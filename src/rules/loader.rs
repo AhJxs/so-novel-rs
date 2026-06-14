@@ -8,9 +8,8 @@ use std::path::{Path, PathBuf};
 
 use thiserror::Error;
 
-use crate::config::{AppConfig, LangType};
+use crate::config::LangType;
 use crate::models::Rule;
-use crate::rules::source::Source;
 use crate::util::lang::detect_system_lang;
 
 // ----- meta 默认查询（与 Java `util.SourceUtils` 常量一致）-----
@@ -70,28 +69,20 @@ pub fn load_rules_from_path(path: &Path) -> Result<Vec<Rule>, RulesError> {
     Ok(rules)
 }
 
-/// 用 active-rules 配置项把规则解析为多个 `Source`，附带每条规则派生的有效抓取参数。
-pub fn sources_from_active_rules(
-    cfg: &AppConfig,
-    rules_dir_or_file: &Path,
-) -> Result<Vec<Source>, RulesError> {
-    // 与 Java 端一致：active-rules 既可能是文件名（拼到 rules 目录下），也可能是绝对路径。
-    let target = resolve_active_rules_path(cfg, rules_dir_or_file);
-    let rules = load_rules_from_path(&target)?;
-    Ok(rules.into_iter().map(|r| Source::from(r, cfg)).collect())
-}
+/// 从 SQLite 加载书源规则（合并 `source_overrides` 的禁用状态），并填充默认值。
+///
+/// 这是阶段二之后的主入口 — `app.rs` / `cli.rs` 都从这里拿规则。
+/// 表为空时会先 seed 默认 main.json（编译期嵌入），所以删 DB 重启依然能用。
+pub fn load_rules_from_db(conn: &rusqlite::Connection) -> anyhow::Result<Vec<Rule>> {
+    // seed 是幂等的：只有在 sources 表为空时才插。
+    crate::db::sources::seed_from_default(conn)?;
+    let mut rules = crate::db::sources::list_with_overrides(conn)?;
 
-fn resolve_active_rules_path(cfg: &AppConfig, rules_dir_or_file: &Path) -> PathBuf {
-    let active = Path::new(&cfg.active_rules);
-    if active.is_absolute() {
-        return active.to_path_buf();
+    let lang = detect_system_lang();
+    for rule in rules.iter_mut() {
+        apply_default_rule(rule, lang);
     }
-    // 如果给的是目录就把 active-rules 当作文件名拼上去；否则它本身就是规则文件路径。
-    if rules_dir_or_file.is_dir() {
-        rules_dir_or_file.join(active)
-    } else {
-        rules_dir_or_file.to_path_buf()
-    }
+    Ok(rules)
 }
 
 fn walk_rule_files(dir: &Path) -> Result<Vec<PathBuf>, RulesError> {

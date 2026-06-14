@@ -9,7 +9,7 @@ pub fn show(ui: &mut egui::Ui, _app: &mut SoNovelApp) {
     ));
     ui.add_space(8.0);
     ui.label("从 Java 项目（v1.10.3）分阶段迁移至 Rust。当前阶段 1：");
-    ui.label("• 工程骨架、数据模型、config.ini 兼容、规则加载已完成。");
+    ui.label("• 工程骨架、数据模型、config.toml 兼容、规则加载已完成。");
     ui.label("• 搜索 / 解析 / 下载 / 导出尚未实现，详见审计文档。");
     ui.add_space(12.0);
     ui.hyperlink_to(

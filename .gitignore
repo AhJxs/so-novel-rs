@@ -1,6 +1,14 @@
 /downloads
 /target
+/dist
 *.lock.bak
+
+# 根目录运行时文件（首次启动生成；仅本地使用）
+/config.toml
+/sonovel.db
+/sonovel.db-journal
+/sonovel.db-wal
+/sonovel.db-shm
 
 # 运行时生成的 SQLite DB（下载任务持久化），仅本地使用
 /bundle/*.db

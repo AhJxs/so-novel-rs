@@ -8,14 +8,13 @@
 //!
 //! 不带子命令 → 启动 egui GUI（见 `main.rs` 的分发逻辑）。
 
-use std::path::{Path, PathBuf};
-
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 
 use crate::config::{load_config, AppConfig, ConfigPaths, ExportFormat};
 use crate::crawler::{self, CancelToken, Progress};
-use crate::rules::{load_rules_from_path, Source};
+use crate::db::Db;
+use crate::rules::{load_rules_from_db, Source};
 use crate::util::system::open_path;
 
 /// so-novel-rs — 小说下载器（CLI）。
@@ -51,10 +50,10 @@ enum Cmd {
         /// 书源 ID（默认按 URL 自动匹配；未匹配则取第一个启用的源）
         #[arg(long)]
         source: Option<i32>,
-        /// 覆盖 config.ini 的下载目录
+        /// 覆盖 config.toml 的下载目录
         #[arg(long)]
         output: Option<String>,
-        /// 覆盖 config.ini 的输出格式（epub / txt / html）
+        /// 覆盖 config.toml 的输出格式（epub / txt / html）
         #[arg(long)]
         format: Option<String>,
     },
@@ -68,7 +67,17 @@ enum Cmd {
 pub fn run() -> Result<()> {
     let cli = Cli::parse();
     let paths = ConfigPaths::discover();
-    let cfg = load_config(&paths.config_file).context("加载 config.ini 失败")?;
+    let cfg = load_config(&paths.config_file).context("加载 config.toml 失败")?;
+
+    // 与 GUI 启动行为保持一致：首次运行时把默认 config 写出去，
+    // 用户立刻能在项目根看到 config.toml 可编辑。失败仅警告，不阻塞 CLI。
+    if !paths.config_file.exists() {
+        if let Err(e) = crate::config::save_config(&paths.config_file, &cfg) {
+            tracing::warn!("写入默认 config.toml 失败: {e:#}");
+        } else {
+            tracing::info!("首次运行：已生成 {}", paths.config_file.display());
+        }
+    }
 
     match cli.command {
         Cmd::Search {
@@ -102,26 +111,14 @@ fn effective_cfg(cfg: AppConfig, output: Option<String>, format: Option<String>)
 }
 
 fn load_active_sources(cfg: &AppConfig, paths: &ConfigPaths) -> Result<Vec<Source>> {
-    let rules_path = resolve_active_rules(cfg, paths);
-    let rules = load_rules_from_path(&rules_path)
-        .with_context(|| format!("加载规则失败: {}", rules_path.display()))?;
-    let overrides = crate::rules::SourceOverrides::load(&paths.source_overrides_file);
-    let mut rules = rules;
-    overrides.apply_to_rules(&mut rules);
+    let db = Db::open(&paths.db_file)
+        .with_context(|| format!("打开 sonovel.db 失败: {}", paths.db_file.display()))?;
+    let rules = load_rules_from_db(db.conn()).context("加载规则失败")?;
     Ok(rules
         .into_iter()
         .filter(|r| !r.disabled)
         .map(|r| Source::from(r, cfg))
         .collect())
-}
-
-fn resolve_active_rules(cfg: &AppConfig, paths: &ConfigPaths) -> PathBuf {
-    let p = Path::new(&cfg.active_rules);
-    if p.is_absolute() {
-        p.to_path_buf()
-    } else {
-        paths.rules_dir.join(p)
-    }
 }
 
 fn run_search(
@@ -138,7 +135,7 @@ fn run_search(
         sources
     };
     if target_sources.is_empty() {
-        anyhow::bail!("没有可用的书源（检查 config.ini / source-overrides.json）");
+        anyhow::bail!("没有可用的书源（检查 config.toml / sonovel.db）");
     }
 
     let cf_bypass = if cfg.cf_bypass.trim().is_empty() {
@@ -287,17 +284,15 @@ fn run_download(
 }
 
 fn run_sources(cfg: &AppConfig, paths: &ConfigPaths) -> Result<()> {
-    let rules_path = resolve_active_rules(cfg, paths);
-    let rules = load_rules_from_path(&rules_path)
-        .with_context(|| format!("加载规则失败: {}", rules_path.display()))?;
-    let overrides = crate::rules::SourceOverrides::load(&paths.source_overrides_file);
-    let mut rules = rules;
-    overrides.apply_to_rules(&mut rules);
+    let _ = cfg; // 当前未用到 cfg 字段，保留参数为未来扩展（按 lang 过滤等）
+    let db = Db::open(&paths.db_file)
+        .with_context(|| format!("打开 sonovel.db 失败: {}", paths.db_file.display()))?;
+    let rules = load_rules_from_db(db.conn()).context("加载规则失败")?;
     let enabled = rules.iter().filter(|r| !r.disabled).count();
     let disabled = rules.iter().filter(|r| r.disabled).count();
     println!(
-        "规则文件: {}（启用 {} / 禁用 {}）",
-        rules_path.display(),
+        "书源数据库: {}（启用 {} / 禁用 {}）",
+        paths.db_file.display(),
         enabled,
         disabled
     );
@@ -437,21 +432,5 @@ mod tests {
         let new_cfg = effective_cfg(cfg, None, None);
         assert_eq!(new_cfg.download_path, "orig");
         assert_eq!(new_cfg.ext_name, ExportFormat::Html);
-    }
-
-    #[test]
-    fn resolve_active_rules_handles_absolute_path() {
-        let cfg = AppConfig {
-            active_rules: "C:/abs/main.json".into(),
-            ..AppConfig::default()
-        };
-        let paths = ConfigPaths {
-            config_file: PathBuf::from("x"),
-            rules_dir: PathBuf::from("rel"),
-            source_overrides_file: PathBuf::from("y"),
-            download_db_file: PathBuf::from("z"),
-        };
-        let p = resolve_active_rules(&cfg, &paths);
-        assert!(p.is_absolute(), "绝对路径应保留");
     }
 }

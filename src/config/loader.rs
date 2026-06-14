@@ -1,17 +1,19 @@
-//! `config.ini` 兼容读写。
+//! `config.toml` 读写。
 //!
 //! 设计目标：
-//! - 直接读取 `bundle/config.ini`（Java 版的旧配置文件），字段语义保持一致；
-//! - 写回时保留段落顺序与字段顺序，UI"设置页"修改后能往原文件写入而不丢失字段；
-//! - Java 端用 `1`/`0` 表示布尔，本 Rust 版对外暴露 `bool`，序列化时统一回写 `1`/`0`；
-//! - Java 端用 `-1` 表示"未指定"的整数（concurrency / source-id / search-limit），
-//!   本 Rust 版对应 `Option<...>`，写回时缺省值发出 `-1` 以保持兼容。
+//! - 配置文件就在项目根目录（`./config.toml`）— 与 Java 时代的 bundle/config.ini 不同；
+//! - 用 `toml_edit` 保留注释 + 字段顺序，UI 设置页改完写回不会洗掉用户注释；
+//! - 字段语义沿用旧版（`extname` / `min-interval` 等保留 kebab-case）；
+//! - 旧 INI 默认 `1` / `0` 表示布尔，TOML 用真正的 bool；
+//! - 旧版 `-1` 占位"未指定"的整数，TOML 一律用键缺失（`Option`）。
+//!
+//! `source-id` / `search-limit` / `concurrency` 在 TOML 里如果不写就视为未指定。
 
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use configparser::ini::Ini;
 use serde::{Deserialize, Serialize};
+use toml_edit::{value, DocumentMut, Item};
 
 use crate::util::lang::detect_system_lang;
 
@@ -20,7 +22,7 @@ pub enum ExportFormat {
     Epub,
     Txt,
     Html,
-    /// 阶段一不实现 PDF 导出，仅保留枚举以便兼容旧 config.ini，
+    /// 阶段一不实现 PDF 导出，仅保留枚举以便兼容旧配置，
     /// UI 选择 PDF 时会显示提示并降级。详见 audit §6.4。
     Pdf,
 }
@@ -65,8 +67,6 @@ impl LangType {
     }
 
     pub fn parse(s: &str) -> Option<Self> {
-        // 注意：Java 端 `LangUtil.getCurrentLang` 把 zh_TW 与 zh_Hant 视为不同；
-        // 我们这里也保留这个区分。
         match s.trim() {
             "zh_CN" | "zh-CN" | "zh-Hans" | "zh_Hans" => Some(LangType::ZhCn),
             "zh_TW" | "zh-TW" => Some(LangType::ZhTw),
@@ -94,8 +94,11 @@ pub struct AppConfig {
 
     // [source]
     pub language: LangType,
+    /// 兼容字段：旧 INI 用文件名标记当前规则集（如 `main.json`）。
+    /// 规则迁到 SQLite 后，这个字段仅作为"标签"保留：UI 上仍可看到，
+    /// 也可被未来的"规则集分组"功能利用，但运行时不再据此找文件。
     pub active_rules: String,
-    /// `-1` 表示未指定（Java 默认值）。
+    /// `None` 表示未指定（旧 INI `-1`）。
     pub source_id: Option<i32>,
     pub search_limit: Option<i32>,
     pub search_filter: bool,
@@ -131,7 +134,7 @@ impl Default for AppConfig {
             gh_proxy: String::new(),
             cf_bypass: String::new(),
 
-            download_path: "downloads".to_string(),
+            download_path: default_download_path(),
             ext_name: ExportFormat::Epub,
             txt_encoding: "UTF-8".to_string(),
             preserve_chapter_cache: false,
@@ -164,244 +167,356 @@ impl Default for AppConfig {
     }
 }
 
-/// 读取 INI 中某 section/key 的字符串。空字符串视为"未设置"，返回默认值。
-fn ini_str(ini: &Ini, section: &str, key: &str, default: &str) -> String {
-    match ini.get(section, key) {
-        Some(v) if !v.trim().is_empty() => v.trim().to_string(),
-        _ => default.to_string(),
-    }
+// ---------- TOML 工具 ----------
+
+fn t_str(doc: &DocumentMut, table: &str, key: &str) -> Option<String> {
+    doc.get(table)
+        .and_then(|t| t.as_table())
+        .and_then(|t| t.get(key))
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .filter(|s| !s.trim().is_empty())
 }
 
-/// 读取整数（带默认值）。
-fn ini_int(ini: &Ini, section: &str, key: &str, default: i64) -> i64 {
-    ini.getint(section, key).ok().flatten().unwrap_or(default)
+fn t_bool(doc: &DocumentMut, table: &str, key: &str) -> Option<bool> {
+    doc.get(table)
+        .and_then(|t| t.as_table())
+        .and_then(|t| t.get(key))
+        .and_then(|v| v.as_bool())
 }
 
-/// 读取 0/1 形式的布尔。
-fn ini_bool01(ini: &Ini, section: &str, key: &str, default: bool) -> bool {
-    match ini.get(section, key) {
-        Some(v) => match v.trim() {
-            "1" => true,
-            "0" => false,
-            "" => default,
-            other => {
-                // 容错：true/false 也接受
-                matches!(other.to_ascii_lowercase().as_str(), "true" | "yes" | "on")
-            }
-        },
-        None => default,
-    }
+fn t_int(doc: &DocumentMut, table: &str, key: &str) -> Option<i64> {
+    doc.get(table)
+        .and_then(|t| t.as_table())
+        .and_then(|t| t.get(key))
+        .and_then(|v| v.as_integer())
 }
 
-/// 把 i64 转 i32，溢出时取饱和。
 fn sat_i32(v: i64) -> i32 {
     v.clamp(i32::MIN as i64, i32::MAX as i64) as i32
 }
 
-/// 加载配置。文件不存在时返回 `Default::default()`，但保留 `path` 信息便于回写。
-#[allow(clippy::field_reassign_with_default)] // 字段-逐条赋值与 INI 段落对齐更易读
+fn sat_u32(v: i64) -> u32 {
+    v.max(0) as u32
+}
+
+fn sat_u16(v: i64) -> u16 {
+    v.clamp(0, u16::MAX as i64) as u16
+}
+
+/// 加载配置。文件不存在时返回 `Default::default()`。
 pub fn load_config(path: &Path) -> Result<AppConfig> {
     if !path.exists() {
-        // 与 Java 端不同，缺失时不抛异常；UI 第一次启动会写出默认 ini。
         return Ok(AppConfig::default());
     }
 
     let content = std::fs::read_to_string(path)
-        .with_context(|| format!("read config.ini failed: {}", path.display()))?;
-    let mut ini = Ini::new_cs(); // case-sensitive section/key
-    ini.read(content)
-        .map_err(|e| anyhow::anyhow!("parse config.ini failed: {e}"))?;
+        .with_context(|| format!("读取 config.toml 失败: {}", path.display()))?;
+    let doc: DocumentMut = content
+        .parse()
+        .map_err(|e| anyhow::anyhow!("解析 config.toml 失败: {e}"))?;
 
     let mut cfg = AppConfig::default();
 
     // [global]
-    cfg.auto_update = ini_bool01(&ini, "global", "auto-update", false);
-    cfg.gh_proxy = ini_str(&ini, "global", "gh-proxy", "");
-    cfg.cf_bypass = ini_str(&ini, "global", "cf-bypass", "");
+    if let Some(v) = t_bool(&doc, "global", "auto-update") {
+        cfg.auto_update = v;
+    }
+    if let Some(v) = t_str(&doc, "global", "gh-proxy") {
+        cfg.gh_proxy = v;
+    }
+    if let Some(v) = t_str(&doc, "global", "cf-bypass") {
+        cfg.cf_bypass = v;
+    }
 
     // [download]
-    cfg.download_path = ini_str(&ini, "download", "download-path", "downloads");
-    cfg.ext_name = ExportFormat::parse(&ini_str(&ini, "download", "extname", "epub"));
-    cfg.txt_encoding = ini_str(&ini, "download", "txt-encoding", "UTF-8");
-    cfg.preserve_chapter_cache = ini_bool01(&ini, "download", "preserve-chapter-cache", false);
-    cfg.enable_progressbar = ini_bool01(&ini, "download", "enable-progressbar", true);
+    if let Some(v) = t_str(&doc, "download", "download-path") {
+        cfg.download_path = v;
+    }
+    if let Some(v) = t_str(&doc, "download", "extname") {
+        cfg.ext_name = ExportFormat::parse(&v);
+    }
+    if let Some(v) = t_str(&doc, "download", "txt-encoding") {
+        cfg.txt_encoding = v;
+    }
+    if let Some(v) = t_bool(&doc, "download", "preserve-chapter-cache") {
+        cfg.preserve_chapter_cache = v;
+    }
+    if let Some(v) = t_bool(&doc, "download", "enable-progressbar") {
+        cfg.enable_progressbar = v;
+    }
 
     // [source]
-    let lang_raw = ini_str(&ini, "source", "language", "");
-    cfg.language = LangType::parse(&lang_raw).unwrap_or_else(detect_system_lang);
-    cfg.active_rules = ini_str(&ini, "source", "active-rules", "main.json");
-    let source_id_raw = ini_int(&ini, "source", "source-id", -1);
-    cfg.source_id = if source_id_raw < 0 {
-        None
-    } else {
-        Some(sat_i32(source_id_raw))
-    };
-    let limit_raw = ini_int(&ini, "source", "search-limit", -1);
-    cfg.search_limit = if limit_raw < 0 {
-        None
-    } else {
-        Some(sat_i32(limit_raw))
-    };
-    cfg.search_filter = ini_bool01(&ini, "source", "search-filter", true);
+    if let Some(v) = t_str(&doc, "source", "language") {
+        if let Some(parsed) = LangType::parse(&v) {
+            cfg.language = parsed;
+        }
+    }
+    if let Some(v) = t_str(&doc, "source", "active-rules") {
+        cfg.active_rules = v;
+    }
+    cfg.source_id = t_int(&doc, "source", "source-id").map(sat_i32);
+    cfg.search_limit = t_int(&doc, "source", "search-limit").map(sat_i32);
+    if let Some(v) = t_bool(&doc, "source", "search-filter") {
+        cfg.search_filter = v;
+    }
 
     // [crawl]
-    let conc = ini_int(&ini, "crawl", "concurrency", -1);
-    cfg.concurrency = if conc < 0 { None } else { Some(sat_i32(conc)) };
-    cfg.min_interval = ini_int(&ini, "crawl", "min-interval", 200).max(0) as u32;
-    cfg.max_interval = ini_int(&ini, "crawl", "max-interval", 400).max(0) as u32;
-    cfg.enable_retry = ini_bool01(&ini, "crawl", "enable-retry", true);
-    cfg.max_retries = ini_int(&ini, "crawl", "max-retries", 5).max(0) as u32;
-    cfg.retry_min_interval = ini_int(&ini, "crawl", "retry-min-interval", 2000).max(0) as u32;
-    cfg.retry_max_interval = ini_int(&ini, "crawl", "retry-max-interval", 4000).max(0) as u32;
+    cfg.concurrency = t_int(&doc, "crawl", "concurrency").map(sat_i32);
+    if let Some(v) = t_int(&doc, "crawl", "min-interval") {
+        cfg.min_interval = sat_u32(v);
+    }
+    if let Some(v) = t_int(&doc, "crawl", "max-interval") {
+        cfg.max_interval = sat_u32(v);
+    }
+    if let Some(v) = t_bool(&doc, "crawl", "enable-retry") {
+        cfg.enable_retry = v;
+    }
+    if let Some(v) = t_int(&doc, "crawl", "max-retries") {
+        cfg.max_retries = sat_u32(v);
+    }
+    if let Some(v) = t_int(&doc, "crawl", "retry-min-interval") {
+        cfg.retry_min_interval = sat_u32(v);
+    }
+    if let Some(v) = t_int(&doc, "crawl", "retry-max-interval") {
+        cfg.retry_max_interval = sat_u32(v);
+    }
 
     // [web]
-    cfg.web_enabled = ini_bool01(&ini, "web", "enabled", false);
-    cfg.web_port = ini_int(&ini, "web", "port", 7765).clamp(0, u16::MAX as i64) as u16;
+    if let Some(v) = t_bool(&doc, "web", "enabled") {
+        cfg.web_enabled = v;
+    }
+    if let Some(v) = t_int(&doc, "web", "port") {
+        cfg.web_port = sat_u16(v);
+    }
 
     // [cookie]
-    cfg.qidian_cookie = ini_str(&ini, "cookie", "qidian", "");
+    if let Some(v) = t_str(&doc, "cookie", "qidian") {
+        cfg.qidian_cookie = v;
+    }
 
     // [proxy]
-    cfg.proxy_enabled = ini_bool01(&ini, "proxy", "enabled", false);
-    cfg.proxy_host = ini_str(&ini, "proxy", "host", "127.0.0.1");
-    cfg.proxy_port = ini_int(&ini, "proxy", "port", 7890).clamp(0, u16::MAX as i64) as u16;
+    if let Some(v) = t_bool(&doc, "proxy", "enabled") {
+        cfg.proxy_enabled = v;
+    }
+    if let Some(v) = t_str(&doc, "proxy", "host") {
+        cfg.proxy_host = v;
+    }
+    if let Some(v) = t_int(&doc, "proxy", "port") {
+        cfg.proxy_port = sat_u16(v);
+    }
 
     Ok(cfg)
 }
 
-/// 把 AppConfig 写回 INI。保持 Java 端字段名与 0/1 表示。
+/// 把 AppConfig 写回 TOML。如果原文件存在，就在它上面 in-place 改字段（保留注释）；
+/// 不存在则用统一模板生成。
 pub fn save_config(path: &Path, cfg: &AppConfig) -> Result<()> {
-    let mut out = String::new();
+    let mut doc: DocumentMut = if path.exists() {
+        std::fs::read_to_string(path)
+            .with_context(|| format!("读取 {}", path.display()))?
+            .parse()
+            .unwrap_or_else(|_| default_template_doc())
+    } else {
+        default_template_doc()
+    };
 
-    // 简单的手写序列化保证字段顺序与 Java 端一致。
-    out.push_str("[global]\n");
-    out.push_str(&format!("auto-update = {}\n", bool_to_01(cfg.auto_update)));
-    out.push_str(&format!("gh-proxy = {}\n", cfg.gh_proxy));
-    out.push_str(&format!("cf-bypass = {}\n\n", cfg.cf_bypass));
+    // 写一行 (table, key, value)。`value()` 自动处理 toml 类型。
+    fn set_str(doc: &mut DocumentMut, table: &str, key: &str, v: &str) {
+        let t = doc.entry(table).or_insert(Item::Table(Default::default()));
+        if let Some(t) = t.as_table_mut() {
+            t[key] = value(v);
+        }
+    }
+    fn set_bool(doc: &mut DocumentMut, table: &str, key: &str, v: bool) {
+        let t = doc.entry(table).or_insert(Item::Table(Default::default()));
+        if let Some(t) = t.as_table_mut() {
+            t[key] = value(v);
+        }
+    }
+    fn set_int(doc: &mut DocumentMut, table: &str, key: &str, v: i64) {
+        let t = doc.entry(table).or_insert(Item::Table(Default::default()));
+        if let Some(t) = t.as_table_mut() {
+            t[key] = value(v);
+        }
+    }
+    fn unset(doc: &mut DocumentMut, table: &str, key: &str) {
+        if let Some(t) = doc.get_mut(table).and_then(|t| t.as_table_mut()) {
+            t.remove(key);
+        }
+    }
 
-    out.push_str("[download]\n");
-    out.push_str(&format!("download-path = {}\n", cfg.download_path));
-    out.push_str(&format!("extname = {}\n", cfg.ext_name.as_lower()));
-    out.push_str(&format!("txt-encoding = {}\n", cfg.txt_encoding));
-    out.push_str(&format!(
-        "preserve-chapter-cache = {}\n",
-        bool_to_01(cfg.preserve_chapter_cache)
-    ));
-    out.push_str(&format!(
-        "enable-progressbar = {}\n\n",
-        bool_to_01(cfg.enable_progressbar)
-    ));
+    // [global]
+    set_bool(&mut doc, "global", "auto-update", cfg.auto_update);
+    set_str(&mut doc, "global", "gh-proxy", &cfg.gh_proxy);
+    set_str(&mut doc, "global", "cf-bypass", &cfg.cf_bypass);
 
-    out.push_str("[source]\n");
-    out.push_str(&format!("language = {}\n", cfg.language.as_str()));
-    out.push_str(&format!("active-rules = {}\n", cfg.active_rules));
-    out.push_str(&format!(
-        "source-id = {}\n",
-        cfg.source_id.map(|v| v.to_string()).unwrap_or_default()
-    ));
-    out.push_str(&format!(
-        "search-limit = {}\n",
-        cfg.search_limit
-            .map(|v| v.to_string())
-            .unwrap_or_else(|| "30".to_string())
-    ));
-    out.push_str(&format!(
-        "search-filter = {}\n\n",
-        bool_to_01(cfg.search_filter)
-    ));
+    // [download]
+    set_str(&mut doc, "download", "download-path", &cfg.download_path);
+    set_str(&mut doc, "download", "extname", cfg.ext_name.as_lower());
+    set_str(&mut doc, "download", "txt-encoding", &cfg.txt_encoding);
+    set_bool(
+        &mut doc,
+        "download",
+        "preserve-chapter-cache",
+        cfg.preserve_chapter_cache,
+    );
+    set_bool(
+        &mut doc,
+        "download",
+        "enable-progressbar",
+        cfg.enable_progressbar,
+    );
 
-    out.push_str("[crawl]\n");
-    out.push_str(&format!(
-        "concurrency = {}\n",
-        cfg.concurrency.map(|v| v.to_string()).unwrap_or_default()
-    ));
-    out.push_str(&format!("min-interval = {}\n", cfg.min_interval));
-    out.push_str(&format!("max-interval = {}\n", cfg.max_interval));
-    out.push_str(&format!(
-        "enable-retry = {}\n",
-        bool_to_01(cfg.enable_retry)
-    ));
-    out.push_str(&format!("max-retries = {}\n", cfg.max_retries));
-    out.push_str(&format!(
-        "retry-min-interval = {}\n",
-        cfg.retry_min_interval
-    ));
-    out.push_str(&format!(
-        "retry-max-interval = {}\n\n",
-        cfg.retry_max_interval
-    ));
+    // [source]
+    set_str(&mut doc, "source", "language", cfg.language.as_str());
+    set_str(&mut doc, "source", "active-rules", &cfg.active_rules);
+    match cfg.source_id {
+        Some(v) => set_int(&mut doc, "source", "source-id", v as i64),
+        None => unset(&mut doc, "source", "source-id"),
+    }
+    match cfg.search_limit {
+        Some(v) => set_int(&mut doc, "source", "search-limit", v as i64),
+        None => unset(&mut doc, "source", "search-limit"),
+    }
+    set_bool(&mut doc, "source", "search-filter", cfg.search_filter);
 
-    out.push_str("[web]\n");
-    out.push_str(&format!("enabled = {}\n", bool_to_01(cfg.web_enabled)));
-    out.push_str(&format!("port = {}\n\n", cfg.web_port));
+    // [crawl]
+    match cfg.concurrency {
+        Some(v) => set_int(&mut doc, "crawl", "concurrency", v as i64),
+        None => unset(&mut doc, "crawl", "concurrency"),
+    }
+    set_int(&mut doc, "crawl", "min-interval", cfg.min_interval as i64);
+    set_int(&mut doc, "crawl", "max-interval", cfg.max_interval as i64);
+    set_bool(&mut doc, "crawl", "enable-retry", cfg.enable_retry);
+    set_int(&mut doc, "crawl", "max-retries", cfg.max_retries as i64);
+    set_int(
+        &mut doc,
+        "crawl",
+        "retry-min-interval",
+        cfg.retry_min_interval as i64,
+    );
+    set_int(
+        &mut doc,
+        "crawl",
+        "retry-max-interval",
+        cfg.retry_max_interval as i64,
+    );
 
-    out.push_str("[cookie]\n");
-    out.push_str(&format!("qidian = {}\n\n", cfg.qidian_cookie));
+    // [web]
+    set_bool(&mut doc, "web", "enabled", cfg.web_enabled);
+    set_int(&mut doc, "web", "port", cfg.web_port as i64);
 
-    out.push_str("[proxy]\n");
-    out.push_str(&format!("enabled = {}\n", bool_to_01(cfg.proxy_enabled)));
-    out.push_str(&format!("host = {}\n", cfg.proxy_host));
-    out.push_str(&format!("port = {}\n", cfg.proxy_port));
+    // [cookie]
+    set_str(&mut doc, "cookie", "qidian", &cfg.qidian_cookie);
+
+    // [proxy]
+    set_bool(&mut doc, "proxy", "enabled", cfg.proxy_enabled);
+    set_str(&mut doc, "proxy", "host", &cfg.proxy_host);
+    set_int(&mut doc, "proxy", "port", cfg.proxy_port as i64);
 
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).ok();
     }
-    std::fs::write(path, out).with_context(|| format!("write {}", path.display()))?;
+    std::fs::write(path, doc.to_string()).with_context(|| format!("写入 {}", path.display()))?;
     Ok(())
 }
 
-fn bool_to_01(b: bool) -> u8 {
-    if b {
-        1
-    } else {
-        0
+/// 默认下载目录：系统 Documents 文件夹下的 `Novel/` 子目录。
+///
+/// - Windows：`%USERPROFILE%\Documents\Novel`（或被用户改过的位置 — `directories`
+///   底层走 `SHGetKnownFolderPath(FOLDERID_Documents)`，会拿到真实位置）
+/// - macOS：`~/Documents/Novel`
+/// - Linux：XDG `XDG_DOCUMENTS_DIR`，未设置时一般是 `~/Documents`
+///
+/// 取不到（极端环境无 home）时回落到相对路径 `downloads`，与历史行为保持一致 —
+/// 至少程序还能跑，写到 cwd 下的 `downloads/`。
+///
+/// 返回字符串而非 PathBuf：`AppConfig.download_path` 字段就是 String，
+/// 字符串能被设置页直接放到 TextEdit 里编辑，也能直接序列化进 TOML。
+fn default_download_path() -> String {
+    use directories::UserDirs;
+    if let Some(user_dirs) = UserDirs::new() {
+        if let Some(docs) = user_dirs.document_dir() {
+            return docs.join("Novel").to_string_lossy().into_owned();
+        }
     }
+    tracing::warn!("无法定位系统 Documents 目录，下载路径回落到 ./downloads");
+    "downloads".to_string()
+}
+
+/// 第一次启动 / 模板 / 文件被破坏时使用的默认 TOML 文档。
+/// 字段顺序与默认值与 Java 端 `bundle/config.ini` 对齐，方便老用户对照。
+fn default_template_doc() -> DocumentMut {
+    let template = r#"# So Novel 配置文件
+# 字段语义与旧版 config.ini 一致；规则与下载任务记录已迁到根目录的 sonovel.db。
+
+[global]
+auto-update = false
+gh-proxy = ""
+cf-bypass = ""
+
+[download]
+# download-path 默认为系统 Documents/Novel/（由 AppConfig::default() 注入）。
+# 占位写空串，save_config 会按当前 cfg.download_path 覆盖此处的值。
+download-path = ""
+extname = "epub"
+txt-encoding = "UTF-8"
+preserve-chapter-cache = false
+enable-progressbar = true
+
+[source]
+language = "zh_CN"
+# active-rules 已不再用于定位文件（规则进 DB），保留为标签字段，方便未来分组。
+active-rules = "main.json"
+search-limit = 30
+search-filter = true
+
+[crawl]
+min-interval = 200
+max-interval = 400
+enable-retry = true
+max-retries = 5
+retry-min-interval = 2000
+retry-max-interval = 4000
+
+[web]
+enabled = false
+port = 7765
+
+[cookie]
+qidian = ""
+
+[proxy]
+enabled = false
+host = "127.0.0.1"
+port = 7890
+"#;
+    template.parse().expect("default template must parse")
 }
 
 /// 程序启动时关心的几条路径。
 #[derive(Debug, Clone)]
 pub struct ConfigPaths {
-    /// `config.ini` 路径。
+    /// `config.toml` 路径。
     pub config_file: PathBuf,
-    /// 规则目录或单文件路径。如果 `active-rules` 是文件名，
-    /// 会被拼到 `<repo>/bundle/rules/` 或 `<bin>/rules/` 下。
-    pub rules_dir: PathBuf,
-    /// 用户对书源的覆写（启用/禁用）。sidecar JSON，不污染上游 rules JSON。
-    /// 与 `config_file` 同目录。
-    pub source_overrides_file: PathBuf,
-    /// SQLite 数据库文件，存下载任务记录（后续书源管理也走这里）。
-    /// 与 `config_file` 同目录。
-    pub download_db_file: PathBuf,
+    /// SQLite 数据库文件 `sonovel.db`：装下载任务 + 书源 + 用户覆写。
+    pub db_file: PathBuf,
 }
 
 impl ConfigPaths {
-    /// 按 Java 端的路径约定查找：
-    /// 1. 当前目录下 `bundle/config.ini` + `bundle/rules/`（开发态，仓库根直接 `cargo run`）；
-    /// 2. 当前目录下 `config.ini` + `rules/`（生产态，与 Java 打包一致）。
+    /// 路径约定：
+    /// - 优先使用项目根（`current_dir`，开发态 `cargo run` 时就是仓库根）下的
+    ///   `config.toml` + `sonovel.db`；
+    /// - 这两个文件首次启动时会自动创建。
+    ///
+    /// 老版的 `bundle/config.ini` / `bundle/rules/` / `source-overrides.json` /
+    /// `bundle/downloads.db` 不再被加载（文件可保留，仅作历史参考）。
     pub fn discover() -> Self {
         let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-        let dev_cfg = cwd.join("bundle").join("config.ini");
-        let dev_rules = cwd.join("bundle").join("rules");
-        if dev_cfg.exists() && dev_rules.exists() {
-            return Self {
-                source_overrides_file: dev_cfg
-                    .parent()
-                    .map(|p| p.join("source-overrides.json"))
-                    .unwrap_or_else(|| PathBuf::from("source-overrides.json")),
-                download_db_file: dev_cfg
-                    .parent()
-                    .map(|p| p.join("downloads.db"))
-                    .unwrap_or_else(|| PathBuf::from("downloads.db")),
-                config_file: dev_cfg,
-                rules_dir: dev_rules,
-            };
-        }
-
         Self {
-            source_overrides_file: cwd.join("source-overrides.json"),
-            download_db_file: cwd.join("downloads.db"),
-            config_file: cwd.join("config.ini"),
-            rules_dir: cwd.join("rules"),
+            config_file: cwd.join("config.toml"),
+            db_file: cwd.join("sonovel.db"),
         }
     }
 }
@@ -410,15 +525,9 @@ impl ConfigPaths {
 mod tests {
     use super::*;
 
-    fn repo_bundle_config() -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("bundle")
-            .join("config.ini")
-    }
-
     #[test]
     fn loads_default_when_missing() {
-        let cfg = load_config(&PathBuf::from("/definitely/does/not/exist.ini")).unwrap();
+        let cfg = load_config(&PathBuf::from("/definitely/does/not/exist.toml")).unwrap();
         assert_eq!(cfg.active_rules, "main.json");
         assert_eq!(cfg.min_interval, 200);
         assert_eq!(cfg.max_interval, 400);
@@ -426,48 +535,12 @@ mod tests {
         assert!(cfg.search_filter);
         assert_eq!(cfg.web_port, 7765);
         assert_eq!(cfg.ext_name, ExportFormat::Epub);
-    }
-
-    #[test]
-    fn loads_real_bundle_config_ini() {
-        // 直接读仓库根 bundle/config.ini，确保字段映射没回归。
-        let path = repo_bundle_config();
-        assert!(
-            path.exists(),
-            "expected {} to exist (run from repo root)",
-            path.display()
-        );
-        let cfg = load_config(&path).unwrap();
-
-        // 来自 bundle/config.ini 的硬编码值（详见审计 §3.1）：
-        assert!(!cfg.auto_update);
-        assert_eq!(cfg.download_path, "downloads");
-        assert_eq!(cfg.ext_name, ExportFormat::Epub);
-        assert_eq!(cfg.txt_encoding, "UTF-8"); // 空串走默认
-        assert!(!cfg.preserve_chapter_cache);
-        assert!(cfg.enable_progressbar);
-
-        assert_eq!(cfg.active_rules, "main.json");
-        assert_eq!(cfg.search_limit, Some(30));
-        assert!(cfg.search_filter);
-
-        assert_eq!(cfg.min_interval, 200);
-        assert_eq!(cfg.max_interval, 400);
-        assert!(cfg.enable_retry);
-        assert_eq!(cfg.retry_min_interval, 2000);
-        assert_eq!(cfg.retry_max_interval, 4000);
-
-        assert!(!cfg.web_enabled);
-        assert_eq!(cfg.web_port, 7765);
-
-        assert!(!cfg.proxy_enabled);
-        assert_eq!(cfg.proxy_host, "127.0.0.1");
     }
 
     #[test]
     fn round_trip_through_save_and_load() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("config.ini");
+        let path = dir.path().join("config.toml");
 
         let cfg = AppConfig {
             download_path: "/tmp/sn-novels".to_string(),
@@ -498,5 +571,54 @@ mod tests {
         assert_eq!(loaded.proxy_port, cfg.proxy_port);
         assert_eq!(loaded.qidian_cookie, cfg.qidian_cookie);
         assert_eq!(loaded.language, cfg.language);
+    }
+
+    #[test]
+    fn save_preserves_user_comments_in_existing_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(
+            &path,
+            r#"# 我的自定义注释
+[global]
+auto-update = false
+gh-proxy = "https://my-proxy.example/"
+"#,
+        )
+        .unwrap();
+
+        let mut cfg = load_config(&path).unwrap();
+        assert_eq!(cfg.gh_proxy, "https://my-proxy.example/");
+        cfg.gh_proxy = "https://changed.example/".to_string();
+
+        save_config(&path, &cfg).unwrap();
+        let written = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            written.contains("# 我的自定义注释"),
+            "注释应保留: {written}"
+        );
+        assert!(
+            written.contains("https://changed.example/"),
+            "新值应写入: {written}"
+        );
+    }
+
+    #[test]
+    fn missing_optional_int_keys_become_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(
+            &path,
+            r#"[source]
+search-filter = true
+"#,
+        )
+        .unwrap();
+
+        let cfg = load_config(&path).unwrap();
+        // source-id / search-limit / concurrency 都没填，应当是 None
+        assert!(cfg.source_id.is_none());
+        assert!(cfg.search_limit.is_none());
+        assert!(cfg.concurrency.is_none());
     }
 }

@@ -6,7 +6,7 @@ mod overrides;
 mod source;
 
 pub use loader::{
-    apply_default_rule, load_rules_from_path, sources_from_active_rules, RulesError, META_AUTHOR,
+    apply_default_rule, load_rules_from_db, load_rules_from_path, RulesError, META_AUTHOR,
     META_BOOK_NAME, META_CATEGORY, META_COVER_URL, META_INTRO, META_LAST_UPDATE_TIME,
     META_LATEST_CHAPTER, META_STATUS,
 };

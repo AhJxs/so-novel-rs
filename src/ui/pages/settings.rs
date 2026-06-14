@@ -1,4 +1,4 @@
-//! 设置页。这是阶段 1 唯一**可真实写回 config.ini** 的页面。
+//! 设置页。这是阶段 1 唯一**可真实写回 config.toml** 的页面。
 
 use crate::app::SoNovelApp;
 use crate::config::{save_config, ExportFormat, LangType};
@@ -35,11 +35,11 @@ pub fn show(ui: &mut egui::Ui, app: &mut SoNovelApp) {
         ui.add_space(16.0);
 
         ui.horizontal(|ui| {
-            if theme::button(ui, &format!("{} 保存到 config.ini", mi::ICON_SAVE.codepoint)).clicked() {
+            if theme::button(ui, &format!("{} 保存到 config.toml", mi::ICON_SAVE.codepoint)).clicked() {
                 match save_config(&app.paths.config_file, &app.draft_config) {
                     Ok(_) => {
                         app.config = app.draft_config.clone();
-                        app.show_toast("已保存到 config.ini");
+                        app.show_toast("已保存到 config.toml");
                     }
                     Err(e) => {
                         app.show_toast(format!("保存失败: {e}"));

@@ -1,22 +1,26 @@
 //! 持久化层：SQLite 单文件数据库。
 //!
-//! 当前 schema 只装下载任务记录；后续书源覆写等也走这里。文件路径由
-//! `config::ConfigPaths::download_db_file` 决定，跟 config.ini 同目录。
+//! 文件路径由 `config::ConfigPaths::db_file` 决定（项目根目录的 `sonovel.db`）。
+//!
+//! 当前装的内容：
+//! - 下载任务记录（`download_tasks`，详见 `tasks.rs`）；
+//! - 书源规则（`sources`，详见 `sources.rs`）—— 规则首次启动从 main.json seed；
+//! - 用户对书源的启用/禁用覆写（`source_overrides`）。
 //!
 //! 设计原则：
-//! - `rusqlite::Connection` 在 `Db` 里直接 owned（eframe 单线程，不需要 Mutex）。
-//! - 任务表只有两列（`id` + `data` 全文 JSON），过滤在 Rust 侧做。
-//!   几百条任务在内存里 filter 完全够用；想加 SQL 索引时再扩 column。
-//! - `schema_version` 表留给将来加表 / 加列时做 migration 用。
+//! - `rusqlite::Connection` 在 `Db` 里直接 owned（eframe 单线程，不需要 Mutex）；
+//! - 业务表的 `data` 列存 JSON 字符串，过滤在 Rust 侧做 — 几百条规模够用，
+//!   想加 SQL 索引时再扩 column；
+//! - `schema_version` 表给将来 migration 用。
 
 use std::path::Path;
 
 use rusqlite::Connection;
 
-/// 当前 schema 版本号。新加表 / 改字段时 bump 这个号，迁移逻辑在 `init_schema`
-/// 里按 `current_version` 递增地跑。
+/// 当前 schema 版本号。新加表 / 改字段时 bump，迁移逻辑在 `init_schema` 里递增地跑。
 const CURRENT_SCHEMA_VERSION: i32 = 1;
 
+pub mod sources;
 pub mod tasks;
 
 pub use tasks::{DownloadTaskRecord, FailureRecord};
@@ -54,8 +58,6 @@ impl Db {
 }
 
 fn init_schema(conn: &Connection) -> rusqlite::Result<()> {
-    // schema_version 表只用来标记"跑到第几版"，方便将来加 migration。
-    // 当前每张业务表都用 `IF NOT EXISTS` 创建，没有 ALTER，所以 v1 直接写完。
     conn.execute_batch(
         "
         CREATE TABLE IF NOT EXISTS schema_version (
@@ -66,10 +68,23 @@ fn init_schema(conn: &Connection) -> rusqlite::Result<()> {
             id   INTEGER PRIMARY KEY,
             data TEXT NOT NULL
         );
+
+        -- 书源规则。`data` 是 JSON 序列化的 Rule（字段对应 main.json 里一条 entry）。
+        -- ord 列保留稳定的展示顺序（首次 seed 时按文件顺序写）。
+        CREATE TABLE IF NOT EXISTS sources (
+            id   INTEGER PRIMARY KEY,
+            ord  INTEGER NOT NULL,
+            data TEXT NOT NULL
+        );
+
+        -- 用户对书源的启用/禁用覆写。
+        -- 只记 disabled=true 的行；启用就直接删行。比一行一 bool 更省。
+        CREATE TABLE IF NOT EXISTS source_overrides (
+            source_id INTEGER PRIMARY KEY
+        );
         ",
     )?;
 
-    // 写入当前版本（如果还没记录）
     let has: bool = conn
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM schema_version)",

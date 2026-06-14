@@ -2,7 +2,7 @@
 //!
 //! - 顶部："检测全部"按钮（HEAD 请求并发，5s 超时）+ 进度计数；
 //! - 表格：ID / 书源 / URL / 代理 / 启用 / 延迟 / 状态 / 操作（启用/禁用）。
-//! - 启用/禁用立即持久化到 `<config>/source-overrides.json`，下次启动保留偏好。
+//! - 启用/禁用立即持久化到 `sonovel.db` 的 `source_overrides` 表，下次启动保留偏好。
 
 use crate::app::SoNovelApp;
 use crate::crawler::health::SourceHealth;

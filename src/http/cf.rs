@@ -6,7 +6,7 @@
 //! 避免每次都跑一遍 scraper（CF 检测会在每页都做一次）。
 //!
 //! bypass 服务约定参考 sarperavci/CloudflareBypassForScraping：
-//! - 用户在 config.ini 的 `[global] cf-bypass` 中填一个本机/远端服务的 base URL
+//! - 用户在 config.toml 的 `[global] cf-bypass` 中填一个本机/远端服务的 base URL
 //!   （如 `http://127.0.0.1:8000`）；
 //! - 我们在命中 CF 时调用 `${cf-bypass}/html?url=<urlencoded>`，得到去 CF 后的真实 HTML。
 

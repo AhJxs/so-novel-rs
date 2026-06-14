@@ -1,0 +1,32 @@
+# Cross 配置：跨平台 Linux 打包用。
+#
+# `cross build --release --target x86_64-unknown-linux-gnu`
+# 会在 Docker 容器里跑构建，不需要在主机上装 GCC / X11 dev headers。
+#
+# eframe（egui glow backend）在 Linux 上需要一组 X11 / Wayland / fontconfig 的
+# 开发头文件 — cross 默认镜像没有，这里 pre-build 钩子里 apt 装一下。
+#
+# 注意：这只是**构建**期依赖；最终用户机器上仍需要对应的 .so 运行时库
+# （libxkbcommon0、libgl1、libfontconfig1 等），一般主流发行版自带。
+
+[target.x86_64-unknown-linux-gnu]
+pre-build = [
+    "apt-get update && apt-get install --assume-yes --no-install-recommends \
+        libxkbcommon-dev \
+        libwayland-dev \
+        libxcb-render0-dev \
+        libxcb-shape0-dev \
+        libxcb-xfixes0-dev \
+        libfontconfig1-dev",
+]
+
+[target.aarch64-unknown-linux-gnu]
+pre-build = [
+    "apt-get update && apt-get install --assume-yes --no-install-recommends \
+        libxkbcommon-dev \
+        libwayland-dev \
+        libxcb-render0-dev \
+        libxcb-shape0-dev \
+        libxcb-xfixes0-dev \
+        libfontconfig1-dev",
+]

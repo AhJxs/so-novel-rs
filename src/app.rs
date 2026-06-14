@@ -24,7 +24,6 @@ use crate::config::{load_config, AppConfig, ConfigPaths};
 use crate::db::{Db, DownloadTaskRecord};
 use crate::crawler::{CancelToken, Progress};
 use crate::models::{Book, Rule, SearchResult};
-use crate::rules::load_rules_from_path;
 use crate::ui::nav::NavPage;
 use crate::ui::theme;
 
@@ -747,13 +746,13 @@ pub struct SoNovelApp {
     pub rule_load_error: Option<String>,
     pub config_load_error: Option<String>,
 
-    /// 用户对书源的禁用 / 启用覆写。toggle 后立即持久化到
-    /// `paths.source_overrides_file`，加载规则时应用到每个 rule.disabled。
+    /// 用户对书源的禁用 / 启用覆写。toggle 后立即写 `sonovel.db`
+    /// 的 `source_overrides` 表；UI 这里持有的副本仅用于显示状态。
     pub source_overrides: crate::rules::SourceOverrides,
 
     pub current_page: NavPage,
 
-    /// 设置页可编辑的副本；点击"保存"后写回 config.ini，并替换 `config`。
+    /// 设置页可编辑的副本；点击"保存"后写回 config.toml，并替换 `config`。
     pub draft_config: AppConfig,
 
     /// 持久化层（SQLite）。下载任务记录全走这里。
@@ -811,26 +810,39 @@ impl SoNovelApp {
             }
         };
 
-        let (mut rules, rule_load_error) = load_initial_rules(&paths.rules_dir, &config);
-
-        // 应用用户的禁用覆写（独立 sidecar JSON，不污染上游 rules 文件）。
-        let source_overrides = crate::rules::SourceOverrides::load(&paths.source_overrides_file);
-        source_overrides.apply_to_rules(&mut rules);
+        // 首次启动：config.toml 不存在时自动写一份默认到项目根，
+        // 用户立刻能在文件管理器里看到 + 用编辑器改。失败时仅警告，不阻塞启动。
+        if !paths.config_file.exists() {
+            if let Err(e) = crate::config::save_config(&paths.config_file, &config) {
+                tracing::warn!("写入默认 config.toml 失败: {e:#}");
+            } else {
+                tracing::info!("首次启动：已生成 {}", paths.config_file.display());
+            }
+        }
 
         let runtime = build_shared_runtime();
 
-        // 打开 SQLite（首次启动会建表）。打开失败时回退到空内存列表 ——
-        // 不阻塞启动，只是丢历史记录。tracing::warn 让用户能看出来。
-        let db = match Db::open(&paths.download_db_file) {
+        // 打开 SQLite（首次启动会建表 + seed 默认书源）。打开失败时回退到内存 DB ——
+        // 不阻塞启动，只是丢历史记录与覆写。tracing::warn 让用户能看出来。
+        let db = match Db::open(&paths.db_file) {
             Ok(db) => db,
             Err(e) => {
-                tracing::warn!("download db open failed: {e:#}");
-                // 内存里用临时文件，避免后续 save_task_to_db 全部 panic
+                tracing::warn!("sonovel.db 打开失败: {e:#}");
                 Db::open_in_memory().unwrap_or_else(|e| {
                     panic!("既开不了磁盘 DB 也开不了内存 DB：{e}")
                 })
             }
         };
+
+        // 从 DB 拉书源（首次启动会自动 seed 自 main.json）+ 用户覆写。
+        let (rules, rule_load_error) = match crate::rules::load_rules_from_db(db.conn()) {
+            Ok(rs) => (rs, None),
+            Err(e) => {
+                tracing::warn!("rules load failed: {e:#}");
+                (Vec::new(), Some(format!("{e:#}")))
+            }
+        };
+        let source_overrides = crate::rules::SourceOverrides::load_from_db(db.conn());
 
         // 从 DB 拉历史任务。`finished.is_none()` 的（之前在跑）一律标记为
         // "应用重启时中断" + 立即写回 DB，下次启动看到的就是稳定态。
@@ -1134,17 +1146,24 @@ impl SoNovelApp {
         });
     }
 
-    /// 切换书源的禁用状态；立即持久化到 sidecar JSON，并同步到 `self.rules`。
+    /// 切换书源的禁用状态；立即持久化到 `sonovel.db` 的 `source_overrides` 表，
+    /// 并同步内存中的 `self.rules` / `self.source_overrides`。
     pub fn toggle_source_disabled(&mut self, source_id: i32) {
-        let now_disabled = self.source_overrides.toggle(source_id);
-        if let Err(e) = self
-            .source_overrides
-            .save(&self.paths.source_overrides_file)
-        {
-            tracing::warn!("source-overrides 保存失败: {e:#}");
-            self.show_toast(format!("保存失败: {e}"));
-        } else if let Some(r) = self.rules.iter_mut().find(|r| r.id == source_id) {
-            r.disabled = now_disabled;
+        match crate::db::sources::toggle_disabled(self.db.conn(), source_id) {
+            Ok(now_disabled) => {
+                if now_disabled {
+                    self.source_overrides.disabled.insert(source_id);
+                } else {
+                    self.source_overrides.disabled.remove(&source_id);
+                }
+                if let Some(r) = self.rules.iter_mut().find(|r| r.id == source_id) {
+                    r.disabled = now_disabled;
+                }
+            }
+            Err(e) => {
+                tracing::warn!("source_overrides toggle 失败: {e:#}");
+                self.show_toast(format!("保存失败: {e}"));
+            }
         }
     }
 
@@ -1224,23 +1243,6 @@ impl SoNovelApp {
         }
         self.library.pending_delete = None;
         self.refresh_library();
-    }
-}
-
-fn load_initial_rules(rules_dir: &Path, cfg: &AppConfig) -> (Vec<Rule>, Option<String>) {
-    let active = std::path::Path::new(&cfg.active_rules);
-    let target = if active.is_absolute() {
-        active.to_path_buf()
-    } else {
-        rules_dir.join(active)
-    };
-
-    match load_rules_from_path(&target) {
-        Ok(rs) => (rs, None),
-        Err(e) => {
-            tracing::warn!("rules load failed: {e}");
-            (Vec::new(), Some(format!("{e}")))
-        }
     }
 }
 
