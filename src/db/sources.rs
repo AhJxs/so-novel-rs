@@ -138,6 +138,66 @@ pub fn set_disabled(conn: &Connection, source_id: i32, disabled: bool) -> Result
     Ok(())
 }
 
+/// 批量追加书源到 `sources` 表。
+///
+/// - `id` 取当前最大 id + 1 起递增；`ord` 取当前最大 ord + 1 起递增。
+/// - 整批包在一个事务里：任意一条插失败回滚整批，避免半成品状态污染列表。
+/// - 入参的 `Rule.id` 字段被忽略 — 重新分配，避免与已有源冲突。
+///
+/// 返回成功插入的条数（= rules.len()，否则会以 Err 抛出）。
+pub fn insert_many(conn: &mut Connection, rules: &[Rule]) -> Result<usize> {
+    if rules.is_empty() {
+        return Ok(0);
+    }
+
+    let tx = conn.transaction().context("begin tx")?;
+
+    // 当前最大 id / ord（COUNT 不准 — 若中途删过会留空洞，但新增应延续最大）
+    let max_id: i64 = tx
+        .query_row("SELECT COALESCE(MAX(id), 0) FROM sources", [], |r| r.get(0))
+        .unwrap_or(0);
+    let max_ord: i64 = tx
+        .query_row("SELECT COALESCE(MAX(ord), -1) FROM sources", [], |r| r.get(0))
+        .unwrap_or(-1);
+
+    for (idx, rule) in rules.iter().enumerate() {
+        let data = serde_json::to_string(rule).context("序列化新增规则")?;
+        let id = max_id + (idx as i64) + 1;
+        let ord = max_ord + (idx as i64) + 1;
+        tx.execute(
+            "INSERT INTO sources (id, ord, data) VALUES (?1, ?2, ?3)",
+            params![id, ord, data],
+        )
+        .with_context(|| format!("插入第 {} 条新规则失败", idx + 1))?;
+    }
+
+    tx.commit().context("commit tx")?;
+    Ok(rules.len())
+}
+
+/// 按 id 删除一条书源；同步删 `source_overrides` 表里同 id 的行。
+///
+/// 返回是否真的删了行（id 不存在时返回 false 但不报错）。
+/// 不重排剩余源的 id —— 让 UI 看到的 id 在整个会话里保持稳定，
+/// 避免删一条后所有 id 后移、用户记忆里的"#7"突然指向了别的源。
+pub fn delete_one(conn: &mut Connection, source_id: i32) -> Result<bool> {
+    let tx = conn.transaction().context("begin tx")?;
+    let n = tx
+        .execute(
+            "DELETE FROM sources WHERE id = ?1",
+            params![source_id as i64],
+        )
+        .context("delete from sources")?;
+    // 同时清理 overrides — 不然下次又把这个 id 标成"禁用"会产生孤儿记录。
+    tx.execute(
+        "DELETE FROM source_overrides WHERE source_id = ?1",
+        params![source_id as i64],
+    )
+    .context("delete from source_overrides")?;
+    tx.commit().context("commit tx")?;
+    Ok(n > 0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -185,5 +245,60 @@ mod tests {
         assert!(!now);
         let rules = list_with_overrides(db.conn()).unwrap();
         assert!(!rules[0].disabled);
+    }
+
+    #[test]
+    fn insert_many_appends_with_new_ids_after_seed() {        let mut db = fresh_db();
+        seed_from_default(db.conn()).unwrap();
+        let before = list_with_overrides(db.conn()).unwrap();
+        let max_before = before.iter().map(|r| r.id).max().unwrap();
+
+        let new_rules = vec![
+            Rule {
+                url: "https://example.com/a".into(),
+                name: "A".into(),
+                ..Rule::default()
+            },
+            Rule {
+                url: "https://example.com/b".into(),
+                name: "B".into(),
+                ..Rule::default()
+            },
+        ];
+        let n = insert_many(db.conn_mut(), &new_rules).unwrap();
+        assert_eq!(n, 2);
+
+        let after = list_with_overrides(db.conn()).unwrap();
+        assert_eq!(after.len(), before.len() + 2);
+        // 新书源的 id 应当 > 之前的最大 id
+        let ids_after: Vec<i32> = after.iter().map(|r| r.id).collect();
+        assert!(ids_after.contains(&(max_before + 1)));
+        assert!(ids_after.contains(&(max_before + 2)));
+        // 新增名称按追加顺序在末尾
+        assert_eq!(after[after.len() - 2].name, "A");
+        assert_eq!(after[after.len() - 1].name, "B");
+    }
+
+    #[test]
+    fn delete_one_removes_source_and_override() {
+        let mut db = fresh_db();
+        seed_from_default(db.conn()).unwrap();
+        // 先把 id=2 标成禁用 → source_overrides 表留下记录
+        set_disabled(db.conn(), 2, true).unwrap();
+        assert!(list_disabled(db.conn()).unwrap().contains(&2));
+
+        // 删 id=2
+        let removed = delete_one(db.conn_mut(), 2).unwrap();
+        assert!(removed);
+
+        // sources 表里没有 id=2 了
+        let after = list_with_overrides(db.conn()).unwrap();
+        assert!(after.iter().all(|r| r.id != 2));
+        // overrides 表也清掉了同 id 的孤儿记录
+        assert!(!list_disabled(db.conn()).unwrap().contains(&2));
+
+        // 不存在的 id 删返回 false 但不 error
+        let removed = delete_one(db.conn_mut(), 9999).unwrap();
+        assert!(!removed);
     }
 }

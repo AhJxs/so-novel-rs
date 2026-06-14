@@ -99,13 +99,13 @@ fn show_summary_bar(ui: &mut egui::Ui, app: &mut SoNovelApp) {
 
     let dark = ui.style().visuals.dark_mode;
     ui.horizontal(|ui| {
-        ui.set_min_height(SUMMARY_BAR_HEIGHT);
+        ui.set_min_height(theme::QUERY_HEIGHT);
 
         // 左侧：从 5 个统计里挑非 0 的画 chip（"总数"始终画）
-        stat_chip(ui, mi::ICON_INVENTORY, "总数", total, theme::semantic_muted(dark));
+        theme::stat_chip(ui, mi::ICON_INVENTORY, "总数", total, theme::semantic_muted(dark));
         if running > 0 {
             ui.add_space(6.0);
-            stat_chip(
+            theme::stat_chip(
                 ui,
                 mi::ICON_DOWNLOADING,
                 "进行中",
@@ -115,7 +115,7 @@ fn show_summary_bar(ui: &mut egui::Ui, app: &mut SoNovelApp) {
         }
         if done > 0 {
             ui.add_space(6.0);
-            stat_chip(
+            theme::stat_chip(
                 ui,
                 mi::ICON_CHECK_CIRCLE,
                 "完成",
@@ -125,7 +125,7 @@ fn show_summary_bar(ui: &mut egui::Ui, app: &mut SoNovelApp) {
         }
         if failed > 0 {
             ui.add_space(6.0);
-            stat_chip(
+            theme::stat_chip(
                 ui,
                 mi::ICON_WARNING,
                 "失败",
@@ -136,7 +136,7 @@ fn show_summary_bar(ui: &mut egui::Ui, app: &mut SoNovelApp) {
         if cancelled > 0 {
             ui.add_space(6.0);
             // 取消属用户主动操作，灰色 muted 不喧宾夺主
-            stat_chip(
+            theme::stat_chip(
                 ui,
                 mi::ICON_CANCEL,
                 "已取消",
@@ -149,251 +149,15 @@ fn show_summary_bar(ui: &mut egui::Ui, app: &mut SoNovelApp) {
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             let any_finished = done + failed + cancelled > 0;
             let label = format!("{} 清除记录", mi::ICON_DELETE.codepoint);
-            if danger_solid_button(ui, &label, any_finished) {
+            if theme::danger_button(ui, &label, any_finished) {
                 app.clear_finished_tasks();
             }
         });
     });
 }
 
-/// summary bar 与 nav_style_button 共用的统一行高。
-const SUMMARY_BAR_HEIGHT: f32 = 34.0;
-/// chip 高度 — 与 search 页 source-status chip 保持一致（视觉重量统一）。
-const CHIP_HEIGHT: f32 = 24.0;
-
-/// 单个统计 chip：左侧 icon（彩色）+ 标签 + 加粗数字。
-///
-/// 视觉与搜索页的 source-status chip 同源（圆角 12 + 状态色低 alpha 底 + 描边），
-/// 区别是：
-/// - 没有圆形 dot；改用 material icon 直接表达状态语义
-/// - 数字加粗与标签拉开层级
-fn stat_chip(ui: &mut egui::Ui, icon: material_icons::MaterialIcon, label: &str, count: usize, color: egui::Color32) {
-    const ICON_SIZE: f32 = 14.0;
-    const PAD_X: f32 = 10.0;
-    const GAP_AFTER_ICON: f32 = 6.0;
-    const GAP_BEFORE_COUNT: f32 = 6.0;
-    const ROUNDING: u8 = 12;
-
-    let dark = ui.style().visuals.dark_mode;
-    let visuals = ui.style().visuals.clone();
-
-    // 测量 — label 用 Body 字号，count 稍大 1px 拉层级。
-    // 这一轮 layout 拿到的 galley 既用来算 chip 总宽，也直接用来绘制 ——
-    // 与搜索页 `chip()` 同源：用 `mesh_bounds.center()`（实际墨迹几何中心）
-    // 做垂直对齐，比 `Align2::*_CENTER`（按字体 row 高度中心，含 leading）
-    // 更准。CJK + emoji + material icon + 多种字号混排时，墨迹中心法不会
-    // 因为每段 leading 不同而上下偏移。
-    let body_font = egui::FontId::proportional(
-        ui.style()
-            .text_styles
-            .get(&egui::TextStyle::Body)
-            .map(|f| f.size)
-            .unwrap_or(13.0),
-    );
-    let count_font = egui::FontId::proportional(body_font.size + 1.0);
-    let icon_font = egui::FontId::new(ICON_SIZE, icon.font_family());
-    let count_text = count.to_string();
-
-    let icon_galley = ui.painter().layout_no_wrap(
-        icon.codepoint.to_string(),
-        icon_font,
-        color,
-    );
-    let label_galley = ui.painter().layout_no_wrap(
-        label.to_string(),
-        body_font,
-        visuals.text_color(),
-    );
-    let count_galley = ui.painter().layout_no_wrap(
-        count_text,
-        count_font,
-        color,
-    );
-
-    let total_w = PAD_X
-        + icon_galley.size().x
-        + GAP_AFTER_ICON
-        + label_galley.size().x
-        + GAP_BEFORE_COUNT
-        + count_galley.size().x
-        + PAD_X;
-    let desired = egui::vec2(total_w, CHIP_HEIGHT);
-
-    let (rect, _resp) = ui.allocate_exact_size(desired, egui::Sense::hover());
-    if !ui.is_rect_visible(rect) {
-        return;
-    }
-
-    let painter = ui.painter();
-
-    // 背景：状态色 ~10-12% alpha；暗色模式下 alpha 略高一点视觉才亮得起来
-    let bg = egui::Color32::from_rgba_unmultiplied(
-        color.r(),
-        color.g(),
-        color.b(),
-        if dark { 32 } else { 22 },
-    );
-    let stroke_color =
-        egui::Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), 140);
-    painter.rect_filled(rect, egui::CornerRadius::same(ROUNDING), bg);
-    painter.rect_stroke(
-        rect,
-        egui::CornerRadius::same(ROUNDING),
-        egui::Stroke::new(1.0, stroke_color),
-        egui::StrokeKind::Inside,
-    );
-
-    // 内容：从左到右画 icon → label → count。
-    // 三段都走 `painter.galley(anchor, galley, color)` —— anchor 是 galley 左上角，
-    // 通过 `rect.center().y - galley.mesh_bounds.center().y` 让墨迹中心钉到 chip
-    // 中心线（参考 `search.rs::chip`）。
-    let center_y = rect.center().y;
-    let mut x = rect.left() + PAD_X;
-
-    let icon_anchor = egui::pos2(x, center_y - icon_galley.mesh_bounds.center().y);
-    let icon_w = icon_galley.size().x;
-    painter.galley(icon_anchor, icon_galley, color);
-    x += icon_w + GAP_AFTER_ICON;
-
-    let label_anchor = egui::pos2(x, center_y - label_galley.mesh_bounds.center().y);
-    let label_w = label_galley.size().x;
-    painter.galley(label_anchor, label_galley, visuals.text_color());
-    x += label_w + GAP_BEFORE_COUNT;
-
-    let count_anchor = egui::pos2(x, center_y - count_galley.mesh_bounds.center().y);
-    painter.galley(count_anchor, count_galley, color);
-}
-
-/// "危险色" 实心按钮：与搜索页 `nav_style_button` 形态一致（圆角填充 + 阴影 +
-/// 按下下沉 1px），但底色用 `theme::semantic_danger`。disabled 时变灰、无阴影。
-///
-/// 返回 true 表示**这一帧被点击**。
-fn danger_solid_button(ui: &mut egui::Ui, text: &str, enabled: bool) -> bool {
-    let dark = ui.style().visuals.dark_mode;
-    solid_button(ui, text, enabled, theme::semantic_danger(dark), SUMMARY_BAR_HEIGHT)
-}
-
-/// 通用实心按钮工厂：圆角 8 + 阴影 + 按下下沉 1px + hover/pressed 色阶。
-///
-/// 用 `base_color` 决定主色（搜索页主按钮用 `theme::ACCENT`，清除记录用
-/// `semantic_danger`，任务卡片"取消"用 danger，"打开"/"重试"用 ACCENT）。
-/// `height` 让卡片内的按钮可以做得比 summary bar 的更紧凑（30 vs 34）。
-fn solid_button(
-    ui: &mut egui::Ui,
-    text: &str,
-    enabled: bool,
-    base_color: egui::Color32,
-    height: f32,
-) -> bool {
-    const BTN_ROUNDING: egui::CornerRadius = egui::CornerRadius::same(8);
-    const BTN_PADDING_X: f32 = 14.0;
-
-    let visuals = ui.style().visuals.clone();
-    let dark_mode = visuals.dark_mode;
-    let font_id = egui::FontId::proportional(
-        ui.style()
-            .text_styles
-            .get(&egui::TextStyle::Button)
-            .map(|f| f.size)
-            .unwrap_or(14.0),
-    );
-
-    let painter_galley =
-        ui.painter()
-            .layout_no_wrap(text.to_string(), font_id.clone(), egui::Color32::WHITE);
-    let text_w = painter_galley.size().x;
-    let desired_size = egui::vec2(text_w + BTN_PADDING_X * 2.0, height);
-
-    let sense = if enabled {
-        egui::Sense::click()
-    } else {
-        egui::Sense::hover()
-    };
-    let (rect, response) = ui.allocate_exact_size(desired_size, sense);
-
-    if !ui.is_rect_visible(rect) {
-        return false;
-    }
-
-    let painter = ui.painter();
-
-    let is_pressed = enabled && response.is_pointer_button_down_on();
-    let is_hovered = enabled && response.hovered();
-
-    // 颜色：按下/hover 在原色上叠暗 / 亮的覆盖，靠 alpha 调出层次
-    let (fill, text_color) = if !enabled {
-        (visuals.widgets.inactive.bg_fill, visuals.weak_text_color())
-    } else if is_pressed {
-        (darken(base_color, 0.15), egui::Color32::WHITE)
-    } else if is_hovered {
-        (lighten(base_color, 0.10), egui::Color32::WHITE)
-    } else {
-        (base_color, egui::Color32::WHITE)
-    };
-
-    // 按下下沉 1px
-    let press_offset = if is_pressed {
-        egui::vec2(0.0, 1.0)
-    } else {
-        egui::vec2(0.0, 0.0)
-    };
-    let rect = rect.translate(press_offset);
-
-    // 阴影（仅 enabled）— 形态与 nav_style_button 一致
-    if enabled {
-        let layers: [(f32, u8); 3] = if is_pressed {
-            if dark_mode {
-                [(0.0, 35), (1.0, 18), (1.5, 8)]
-            } else {
-                [(0.0, 16), (1.0, 8), (1.5, 4)]
-            }
-        } else if dark_mode {
-            [(0.0, 70), (1.5, 40), (3.0, 18)]
-        } else {
-            [(0.0, 32), (1.5, 18), (3.0, 8)]
-        };
-        let shadow_dy = if is_pressed { 1.5 } else { 3.0 };
-        for (expand, alpha) in layers {
-            let shadow_rect = rect.translate(egui::vec2(0.0, shadow_dy)).expand(expand);
-            painter.rect_filled(
-                shadow_rect,
-                egui::CornerRadius::same((8.0 + expand).round() as u8),
-                egui::Color32::from_black_alpha(alpha),
-            );
-        }
-    }
-
-    painter.rect_filled(rect, BTN_ROUNDING, fill);
-
-    // 文字 — mesh_bounds 居中
-    let galley = painter.layout_no_wrap(text.to_string(), font_id, text_color);
-    let mesh = galley.mesh_bounds;
-    let anchor = rect.center() - mesh.center().to_vec2();
-    painter.galley(anchor, galley, text_color);
-
-    response.clicked()
-}
-
-/// 把 `c` 向黑色混合 `t`（0..=1）。仅用于按钮 pressed/hover 的色调微调。
-fn darken(c: egui::Color32, t: f32) -> egui::Color32 {
-    let t = t.clamp(0.0, 1.0);
-    let f = 1.0 - t;
-    egui::Color32::from_rgb(
-        (c.r() as f32 * f) as u8,
-        (c.g() as f32 * f) as u8,
-        (c.b() as f32 * f) as u8,
-    )
-}
-
-/// 把 `c` 向白色混合 `t`。
-fn lighten(c: egui::Color32, t: f32) -> egui::Color32 {
-    let t = t.clamp(0.0, 1.0);
-    egui::Color32::from_rgb(
-        (c.r() as f32 + (255.0 - c.r() as f32) * t) as u8,
-        (c.g() as f32 + (255.0 - c.g() as f32) * t) as u8,
-        (c.b() as f32 + (255.0 - c.b() as f32) * t) as u8,
-    )
-}
+// chip / 实心按钮 / darken / lighten 已抽到 `crate::ui::theme`，多个页面共用。
+// 见 theme::{stat_chip, primary_button, danger_button, solid_button}。
 
 enum TaskAction {
     None,

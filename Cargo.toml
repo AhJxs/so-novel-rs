@@ -94,6 +94,11 @@ flate2 = "1"
 # CLI 子命令（5c）。
 clap = { version = "4", features = ["derive"] }
 
+# 原生文件选择对话框（书源管理「添加」按钮：选 JSON 文件导入）。
+# Linux 走 xdg-portal 而非默认 GTK3，避免引入 gtk3 系统依赖；
+# Windows / macOS 走原生 IFileOpenDialog / NSOpenPanel。
+rfd = { version = "0.15", default-features = false, features = ["xdg-portal", "tokio"] }
+
 # SQLite — bundled 模式零系统依赖，单文件 DB 持久化下载任务记录（后续书源覆写也会走这个库）。
 rusqlite = { version = "0.40", features = ["bundled"] }
 

@@ -315,6 +315,9 @@ pub struct SourcesState {
     pub received: usize,
     /// 后台推送的接收端，update 循环 drain。
     pub rx: Option<mpsc::UnboundedReceiver<crate::crawler::health::SourceHealth>>,
+    /// 二次删除确认：UI 点了一次「删除」后存它的 id；再点「确认删除」才真正删。
+    /// 与 library 卡片的 `pending_delete: Option<PathBuf>` 同模式。
+    pub pending_delete: Option<i32>,
 }
 
 impl SourcesState {
@@ -1165,6 +1168,106 @@ impl SoNovelApp {
                 self.show_toast(format!("保存失败: {e}"));
             }
         }
+    }
+
+    /// 从用户选中的 JSON 文件导入书源到 sonovel.db。
+    ///
+    /// 文件可以是：
+    /// - 一条规则对象 `{ "url": "...", "name": "...", ... }`
+    /// - 多条规则数组 `[ {...}, {...} ]`（兼容 main.json 格式）
+    ///
+    /// 解析失败 / DB 写入失败时弹 toast 但不修改既有 rules；成功时插入到表尾、
+    /// 重新 load `self.rules` 让 UI 立刻看到新源。
+    pub fn add_sources_from_file(&mut self, path: &Path) {
+        let bytes = match std::fs::read(path) {
+            Ok(b) => b,
+            Err(e) => {
+                self.show_toast(format!("读取文件失败: {e}"));
+                return;
+            }
+        };
+        let text = String::from_utf8_lossy(&bytes);
+
+        // 既接受单条对象，也接受数组：先尝试数组，失败再当单条解析。
+        // 同时容忍 json5（带注释的规则文件常见）。
+        let rules: Vec<crate::models::Rule> =
+            match serde_json::from_str::<Vec<crate::models::Rule>>(&text) {
+                Ok(v) => v,
+                Err(_) => match serde_json::from_str::<crate::models::Rule>(&text) {
+                    Ok(one) => vec![one],
+                    Err(_) => match json5::from_str::<Vec<crate::models::Rule>>(&text) {
+                        Ok(v) => v,
+                        Err(_) => match json5::from_str::<crate::models::Rule>(&text) {
+                            Ok(one) => vec![one],
+                            Err(e) => {
+                                self.show_toast(format!("解析失败: {e}"));
+                                return;
+                            }
+                        },
+                    },
+                },
+            };
+
+        if rules.is_empty() {
+            self.show_toast("文件内容为空，未导入任何书源");
+            return;
+        }
+
+        // url + name 起码要有一个非空 — 全空的多半是用户拖错了文件。
+        let valid_count = rules
+            .iter()
+            .filter(|r| !r.url.trim().is_empty() || !r.name.trim().is_empty())
+            .count();
+        if valid_count == 0 {
+            self.show_toast("文件中未找到有效的书源条目");
+            return;
+        }
+
+        match crate::db::sources::insert_many(self.db.conn_mut(), &rules) {
+            Ok(n) => {
+                // 重新 load 整张表，UI 立刻看到新源 + 新分配的 id。
+                match crate::rules::load_rules_from_db(self.db.conn()) {
+                    Ok(rs) => {
+                        self.rules = rs;
+                        self.rule_load_error = None;
+                    }
+                    Err(e) => {
+                        tracing::warn!("插入成功但重载规则失败: {e:#}");
+                    }
+                }
+                self.show_toast(format!("已导入 {n} 个书源"));
+            }
+            Err(e) => {
+                tracing::warn!("书源导入失败: {e:#}");
+                self.show_toast(format!("导入失败: {e}"));
+            }
+        }
+    }
+
+    /// 删除一条书源（DB + 内存中的 rules / overrides / health 都同步清掉）。
+    ///
+    /// 已经过 UI 二次确认；调用方负责清 `sources_state.pending_delete`。
+    pub fn delete_source(&mut self, source_id: i32) {
+        match crate::db::sources::delete_one(self.db.conn_mut(), source_id) {
+            Ok(true) => {
+                // 内存数据同步清理：rules（要让 UI 立刻看到少了一条）+ overrides
+                // 副本（避免 is_disabled 仍返回 true）+ health 探测结果（避免 stale）。
+                self.rules.retain(|r| r.id != source_id);
+                self.source_overrides.disabled.remove(&source_id);
+                self.sources_state.health.remove(&source_id);
+                self.show_toast(format!("已删除书源 #{source_id}"));
+            }
+            Ok(false) => {
+                // id 已不在 DB（多窗口 / 并发场景的稀有情况）。同步内存即可。
+                self.rules.retain(|r| r.id != source_id);
+                self.show_toast("书源已不存在");
+            }
+            Err(e) => {
+                tracing::warn!("删除书源 #{source_id} 失败: {e:#}");
+                self.show_toast(format!("删除失败: {e}"));
+            }
+        }
+        self.sources_state.pending_delete = None;
     }
 
     /// 派一个连通性检测任务到后台，对全部 rules（含已禁用）做 HEAD 探测。

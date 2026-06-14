@@ -389,7 +389,31 @@ pub fn rounded_combo<R>(
 /// 与导航选中按钮 / 搜索按钮同款：亮蓝填充 + 白字 + 圆角 8px + 阴影。
 ///
 /// `enabled = false` 时变灰、无阴影、不可点击。返回 click 状态。
+///
+/// 这是 `solid_button` 的 ACCENT 包装；高度固定为 `QUERY_HEIGHT`（与搜索 / 过滤栏对齐）。
 pub fn primary_button(ui: &mut egui::Ui, text: &str, enabled: bool) -> bool {
+    solid_button(ui, text, enabled, ACCENT, QUERY_HEIGHT)
+}
+
+/// 危险色按钮（清除记录 / 删除规则等破坏性操作）：红色填充。形态与 `primary_button` 一致。
+pub fn danger_button(ui: &mut egui::Ui, text: &str, enabled: bool) -> bool {
+    let dark = ui.style().visuals.dark_mode;
+    solid_button(ui, text, enabled, semantic_danger(dark), QUERY_HEIGHT)
+}
+
+/// 通用实心按钮工厂：圆角 8 + 阴影 + 按下下沉 1px + hover/pressed 自动派生色阶。
+///
+/// `base_color` 决定主色（ACCENT / semantic_danger / semantic_success...），
+/// `height` 让卡片内的紧凑按钮（30）与 summary bar 主按钮（34）共用同一份实现。
+///
+/// 返回 true 表示**这一帧被点击**。
+pub fn solid_button(
+    ui: &mut egui::Ui,
+    text: &str,
+    enabled: bool,
+    base_color: egui::Color32,
+    height: f32,
+) -> bool {
     const BTN_ROUNDING: egui::CornerRadius = egui::CornerRadius::same(8);
     const BTN_PADDING_X: f32 = 18.0;
 
@@ -407,7 +431,7 @@ pub fn primary_button(ui: &mut egui::Ui, text: &str, enabled: bool) -> bool {
         ui.painter()
             .layout_no_wrap(text.to_string(), font_id.clone(), egui::Color32::WHITE);
     let text_w = painter_galley.size().x;
-    let desired_size = egui::vec2(text_w + BTN_PADDING_X * 2.0, QUERY_HEIGHT);
+    let desired_size = egui::vec2(text_w + BTN_PADDING_X * 2.0, height);
 
     let sense = if enabled {
         egui::Sense::click()
@@ -427,11 +451,11 @@ pub fn primary_button(ui: &mut egui::Ui, text: &str, enabled: bool) -> bool {
     let (fill, text_color) = if !enabled {
         (visuals.widgets.inactive.bg_fill, visuals.weak_text_color())
     } else if is_pressed {
-        (egui::Color32::from_rgb(42, 110, 200), egui::Color32::WHITE)
+        (darken(base_color, 0.15), egui::Color32::WHITE)
     } else if is_hovered {
-        (egui::Color32::from_rgb(72, 148, 240), egui::Color32::WHITE)
+        (lighten(base_color, 0.10), egui::Color32::WHITE)
     } else {
-        (ACCENT, egui::Color32::WHITE)
+        (base_color, egui::Color32::WHITE)
     };
 
     let press_offset = if is_pressed {
@@ -472,6 +496,122 @@ pub fn primary_button(ui: &mut egui::Ui, text: &str, enabled: bool) -> bool {
     painter.galley(anchor, galley, text_color);
 
     response.clicked()
+}
+
+/// 把 `c` 向黑色混合 `t`（0..=1）。仅用于按钮 pressed/hover 的色调微调。
+fn darken(c: egui::Color32, t: f32) -> egui::Color32 {
+    let t = t.clamp(0.0, 1.0);
+    let f = 1.0 - t;
+    egui::Color32::from_rgb(
+        (c.r() as f32 * f) as u8,
+        (c.g() as f32 * f) as u8,
+        (c.b() as f32 * f) as u8,
+    )
+}
+
+/// 把 `c` 向白色混合 `t`（0..=1）。
+fn lighten(c: egui::Color32, t: f32) -> egui::Color32 {
+    let t = t.clamp(0.0, 1.0);
+    egui::Color32::from_rgb(
+        (c.r() as f32 + (255.0 - c.r() as f32) * t) as u8,
+        (c.g() as f32 + (255.0 - c.g() as f32) * t) as u8,
+        (c.b() as f32 + (255.0 - c.b() as f32) * t) as u8,
+    )
+}
+
+/// 统计 chip：左侧 material 图标（彩色）+ 标签 + 加粗数字。
+///
+/// 视觉与搜索页的 source-status pill 同源（圆角 12 + 状态色低 alpha 底 + 描边）：
+/// - 体积小（24px 高）适合放在 summary bar 里
+/// - 数字加粗、字号比标签大 1px，拉开层级
+/// - icon / label / count 都用 `mesh_bounds.center()` 做垂直居中，
+///   CJK + emoji + 多字号混排不会有 leading 错位
+pub fn stat_chip(
+    ui: &mut egui::Ui,
+    icon: material_icons::MaterialIcon,
+    label: &str,
+    count: usize,
+    color: egui::Color32,
+) {
+    const ICON_SIZE: f32 = 14.0;
+    const PAD_X: f32 = 10.0;
+    const GAP_AFTER_ICON: f32 = 6.0;
+    const GAP_BEFORE_COUNT: f32 = 6.0;
+    const ROUNDING: u8 = 12;
+    const CHIP_HEIGHT: f32 = 24.0;
+
+    let dark = ui.style().visuals.dark_mode;
+    let visuals = ui.style().visuals.clone();
+
+    let body_font = egui::FontId::proportional(
+        ui.style()
+            .text_styles
+            .get(&egui::TextStyle::Body)
+            .map(|f| f.size)
+            .unwrap_or(13.0),
+    );
+    let count_font = egui::FontId::proportional(body_font.size + 1.0);
+    let icon_font = egui::FontId::new(ICON_SIZE, icon.font_family());
+    let count_text = count.to_string();
+
+    let icon_galley = ui
+        .painter()
+        .layout_no_wrap(icon.codepoint.to_string(), icon_font, color);
+    let label_galley = ui
+        .painter()
+        .layout_no_wrap(label.to_string(), body_font, visuals.text_color());
+    let count_galley = ui
+        .painter()
+        .layout_no_wrap(count_text, count_font, color);
+
+    let total_w = PAD_X
+        + icon_galley.size().x
+        + GAP_AFTER_ICON
+        + label_galley.size().x
+        + GAP_BEFORE_COUNT
+        + count_galley.size().x
+        + PAD_X;
+    let desired = egui::vec2(total_w, CHIP_HEIGHT);
+
+    let (rect, _resp) = ui.allocate_exact_size(desired, egui::Sense::hover());
+    if !ui.is_rect_visible(rect) {
+        return;
+    }
+
+    let painter = ui.painter();
+
+    // 背景：状态色 ~10-12% alpha；暗色模式下 alpha 略高一点视觉才亮得起来
+    let bg = egui::Color32::from_rgba_unmultiplied(
+        color.r(),
+        color.g(),
+        color.b(),
+        if dark { 32 } else { 22 },
+    );
+    let stroke_color =
+        egui::Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), 140);
+    painter.rect_filled(rect, egui::CornerRadius::same(ROUNDING), bg);
+    painter.rect_stroke(
+        rect,
+        egui::CornerRadius::same(ROUNDING),
+        egui::Stroke::new(1.0, stroke_color),
+        egui::StrokeKind::Inside,
+    );
+
+    let center_y = rect.center().y;
+    let mut x = rect.left() + PAD_X;
+
+    let icon_anchor = egui::pos2(x, center_y - icon_galley.mesh_bounds.center().y);
+    let icon_w = icon_galley.size().x;
+    painter.galley(icon_anchor, icon_galley, color);
+    x += icon_w + GAP_AFTER_ICON;
+
+    let label_anchor = egui::pos2(x, center_y - label_galley.mesh_bounds.center().y);
+    let label_w = label_galley.size().x;
+    painter.galley(label_anchor, label_galley, visuals.text_color());
+    x += label_w + GAP_BEFORE_COUNT;
+
+    let count_anchor = egui::pos2(x, center_y - count_galley.mesh_bounds.center().y);
+    painter.galley(count_anchor, count_galley, color);
 }
 
 /// 通用空态视图：大号图标 + 主文案 + 副文案，水平居中。

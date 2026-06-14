@@ -48,6 +48,13 @@ impl Db {
         &self.conn
     }
 
+    /// 可变借引；事务（`Connection::transaction`）要求 `&mut Connection`。
+    /// 因为 eframe 是单线程，且 `Db` 在 `SoNovelApp` 里以 owned 形式持有，
+    /// 调用方拿 `&mut self.db` 就能拿到 `&mut Connection`。
+    pub fn conn_mut(&mut self) -> &mut Connection {
+        &mut self.conn
+    }
+
     /// 内存数据库（`sqlite::memory:`）—— `Db::open` 失败时回退用，不阻塞启动。
     /// 表 schema 跟磁盘版完全一致（init_schema 仍会跑）。
     pub fn open_in_memory() -> rusqlite::Result<Self> {
