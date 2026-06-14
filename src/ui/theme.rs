@@ -269,6 +269,240 @@ pub fn action_button(ui: &mut egui::Ui, text: &str) -> egui::Response {
     .inner
 }
 
+// ============================================================
+// 搜索栏 / 过滤栏共用控件
+// ============================================================
+//
+// 设计语言：固定行高 34px、圆角 8px、与文字色一致的细边框；
+// 搜索下载页与本地书库的过滤栏共用，保持页面间的视觉一致。
+
+/// 搜索栏 / 过滤栏的统一行高。
+pub const QUERY_HEIGHT: f32 = 34.0;
+
+/// 圆角输入框（前置 material 图标 + 单行 TextEdit）。
+///
+/// 视觉与"搜索下载"页的关键词输入框一致：自定义 Frame 画圆角 + 边框，
+/// 内嵌 `icon` + `TextEdit::frame(NONE)`，避开 egui::TextEdit 自带的方角样式。
+///
+/// 返回值：`(response, enter_pressed)`。`enter_pressed` 仅在输入框失焦时同帧
+/// 命中 Enter 才为 true —— 适合配合"搜索/过滤"按钮做键盘提交。
+pub fn search_input(
+    ui: &mut egui::Ui,
+    text: &mut String,
+    hint: &str,
+    icon: material_icons::MaterialIcon,
+    width: f32,
+) -> (egui::Response, bool) {
+    let visuals = ui.style().visuals.clone();
+    const ICON_W: f32 = 22.0;
+
+    let input_frame = egui::Frame::new()
+        .fill(visuals.extreme_bg_color)
+        .stroke(egui::Stroke::new(1.0, visuals.text_color()))
+        .corner_radius(egui::CornerRadius::same(8))
+        .inner_margin(egui::Margin::symmetric(10, 0));
+
+    let mut enter_pressed = false;
+    let mut edit_resp: Option<egui::Response> = None;
+
+    ui.scope(|ui| {
+        ui.set_max_width(width);
+        input_frame.show(ui, |ui| {
+            ui.set_min_size(egui::vec2(width, QUERY_HEIGHT));
+            ui.horizontal_centered(|ui| {
+                ui.label(
+                    icon.rich_text()
+                        .size(14.0)
+                        .color(visuals.weak_text_color()),
+                );
+                let edit_w = width - ICON_W - 20.0;
+                let edit = egui::TextEdit::singleline(text)
+                    .hint_text(hint)
+                    .frame(egui::Frame::NONE)
+                    .desired_width(edit_w)
+                    .vertical_align(egui::Align::Center);
+                let resp = ui.add(edit);
+                if resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                    enter_pressed = true;
+                }
+                edit_resp = Some(resp);
+            });
+        });
+    });
+
+    // 始终能 unwrap：上面无条件赋值。
+    (edit_resp.expect("text edit always allocated"), enter_pressed)
+}
+
+/// 圆角 ComboBox 包装：固定行高 34px、圆角 8px、自定义上下三角箭头。
+///
+/// 与"搜索下载"页书源下拉一致。`render_items` 闭包跟原生 `show_ui` 一样，
+/// 由调用方往下拉里塞 `selectable_value` / `selectable_label` 等。
+pub fn rounded_combo<R>(
+    ui: &mut egui::Ui,
+    id_salt: &str,
+    selected_text: impl Into<egui::WidgetText>,
+    width: f32,
+    render_items: impl FnOnce(&mut egui::Ui) -> R,
+) -> Option<R> {
+    let mut inner: Option<R> = None;
+    ui.allocate_ui_with_layout(
+        egui::vec2(width, QUERY_HEIGHT),
+        egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
+        |ui| {
+            let mut style: egui::Style = (**ui.style()).clone();
+            let r = egui::CornerRadius::same(8);
+            style.visuals.widgets.inactive.corner_radius = r;
+            style.visuals.widgets.hovered.corner_radius = r;
+            style.visuals.widgets.active.corner_radius = r;
+            style.visuals.widgets.open.corner_radius = r;
+            style.spacing.button_padding = egui::vec2(8.0, 0.0);
+            ui.set_style(style);
+
+            egui::ComboBox::from_id_salt(id_salt)
+                .selected_text(selected_text)
+                .width(width)
+                .height(360.0)
+                .icon(|ui, rect, vis, is_open| {
+                    let painter = ui.painter();
+                    let center = rect.center();
+                    let h = (rect.height() * 0.18).clamp(3.0, 5.0);
+                    let w = h * 1.4;
+                    let dir = if is_open { -1.0 } else { 1.0 };
+                    let p1 = egui::pos2(center.x - w, center.y - h * dir);
+                    let p2 = egui::pos2(center.x + w, center.y - h * dir);
+                    let p3 = egui::pos2(center.x, center.y + h * dir);
+                    painter.add(egui::Shape::convex_polygon(
+                        vec![p1, p2, p3],
+                        vis.fg_stroke.color,
+                        egui::Stroke::NONE,
+                    ));
+                })
+                .show_ui(ui, |ui| {
+                    inner = Some(render_items(ui));
+                });
+        },
+    );
+    inner
+}
+
+/// 与导航选中按钮 / 搜索按钮同款：亮蓝填充 + 白字 + 圆角 8px + 阴影。
+///
+/// `enabled = false` 时变灰、无阴影、不可点击。返回 click 状态。
+pub fn primary_button(ui: &mut egui::Ui, text: &str, enabled: bool) -> bool {
+    const BTN_ROUNDING: egui::CornerRadius = egui::CornerRadius::same(8);
+    const BTN_PADDING_X: f32 = 18.0;
+
+    let visuals = ui.style().visuals.clone();
+    let dark_mode = visuals.dark_mode;
+    let font_id = egui::FontId::proportional(
+        ui.style()
+            .text_styles
+            .get(&egui::TextStyle::Button)
+            .map(|f| f.size)
+            .unwrap_or(14.0),
+    );
+
+    let painter_galley =
+        ui.painter()
+            .layout_no_wrap(text.to_string(), font_id.clone(), egui::Color32::WHITE);
+    let text_w = painter_galley.size().x;
+    let desired_size = egui::vec2(text_w + BTN_PADDING_X * 2.0, QUERY_HEIGHT);
+
+    let sense = if enabled {
+        egui::Sense::click()
+    } else {
+        egui::Sense::hover()
+    };
+    let (rect, response) = ui.allocate_exact_size(desired_size, sense);
+
+    if !ui.is_rect_visible(rect) {
+        return false;
+    }
+
+    let painter = ui.painter();
+    let is_pressed = enabled && response.is_pointer_button_down_on();
+    let is_hovered = enabled && response.hovered();
+
+    let (fill, text_color) = if !enabled {
+        (visuals.widgets.inactive.bg_fill, visuals.weak_text_color())
+    } else if is_pressed {
+        (egui::Color32::from_rgb(42, 110, 200), egui::Color32::WHITE)
+    } else if is_hovered {
+        (egui::Color32::from_rgb(72, 148, 240), egui::Color32::WHITE)
+    } else {
+        (ACCENT, egui::Color32::WHITE)
+    };
+
+    let press_offset = if is_pressed {
+        egui::vec2(0.0, 1.0)
+    } else {
+        egui::vec2(0.0, 0.0)
+    };
+    let rect = rect.translate(press_offset);
+
+    if enabled {
+        let layers: [(f32, u8); 3] = if is_pressed {
+            if dark_mode {
+                [(0.0, 35), (1.0, 18), (1.5, 8)]
+            } else {
+                [(0.0, 16), (1.0, 8), (1.5, 4)]
+            }
+        } else if dark_mode {
+            [(0.0, 70), (1.5, 40), (3.0, 18)]
+        } else {
+            [(0.0, 32), (1.5, 18), (3.0, 8)]
+        };
+        let shadow_dy = if is_pressed { 1.5 } else { 3.0 };
+        for (expand, alpha) in layers {
+            let shadow_rect = rect.translate(egui::vec2(0.0, shadow_dy)).expand(expand);
+            painter.rect_filled(
+                shadow_rect,
+                egui::CornerRadius::same((8.0 + expand).round() as u8),
+                egui::Color32::from_black_alpha(alpha),
+            );
+        }
+    }
+
+    painter.rect_filled(rect, BTN_ROUNDING, fill);
+
+    let galley = painter.layout_no_wrap(text.to_string(), font_id, text_color);
+    let mesh = galley.mesh_bounds;
+    let anchor = rect.center() - mesh.center().to_vec2();
+    painter.galley(anchor, galley, text_color);
+
+    response.clicked()
+}
+
+/// 通用空态视图：大号图标 + 主文案 + 副文案，水平居中。
+///
+/// 与"下载任务页空态"视觉一致；本地书库过滤后无结果、其它列表初始空都可复用。
+pub fn empty_state(
+    ui: &mut egui::Ui,
+    icon: material_icons::MaterialIcon,
+    primary: &str,
+    secondary: &str,
+) {
+    ui.add_space(24.0);
+    const ICON_SIZE: f32 = 48.0;
+    let dark = ui.style().visuals.dark_mode;
+    ui.allocate_ui_with_layout(
+        egui::vec2(ui.available_width(), 0.0),
+        egui::Layout::top_down(egui::Align::Center),
+        |ui| {
+            ui.label(
+                icon.rich_text()
+                    .size(ICON_SIZE)
+                    .color(semantic_muted(dark)),
+            );
+            ui.add_space(10.0);
+            ui.label(egui::RichText::new(primary).size(16.0).strong());
+            ui.add_space(6.0);
+            ui.label(egui::RichText::new(secondary).size(14.0).weak());
+        },
+    );
+}
+
 #[cfg(target_os = "windows")]
 fn system_cjk_candidate_paths() -> Vec<(&'static str, PathBuf)> {
     let win_fonts = std::env::var_os("WINDIR")

@@ -4,13 +4,13 @@
 //! - 顶部"清除已完成"按钮。
 
 use std::path::PathBuf;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::app::{DownloadTask, SoNovelApp};
 use crate::models::SearchResult;
 use crate::ui::theme;
 
 use crate::util::system::{open_path, reveal_in_folder};
+use crate::util::time::{format_duration, format_unix_local};
 use material_icons::icons as mi;
 
 pub fn show(ui: &mut egui::Ui, app: &mut SoNovelApp) {
@@ -18,7 +18,12 @@ pub fn show(ui: &mut egui::Ui, app: &mut SoNovelApp) {
     ui.add_space(8.0);
 
     if app.tasks.is_empty() {
-        show_empty_state(ui);
+        theme::empty_state(
+            ui,
+            mi::ICON_INBOX,
+            "暂无下载任务",
+            "去『搜索下载』选一本书试试",
+        );
         return;
     }
 
@@ -68,54 +73,6 @@ pub fn show(ui: &mut egui::Ui, app: &mut SoNovelApp) {
         let _id = app.spawn_download(*r);
         app.show_toast("已重新加入下载");
     }
-}
-
-/// 任务列表为空时的空状态。
-///
-/// 与上方 summary bar 之间留 32px 间距（设计稿要求）；水平居中，
-/// 内含大号 material 图标 + 主文案 + 副文案的视觉层级。
-/// 不画卡片边框 / 背景 —— 让"空"的氛围更轻量，跟有任务时的 `Frame::group`
-/// 卡片在视觉密度上拉开档次。
-fn show_empty_state(ui: &mut egui::Ui) {
-    // 与上方组件留 32px 间距（show() 已经在 summary bar 之后 add_space(8)，
-    // 这里再补 24，加起来正好 32 — 不直接覆盖让调用方仍有"基础间距"语义）。
-    ui.add_space(24.0);
-
-    const ICON_SIZE: f32 = 48.0;
-    let dark = ui.style().visuals.dark_mode;
-
-    // 占满父宽度 + top_down(Align::Center) → 内容水平居中。
-    // 没有 Frame，背景就走外层 panel 默认色；省一层视觉噪声。
-    ui.allocate_ui_with_layout(
-        egui::vec2(ui.available_width(), 0.0),
-        egui::Layout::top_down(egui::Align::Center),
-        |ui| {
-            // 图标 — 用 muted 色不抢戏；ICON_INBOX = 空收件箱，最贴"无任务"语义
-            ui.label(
-                mi::ICON_INBOX
-                    .rich_text()
-                    .size(ICON_SIZE)
-                    .color(theme::semantic_muted(dark)),
-            );
-            ui.add_space(10.0);
-
-            // 主文案 — 强字号
-            ui.label(
-                egui::RichText::new("暂无下载任务")
-                    .size(16.0)
-                    .strong(),
-            );
-            ui.add_space(6.0);
-
-            // 副文案 — 引导用户去搜索页。比之前的 .small() 大一档：直接 14pt
-            // 不弱化，让指引可读性优先于"次要文案"的视觉降级。
-            ui.label(
-                egui::RichText::new("去『搜索下载』选一本书试试")
-                    .size(14.0)
-                    .weak(),
-            );
-        },
-    );
 }
 
 /// 顶部摘要条：左侧统计 chip 组 + 右侧"清除记录"主按钮（红色）。
@@ -539,12 +496,7 @@ fn show_one_task(
                             // #id —— 字号与作者一致（Body 13pt），颜色 = 状态色，strong
                             // 让 #1 / #2 这种序号在卡片左上角有视觉重量，跟边框+进度条
                             // 三位一体共同表达下载状态
-                            ui.label(
-                                egui::RichText::new(format!("#{}", task.id))
-                                    .strong()
-                                    .size(13.0)
-                                    .color(status_color),
-                            );
+                            ui.label(egui::RichText::new(format!("#{}", task.id)));
                             ui.add_space(8.0);
 
                             // 书名（强 14.5pt 截断 28）
@@ -753,7 +705,7 @@ fn show_task_time_line(ui: &mut egui::Ui, task: &DownloadTask) {
     let dark = ui.style().visuals.dark_mode;
     ui.horizontal(|ui| {
         ui.label(
-            egui::RichText::new(format!("{}", format_unix(task.started_at_unix))),
+            egui::RichText::new(format!("{}", format_unix_local(task.started_at_unix))),
         );
         if let Some(d) = task.elapsed() {
             ui.label(egui::RichText::new("·").small().weak());
@@ -849,141 +801,5 @@ fn truncate(s: &str, n: usize) -> String {
     out
 }
 
-/// 把 unix 时间戳格式化为本地时间字符串。
-///
-/// 统一格式 `YYYY-MM-DD HH:MM`，让任务卡片的"开始时间"在跨日 / 跨年场景下
-/// 都不会有歧义。之前按"今天 / 昨天 / MM-DD"分支显示的写法在用户翻历史
-/// 任务时容易混淆（"昨天 15:30" 到底是今天的昨天还是某历史任务的昨天）。
-fn format_unix(unix_secs: i64) -> String {
-    use std::time::{Duration, UNIX_EPOCH};
-    if unix_secs <= 0 {
-        return "未知".to_string();
-    }
-    let dt = UNIX_EPOCH + Duration::from_secs(unix_secs as u64);
-    let date = chrono_like_local_date(dt);
-    let hhmm = chrono_like_hhmm(dt);
-    format!(
-        "{}-{:02}-{:02} {hhmm}",
-        chrono_year(date),
-        chrono_month(date),
-        chrono_day(date)
-    )
-}
+// 时间格式化（开始时间 / 耗时）已抽到 `crate::util::time` —— 多个页面共用。
 
-/// `Duration` 格式化为人类可读的"X 分 Y 秒"风格。
-///
-/// < 1 分钟  → "30 秒"
-/// < 1 小时  → "5 分 30 秒"
-/// < 1 天    → "2 时 15 分"
-/// ≥ 1 天    → "3 天 4 时"
-fn format_duration(d: Duration) -> String {
-    let total = d.as_secs();
-    if total < 60 {
-        return format!("{total} 秒");
-    }
-    if total < 3600 {
-        let m = total / 60;
-        let s = total % 60;
-        return if s == 0 {
-            format!("{m} 分")
-        } else {
-            format!("{m} 分 {s} 秒")
-        };
-    }
-    if total < 86_400 {
-        let h = total / 3600;
-        let m = (total % 3600) / 60;
-        return if m == 0 {
-            format!("{h} 时")
-        } else {
-            format!("{h} 时 {m} 分")
-        };
-    }
-    let days = total / 86_400;
-    let h = (total % 86_400) / 3600;
-    if h == 0 {
-        format!("{days} 天")
-    } else {
-        format!("{days} 天 {h} 时")
-    }
-}
-
-// ---- 下面是 std 替代的"calendar 工具"，避免引 chrono 这个大依赖 ----
-//
-// 用 SystemTime + 算法自己算本地日期/时间。系统时区用 `chrono` 风格的
-// `Local time since midnight / days since 1970-01-01` 推导，精度只到天，
-// 但对我们这种"今天 / 昨天 / YYYY-MM-DD"的展示需求完全够。
-
-/// 把 `SystemTime` 转换成本地日历的 (year, month, day)。用 std-only 算。
-/// 算法来源：Howard Hinnant 的 `days_from_civil` 反向版本。
-fn chrono_like_local_date(t: SystemTime) -> (i32, u32, u32) {
-    let days = days_from_unix(t);
-    civil_from_days(days)
-}
-
-/// SystemTime → 距 1970-01-01 本地零点的天数
-fn days_from_unix(t: SystemTime) -> i64 {
-    let secs = t
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or(Duration::ZERO)
-        .as_secs() as i64;
-    // 用本地时区偏移：把 secs 减去当前时区偏移（以天为单位，向下取整）
-    let offset = local_tz_offset_secs();
-    let local_secs = secs + offset;
-    local_secs.div_euclid(86_400)
-}
-
-/// `t` 的本地 HH:MM 字符串
-fn chrono_like_hhmm(t: SystemTime) -> String {
-    let secs = t
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or(Duration::ZERO)
-        .as_secs() as i64;
-    let offset = local_tz_offset_secs();
-    let local_secs = secs + offset;
-    let day_secs = local_secs.rem_euclid(86_400);
-    let h = day_secs / 3600;
-    let m = (day_secs % 3600) / 60;
-    format!("{h:02}:{m:02}")
-}
-
-fn chrono_year(d: (i32, u32, u32)) -> i32 { d.0 }
-fn chrono_month(d: (i32, u32, u32)) -> u32 { d.1 }
-fn chrono_day(d: (i32, u32, u32)) -> u32 { d.2 }
-
-/// Howard Hinnant's civil_from_days。
-/// 输入：距 1970-01-01 的天数。输出：(year, month, day)。
-fn civil_from_days(z: i64) -> (i32, u32, u32) {
-    let z = z + 719468;
-    let era = if z >= 0 { z } else { z - 146096 } / 146097;
-    let doe = (z - era * 146097) as u32; // [0, 146096]
-    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365; // [0, 399]
-    let y = yoe as i32 + era as i32 * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100); // [0, 365]
-    let mp = (5 * doy + 2) / 153; // [0, 11]
-    let d = doy - (153 * mp + 2) / 5 + 1; // [1, 31]
-    let m = if mp < 10 { mp + 3 } else { mp - 9 }; // [1, 12]
-    let y = y + if m <= 2 { 1 } else { 0 };
-    (y, m, d)
-}
-
-/// 拿本地时区偏移（秒）。读系统时区 ——
-/// - Windows：`GetTimeZoneInformation`
-/// - macOS / Linux：`localtime_r`
-///
-/// 拿不到时回退到 UTC（返回 0），让"今天/昨天"判断至少不出 NaN。
-fn local_tz_offset_secs() -> i64 {
-    match time::UtcOffset::current_local_offset() {
-        Ok(off) => off.whole_seconds() as i64,
-        Err(e) => {
-            // 第一次失败时 warn 一次（每次调用都 warn 太吵）。
-            // 用一个 static AtomicBool 守门，简单够用。
-            use std::sync::atomic::{AtomicBool, Ordering};
-            static WARNED: AtomicBool = AtomicBool::new(false);
-            if !WARNED.swap(true, Ordering::Relaxed) {
-                tracing::warn!("读系统时区失败 ({e})，UI 时间显示回退到 UTC");
-            }
-            0
-        }
-    }
-}

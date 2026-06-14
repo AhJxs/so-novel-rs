@@ -121,60 +121,23 @@ fn show_task_banner(ui: &mut egui::Ui, app: &mut SoNovelApp) {
     }
 }
 
-/// 三件套（输入框 / 下拉 / 搜索按钮）统一高度。
-const QUERY_HEIGHT: f32 = 34.0;
-
-use crate::ui::theme::ACCENT;
+/// 搜索栏：输入框 + 书源下拉 + 搜索按钮。控件样式统一在 `theme` 模块。
 
 fn show_query_bar(ui: &mut egui::Ui, app: &mut SoNovelApp) {
-    let visuals = ui.style().visuals.clone();
-
     ui.horizontal(|ui| {
-        // ---- 1. 输入框：自定义 Frame（圆角 + border），内嵌 🔍 图标 + TextEdit ----
-        // 不能直接给 egui::TextEdit 设圆角；包一层 Frame 自己画背景 + 圆角 + 边框。
-        // 固定宽度 360，避免 TextEdit::desired_width 把行撑爆。
+        // ---- 1. 输入框 ----
         const INPUT_W: f32 = 360.0;
-        const ICON_W: f32 = 22.0; // 🔍 字符 + 一点空隙
-
-        let input_frame = egui::Frame::new()
-            .fill(visuals.extreme_bg_color)
-            // border 颜色与文字色一致（按用户要求），整个输入框是"文字色"线框。
-            .stroke(egui::Stroke::new(1.0, visuals.text_color()))
-            .corner_radius(egui::CornerRadius::same(8))
-            .inner_margin(egui::Margin::symmetric(10, 0));
-
-        let enter_pressed = ui
-            .scope(|ui| {
-                ui.set_max_width(INPUT_W);
-                input_frame
-                    .show(ui, |ui| {
-                        ui.set_min_size(egui::vec2(INPUT_W, QUERY_HEIGHT));
-                        ui.horizontal_centered(|ui| {
-                            ui.label(
-                                material_icons::icons::ICON_SEARCH
-                                    .rich_text()
-                                    .size(14.0)
-                                    .color(visuals.weak_text_color()),
-                            );
-                            // TextEdit 占去除图标 + 左右 padding 之后的剩余宽度
-                            let edit_w = INPUT_W - ICON_W - 20.0;
-                            let edit = egui::TextEdit::singleline(&mut app.search.keyword)
-                                .hint_text("书名 / 作者")
-                                .frame(egui::Frame::NONE)
-                                .desired_width(edit_w)
-                                .vertical_align(egui::Align::Center);
-                            let resp = ui.add(edit);
-                            resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))
-                        })
-                        .inner
-                    })
-                    .inner
-            })
-            .inner;
+        let (_resp, enter_pressed) = theme::search_input(
+            ui,
+            &mut app.search.keyword,
+            "书名 / 作者",
+            material_icons::icons::ICON_SEARCH,
+            INPUT_W,
+        );
 
         ui.add_space(6.0);
 
-        // ---- 2. 书源下拉：固定高度 + 圆角 8px + 自定义箭头（打开时翻转）----
+        // ---- 2. 书源下拉 ----
         let current_label = match app.search.source_id {
             None => "全部书源（聚合）".to_string(),
             Some(id) => app
@@ -184,63 +147,22 @@ fn show_query_bar(ui: &mut egui::Ui, app: &mut SoNovelApp) {
                 .map(|r| format!("{} ({})", r.name, r.id))
                 .unwrap_or_else(|| format!("书源 {id}（已下线？）")),
         };
-        ui.allocate_ui_with_layout(
-            egui::vec2(220.0, QUERY_HEIGHT),
-            egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
-            |ui| {
-                // ComboBox 用 style.widgets.{inactive,hovered,active,open}.corner_radius；
-                // 这里在子 scope 改 style，不污染外层 ui。
-                // 注意 ui.style() 返回 &Arc<Style>；要拿可变引用必须先 clone Style。
-                let mut style: egui::Style = (**ui.style()).clone();
-                let r = egui::CornerRadius::same(8);
-                style.visuals.widgets.inactive.corner_radius = r;
-                style.visuals.widgets.hovered.corner_radius = r;
-                style.visuals.widgets.active.corner_radius = r;
-                style.visuals.widgets.open.corner_radius = r;
-                // 加大水平内边距：全局默认 (10, 6) 让"全部书源（聚合）"这种长 label
-                // 视觉上贴边；这里只对 ComboBox 及其下拉项生效，不影响其他按钮。
-                style.spacing.button_padding = egui::vec2(8.0, 0.0);
-                ui.set_style(style);
-
-                egui::ComboBox::from_id_salt("search_source")
-                    .selected_text(current_label)
-                    .width(220.0)
-                    .height(360.0)
-                    // 自定义箭头：is_open=true 时画"向上 ▲"，否则"向下 ▼"
-                    .icon(|ui, rect, vis, is_open| {
-                        let painter = ui.painter();
-                        let center = rect.center();
-                        let h = (rect.height() * 0.18).clamp(3.0, 5.0);
-                        let w = h * 1.4;
-                        // is_open=false 时尖朝下（向下三角）；is_open=true 时尖朝上
-                        let dir = if is_open { -1.0 } else { 1.0 };
-                        let p1 = egui::pos2(center.x - w, center.y - h * dir);
-                        let p2 = egui::pos2(center.x + w, center.y - h * dir);
-                        let p3 = egui::pos2(center.x, center.y + h * dir);
-                        painter.add(egui::Shape::convex_polygon(
-                            vec![p1, p2, p3],
-                            vis.fg_stroke.color,
-                            egui::Stroke::NONE,
-                        ));
-                    })
-                    .show_ui(ui, |ui| {
-                        ui.selectable_value(&mut app.search.source_id, None, "全部书源（聚合）");
-                        for r in &app.rules {
-                            if r.disabled {
-                                continue;
-                            }
-                            let label = format!("{} ({})", r.name, r.id);
-                            ui.selectable_value(&mut app.search.source_id, Some(r.id), label);
-                        }
-                    });
-            },
-        );
+        theme::rounded_combo(ui, "search_source", current_label, 220.0, |ui| {
+            ui.selectable_value(&mut app.search.source_id, None, "全部书源（聚合）");
+            for r in &app.rules {
+                if r.disabled {
+                    continue;
+                }
+                let label = format!("{} ({})", r.name, r.id);
+                ui.selectable_value(&mut app.search.source_id, Some(r.id), label);
+            }
+        });
 
         ui.add_space(6.0);
 
-        // ---- 3. 搜索按钮：与导航选中按钮同款（亮蓝填充 + 白字 + 圆角 8px）----
+        // ---- 3. 搜索按钮（亮蓝填充） ----
         let search_label = format!("{} 搜索", material_icons::icons::ICON_SEARCH.codepoint);
-        let search_clicked = nav_style_button(ui, &search_label, !app.search.running);
+        let search_clicked = theme::primary_button(ui, &search_label, !app.search.running);
 
         if (search_clicked || enter_pressed) && !app.search.running {
             let _ = app.spawn_search();
@@ -262,101 +184,6 @@ fn show_query_bar(ui: &mut egui::Ui, app: &mut SoNovelApp) {
             format!("⚠ {err}"),
         );
     }
-}
-/// 与 `ui::nav` 的选中按钮同款：亮蓝填充 + 白字 + 圆角 8px + 阴影 + 高度统一。
-/// 仅 disabled 时变灰、无阴影。
-fn nav_style_button(ui: &mut egui::Ui, text: &str, enabled: bool) -> bool {
-    const BTN_ROUNDING: egui::CornerRadius = egui::CornerRadius::same(8);
-    const BTN_PADDING_X: f32 = 18.0;
-
-    let visuals = ui.style().visuals.clone();
-    let dark_mode = visuals.dark_mode;
-    let font_id = egui::FontId::proportional(
-        ui.style()
-            .text_styles
-            .get(&egui::TextStyle::Button)
-            .map(|f| f.size)
-            .unwrap_or(14.0),
-    );
-
-    let painter_galley =
-        ui.painter()
-            .layout_no_wrap(text.to_string(), font_id.clone(), egui::Color32::WHITE);
-    let text_w = painter_galley.size().x;
-    let desired_size = egui::vec2(text_w + BTN_PADDING_X * 2.0, QUERY_HEIGHT);
-
-    let sense = if enabled {
-        egui::Sense::click()
-    } else {
-        egui::Sense::hover()
-    };
-    let (rect, response) = ui.allocate_exact_size(desired_size, sense);
-
-    if !ui.is_rect_visible(rect) {
-        return false;
-    }
-
-    let painter = ui.painter();
-
-    // 状态判断：是否被按下（鼠标按住）/ 是否 hover
-    let is_pressed = enabled && response.is_pointer_button_down_on();
-    let is_hovered = enabled && response.hovered();
-
-    // 颜色
-    let (fill, text_color) = if !enabled {
-        (visuals.widgets.inactive.bg_fill, visuals.weak_text_color())
-    } else if is_pressed {
-        // 按下时颜色稍深（点击反馈），用 ACCENT 加点黑色叠加
-        (egui::Color32::from_rgb(42, 110, 200), egui::Color32::WHITE)
-    } else if is_hovered {
-        // hover 时颜色稍亮
-        (egui::Color32::from_rgb(72, 148, 240), egui::Color32::WHITE)
-    } else {
-        (ACCENT, egui::Color32::WHITE)
-    };
-
-    // 点击时整个按钮下沉 1px（视觉"按下"反馈），同时阴影变小
-    let press_offset = if is_pressed {
-        egui::vec2(0.0, 1.0)
-    } else {
-        egui::vec2(0.0, 0.0)
-    };
-    let rect = rect.translate(press_offset);
-
-    // 阴影（仅 enabled，按下时阴影更紧贴减半）
-    if enabled {
-        let layers: [(f32, u8); 3] = if is_pressed {
-            // 按下时阴影变浅 + 偏移变小
-            if dark_mode {
-                [(0.0, 35), (1.0, 18), (1.5, 8)]
-            } else {
-                [(0.0, 16), (1.0, 8), (1.5, 4)]
-            }
-        } else if dark_mode {
-            [(0.0, 70), (1.5, 40), (3.0, 18)]
-        } else {
-            [(0.0, 32), (1.5, 18), (3.0, 8)]
-        };
-        let shadow_dy = if is_pressed { 1.5 } else { 3.0 };
-        for (expand, alpha) in layers {
-            let shadow_rect = rect.translate(egui::vec2(0.0, shadow_dy)).expand(expand);
-            painter.rect_filled(
-                shadow_rect,
-                egui::CornerRadius::same((8.0 + expand).round() as u8),
-                egui::Color32::from_black_alpha(alpha),
-            );
-        }
-    }
-
-    painter.rect_filled(rect, BTN_ROUNDING, fill);
-
-    // 文字 — 用 mesh_bounds 居中（与 nav 按钮一致）
-    let galley = painter.layout_no_wrap(text.to_string(), font_id, text_color);
-    let mesh = galley.mesh_bounds;
-    let anchor = rect.center() - mesh.center().to_vec2();
-    painter.galley(anchor, galley, text_color);
-
-    response.clicked()
 }
 
 fn show_source_status(ui: &mut egui::Ui, search: &SearchState) {
@@ -799,11 +626,7 @@ fn result_card(
                             style.visuals.widgets.active.corner_radius = r8;
                             ui.set_style(style);
 
-                            ui.label(
-                                egui::RichText::new(format!("#{}", idx + 1))
-                                    .small()
-                                    .weak(),
-                            );
+                            ui.label(egui::RichText::new(format!("#{}", idx + 1)));
                             ui.add_space(8.0);
 
                             // 书名 — 不可点击的强 label

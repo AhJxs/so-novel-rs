@@ -9,6 +9,7 @@ use std::path::PathBuf;
 use crate::app::{LibraryEntry, SoNovelApp};
 use crate::ui::theme;
 use crate::util::system::{open_path, reveal_in_folder};
+use crate::util::time::format_unix_local_u64;
 use material_icons::icons as mi;
 
 pub fn show(ui: &mut egui::Ui, app: &mut SoNovelApp) {
@@ -24,8 +25,6 @@ pub fn show(ui: &mut egui::Ui, app: &mut SoNovelApp) {
         app.refresh_library();
     }
 
-    ui.heading("本地书库");
-    ui.add_space(4.0);
     show_toolbar(ui, app);
     ui.add_space(8.0);
 
@@ -41,74 +40,55 @@ pub fn show(ui: &mut egui::Ui, app: &mut SoNovelApp) {
 }
 
 fn show_toolbar(ui: &mut egui::Ui, app: &mut SoNovelApp) {
-    let dir_display = app
-        .library
-        .scanned_dir
-        .as_deref()
-        .map(|p| p.display().to_string())
-        .unwrap_or_else(|| app.config.download_path.clone());
-
     ui.horizontal(|ui| {
-        ui.label("下载目录:");
-        ui.add(
-            egui::Label::new(
-                egui::RichText::new(&dir_display)
-                    .small()
-                    .color(theme::semantic_info(ui.style().visuals.dark_mode)),
-            )
-            .truncate(),
+        // 1. 文件名过滤输入框（与搜索页关键词框同款）
+        const INPUT_W: f32 = 280.0;
+        let (_resp, _enter) = theme::search_input(
+            ui,
+            &mut app.library.filter_text,
+            "按文件名过滤",
+            mi::ICON_SEARCH,
+            INPUT_W,
         );
-    });
 
-    ui.add_space(4.0);
+        ui.add_space(6.0);
 
-    ui.horizontal(|ui| {
-        let edit = egui::TextEdit::singleline(&mut app.library.filter_text)
-            .hint_text("按文件名过滤")
-            .desired_width(280.0);
-        ui.add(edit);
-
-        // 格式过滤
+        // 2. 格式过滤下拉（与搜索页书源下拉同款）
         let mut current = app
             .library
             .filter_ext
             .clone()
             .unwrap_or_else(|| "全部".to_string());
-        egui::ComboBox::from_id_salt("library_ext_filter")
-            .selected_text(&current)
-            .width(110.0)
-            .show_ui(ui, |ui| {
-                for opt in ["全部", "epub", "txt", "zip", "html", "pdf"] {
-                    ui.selectable_value(&mut current, opt.to_string(), opt);
-                }
-            });
+        theme::rounded_combo(ui, "library_ext_filter", current.clone(), 110.0, |ui| {
+            for opt in ["全部", "epub", "txt", "zip", "html", "pdf"] {
+                ui.selectable_value(&mut current, opt.to_string(), opt);
+            }
+        });
         app.library.filter_ext = if current == "全部" {
             None
         } else {
             Some(current)
         };
 
-        if theme::button(ui, &format!("{} 刷新", mi::ICON_REFRESH.codepoint)).clicked() {
-            app.refresh_library();
-        }
+        ui.add_space(6.0);
 
-        if theme::button(ui, &format!("{} 打开下载目录", mi::ICON_FOLDER_OPEN.codepoint)).clicked() {
-            if let Some(dir) = &app.library.scanned_dir {
-                if let Err(e) = open_path(dir) {
-                    app.library.last_error = Some(format!("打开目录失败: {e}"));
-                }
-            }
+        // 3. 刷新按钮（亮蓝主按钮，与搜索按钮同款）
+        let refresh_label = format!("{} 刷新", mi::ICON_REFRESH.codepoint);
+        if theme::primary_button(ui, &refresh_label, true) {
+            app.refresh_library();
         }
     });
 }
 
 fn show_table(ui: &mut egui::Ui, app: &mut SoNovelApp) {
     if app.library.entries.is_empty() {
-        egui::Frame::group(ui.style())
-            .inner_margin(egui::Margin::same(12))
-            .show(ui, |ui| {
-                ui.label("还没有下载完成的书。去 [搜索下载] 试试。");
-            });
+        // 还没扫到任何书：与下载任务页空态同款（图标 + 主副文案）。
+        theme::empty_state(
+            ui,
+            mi::ICON_LIBRARY_BOOKS,
+            "本地书库为空",
+            "下载完成的书会显示在这里",
+        );
         return;
     }
 
@@ -148,54 +128,38 @@ fn show_table(ui: &mut egui::Ui, app: &mut SoNovelApp) {
     ));
     ui.add_space(4.0);
 
-    egui::ScrollArea::vertical().show(ui, |ui| {
-        egui::Grid::new("library_grid")
-            .striped(true)
-            .min_col_width(60.0)
-            .show(ui, |ui| {
-                ui.strong("文件");
-                ui.strong("格式");
-                ui.strong("大小");
-                ui.strong("修改时间");
-                ui.strong("操作");
-                ui.end_row();
+    // 过滤后无结果：同款空态，引导清空过滤条件。
+    if visible.is_empty() {
+        theme::empty_state(
+            ui,
+            mi::ICON_SEARCH_OFF,
+            "没有匹配的书",
+            "试试清空关键词或换一种格式",
+        );
+        return;
+    }
 
-                for e in &visible {
-                    ui.label(truncate(&e.file_name, 50));
-                    ui.label(&e.ext);
-                    ui.label(format_size(e.size_bytes));
-                    ui.label(format_unix_time(e.modified_unix_secs));
-
-                    ui.horizontal(|ui| {
-                        if theme::small_button(ui, "打开").clicked() {
-                            to_open = Some(e.path.clone());
-                        }
-                        if theme::small_button(ui, "位置").clicked() {
-                            to_reveal = Some(e.path.clone());
-                        }
-
-                        if pending_delete.as_ref() == Some(&e.path) {
-                            // 二次确认：警示色"确认删除"+ 普通"取消"
-                            let resp = ui.add(
-                                egui::Button::new(
-                                    egui::RichText::new("确认删除").color(egui::Color32::WHITE),
-                                )
-                                .fill(theme::semantic_danger(ui.style().visuals.dark_mode)),
-                            );
-                            if resp.clicked() {
-                                to_delete = Some(e.path.clone());
-                            }
-                            if theme::small_button(ui, "取消").clicked() {
-                                cancel_pending_delete = true;
-                            }
-                        } else if theme::small_button(ui, "删除").clicked() {
-                            to_confirm_delete = Some(e.path.clone());
-                        }
-                    });
-                    ui.end_row();
+    egui::ScrollArea::vertical()
+        .id_salt("library_list")
+        .auto_shrink([false; 2])
+        .show(ui, |ui| {
+            // 卡片宽度在循环外算一次（避免 ScrollArea 跨帧反馈造成"逐张变宽"），
+            // 与 search 页 result_card 同样的处理。
+            let card_width = ui.available_width();
+            for (idx, e) in visible.iter().enumerate() {
+                let is_pending = pending_delete.as_ref() == Some(&e.path);
+                let action = entry_card(ui, idx, e, is_pending, card_width);
+                match action {
+                    EntryAction::None => {}
+                    EntryAction::Open => to_open = Some(e.path.clone()),
+                    EntryAction::Reveal => to_reveal = Some(e.path.clone()),
+                    EntryAction::ConfirmDelete => to_confirm_delete = Some(e.path.clone()),
+                    EntryAction::Delete => to_delete = Some(e.path.clone()),
+                    EntryAction::CancelDelete => cancel_pending_delete = true,
                 }
-            });
-    });
+                ui.add_space(6.0);
+            }
+        });
 
     // 收尾动作
     if let Some(p) = to_open {
@@ -217,6 +181,201 @@ fn show_table(ui: &mut egui::Ui, app: &mut SoNovelApp) {
     if let Some(p) = to_delete {
         app.delete_library_entry(&p);
     }
+}
+
+/// 卡片点击产生的动作（统一收尾在 show_table 末尾），避免循环里多重借 app。
+#[derive(Debug, Clone, Copy)]
+enum EntryAction {
+    None,
+    Open,
+    Reveal,
+    ConfirmDelete,
+    Delete,
+    CancelDelete,
+}
+
+/// 单本书卡片。视觉与「搜索下载」页 result_card 一致：
+/// - 行高 32px、圆角 8px、淡描边、hover 浅底
+/// - 左侧：序号 + 书名（强 label）+ · + 格式 + · + 大小 + · + 修改时间
+/// - 右侧：打开 / 位置 / 删除（pending 时切换为「确认删除 / 取消」）
+fn entry_card(
+    ui: &mut egui::Ui,
+    idx: usize,
+    e: &LibraryEntry,
+    pending_delete: bool,
+    card_width: f32,
+) -> EntryAction {
+    let visuals = ui.style().visuals.clone();
+    let dark_mode = visuals.dark_mode;
+
+    let hover_fill = if dark_mode {
+        egui::Color32::from_white_alpha(10)
+    } else {
+        egui::Color32::from_black_alpha(8)
+    };
+
+    let card_inner_width = (card_width - 28.0).max(0.0);
+
+    // hover 反馈：与 search 页同款 — 借 memory 记上一帧，1 帧延迟人感不到。
+    let card_id = egui::Id::new(("library_card", idx));
+    let was_hovered = ui
+        .ctx()
+        .memory(|m| m.data.get_temp::<bool>(card_id).unwrap_or(false));
+
+    let frame_fill = if was_hovered {
+        hover_fill
+    } else {
+        egui::Color32::TRANSPARENT
+    };
+    let frame_stroke = egui::Stroke::new(1.0, visuals.widgets.noninteractive.bg_stroke.color);
+
+    let mut action = EntryAction::None;
+
+    let frame_resp = ui
+        .allocate_ui_with_layout(
+            egui::vec2(card_width, 0.0),
+            egui::Layout::top_down(egui::Align::Min),
+            |ui| {
+                ui.set_max_width(card_width);
+                ui.set_min_width(card_width);
+
+                egui::Frame::new()
+                    .fill(frame_fill)
+                    .stroke(frame_stroke)
+                    .corner_radius(egui::CornerRadius::same(8))
+                    .inner_margin(egui::Margin::symmetric(14, 10))
+                    .show(ui, |ui| {
+                        ui.set_max_width(card_inner_width);
+                        ui.set_min_width(card_inner_width);
+
+                        // 两行布局：
+                        // - 第一行：序号 + 书名（强）           + 按钮组（贴右）
+                        // - 第二行：           大小 · 时间       （缩进对齐到书名起点，弱小字）
+                        //
+                        // 单行版本里"大小 / 时间"夹在书名右边，每行因书名长度不同
+                        // 而起始 x 飘移，视觉上很乱。挪到第二行后所有卡片元数据
+                        // 起点一致，自然对齐。
+                        //
+                        // 整体 horizontal：左 vertical（两行内容）+ 右 rtl 按钮组。
+                        // rtl 默认 Align::Center，按钮垂直居中于左侧 vertical 整体高度。
+                        ui.horizontal(|ui| {
+                            // 与卡片整体一致的圆角 8 按钮
+                            let mut style: egui::Style = (**ui.style()).clone();
+                            let r8 = egui::CornerRadius::same(8);
+                            style.visuals.widgets.inactive.corner_radius = r8;
+                            style.visuals.widgets.hovered.corner_radius = r8;
+                            style.visuals.widgets.active.corner_radius = r8;
+                            ui.set_style(style);
+
+                            // ---- 左：书名行 + 元数据行 ----
+                            ui.vertical(|ui| {
+                                // 第一行：序号 + 书名
+                                ui.horizontal(|ui| {
+                                    ui.label(egui::RichText::new(format!("#{}", idx + 1)));
+                                    ui.add_space(8.0);
+                                    ui.label(
+                                        egui::RichText::new(truncate(&e.file_name, 50))
+                                            .strong()
+                                            .size(14.5),
+                                    );
+                                });
+
+                                ui.add_space(2.0);
+
+                                // 第二行：大小 · 时间。缩进 24px 让起点与书名大致对齐
+                                // （序号 #N 宽度 + space(8) 视觉等价）。所有卡片同样的
+                                // 缩进 → 视觉对齐成一列。
+                                ui.horizontal(|ui| {
+                                    ui.add_space(24.0);
+                                    ui.label(
+                                        egui::RichText::new(format_unix_local_u64(
+                                            e.modified_unix_secs,
+                                        ))
+                                        .small()
+                                        .weak(),
+                                    );
+                                    ui.add_space(8.0);
+                                    ui.label(egui::RichText::new("·").small().weak());
+                                    ui.add_space(8.0);
+                                    ui.label(
+                                        egui::RichText::new(format_size(e.size_bytes))
+                                            .small()
+                                            .weak(),
+                                    );
+                                });
+                            });
+
+                            // ---- 右：按钮组（垂直居中于整张卡片）----
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    if pending_delete {
+                                        // 二次确认：警示色"确认删除"+ 普通"取消"
+                                        // rtl 下添加顺序：先取消 → 再确认删除 → 视觉上"确认删除"在最右
+                                        let confirm = ui.add(
+                                            egui::Button::new(
+                                                egui::RichText::new("确认删除")
+                                                    .size(14.0)
+                                                    .color(egui::Color32::WHITE),
+                                            )
+                                            .fill(theme::semantic_danger(dark_mode))
+                                            .corner_radius(egui::CornerRadius::same(8))
+                                            .min_size(egui::vec2(72.0, 28.0)),
+                                        );
+                                        if confirm.clicked() {
+                                            action = EntryAction::Delete;
+                                        }
+                                        ui.add_space(6.0);
+                                        let cancel = ui.add(
+                                            egui::Button::new(egui::RichText::new("取消").size(14.0))
+                                                .corner_radius(egui::CornerRadius::same(8))
+                                                .min_size(egui::vec2(56.0, 28.0)),
+                                        );
+                                        if cancel.clicked() {
+                                            action = EntryAction::CancelDelete;
+                                        }
+                                    } else {
+                                        let del = ui.add(
+                                            egui::Button::new(egui::RichText::new("删除").size(14.0))
+                                                .corner_radius(egui::CornerRadius::same(8))
+                                                .min_size(egui::vec2(56.0, 28.0)),
+                                        );
+                                        if del.clicked() {
+                                            action = EntryAction::ConfirmDelete;
+                                        }
+                                        ui.add_space(6.0);
+                                        let reveal = ui.add(
+                                            egui::Button::new(egui::RichText::new("位置").size(14.0))
+                                                .corner_radius(egui::CornerRadius::same(8))
+                                                .min_size(egui::vec2(56.0, 28.0)),
+                                        );
+                                        if reveal.clicked() {
+                                            action = EntryAction::Reveal;
+                                        }
+                                        ui.add_space(6.0);
+                                        let open = ui.add(
+                                            egui::Button::new(egui::RichText::new("打开").size(14.0))
+                                                .corner_radius(egui::CornerRadius::same(8))
+                                                .min_size(egui::vec2(56.0, 28.0)),
+                                        );
+                                        if open.clicked() {
+                                            action = EntryAction::Open;
+                                        }
+                                    }
+                                },
+                            );
+                        });
+                    })
+                    .response
+            },
+        )
+        .inner;
+
+    ui.ctx().memory_mut(|m| {
+        m.data.insert_temp(card_id, frame_resp.hovered());
+    });
+
+    action
 }
 
 fn truncate(s: &str, n: usize) -> String {
@@ -244,75 +403,6 @@ fn format_size(bytes: u64) -> String {
     }
 }
 
-/// 把 Unix 时间戳格式化为 `YYYY-MM-DD HH:MM`（本地时间近似）。
-/// **故意不引 chrono / time crate**：本展示精度到分钟即可，不需要时区数据库。
-/// 这里用一个简化的"日历"算法（适用 1970..2099 范围足够）。
-fn format_unix_time(secs: u64) -> String {
-    if secs == 0 {
-        return "-".to_string();
-    }
-    // 把 UTC 偏移成本地：std 没有现成 API，这里直接显示 UTC 时间并标注。
-    // 用户主要靠这个排序与"什么时候下的"概念，分钟级 UTC 已够用。
-    let (y, m, d, hh, mm) = unix_to_ymdhm(secs);
-    format!("{y:04}-{m:02}-{d:02} {hh:02}:{mm:02} UTC")
-}
-
-/// 把秒级 Unix 时间戳分解为 (年, 月, 日, 时, 分)。基于 1970-01-01 起算。
-/// 闰年规则覆盖 1900-2100 完全准确。
-fn unix_to_ymdhm(secs: u64) -> (u32, u32, u32, u32, u32) {
-    let mut s = secs;
-    let mm = ((s / 60) % 60) as u32;
-    let hh = ((s / 3600) % 24) as u32;
-    let mut days = s / 86_400;
-    s = days; // re-purpose
-
-    // 自 1970-01-01（周四）起按年累加
-    let mut year: u32 = 1970;
-    loop {
-        let dy = if is_leap(year) { 366 } else { 365 };
-        if days >= dy {
-            days -= dy;
-            year += 1;
-        } else {
-            break;
-        }
-    }
-    let _ = s; // silence unused
-    let mdays = month_days(year);
-    let mut month = 1u32;
-    let mut d = days as u32;
-    for (i, dm) in mdays.iter().enumerate() {
-        if d < *dm {
-            month = (i + 1) as u32;
-            break;
-        }
-        d -= dm;
-    }
-    let day = d + 1;
-    (year, month, day, hh, mm)
-}
-
-fn is_leap(y: u32) -> bool {
-    (y % 4 == 0 && y % 100 != 0) || (y % 400 == 0)
-}
-
-fn month_days(y: u32) -> [u32; 12] {
-    [
-        31,
-        if is_leap(y) { 29 } else { 28 },
-        31,
-        30,
-        31,
-        30,
-        31,
-        31,
-        30,
-        31,
-        30,
-        31,
-    ]
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -324,31 +414,5 @@ mod tests {
         assert_eq!(format_size(2048), "2.0 KB");
         assert_eq!(format_size(2 * 1024 * 1024), "2.00 MB");
         assert_eq!(format_size(3 * 1024 * 1024 * 1024), "3.00 GB");
-    }
-
-    #[test]
-    fn unix_to_ymdhm_known_values() {
-        // 1970-01-01 00:00:00 UTC = 0
-        let (y, m, d, hh, mm) = unix_to_ymdhm(0);
-        assert_eq!((y, m, d, hh, mm), (1970, 1, 1, 0, 0));
-        // 2026-01-01 00:00:00 UTC（已知 56 年含 14 个闰年）
-        let (y, m, d, hh, mm) = unix_to_ymdhm(1_767_225_600);
-        assert_eq!((y, m, d, hh, mm), (2026, 1, 1, 0, 0));
-        // 2024-02-29 12:34:00 UTC（闰年验证）
-        let (y, m, d, hh, mm) = unix_to_ymdhm(1_709_210_040);
-        assert_eq!((y, m, d, hh, mm), (2024, 2, 29, 12, 34));
-    }
-
-    #[test]
-    fn format_unix_time_zero_renders_dash() {
-        assert_eq!(format_unix_time(0), "-");
-    }
-
-    #[test]
-    fn format_unix_time_basic() {
-        // 用上面验证过的 2026-01-01 时间戳
-        let s = format_unix_time(1_767_225_600);
-        assert!(s.starts_with("2026-01-01"), "got {s}");
-        assert!(s.ends_with("UTC"));
     }
 }
