@@ -7,6 +7,7 @@
 use crate::app::SoNovelApp;
 use crate::crawler::health::SourceHealth;
 use crate::ui::theme;
+use material_icons::icons as mi;
 
 pub fn show(ui: &mut egui::Ui, app: &mut SoNovelApp) {
     ui.heading("书源管理");
@@ -35,7 +36,7 @@ fn show_toolbar(ui: &mut egui::Ui, app: &mut SoNovelApp) {
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             let btn = ui.add_enabled(
                 !app.sources_state.running && !app.rules.is_empty(),
-                egui::Button::new("🌐 检测全部"),
+                egui::Button::new(format!("{} 检测全部", mi::ICON_LANGUAGE.codepoint)),
             );
             if btn.clicked() {
                 app.spawn_health_check();

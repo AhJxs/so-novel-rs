@@ -1,38 +1,120 @@
 //! 主题与字体初始化。
 //!
 //! egui 默认字体不包含 CJK，运行后中文会显示为 `▯`（豆腐块）。
-//! 本模块尝试从系统字体目录加载一个常见 CJK 字体，找不到时给出 warn 日志，
-//! 但不阻塞应用启动（用户至少能看到非 CJK 文本）。
+//! 本模块优先加载 `bundle/fonts/` 下打包的 Noto Sans SC 全 9 个 weight（Regular /
+//! Medium / SemiBold / Bold / ExtraBold / Black + Light / ExtraLight / Thin），
+//! 全部缺失时回落到系统 CJK 字体，找不到任何 CJK 字体时 warn 不阻塞启动。
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use egui::{FontData, FontDefinitions, FontFamily};
 
-/// 安装 CJK 字体。按平台尝试一组常见字体路径。
+/// 项目内打包的 Noto Sans SC 字体目录。运行时按 cwd 解析，
+/// `cargo run` 时 cwd 是仓库根，`bundle/fonts/...` 直接可读。
+const BUNDLE_FONTS_DIR: &str = "bundle/fonts";
+
+/// Noto Sans SC 全 weight 列表 + 在 egui 里的 font_data 注册名。
+///
+/// 顺序就是 Proportional 家族里的优先级（最前 = 最先尝试），也让
+/// `RichText::strong()` 之类带"bold"暗示的渲染能找到对应的 Bold 字重。
+const BUNDLED_NOTO_SANS_SC: &[(&str, &str)] = &[
+    ("noto_sans_sc_regular", "NotoSansSC-Regular.ttf"),
+    ("noto_sans_sc_bold", "NotoSansSC-Bold.ttf"),
+    ("noto_sans_sc_medium", "NotoSansSC-Medium.ttf"),
+    ("noto_sans_sc_semibold", "NotoSansSC-SemiBold.ttf"),
+    ("noto_sans_sc_extrabold", "NotoSansSC-ExtraBold.ttf"),
+    ("noto_sans_sc_black", "NotoSansSC-Black.ttf"),
+    ("noto_sans_sc_light", "NotoSansSC-Light.ttf"),
+    ("noto_sans_sc_extralight", "NotoSansSC-ExtraLight.ttf"),
+    ("noto_sans_sc_thin", "NotoSansSC-Thin.ttf"),
+];
+
+/// 安装 CJK 字体。
+///
+/// 优先级：
+/// 1. `bundle/fonts/NotoSansSC-*.ttf`（项目内打包，全 9 个 weight）— 命中任一即用，
+///    缺失的 weight warn 但不阻塞，剩下的 weight 继续注册。
+/// 2. 全部 9 个都找不到 → 回落到系统 CJK 字体（仅取第一个可用的）。
+/// 3. 都没有 → warn 后 return，不调 `set_fonts`（用 egui 默认字体启动，非 CJK 仍可读）。
 pub fn install_cjk_fonts(ctx: &egui::Context) {
-    let Some((name, bytes)) = load_first_available_cjk_font() else {
-        tracing::warn!("未找到系统 CJK 字体，中文可能显示为豆腐块。");
-        return;
+    let loaded = load_bundled_noto_sans_sc().unwrap_or_default();
+    let loaded = if loaded.is_empty() {
+        tracing::warn!("bundle/fonts/ 下找不到任何 Noto Sans SC weight，回落到系统 CJK 字体");
+        load_first_available_system_cjk_font()
+            .map(|one| vec![one])
+            .unwrap_or_default()
+    } else {
+        tracing::info!("已加载 {} 个 Noto Sans SC weight", loaded.len());
+        loaded
     };
 
-    let mut fonts = FontDefinitions::default();
-    fonts
-        .font_data
-        .insert(name.clone(), Arc::new(FontData::from_owned(bytes)));
+    if loaded.is_empty() {
+        tracing::warn!("未找到任何 CJK 字体，中文可能显示为豆腐块。");
+        return;
+    }
 
-    fonts
-        .families
-        .entry(FontFamily::Proportional)
-        .or_default()
-        .insert(0, name.clone());
-    fonts
-        .families
-        .entry(FontFamily::Monospace)
-        .or_default()
-        .push(name);
+    let mut fonts = FontDefinitions::default();
+    for (name, bytes) in &loaded {
+        fonts
+            .font_data
+            .insert(name.clone(), Arc::new(FontData::from_owned(bytes.clone())));
+    }
+
+    // Proportional 家族：反序 insert(0, ...) 让 `loaded[0]` = Regular 排在最前，
+    // Bold / Medium 紧随其后（egui 的 "strong" 渲染会找名字含 "bold" 的字重）。
+    // Monospace 家族：用 push，把 Noto SC 放到系统默认等宽字体之后，作为 CJK
+    // 字符的兜底 — 这样代码里的中文不会回退到丑陋的方块字。
+    // 注意：两个 `entry().or_default()` 不能同时持有 &mut 借用，所以各自套一个 scope
+    // 让前一个借用出 scope 再借下一次。
+    {
+        let prop = fonts.families.entry(FontFamily::Proportional).or_default();
+        for (name, _) in loaded.iter().rev() {
+            prop.insert(0, name.clone());
+        }
+    }
+    {
+        let mono = fonts.families.entry(FontFamily::Monospace).or_default();
+        for (name, _) in &loaded {
+            mono.push(name.clone());
+        }
+    }
 
     ctx.set_fonts(fonts);
+}
+
+/// 尝试从 `bundle/fonts/` 加载所有能读到的 Noto Sans SC weight。
+/// 单个 weight 缺失不中断；返回加载成功的列表。
+fn load_bundled_noto_sans_sc() -> Option<Vec<(String, Vec<u8>)>> {
+    let dir = Path::new(BUNDLE_FONTS_DIR);
+    if !dir.is_dir() {
+        return None;
+    }
+    let mut loaded = Vec::new();
+    for (name, filename) in BUNDLED_NOTO_SANS_SC {
+        let path = dir.join(filename);
+        match std::fs::read(&path) {
+            Ok(bytes) => {
+                tracing::debug!("Noto Sans SC weight 已加载: {} ({} bytes)", name, bytes.len());
+                loaded.push((name.to_string(), bytes));
+            }
+            Err(e) => {
+                tracing::warn!("Noto Sans SC weight 缺失: {} ({e})", path.display());
+            }
+        }
+    }
+    if loaded.is_empty() { None } else { Some(loaded) }
+}
+
+/// 加载系统中第一个可用的 CJK 字体（仅一个，作为打包字体缺失时的兜底）。
+fn load_first_available_system_cjk_font() -> Option<(String, Vec<u8>)> {
+    for (name, path) in system_cjk_candidate_paths() {
+        if let Ok(bytes) = std::fs::read(&path) {
+            tracing::info!("系统 CJK 字体已加载: {} ({})", name, path.display());
+            return Some((name.to_string(), bytes));
+        }
+    }
+    None
 }
 
 /// 现代化外观：稍紧凑的 spacing、跟随系统的浅/深色。
@@ -187,18 +269,8 @@ pub fn action_button(ui: &mut egui::Ui, text: &str) -> egui::Response {
     .inner
 }
 
-fn load_first_available_cjk_font() -> Option<(String, Vec<u8>)> {
-    for (name, path) in candidate_paths() {
-        if let Ok(bytes) = std::fs::read(&path) {
-            tracing::info!("CJK 字体已加载: {} ({})", name, path.display());
-            return Some((name.to_string(), bytes));
-        }
-    }
-    None
-}
-
 #[cfg(target_os = "windows")]
-fn candidate_paths() -> Vec<(&'static str, PathBuf)> {
+fn system_cjk_candidate_paths() -> Vec<(&'static str, PathBuf)> {
     let win_fonts = std::env::var_os("WINDIR")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(r"C:\Windows"))
@@ -213,7 +285,7 @@ fn candidate_paths() -> Vec<(&'static str, PathBuf)> {
 }
 
 #[cfg(target_os = "macos")]
-fn candidate_paths() -> Vec<(&'static str, PathBuf)> {
+fn system_cjk_candidate_paths() -> Vec<(&'static str, PathBuf)> {
     vec![
         (
             "PingFangSC",
@@ -231,7 +303,7 @@ fn candidate_paths() -> Vec<(&'static str, PathBuf)> {
 }
 
 #[cfg(target_os = "linux")]
-fn candidate_paths() -> Vec<(&'static str, PathBuf)> {
+fn system_cjk_candidate_paths() -> Vec<(&'static str, PathBuf)> {
     vec![
         (
             "NotoSansCJK",
@@ -257,6 +329,6 @@ fn candidate_paths() -> Vec<(&'static str, PathBuf)> {
 }
 
 #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
-fn candidate_paths() -> Vec<(&'static str, PathBuf)> {
+fn system_cjk_candidate_paths() -> Vec<(&'static str, PathBuf)> {
     Vec::new()
 }

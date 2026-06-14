@@ -10,6 +10,7 @@ use crate::models::SearchResult;
 use crate::ui::theme;
 
 use crate::util::system::{open_path, reveal_in_folder};
+use material_icons::icons as mi;
 
 pub fn show(ui: &mut egui::Ui, app: &mut SoNovelApp) {
     ui.heading("下载任务");
@@ -152,7 +153,7 @@ fn show_one_task(ui: &mut egui::Ui, task: &mut DownloadTask) -> TaskAction {
                             }
                         }
                         None => {
-                            if theme::button(ui, "取消").clicked() {
+                            if theme::button(ui, &format!("{} 取消", mi::ICON_CANCEL.codepoint)).clicked() {
                                 task.cancel.cancel();
                             }
                         }

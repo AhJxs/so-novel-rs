@@ -636,6 +636,9 @@ impl SoNovelApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         // 注入中文字体（egui 默认字体不含 CJK，否则会显示豆腐块）。
         theme::install_cjk_fonts(&cc.egui_ctx);
+        // 注册 Material Symbols 圆角图标字体（vendor 在 crates/material_icons/）。
+        // 必须在 install_cjk_fonts 之后 — 后者也会动 FontDefinitions，二者要按顺序合并不冲突。
+        material_icons::initialize(&cc.egui_ctx);
         //theme::install_visuals(&cc.egui_ctx);
         // 安装 egui_extras 的图片 loader（PNG/JPEG/SVG/GIF/...）。
         // 不调用这个，`egui::Image::from_bytes` 会报 "no image loaders installed"。

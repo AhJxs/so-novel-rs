@@ -51,18 +51,27 @@ pub fn show(ui: &mut egui::Ui, app: &mut SoNovelApp) {
 fn show_task_banner(ui: &mut egui::Ui, app: &mut SoNovelApp) {
     let t = app.tasks.last().expect("non-empty checked by caller");
     let task_id = t.id;
-    let label = if t.is_running() {
-        format!(
-            "📥 下载中：{}（{} / {}）",
-            t.book_name(),
-            t.completed,
-            t.total_chapters.max(t.completed as usize)
+    // 状态图标 + 文案拆开：图标用 painter 画（见 `task_status_icon`），
+    // 文字里去掉了原 emoji 前缀（✅/⚠️/📥），避免 unicode 字符在 CJK 字体
+    // 下渲染为豆腐块 — Noto Sans SC 也不保证覆盖 Symbols 块。
+    let (status, label) = if t.is_running() {
+        (
+            TaskStatus::Running,
+            format!(
+                "下载中：{}（{} / {}）",
+                t.book_name(),
+                t.completed,
+                t.total_chapters.max(t.completed as usize)
+            ),
         )
     } else {
         match &t.finished {
-            Some(Ok(p)) => format!("✅ 已完成：{}", p.display()),
-            Some(Err(reason)) => format!("⚠️ 已结束：{} — {reason}", t.book_name()),
-            None => format!("📥 准备中：{}", t.book_name()),
+            Some(Ok(p)) => (TaskStatus::Completed, format!("已完成：{}", p.display())),
+            Some(Err(reason)) => (
+                TaskStatus::Warning,
+                format!("已结束：{} — {reason}", t.book_name()),
+            ),
+            None => (TaskStatus::Running, format!("准备中：{}", t.book_name())),
         }
     };
 
@@ -89,6 +98,8 @@ fn show_task_banner(ui: &mut egui::Ui, app: &mut SoNovelApp) {
                 style.visuals.widgets.active.corner_radius = r8;
                 ui.set_style(style);
 
+                task_status_icon(ui, status);
+                ui.add_space(6.0);
                 ui.label(label);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     // ✕ 关闭按钮：手画 X 线段，避免 unicode ✕ 在某些字体下不渲染
@@ -139,7 +150,12 @@ fn show_query_bar(ui: &mut egui::Ui, app: &mut SoNovelApp) {
                     .show(ui, |ui| {
                         ui.set_min_size(egui::vec2(INPUT_W, QUERY_HEIGHT));
                         ui.horizontal_centered(|ui| {
-                            ui.label(egui::RichText::new("🔍").color(visuals.weak_text_color()));
+                            ui.label(
+                                material_icons::icons::ICON_SEARCH
+                                    .rich_text()
+                                    .size(14.0)
+                                    .color(visuals.weak_text_color()),
+                            );
                             // TextEdit 占去除图标 + 左右 padding 之后的剩余宽度
                             let edit_w = INPUT_W - ICON_W - 20.0;
                             let edit = egui::TextEdit::singleline(&mut app.search.keyword)
@@ -223,7 +239,8 @@ fn show_query_bar(ui: &mut egui::Ui, app: &mut SoNovelApp) {
         ui.add_space(6.0);
 
         // ---- 3. 搜索按钮：与导航选中按钮同款（亮蓝填充 + 白字 + 圆角 8px）----
-        let search_clicked = nav_style_button(ui, "🔍 搜索", !app.search.running);
+        let search_label = format!("{} 搜索", material_icons::icons::ICON_SEARCH.codepoint);
+        let search_clicked = nav_style_button(ui, &search_label, !app.search.running);
 
         if (search_clicked || enter_pressed) && !app.search.running {
             let _ = app.spawn_search();
@@ -246,7 +263,6 @@ fn show_query_bar(ui: &mut egui::Ui, app: &mut SoNovelApp) {
         );
     }
 }
-
 /// 与 `ui::nav` 的选中按钮同款：亮蓝填充 + 白字 + 圆角 8px + 阴影 + 高度统一。
 /// 仅 disabled 时变灰、无阴影。
 fn nav_style_button(ui: &mut egui::Ui, text: &str, enabled: bool) -> bool {
@@ -354,7 +370,6 @@ fn show_source_status(ui: &mut egui::Ui, search: &SearchState) {
         }
     });
 }
-
 /// 单个书源状态 chip：左侧圆形状态点 + 右侧"书源名#ID"文字。
 ///
 /// 颜色按状态区分：
@@ -815,29 +830,72 @@ fn result_card(ui: &mut egui::Ui, idx: usize, r: &SearchResult, selected: bool) 
     CardAction::None
 }
 
-/// 手画的 ✕ 关闭按钮：22x22 圆角方块 + 两条交叉线段。
-///
-/// 跟 `ui::title_bar` 的窗口控制按钮思路一致 — unicode ✕ 在某些 CJK 字体下
-/// 渲染为豆腐块，painter 手画线段不依赖字体。
-fn close_x_button(ui: &mut egui::Ui) -> egui::Response {
-    let size = egui::vec2(22.0, 22.0);
-    let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
+/// banner 用的下载任务状态。跟 `task_status_icon` 配合 — 状态决定图标的
+/// 形状 + 颜色，避免在 label 文本里塞 unicode emoji。
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+enum TaskStatus {
+    /// 运行中 / 准备中：蓝色下载中图标
+    Running,
+    /// 已完成：绿色对勾圆
+    Completed,
+    /// 已结束但带错误/取消：橙色警告三角
+    Warning,
+}
 
+/// 在 horizontal 布局里画一个 18x18 的状态图标。颜色随主题走
+/// `theme::ACCENT` / `semantic_success` / `semantic_warn`。
+///
+/// 用 `material_icons`（Material Symbols Rounded 字体）渲染 — 跟之前
+/// 的 painter 几何方案相比：图标本身跨主题一致、emoji-like 视觉风格，
+/// 仍然不依赖任何 CJK 字形（material 字体是独立 codepoint 空间）。
+fn task_status_icon(ui: &mut egui::Ui, status: TaskStatus) -> egui::Response {
+    use material_icons::icons as mi;
+    const SIZE: f32 = 18.0;
+
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(SIZE, SIZE), egui::Sense::hover());
     if !ui.is_rect_visible(rect) {
         return response;
     }
 
-    let visuals = ui.style().visuals.clone();
-    let dark_mode = visuals.dark_mode;
-    let painter = ui.painter();
-    let rounding = egui::CornerRadius::same(4);
+    let dark_mode = ui.style().visuals.dark_mode;
+    let (icon, color) = match status {
+        TaskStatus::Running => (mi::ICON_DOWNLOADING, theme::ACCENT),
+        TaskStatus::Completed => (mi::ICON_CHECK_CIRCLE, theme::semantic_success(dark_mode)),
+        TaskStatus::Warning => (mi::ICON_WARNING, theme::semantic_warn(dark_mode)),
+    };
 
-    // hover：红底 + 白色 X；否则透明底 + 主题色 X
-    let (bg, x_color) = if response.hovered() {
-        (
-            Some(egui::Color32::from_rgb(232, 17, 35)),
-            egui::Color32::WHITE,
-        )
+    // 用 painter.text 居中绘制，font family 走 material-icons 让 codepoint 命中。
+    // crate 在 initialize() 里把 y_offset_factor 设成 0.05，Align2::CENTER_CENTER
+    // 会自动应用，不会偏上。
+    ui.painter().text(
+        rect.center(),
+        egui::Align2::CENTER_CENTER,
+        icon.codepoint,
+        egui::FontId::new(SIZE, icon.font_family()),
+        color,
+    );
+
+    response
+}
+
+/// 22x22 的 ✕ 关闭按钮：透明 / 红色 hover 背景 + Material `close` 图标。
+///
+/// 之前用 painter 手画 ✕ 线段；现在改用 `ICON_CLOSE`（vendor 在
+/// `material_icons`），跨主题一致、不依赖 CJK 字形。
+/// hover 时的红底效果保留。
+fn close_x_button(ui: &mut egui::Ui) -> egui::Response {
+    use material_icons::icons::ICON_CLOSE;
+    const SIZE: f32 = 22.0;
+    const ICON_PX: f32 = 16.0;
+
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(SIZE, SIZE), egui::Sense::click());
+    if !ui.is_rect_visible(rect) {
+        return response;
+    }
+
+    let dark_mode = ui.style().visuals.dark_mode;
+    let (bg, icon_color) = if response.hovered() {
+        (Some(egui::Color32::from_rgb(232, 17, 35)), egui::Color32::WHITE)
     } else {
         let c = if dark_mode {
             egui::Color32::from_white_alpha(180)
@@ -848,26 +906,16 @@ fn close_x_button(ui: &mut egui::Ui) -> egui::Response {
     };
 
     if let Some(bg) = bg {
-        painter.rect_filled(rect, rounding, bg);
+        ui.painter()
+            .rect_filled(rect, egui::CornerRadius::same(4), bg);
     }
 
-    // 画 X
-    let center = rect.center();
-    let half = 4.0;
-    let stroke = egui::Stroke::new(1.5, x_color);
-    painter.line_segment(
-        [
-            egui::pos2(center.x - half, center.y - half),
-            egui::pos2(center.x + half, center.y + half),
-        ],
-        stroke,
-    );
-    painter.line_segment(
-        [
-            egui::pos2(center.x + half, center.y - half),
-            egui::pos2(center.x - half, center.y + half),
-        ],
-        stroke,
+    ui.painter().text(
+        rect.center(),
+        egui::Align2::CENTER_CENTER,
+        ICON_CLOSE.codepoint,
+        egui::FontId::new(ICON_PX, ICON_CLOSE.font_family()),
+        icon_color,
     );
 
     response

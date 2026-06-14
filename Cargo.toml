@@ -1,3 +1,6 @@
+[workspace]
+members = ["crates/*"]
+
 [package]
 name = "so-novel-rs"
 version = "0.1.0-alpha.1"
@@ -15,6 +18,8 @@ path = "src/main.rs"
 # UI（2026-06 升级到 0.34：breaking API 大量）
 eframe = { version = "0.34", default-features = false, features = ["default_fonts", "glow", "persistence"] }
 egui = "0.34"
+# Material Symbols 圆角图标（vendor 在 crates/material_icons/，字体在 bundle/icons/）
+material_icons = { path = "crates/material_icons", default-features = false, features = ["filled"] }
 # egui_extras 提供 RetainedImage + 各种图片 loader。all_loaders 包含 PNG/JPEG 等常用格式。
 egui_extras = { version = "0.34", features = ["all_loaders"] }
 

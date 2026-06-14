@@ -9,6 +9,7 @@ use std::path::PathBuf;
 use crate::app::{LibraryEntry, SoNovelApp};
 use crate::ui::theme;
 use crate::util::system::{open_path, reveal_in_folder};
+use material_icons::icons as mi;
 
 pub fn show(ui: &mut egui::Ui, app: &mut SoNovelApp) {
     // 首次进入或下载目录变化时自动扫描。
@@ -87,11 +88,11 @@ fn show_toolbar(ui: &mut egui::Ui, app: &mut SoNovelApp) {
             Some(current)
         };
 
-        if theme::button(ui, "🔄 刷新").clicked() {
+        if theme::button(ui, &format!("{} 刷新", mi::ICON_REFRESH.codepoint)).clicked() {
             app.refresh_library();
         }
 
-        if theme::button(ui, "打开下载目录").clicked() {
+        if theme::button(ui, &format!("{} 打开下载目录", mi::ICON_FOLDER_OPEN.codepoint)).clicked() {
             if let Some(dir) = &app.library.scanned_dir {
                 if let Err(e) = open_path(dir) {
                     app.library.last_error = Some(format!("打开目录失败: {e}"));

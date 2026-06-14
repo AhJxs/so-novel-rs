@@ -14,6 +14,7 @@
 
 use crate::app::SoNovelApp;
 use crate::ui::theme;
+use material_icons::icons as mi;
 
 /// 导航按钮统一圆角。
 const NAV_BTN_ROUNDING: egui::CornerRadius = egui::CornerRadius::same(8);
@@ -36,7 +37,12 @@ pub fn show_in_panel(ui: &mut egui::Ui, ctx: &egui::Context, app: &mut SoNovelAp
             ui.set_min_height(36.0);
             ui.add_space(4.0);
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("📚").size(18.0).color(theme::ACCENT));
+                ui.label(
+                    mi::ICON_MENU_BOOK
+                        .rich_text()
+                        .size(18.0)
+                        .color(theme::ACCENT),
+                );
                 ui.add_space(4.0);
                 ui.strong(egui::RichText::new("So Novel").size(15.0));
             });
@@ -323,7 +329,7 @@ fn nav_button(ui: &mut egui::Ui, page: NavPage, selected: bool) -> egui::Respons
 /// 主题切换段控（segmented control）：☀ Light / 💻 System / 🌙 Dark。
 ///
 /// 三个 26x26 圆角按钮拼成一个胶囊；当前选中态用 theme::ACCENT 浅底色 + 蓝边。
-/// 图标用 painter 手画（圆 / 三横 / 月牙），不依赖 emoji 字体。
+/// 图标用 Material Symbols (`ICON_LIGHT_MODE` / `ICON_COMPUTER` / `ICON_DARK_MODE`)。
 fn theme_segmented_control(ui: &mut egui::Ui, ctx: &egui::Context) {
     use egui::ThemePreference;
     let current = ctx.options(|o| o.theme_preference);
@@ -403,78 +409,21 @@ fn theme_icon_button(ui: &mut egui::Ui, icon: ThemeIcon, selected: bool) -> egui
     } else {
         egui::Color32::from_black_alpha(180)
     };
-    let stroke = egui::Stroke::new(1.5, icon_color);
-    let center = rect.center();
 
-    match icon {
-        ThemeIcon::Light => {
-            // ☀ 太阳：中心圆 + 8 条短射线
-            painter.circle_stroke(center, 4.0, stroke);
-            for i in 0..8 {
-                let angle = i as f32 * std::f32::consts::FRAC_PI_4;
-                let (sin, cos) = angle.sin_cos();
-                let p1 = egui::pos2(center.x + cos * 6.0, center.y + sin * 6.0);
-                let p2 = egui::pos2(center.x + cos * 8.5, center.y + sin * 8.5);
-                painter.line_segment([p1, p2], stroke);
-            }
-        }
-        ThemeIcon::System => {
-            // 💻 显示器：方框 + 底部底座
-            let r =
-                egui::Rect::from_center_size(center - egui::vec2(0.0, 1.5), egui::vec2(13.0, 9.0));
-            painter.rect_stroke(
-                r,
-                egui::CornerRadius::same(2),
-                stroke,
-                egui::StrokeKind::Inside,
-            );
-            // 底座短横线
-            painter.line_segment(
-                [
-                    egui::pos2(center.x - 4.0, center.y + 5.5),
-                    egui::pos2(center.x + 4.0, center.y + 5.5),
-                ],
-                stroke,
-            );
-        }
-        ThemeIcon::Dark => {
-            // 🌙 月牙：用两个相交圆做"挖掉"效果 — 我们没有 mask，
-            // 用两条圆弧近似（外圆完整 + 内圆错位偏右上 4px、覆盖背景色"挡住"右半）
-            // 简化：画个右开口的圆弧
-            use std::f32::consts::PI;
-            let r = 6.5;
-            // 主圆弧（左侧 3/4 圈）：从 -135° 到 +135°
-            let segments = 24;
-            let mut prev: Option<egui::Pos2> = None;
-            for i in 0..=segments {
-                let t = i as f32 / segments as f32;
-                // 角度从 PI*0.5 -> PI*1.5（顺时针绕过左半圈）
-                let angle = PI * 0.5 + t * PI;
-                let (sin, cos) = angle.sin_cos();
-                let p = egui::pos2(center.x + cos * r, center.y + sin * r);
-                if let Some(prev_p) = prev {
-                    painter.line_segment([prev_p, p], stroke);
-                }
-                prev = Some(p);
-            }
-            // 闭合：右上角 → 右下角连一条凹弧（向左凹）模拟月相
-            // 用一段较小半径的弧反向覆盖：从右上 (PI*1.5) 经左侧到右下 (PI*0.5)
-            let r2 = 4.0;
-            let mut prev: Option<egui::Pos2> = None;
-            // 圆心向右偏 3px，让弧"咬入"主圆
-            let c2 = center + egui::vec2(3.0, 0.0);
-            for i in 0..=segments {
-                let t = i as f32 / segments as f32;
-                let angle = PI * 0.5 + t * PI;
-                let (sin, cos) = angle.sin_cos();
-                let p = egui::pos2(c2.x + cos * r2, c2.y + sin * r2);
-                if let Some(prev_p) = prev {
-                    painter.line_segment([prev_p, p], stroke);
-                }
-                prev = Some(p);
-            }
-        }
-    }
+    // 之前用 painter 手画 ☀/💻/🌙（圆 + 8 射线 / 方框 + 底座 / 月牙弧线段），
+    // 现在改用 Material Symbols：跨主题一致、不依赖任何 CJK/emoji 字形。
+    let mi_icon = match icon {
+        ThemeIcon::Light => mi::ICON_LIGHT_MODE,
+        ThemeIcon::System => mi::ICON_COMPUTER,
+        ThemeIcon::Dark => mi::ICON_DARK_MODE,
+    };
+    painter.text(
+        rect.center(),
+        egui::Align2::CENTER_CENTER,
+        mi_icon.codepoint,
+        egui::FontId::new(18.0, mi_icon.font_family()),
+        icon_color,
+    );
 
     response
 }
@@ -491,14 +440,22 @@ pub enum NavPage {
 }
 
 impl NavPage {
-    pub fn label(self) -> &'static str {
+    /// 导航按钮显示文字。返回 `String` 是因为里面塞了 material icon codepoint —
+    /// codepoint 是 `&'static str`，拼到 `&'static str` 上做不到，必须在运行时
+    /// 拼成 `String`。
+    ///
+    /// 渲染上：egui 拿到这个字符串后，字符级查找字体 — 前缀的 material codepoint
+    /// 在 `material_icons` 注册的 `material-icons` 家族里命中（兜底被
+    /// crate 设成 Lowest priority，跨族查找能 fallback 到），后半段中文落到
+    /// Noto Sans SC。一行字符串两种字体共存，不需要手动分段。
+    pub fn label(self) -> String {
         match self {
-            NavPage::Search => "🔍 搜索下载",
-            NavPage::Tasks => "📥 下载任务",
-            NavPage::Library => "📚 本地书库",
-            NavPage::Sources => "🌐 书源管理",
-            NavPage::Settings => "⚙ 设置",
-            NavPage::About => "ℹ 关于",
+            NavPage::Search => format!("{} 搜索下载", mi::ICON_SEARCH.codepoint),
+            NavPage::Tasks => format!("{} 下载任务", mi::ICON_DOWNLOAD.codepoint),
+            NavPage::Library => format!("{} 本地书库", mi::ICON_LIBRARY_BOOKS.codepoint),
+            NavPage::Sources => format!("{} 书源管理", mi::ICON_LANGUAGE.codepoint),
+            NavPage::Settings => format!("{} 设置", mi::ICON_SETTINGS.codepoint),
+            NavPage::About => format!("{} 关于", mi::ICON_INFO.codepoint),
         }
     }
 

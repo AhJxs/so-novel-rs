@@ -3,6 +3,7 @@
 use crate::app::SoNovelApp;
 use crate::config::{save_config, ExportFormat, LangType};
 use crate::ui::theme;
+use material_icons::icons as mi;
 
 pub fn show(ui: &mut egui::Ui, app: &mut SoNovelApp) {
     ui.heading("设置");
@@ -34,7 +35,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut SoNovelApp) {
         ui.add_space(16.0);
 
         ui.horizontal(|ui| {
-            if theme::button(ui, "保存到 config.ini").clicked() {
+            if theme::button(ui, &format!("{} 保存到 config.ini", mi::ICON_SAVE.codepoint)).clicked() {
                 match save_config(&app.paths.config_file, &app.draft_config) {
                     Ok(_) => {
                         app.config = app.draft_config.clone();
@@ -45,7 +46,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut SoNovelApp) {
                     }
                 }
             }
-            if theme::button(ui, "重置为已保存值").clicked() {
+            if theme::button(ui, &format!("{} 重置为已保存值", mi::ICON_RESTORE.codepoint)).clicked() {
                 app.draft_config = app.config.clone();
                 app.show_toast("已重置");
             }

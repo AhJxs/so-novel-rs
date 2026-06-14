@@ -1,0 +1,23 @@
+[package]
+name = "material_icons"
+version = "0.6.0"
+edition = "2021"
+categories = ["gui"]
+keywords = ["egui", "icons", "material"]
+description = "Material icons for egui. (Vendored from hello_egui; fonts live in ../../bundle/icons/.)"
+license = "MIT"
+publish = false
+
+# 跟主 crate 锁同一 egui 版本，避免传递依赖冲突。
+[dependencies]
+egui = "0.34"
+include-flate = { version = "0.3.2", optional = true }
+
+[features]
+default = ["filled"]
+## Include the filled font variant.
+filled = []
+## Include the outline font variant.
+outline = []
+## Compress embedded fonts with DEFLATE at compile time, decompressing at runtime.
+compressed = ["dep:include-flate"]
