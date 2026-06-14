@@ -1,0 +1,395 @@
+[
+  {
+    "url": "http://www.xbiqugu.la/",
+    "name": "香书小说",
+    "comment": "",
+    "search": {
+      "url": "http://www.xbiqugu.la/modules/article/waps.php",
+      "method": "post",
+      "data": "{searchkey: %s}",
+      "result": "#checkform > table > tbody > tr",
+      "bookName": "td.even > a",
+      "author": "td:nth-of-type(3)",
+      "latestChapter": "td.odd > a",
+      "lastUpdateTime": "td:nth-of-type(4)"
+    },
+    "book": {
+    },
+    "toc": {
+      "item": "#list > dl > dd > a"
+    },
+    "chapter": {
+      "title": ".bookname > h1",
+      "content": "#content",
+      "paragraphTagClosed": false,
+      "paragraphTag": "<br>+",
+      "filterTxt": "一秒记住【文学巴士&nbsp;】，精彩无弹窗免费阅读！|(www.xbiquge.la 新笔趣阁)，高速全文字在线阅读！|天才一秒记住本站地址：.+。手机版阅读网址：m.|手机用户请浏览阅读，更优质的阅读体验。|天才壹秒記住.+，為您提供精彩小說閱讀。|\\(本章完\\)",
+      "filterTag": "div, p, script"
+    }
+  },
+  {
+    "url": "https://www.shuhaige.net/",
+    "name": "书海阁小说网",
+    "comment": "部分书源正文段落顺序错乱的书在这里可能正常，搜索爬取过快会丢包(Unexpected end of file from server)",
+    "search": {
+      "url": "https://www.shuhaige.net/search.html",
+      "method": "post",
+      "data": "{searchkey: %s, searchtype: all}",
+      "cookies": "waf_sc=''; HMACCOUNT=''",
+      "result": "#sitembox > dl",
+      "bookName": "dd > h3 > a",
+      "author": "dd:nth-child(3) > span:nth-child(1)",
+      "category": "dd:nth-child(3) > span:nth-child(3)",
+      "latestChapter": "dd:nth-child(5) > a",
+      "lastUpdateTime": "dd:nth-child(5) > span",
+      "wordCount": "dd:nth-child(3) > span:nth-child(4)",
+      "status": "dd:nth-child(3) > span:nth-child(2)",
+      "pagination": true,
+      "nextPage": "#pagelink > a:not(.pgroup):not(.ngroup)"
+    },
+    "book": {
+      "intro": "#intro > p:nth-child(1)"
+    },
+    "toc": {
+      "item": "dl > dt:nth-of-type(2) ~ dd > a"
+    },
+    "chapter": {
+      "title": ".bookname > h1",
+      "content": "#content",
+      "paragraphTagClosed": true,
+      "filterTxt": "本小章还未完，请点击下一页继续阅读后面精彩内容！|小主，这个章节后面还有哦，请点击下一页继续阅读，后面更精彩！|这章没有结束，请点击下一页继续阅读！|喜欢(.+?)请大家收藏：\\(([^)]+)\\)\\1书海阁小说网更新速度全网最快。|\\(本章完\\)",
+      "filterTag": ".bottem2, hr, script, table",
+      "pagination": true,
+      "nextPage": "#pager_next"
+    }
+  },
+  {
+    "url": "http://www.mcxs.info/",
+    "name": "梦书中文",
+    "comment": "搜索有限流(Connect timed out)",
+    "search": {
+      "url": "http://www.mcxs.info/search.html",
+      "method": "post",
+      "data": "{name: %s}",
+      "result": ".novelslist2 > ul > li",
+      "bookName": "span.s2.wid > a",
+      "author": "span.s4.wid > a",
+      "latestChapter": "span.s3.wid3 > a",
+      "lastUpdateTime": "span.s6.wid6"
+    },
+    "book": {
+      "coverUrl": "meta[property=\"og:image\"]@js:r='http://www.mcxs.info'+r"
+    },
+    "toc": {
+      "item": "dl > dt:nth-of-type(2) ~ dd > a"
+    },
+    "chapter": {
+      "title": ".bookname > h1",
+      "content": "#content",
+      "paragraphTagClosed": false,
+      "paragraphTag": "<br>+",
+      "filterTxt": "天才一秒记住本站地址：[.+] .+最快更新！无广告！|(.+)，高速全文字在线阅读！|一秒记住【.+】，精彩无弹窗免费阅读！|《.+》.+全文字更新，牢记网址：([a-zA-Z0-9-]+(\\.[a-zA-Z0-9-]+)*\\.[a-zA-Z]{2,})|\\(本章完\\)",
+      "filterTag": "div, p, script"
+    }
+  },
+  {
+    "url": "http://www.99xs.info/",
+    "name": "鸟书网",
+    "comment": "搜索有限流 (Read timed out)，数量15w+",
+    "search": {
+      "url": "http://www.99xs.info/read/search/",
+      "method": "post",
+      "data": "{searchkey: %s}",
+      "result": "div.wrap > div > div > div",
+      "bookName": "div.bookinfo > h4 > a",
+      "author": "div.bookinfo > div.author@js:r=r.replace('作者：', '');",
+      "latestChapter": "div.bookinfo > div.update > a"
+    },
+    "book": {
+    },
+    "toc": {
+      "item": "dl > dt:nth-of-type(2) ~ dd > a"
+    },
+    "chapter": {
+      "title": ".content > h1",
+      "content": "#content",
+      "paragraphTagClosed": false,
+      "paragraphTag": "<br>+",
+      "filterTxt": "请记住本书首发域名：.+。鸟书网手机版阅读网址：.+|7017k|\\(本章完\\)",
+      "filterTag": ""
+    }
+  },
+  {
+    "url": "https://www.22biqu.com/",
+    "name": "笔趣阁22",
+    "comment": "meta信息lastest_chapter_name拼写错误",
+    "search": {
+      "url": "https://www.22biqu.com/ss/",
+      "method": "post",
+      "data": "{searchkey: %s, Submit: 搜索}",
+      "result": "body > div.container > div > div > ul > li",
+      "bookName": "span.s2 > a",
+      "author": "span.s4",
+      "category": "span.s1",
+      "latestChapter": "span.s3",
+      "lastUpdateTime": "span.s5"
+    },
+    "book": {
+      "latestChapter": "meta[property=\"og:novel:lastest_chapter_name\"]"
+    },
+    "toc": {
+      "item": "div:nth-child(4) > ul > li > a",
+      "pagination": true,
+      "nextPage": "#indexselect > option"
+    },
+    "chapter": {
+      "title": ".title",
+      "content": "#content",
+      "paragraphTagClosed": true,
+      "filterTxt": "\\(本章完\\)",
+      "filterTag": "",
+      "pagination": true,
+      "nextPage": "#next_url"
+    }
+  },
+  {
+    "url": "http://www.xbiquzw.net/",
+    "name": "笔尖中文",
+    "comment": "",
+    "search": {
+      "url": "http://www.xbiquzw.net/modules/article/search.php",
+      "method": "post",
+      "data": "{searchkey: %s}",
+      "result": "#wrapper > table > tbody > tr",
+      "bookName": "td:nth-child(1) > a",
+      "author": "td:nth-child(3)",
+      "latestChapter": "td:nth-child(2)",
+      "lastUpdateTime": "td:nth-child(5)"
+    },
+    "book": {
+      "url": "http://www.xbiquzw.net/(.*?)/"
+    },
+    "toc": {
+      "baseUri": "http://www.xbiquzw.net/%s/",
+      "item": "#list > dl > dd > a"
+    },
+    "chapter": {
+      "title": ".bookname > h1",
+      "content": "#content",
+      "paragraphTagClosed": false,
+      "paragraphTag": "<br>+",
+      "filterTxt": "<!--.*?-->|喜欢.+请大家收藏：.+|\\(本章完\\)",
+      "filterTag": ""
+    }
+  },
+  {
+    "url": "http://www.shu009.com/",
+    "name": "书林文学",
+    "comment": "源站目录有重复、缺章的情况。目录每页只有20章，翻页速度很慢",
+    "search": {
+      "url": "http://www.shu009.com/search/",
+      "method": "post",
+      "data": "{searchkey: %s, searchtype: all}",
+      "result": ".SHsectionThree > div > p",
+      "bookName": "span:nth-child(2) > a",
+      "author": "span:nth-child(3) > a",
+      "category": "span:nth-child(1) > a"
+    },
+    "book": {
+      "url": "http://www.shu009.com/book/(.*?)/",
+      "intro": "#intro > div",
+      "latestChapter": "meta[property=\"og:novel:lastest_chapter_name\"]"
+    },
+    "toc": {
+      "url": "http://www.shu009.com/indexlist/%s/",
+      "item": "ol > li > a",
+      "pagination": true,
+      "nextPage": "//select[@id='indexselect']/option"
+    },
+    "chapter": {
+      "title": "#chapterTitle@js:r=r.replace(/\\(\\d+\\/\\d+\\)/, '');",
+      "content": "#content",
+      "paragraphTagClosed": false,
+      "paragraphTag": "<br>+",
+      "filterTxt": "",
+      "filterTag": "center",
+      "pagination": true,
+      "nextPage": ".RBGsectionTwo-right > a"
+    }
+  },
+  {
+    "url": "http://www.ujxsw.org/",
+    "name": "悠久小说网",
+    "comment": "下载速度快",
+    "search": {
+      "url": "http://www.ujxsw.org/searchbooks.php",
+      "method": "post",
+      "data": "{searchkey: %s}",
+      "result": "#main > div.shuku_list > div.shulist > ul",
+      "bookName": "li.three > a",
+      "author": "li.four > a",
+      "category": "li.two",
+      "status": "li.six",
+      "latestChapter": "li.three > span > a",
+      "lastUpdateTime": "li.five"
+    },
+    "book": {
+      "url": "http://www.ujxsw.org/book/(.*?)/",
+      "bookName": "#maininfo > div.coverecom.w_770.left > div.tabstit > a:nth-child(4)",
+      "author": "#bookinfo > div.bookright > div.d_title > h1 > em > a",
+      "intro": "#bookintro",
+      "category": "#count > span:nth-child(1)",
+      "coverUrl": "#bookimg > a > img",
+      "latestChapter": "#bookinfo > div.bookright > div.new > span.new_t > a",
+      "lastUpdateTime": "#bookinfo > div.bookright > div.new > span.new_p"
+    },
+    "toc": {
+      "url": "http://www.ujxsw.org/read/%s/",
+      "item": "#readerlist > ul > li > a"
+    },
+    "chapter": {
+      "title": "#mlfy_main_text > h3",
+      "content": "#mlfy_main_text > div.read-content > p",
+      "paragraphTagClosed": false,
+      "paragraphTag": "<br>+",
+      "filterTxt": "【悠久小説網ωωω.ＵＪХＳw.ｎｅｔ】，免费小说无弹窗免费阅读！|佰度搜索 【悠久小說網 ＷＷＷ.ＵＪХＳw．ＮＥＴ】 全集TXT电子书免费下载！|《.*》悠久小说网全文字更新,牢记网址:www.ujxsw.org|1秒记住网：",
+      "filterTag": ""
+    }
+  },
+  {
+    "url": "http://www.yeudusk.com/",
+    "name": "阅读库",
+    "comment": "",
+    "search": {
+      "url": "http://www.yeudusk.com/modules/article/search.php?q=%s",
+      "method": "get",
+      "result": "#jieqi_page_contents > div > div:nth-child(2)",
+      "bookName": "div:nth-child(1) > span > a",
+      "author": "div:nth-child(2) > span:nth-child(2)",
+      "category": "div:nth-child(2) > span:nth-child(4)",
+      "status": "span:nth-child(8)",
+      "latestChapter": "div:nth-child(4) > span:nth-child(2) > a",
+      "lastUpdateTime": "div:nth-child(4) > span:nth-child(4)"
+    },
+    "book": {
+      "url": "http://www.yeudusk.com/book/(.*?)/",
+      "intro": "#content > div.divbox.cf > div:nth-child(2) > div:nth-child(3) > div.tabcontent > div:nth-child(1) > div",
+      "latestChapter": "#content > div:nth-child(4) > h3"
+    },
+    "toc": {
+      "url": "http://www.yeudusk.com/html/0/%s/",
+      "item": "ul > li > a"
+    },
+    "chapter": {
+      "title": "#cont > h1",
+      "content": "#clickeye_content",
+      "paragraphTagClosed": false,
+      "paragraphTag": "<br>+",
+      "filterTxt": "\\(阅读库\\s?www\\.yeudusk\\.com\\)|阅读库 www.yeudusk.comyeudusk www.yeudusk.com|《.+》阅读库全文字更新,牢记网址:www\\.yeudusk\\.com"
+    }
+  },
+  {
+    "url": "https://www.wxsy.net/",
+    "name": "顶点小说",
+    "comment": "搜索、详情、章节限流。目录乱序、正文段落被base64编码",
+    "search": {
+      "url": "https://www.wxsy.net/search.html",
+      "method": "post",
+      "data": "{s: %s}",
+      "result": "body > div.container > div:nth-child(1) > div > ul > li",
+      "bookName": "span.s2 > a",
+      "author": "span.s3 > a",
+      "category": "span.s1",
+      "latestChapter": "span.s4 > a",
+      "lastUpdateTime": "span.s5"
+    },
+    "book": {
+      "url": "https://www.wxsy.net/novel/(.*?)/",
+      "coverUrl": ".imgbox > img"
+    },
+    "toc": {
+      "url": "https://www.wxsy.net/novel/%s/chapter_1.html",
+      "list": "/html@js:const childRegex=/\\.section-list\\.ycxsid>li:nth-child\\(\\d+\\){display:none}/g;const lastChildRegex=/\\.section-list\\.ycxsid>li:nth-last-child\\(\\d+\\){display:none}/g;const preHiddenCount=[...r.matchAll(childRegex)].length;const afterHiddenCount=[...r.matchAll(lastChildRegex)].length;r=r.replace(/<ul[^>]*class=\"[^\"]*\\bsection-list\\b[^\"]*\\bycxsid\\b[^\"]*\"[^>]*>([\\s\\S]*?)<\\/ul>/g,(match,liContent)=>{const lis=liContent.match(/<li[\\s\\S]*?<\\/li>/g)||[];const newLis=lis.slice(preHiddenCount,lis.length-afterHiddenCount);return match.replace(liContent,newLis.join(''))});",
+      "item": ".biqunaicc > div:nth-child(2) > div > ul > li > a",
+      "pagination": true,
+      "nextPage": ".biqunaicc > div:nth-child(2) > div > div:nth-child(2) > select > option"
+    },
+    "chapter": {
+      "title": "h3",
+      "content": ".row-detail > div > div@js:var qsbs={_keyStr:\"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=\",bb:function(input){var output=\"\",chr1,chr2,chr3,enc1,enc2,enc3,enc4,i=0;input=input.replace(/[^A-Za-z0-9+\\/=]/g,\"\");while(i<input.length){enc1=this._keyStr.indexOf(input.charAt(i++));enc2=this._keyStr.indexOf(input.charAt(i++));enc3=this._keyStr.indexOf(input.charAt(i++));enc4=this._keyStr.indexOf(input.charAt(i++));chr1=(enc1<<2)|(enc2>>4);chr2=((enc2&15)<<4)|(enc3>>2);chr3=((enc3&3)<<6)|enc4;output+=String.fromCharCode(chr1);if(enc3!=64)output+=String.fromCharCode(chr2);if(enc4!=64)output+=String.fromCharCode(chr3)}return this._utf8_decode(output)},_utf8_encode:function(string){string=string.replace(/\\r\\n/g,\"\\n\");var utftext=\"\";for(var n=0;n<string.length;n++){var c=string.charCodeAt(n);if(c<128){utftext+=String.fromCharCode(c)}else if(c<2048){utftext+=String.fromCharCode((c>>6)|192);utftext+=String.fromCharCode((c&63)|128)}else{utftext+=String.fromCharCode((c>>12)|224);utftext+=String.fromCharCode(((c>>6)&63)|128);utftext+=String.fromCharCode((c&63)|128)}}return utftext},_utf8_decode:function(utftext){var string=\"\",i=0,c=0,c1=0,c2=0,c3=0;while(i<utftext.length){c=utftext.charCodeAt(i);if(c<128){string+=String.fromCharCode(c);i++}else if(c<224){c2=utftext.charCodeAt(i+1);string+=String.fromCharCode(((c&31)<<6)|(c2&63));i+=2}else{c2=utftext.charCodeAt(i+1);c3=utftext.charCodeAt(i+2);string+=String.fromCharCode(((c&15)<<12)|((c2&63)<<6)|(c3&63));i+=3}}return string}};r=r.replace(/<script>\\s*document\\.writeln\\(qsbs\\.bb\\('([^']+)'\\)\\);\\s*<\\/script>/g,function(match,p1){return qsbs.bb(p1)});r=r.replace(/<p[^>]*?>相邻推荐:([\\s\\S]*?)<\\/p>/,'');",
+      "paragraphTagClosed": true,
+      "filterTxt": "请勿开启浏览器阅读模式，否则将导致章节内容缺失及无法阅读下一章。|\\(本章完\\)",
+      "filterTag": "h3, div",
+      "pagination": true,
+      "nextPage": ".row.row-detail > div > div > div:nth-child(2) > a:nth-child(4)"
+    }
+  },
+  {
+    "url": "https://www.biquge365.net/",
+    "name": "笔趣阁365",
+    "comment": "搜索间隔15秒，若搜索结果为空则手动打开网页搜一次后再试",
+    "search": {
+      "url": "https://www.biquge365.net/s.php",
+      "method": "post",
+      "data": "{type: articlename, s: %s}",
+      "result": "body > div.menu > div > ul > li",
+      "bookName": "span.name > a",
+      "author": "span.zuo > a",
+      "category": "span.lei > a",
+      "latestChapter": "span.jie > a",
+      "lastUpdateTime": "span.time"
+    },
+    "book": {
+      "url": "https://www.biquge365.net/book/(.*?)/"
+    },
+    "toc": {
+      "url": "https://www.biquge365.net/newbook/%s/",
+      "item": "body > div.menu > div.border > ul > li > a"
+    },
+    "chapter": {
+      "title": "#neirong > h1",
+      "content": "#txt",
+      "paragraphTagClosed": false,
+      "paragraphTag": "<br>+",
+      "filterTxt": "",
+      "filterTag": "p"
+    }
+  },
+  {
+    "url": "https://www.ranwen8.cc/",
+    "name": "燃文小说网",
+    "comment": "正文段落被base64编码",
+    "search": {
+      "url": "https://www.ranwen8.cc/search.html",
+      "method": "post",
+      "data": "{submit: 搜索, s: %s}",
+      "result": "body > div.padding > div > table > tbody > tr",
+      "bookName": "td:nth-child(1) > a",
+      "author": "td:nth-child(3)",
+      "latestChapter": "td:nth-child(2) > a",
+      "lastUpdateTime": "td:nth-child(4)"
+    },
+    "book": {
+      "url": "https://www.ranwen8.cc/book/(.*?)/",
+      "bookName": "meta[property=\"og:title\"]",
+      "author": "#info > h1 > small > a",
+      "coverUrl": "meta[property=\"og:image\"]@js:r='https://www.ranwen8.cc'+r"
+    },
+    "toc": {
+      "url": "https://www.ranwen8.cc/book/%s/index_1.html",
+      "item": "body > div:nth-child(4) > div > ul > li > a",
+      "pagination": true,
+      "nextPage": "body > div:nth-child(4) > div > div > select > option"
+    },
+    "chapter": {
+      "title": "#jsnc_l > div > h1",
+      "content": "#htmlContent@js:var qsbs={_keyStr:\"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=\",bb:function(input){var output=\"\";var chr1,chr2,chr3;var enc1,enc2,enc3,enc4;var i=0;input=input.replace(/[^A-Za-z0-9\\+\\/\\=]/g,\"\");while(i<input.length){enc1=this._keyStr.indexOf(input.charAt(i++));enc2=this._keyStr.indexOf(input.charAt(i++));enc3=this._keyStr.indexOf(input.charAt(i++));enc4=this._keyStr.indexOf(input.charAt(i++));chr1=(enc1<<2)|(enc2>>4);chr2=((enc2&15)<<4)|(enc3>>2);chr3=((enc3&3)<<6)|enc4;output=output+String.fromCharCode(chr1);if(enc3!=64){output=output+String.fromCharCode(chr2)}if(enc4!=64){output=output+String.fromCharCode(chr3)}}output=qsbs._utf8_decode(output);return output},_utf8_encode:function(string){string=string.replace(/\\r\\n/g,\"\\n\");var utftext=\"\";for(var n=0;n<string.length;n++){var c=string.charCodeAt(n);if(c<128){utftext+=String.fromCharCode(c)}else if((c>127)&&(c<2048)){utftext+=String.fromCharCode((c>>6)|192);utftext+=String.fromCharCode((c&63)|128)}else{utftext+=String.fromCharCode((c>>12)|224);utftext+=String.fromCharCode(((c>>6)&63)|128);utftext+=String.fromCharCode((c&63)|128)}}return utftext},_utf8_decode:function(utftext){var string=\"\";var i=0,c1,c2,c3;var c=c1=c2=0;while(i<utftext.length){c=utftext.charCodeAt(i);if(c<128){string+=String.fromCharCode(c);i++}else if((c>191)&&(c<224)){c2=utftext.charCodeAt(i+1);string+=String.fromCharCode(((c&31)<<6)|(c2&63));i+=2}else{c2=utftext.charCodeAt(i+1);c3=utftext.charCodeAt(i+2);string+=String.fromCharCode(((c&15)<<12)|((c2&63)<<6)|(c3&63));i+=3}}return string}};r=r.replace(/<script>\\s*document\\.writeln\\(qsbs\\.bb\\('([^']+)'\\)\\);\\s*<\\/script>/g,function(match,p1){return qsbs.bb(p1)});",
+      "paragraphTagClosed": false,
+      "paragraphTag": "<br>+",
+      "filterTxt": "首发：~小÷说◎网】，♂小÷说◎网】，",
+      "filterTag": "",
+      "pagination": true,
+      "nextPage": "#link-next"
+    }
+  }
+]

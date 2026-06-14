@@ -1,0 +1,127 @@
+//! 单次 HTTP 请求封装。对应 Java `util.CrawlUtils#request` + 编码兜底。
+//!
+//! 这一层是同步阻塞接口，让 parser 测试无需 async 框架。
+//! 阶段 3 接下载调度时会再写一份 async fetch，复用同样的编码 / CF 逻辑。
+//!
+//! 单次抓取的责任：
+//! 1. 加 UA / Referer / Cookie 头；
+//! 2. 区分 GET / POST，POST 时把 form 数据填进 body；
+//! 3. 用 `decode_response_bytes` 兜底解码；
+//! 4. 调用方按需检测 CF（`http::cf::has_cloudflare`）—— 不在本函数里
+//!    做 CF 旁路调用，旁路属阶段 2c 的 `cf-bypass` 服务集成。
+
+use std::time::Duration;
+
+use anyhow::{Context, Result};
+use reqwest::blocking::Client;
+use reqwest::header::{ACCEPT, COOKIE, REFERER, USER_AGENT};
+
+use crate::http::encoding::decode_response_bytes;
+use crate::http::ua::random_ua;
+use crate::http::url_join::origin_or_self;
+
+/// 一次抓取的入参。
+pub struct FetchRequest<'a> {
+    pub url: &'a str,
+    pub method: HttpMethod<'a>,
+    /// 形如 `"k=v;k2=v2"` 的 cookie 字符串（与 Java 端规则字段直接拼）。
+    pub cookies: Option<&'a str>,
+    /// 单次请求超时（秒）。规则里以秒为单位；None 时用 client 默认。
+    pub timeout_secs: Option<u32>,
+}
+
+pub enum HttpMethod<'a> {
+    Get,
+    Post(&'a [(String, String)]),
+}
+
+/// 抓取结果：解码后的 HTML、最终 URL（处理重定向后的）、状态码。
+pub struct FetchResponse {
+    pub html: String,
+    pub final_url: String,
+    pub status: u16,
+}
+
+/// 执行一次抓取。
+pub fn fetch(client: &Client, req: &FetchRequest<'_>) -> Result<FetchResponse> {
+    let referer = origin_or_self(req.url);
+    let ua = random_ua();
+
+    let mut builder = match req.method {
+        HttpMethod::Get => client.get(req.url),
+        HttpMethod::Post(form) => client.post(req.url).form(form),
+    };
+
+    builder = builder
+        .header(USER_AGENT, ua)
+        .header(REFERER, referer)
+        .header(
+            ACCEPT,
+            "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        );
+
+    if let Some(cookie_value) = req.cookies.filter(|s| !s.trim().is_empty()) {
+        builder = builder.header(COOKIE, cookie_value);
+    }
+    if let Some(t) = req.timeout_secs {
+        builder = builder.timeout(Duration::from_secs(t as u64));
+    }
+
+    let resp = builder
+        .send()
+        .with_context(|| format!("HTTP send failed: {}", req.url))?;
+
+    let status = resp.status().as_u16();
+    let final_url = resp.url().to_string();
+    let content_type = resp
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string());
+
+    let bytes = resp
+        .bytes()
+        .with_context(|| format!("read body failed: {}", req.url))?;
+
+    let html = decode_response_bytes(&bytes, content_type.as_deref());
+
+    Ok(FetchResponse {
+        html,
+        final_url,
+        status,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::AppConfig;
+    use crate::http::client::{build_blocking_client, ClientOptions};
+
+    /// 这条测试只验证 fetch 函数能编译、能用 builder 模式调用；
+    /// 不真发请求。真实联网测试在 search/book 模块下用 `#[ignore]` 标记。
+    #[test]
+    fn fetch_request_struct_compiles() {
+        let cfg = AppConfig::default();
+        let _client = build_blocking_client(&cfg, &ClientOptions::default()).unwrap();
+        let _req = FetchRequest {
+            url: "https://example.com/",
+            method: HttpMethod::Get,
+            cookies: None,
+            timeout_secs: Some(15),
+        };
+        // 不调用 send；只确保 API 形状稳定。
+    }
+
+    #[test]
+    fn post_form_compiles() {
+        let form: Vec<(String, String)> =
+            vec![("k".into(), "v".into()), ("submit".into(), "Search".into())];
+        let _req = FetchRequest {
+            url: "https://example.com/s/",
+            method: HttpMethod::Post(&form),
+            cookies: Some("a=1; b=2"),
+            timeout_secs: Some(15),
+        };
+    }
+}

@@ -1,0 +1,104 @@
+[package]
+name = "so-novel-rs"
+version = "0.1.0-alpha.1"
+edition = "2021"
+rust-version = "1.75"
+description = "So Novel — Rust + egui desktop client (work in progress migration from Java)."
+license = "Apache-2.0"
+publish = false
+
+[[bin]]
+name = "so-novel-rs"
+path = "src/main.rs"
+
+[dependencies]
+# UI（2026-06 升级到 0.34：breaking API 大量）
+eframe = { version = "0.34", default-features = false, features = ["default_fonts", "glow", "persistence"] }
+egui = "0.34"
+# egui_extras 提供 RetainedImage + 各种图片 loader。all_loaders 包含 PNG/JPEG 等常用格式。
+egui_extras = { version = "0.34", features = ["all_loaders"] }
+
+# Async runtime (kept lean — used in later stages; pulled now so tests/integration are stable)
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "fs"] }
+
+# Errors / logging
+anyhow = "1"
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Config / serde
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+json5 = "0.4"
+configparser = "3"
+
+# Filesystem helpers
+directories = "5"
+
+# HTTP client (rustls 避免 OpenSSL 依赖；cookies 用于规则中的 Cookie 头注入；
+# gzip/brotli 解压由 reqwest 透明处理)。
+reqwest = { version = "0.12", default-features = false, features = [
+    "rustls-tls",
+    "cookies",
+    "gzip",
+    "brotli",
+    "stream",
+    "blocking",
+] }
+
+# HTML / 选择器 / 正则
+scraper = "0.21"
+regex = "1"
+
+# 编码兜底（GBK / Big5 等老站点）
+encoding_rs = "0.8"
+chardetng = "0.1"
+
+# JavaScript 引擎（书源规则 @js: 后处理 + quanben5 加密）。
+# 选 boa 而非 rquickjs：纯 Rust 无 C 工具链依赖，
+# 现有规则全部 ES5/ES6 子集 boa 完整支持（详见 audit §6.1 的修订）。
+boa_engine = "0.20"
+
+# 静态/惰性初始化（UA 池等）
+once_cell = "1"
+rand = "0.8"
+
+# 图片解码校验（5b）：egui::Image 是懒加载（错误要等 ui.add 时才暴露），
+# 这里提前用 image::ImageReader 验证字节是真的图片，避免 Failed 路径不可达。
+image = "0.25"
+
+# URL 解析与拼接（absUrl）
+url = "2"
+
+# 字符串相似度（聚合搜索结果排序用，等价 Java hutool StrUtil.similar）。纯 Rust 无依赖。
+strsim = "0.11"
+
+# EPUB 生成（纯 Rust + 内置 zip）。0.8 系列与 epub-builder 当前稳定版。
+epub-builder = "0.8"
+
+# zip 打包（HTML 整本下载用）。关掉 bzip2/lzma 等带 C 依赖的特性，只保留 deflate；
+# 减少在 Windows MSVC 上编译时对 cl.exe 的潜在依赖。
+zip = { version = "4", default-features = false, features = ["deflate-flate2"] }
+flate2 = "1"
+
+# CLI 子命令（5c）。
+clap = { version = "4", features = ["derive"] }
+
+# 跨平台 HWND / X11 / Wayland 句柄类型（egui-winit 已传递依赖，显式声明以便
+# 在 src/window.rs 调 DWM 用）。
+raw-window-handle = "0.6"
+
+# Windows 11 DWM 圆角窗口（仅 Windows 平台；其它平台用空 stub）。
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_Graphics_Dwm", "Win32_Foundation"] }
+
+[dev-dependencies]
+tempfile = "3"
+# 仅测试用：构造最小 PNG 验证 cover_entry_from_bytes。运行时通过 egui_extras 间接使用。
+image = "0.25"
+
+# 在 Windows 上把 assets/logo.ico 嵌入 exe 的资源段（资源管理器/任务栏会看到图标）。
+# build.rs 调用，仅 Windows target 需要。
+[target.'cfg(target_os = "windows")'.build-dependencies]
+winres = "0.1"

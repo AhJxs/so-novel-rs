@@ -1,0 +1,7 @@
+/downloads
+/target
+*.lock.bak
+
+# 本地工具状态，不入库
+/.claude/
+/.codegraph/

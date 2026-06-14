@@ -1,0 +1,80 @@
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <title>${title}</title>
+  <meta charset="UTF-8">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style type="text/css">
+    body {
+      max-width: 800px;
+      margin: 100px auto;
+      background: #111;
+    }
+
+    h1 {
+      color: #939392;
+    }
+
+    p {
+      text-indent: 2em;
+      letter-spacing: 0.1em;
+      color: #939392;
+      font-size: 25px;
+      margin: 40px 0;
+    }
+
+    .bottom-bar {
+      margin-top: 100px;
+    }
+  </style>
+</head>
+
+<body>
+  <h1>${title}</h1>
+  <div class="content">
+    ${content}
+  </div>
+  <div class="bottom-bar d-flex justify-content-between">
+    <button id="btn-pre" type="button" class="btn btn-primary btn-lg w-25" onclick="turnPage('pre')">上一页</button>
+    <button id="btn-next" type="button" class="btn btn-primary btn-lg w-25" onclick="turnPage('next')">下一页</button>
+  </div>
+</body>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.min.js"></script>
+<script type="text/javascript">
+  const url = decodeURI(location.href)
+  const prefixUrl = url.substring(0, url.lastIndexOf('/') + 1)
+
+  // 提取文件名中的数字部分和长度
+  const match = url.match(/(\d+)_\.html/)
+  let indexStr = match[1]
+  let index = parseInt(indexStr, 10)
+  const length = indexStr.length
+
+  if (index <= 1) {
+    document.getElementById('btn-pre').disabled = true
+  }
+
+  function turnPage(action) {
+    action === 'next' ? ++index : --index
+    if (index < 1) {
+      index = 1
+      return
+    }
+
+    const newIndexStr = String(index).padStart(length, '0')
+    location.href = prefixUrl + newIndexStr + '_.html'
+  }
+
+  document.addEventListener('keyup', function (e) {
+    switch (e.key) {
+      case 'ArrowRight':
+        turnPage('next')
+        break
+      case 'ArrowLeft':
+        turnPage('pre')
+        break
+    }
+  })
+</script>
+
+</html>
