@@ -13,8 +13,8 @@
 //! 同一套 `parse_search_results` 逻辑。
 
 use anyhow::Result;
-use reqwest::blocking::Client;
 use reqwest::header::{ACCEPT, COOKIE, REFERER, USER_AGENT};
+use reqwest::Client;
 
 use crate::http::ua::random_ua;
 use crate::http::{decode_response_bytes, has_cloudflare};
@@ -30,7 +30,7 @@ const QUANBEN5_REFERER: &str = "https://quanben5.com/search.html";
 /// 抓 quanben5 搜索结果。
 ///
 /// `cf_bypass_base` 与一般 search_one 一致：CF 命中且非空时调外部 bypass 服务。
-pub fn search_one_quanben5(
+pub async fn search_one_quanben5(
     client: &Client,
     rule: &Rule,
     keyword: &str,
@@ -68,6 +68,7 @@ pub fn search_one_quanben5(
 
     let resp = builder
         .send()
+        .await
         .map_err(|e| SearchError::Http(format!("send: {e}")))?;
     let final_url = resp.url().to_string();
     let content_type = resp
@@ -77,6 +78,7 @@ pub fn search_one_quanben5(
         .map(|s| s.to_string());
     let bytes = resp
         .bytes()
+        .await
         .map_err(|e| SearchError::Http(format!("read body: {e}")))?;
 
     let raw_text = decode_response_bytes(&bytes, content_type.as_deref());
@@ -88,6 +90,7 @@ pub fn search_one_quanben5(
                 // 走 bypass：bypass 返回的就是去 CF 后的页面 HTML，
                 // 但对 JSONP 接口它通常返回 raw JSONP 字符串本身。
                 let bypassed = crate::http::fetch_via_cf_bypass(client, base, &url)
+                    .await
                     .map_err(|e| SearchError::Http(format!("cf-bypass: {e:#}")))?;
                 return parse_jsonp_and_extract(&bypassed, &final_url, rule, limit);
             }

@@ -60,9 +60,15 @@ pub fn decode_response_bytes(bytes: &[u8], content_type: Option<&str>) -> String
     }
 
     // 3. chardetng 探测
-    let mut detector = chardetng::EncodingDetector::new();
+    //
+    // chardetng 1.0 把 `new()` / `guess()` 的开关参数从隐式默认改成了显式枚举：
+    //   - `new(Iso2022JpDetection)`：是否允许 ISO-2022-JP 探测（中文站点不需要 → Deny）
+    //   - `guess(tld, Utf8Detection)`：是否优先信任 UTF-8 字节序列；中文老站点
+    //     存在"声明 UTF-8 实际是 GBK"的反例，但若 body 真的全是合法 UTF-8 字节，
+    //     当作 UTF-8 是更安全的选择 → Allow（与 0.x 默认行为等价）。
+    let mut detector = chardetng::EncodingDetector::new(chardetng::Iso2022JpDetection::Deny);
     detector.feed(bytes, true);
-    let enc = detector.guess(None, true);
+    let enc = detector.guess(None, chardetng::Utf8Detection::Allow);
     let (cow, _, _) = enc.decode(bytes);
     if !cow.is_empty() {
         return cow.into_owned();

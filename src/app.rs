@@ -21,6 +21,7 @@ use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
 
 use crate::config::{load_config, AppConfig, ConfigPaths};
+use crate::db::{Db, DownloadTaskRecord};
 use crate::crawler::{CancelToken, Progress};
 use crate::models::{Book, Rule, SearchResult};
 use crate::rules::load_rules_from_path;
@@ -48,12 +49,23 @@ pub struct DownloadTask {
     /// 触发时拿到的搜索结果，包含 source / book_url / 书名作者等信息。
     pub origin: SearchResult,
     /// 后台推送进度的接收端；每帧 `try_recv` 排空。
-    pub rx: mpsc::UnboundedReceiver<Progress>,
-    /// 后台任务的取消令牌。
-    pub cancel: CancelToken,
+    /// 加载自 SQLite 时为 None（已中断的旧任务不会有活通道）。
+    pub rx: Option<mpsc::UnboundedReceiver<Progress>>,
+    /// 后台任务的取消令牌。加载自 SQLite 时为 None。
+    pub cancel: Option<CancelToken>,
+
+    /// 用户点了"取消"但后台还没响应的中间态。true 时 UI 显示"正在取消..."，
+    /// 按钮置灰避免重复点；drain 收到 `Progress::Cancelled` 时清零。
+    /// 运行时字段，不持久化。
+    pub cancelling: bool,
+
+    // ---- 时间戳 ----
+    /// 任务开始的 unix 时间戳（秒）。比 `Instant` 多两个能力：可序列化 / 跨重启。
+    pub started_at_unix: i64,
+    /// 任务结束的 unix 时间戳（秒）；None = 还没结束。给 UI 算"耗时"。
+    pub finished_at_unix: Option<i64>,
 
     // ---- 累计状态（每帧 try_recv 时更新） ----
-    pub started_at: Instant,
     pub book_meta: Option<Book>,
     pub total_chapters: usize,
     pub completed: u32,
@@ -61,16 +73,24 @@ pub struct DownloadTask {
     pub last_chapter_title: String,
     /// `Some(Ok(path))` 完成；`Some(Err(reason))` 失败 / 取消；`None` 还在跑。
     pub finished: Option<Result<std::path::PathBuf, String>>,
-    /// 失败章节明细（用于任务页详情显示）。
+    /// 失败章节明细（用于任务页详情显示）。持久化时通过 `FailureRecord` 转换。
     pub failures: Vec<(u32, String, String)>,
 }
 
 impl DownloadTask {
     /// 排空进度通道；返回是否产生过事件（用于触发 repaint）。
+    ///
+    /// `just_finished` 用来提示调用方"这一帧有任务从 running 变成 finished"，
+    /// 方便调用方决定要不要刷 DB。直接用 `finished.is_some()` 判不了（之前就
+    /// finished 的旧任务这次也"is_some"）。
     pub fn drain(&mut self) -> bool {
         let mut any = false;
+        let was_running = self.is_running();
+        let Some(rx) = self.rx.as_mut() else {
+            return false;
+        };
         loop {
-            match self.rx.try_recv() {
+            match rx.try_recv() {
                 Ok(ev) => {
                     any = true;
                     match ev {
@@ -99,6 +119,8 @@ impl DownloadTask {
                         }
                         Progress::Cancelled => {
                             self.finished = Some(Err("用户已取消".to_string()));
+                            // 后台响应到取消 → 解除 cancelling 中间态
+                            self.cancelling = false;
                         }
                     }
                 }
@@ -107,10 +129,15 @@ impl DownloadTask {
                     if self.finished.is_none() {
                         // 后台 panic 或异常退出，没来得及发 Finished/Cancelled。
                         self.finished = Some(Err("后台任务异常退出（通道已断开）".to_string()));
+                        self.cancelling = false;
                     }
                     break;
                 }
             }
+        }
+        // 任务在本帧从 running → finished 时打时间戳。
+        if was_running && self.finished.is_some() && self.finished_at_unix.is_none() {
+            self.finished_at_unix = Some(now_unix_secs());
         }
         any
     }
@@ -119,12 +146,133 @@ impl DownloadTask {
         self.finished.is_none()
     }
 
+    /// "用户主动取消" / "应用重启时中断"算 cancelled；
+    /// 后台异常 / 网络错误 / parser 错误算 failed。判别依据是 `Err(reason)`
+    /// 里的字符串 — 这些字符串都由本模块自己写入（搜索/CLI 不会构造），
+    /// 跟数据库里的旧记录也兼容（reason 是 schema 一部分）。
+    pub fn is_cancelled(&self) -> bool {
+        matches!(
+            self.finished.as_ref(),
+            Some(Err(reason)) if reason == "用户已取消" || reason == "应用重启时中断"
+        )
+    }
+
+    /// 已结束且不是取消 → 失败（download_book 报错、通道异常断开等）。
+    pub fn is_failed(&self) -> bool {
+        matches!(self.finished.as_ref(), Some(Err(_))) && !self.is_cancelled()
+    }
+
     pub fn book_name(&self) -> &str {
         self.book_meta
             .as_ref()
             .map(|b| b.book_name.as_str())
             .unwrap_or(self.origin.book_name.as_str())
     }
+
+    /// 距开始的实时耗时。运行中用 `Instant` 算到当前帧的间隔；已完成用
+    /// `finished_at_unix - started_at_unix` 算历史值。
+    pub fn elapsed(&self) -> Option<Duration> {
+        let started = self.started_at_unix.max(0) as u64;
+        if self.is_running() {
+            let now = now_unix_secs().max(0) as u64;
+            Some(Duration::from_secs(now.saturating_sub(started)))
+        } else {
+            self.finished_at_unix.map(|end| {
+                let end_u = end.max(0) as u64;
+                Duration::from_secs(end_u.saturating_sub(started))
+            })
+        }
+    }
+
+    /// 转成可持久化的 record（不含 rx/cancel）。
+    pub fn to_record(&self) -> crate::db::tasks::DownloadTaskRecord {
+        use crate::db::tasks::{DownloadTaskRecord, FailureRecord};
+        DownloadTaskRecord {
+            id: self.id,
+            origin: self.origin.clone(),
+            started_at_unix: self.started_at_unix,
+            finished_at_unix: self.finished_at_unix,
+            book_meta: self.book_meta.clone(),
+            total_chapters: self.total_chapters,
+            completed: self.completed,
+            failed: self.failed,
+            last_chapter_title: self.last_chapter_title.clone(),
+            finished: self.finished.clone(),
+            failures: self
+                .failures
+                .iter()
+                .map(|(i, t, r)| FailureRecord {
+                    index: *i,
+                    title: t.clone(),
+                    reason: r.clone(),
+                })
+                .collect(),
+        }
+    }
+
+    /// 从 record 重建。`rx` 和 `cancel` 留 None（已结束的任务不需要；中断的旧任务也不需要）。
+    pub fn from_record(rec: crate::db::tasks::DownloadTaskRecord) -> Self {
+        Self {
+            id: rec.id,
+            origin: rec.origin,
+            rx: None,
+            cancel: None,
+            cancelling: false,
+            started_at_unix: rec.started_at_unix,
+            finished_at_unix: rec.finished_at_unix,
+            book_meta: rec.book_meta,
+            total_chapters: rec.total_chapters,
+            completed: rec.completed,
+            failed: rec.failed,
+            last_chapter_title: rec.last_chapter_title,
+            finished: rec.finished,
+            failures: rec.failures.into_iter().map(|f| (f.index, f.title, f.reason)).collect(),
+        }
+    }
+}
+
+/// 当前 unix 时间戳（秒）。失败时返回 0 — UI 显示"未知"远比 panic 友好。
+fn now_unix_secs() -> i64 {
+    SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+/// 从 DB 加载所有任务记录 → 转成运行时 `DownloadTask` 列表。
+///
+/// 副作用：上次退出时还在跑的任务（`finished.is_none()`）一律标成
+/// "应用重启时中断"，并立即写回 DB，避免下次再看到"未结束"状态。
+/// `next_task_id` 返回"所有 id 中最大值 + 1"以避免和历史冲突。
+fn load_tasks_from_db(db: &Db) -> (Vec<DownloadTask>, u64) {
+    let records = match crate::db::tasks::list(db.conn()) {
+        Ok(rs) => rs,
+        Err(e) => {
+            tracing::warn!("load tasks from db failed: {e}");
+            return (Vec::new(), 1);
+        }
+    };
+    let now = now_unix_secs();
+    let mut max_id: u64 = 0;
+    let mut tasks = Vec::with_capacity(records.len());
+    let mut need_rewrite: Vec<DownloadTaskRecord> = Vec::new();
+    for rec in records {
+        max_id = max_id.max(rec.id);
+        let mut task = DownloadTask::from_record(rec.clone());
+        if task.finished.is_none() {
+            task.finished = Some(Err("应用重启时中断".to_string()));
+            task.finished_at_unix = Some(now);
+            // 持久化修正后的记录
+            need_rewrite.push(task.to_record());
+        }
+        tasks.push(task);
+    }
+    for r in &need_rewrite {
+        if let Err(e) = crate::db::tasks::upsert(db.conn(), r) {
+            tracing::warn!("rewrite interrupted task {} failed: {e}", r.id);
+        }
+    }
+    (tasks, max_id + 1)
 }
 
 /// 本地书库的一个条目。对应 `download_path` 下一个已生成的电子书文件。
@@ -256,6 +404,12 @@ pub struct SearchState {
     pub cover_in_flight: HashSet<(i32, String)>,
     /// drain_detail 期间收集到的待 prefetch 封面 URL，drain 后由 SoNovelApp 取出统一派发。
     pub pending_cover_prefetch: Vec<(i32, String)>,
+
+    /// 触发一次"结果列表滚回顶部"的一次性标记。
+    /// `spawn_search` 设 true，下一次 `show_results` 在 `ScrollArea` 上应用
+    /// `.vertical_scroll_offset(0.0)` 后清零。
+    /// 不直接 every-frame 重置 — 那样用户永远滑不动。
+    pub pending_scroll_top: bool,
 }
 
 /// 详情面板加载状态。
@@ -602,6 +756,9 @@ pub struct SoNovelApp {
     /// 设置页可编辑的副本；点击"保存"后写回 config.ini，并替换 `config`。
     pub draft_config: AppConfig,
 
+    /// 持久化层（SQLite）。下载任务记录全走这里。
+    pub db: Db,
+
     /// 顶部状态栏的临时消息（保存成功 / 加载失败等）。
     pub toast: Option<(String, Instant)>,
 
@@ -662,7 +819,35 @@ impl SoNovelApp {
 
         let runtime = build_shared_runtime();
 
+        // 打开 SQLite（首次启动会建表）。打开失败时回退到空内存列表 ——
+        // 不阻塞启动，只是丢历史记录。tracing::warn 让用户能看出来。
+        let db = match Db::open(&paths.download_db_file) {
+            Ok(db) => db,
+            Err(e) => {
+                tracing::warn!("download db open failed: {e:#}");
+                // 内存里用临时文件，避免后续 save_task_to_db 全部 panic
+                Db::open_in_memory().unwrap_or_else(|e| {
+                    panic!("既开不了磁盘 DB 也开不了内存 DB：{e}")
+                })
+            }
+        };
+
+        // 从 DB 拉历史任务。`finished.is_none()` 的（之前在跑）一律标记为
+        // "应用重启时中断" + 立即写回 DB，下次启动看到的就是稳定态。
+        let (tasks, next_task_id) = load_tasks_from_db(&db);
+        tracing::info!("从 DB 加载 {} 个历史下载任务", tasks.len());
+
+        // 启动时不显示「最近任务横幅」：把"已忽略"标记设到当前最大任务 id，
+        // 下次用户主动 spawn_download（id 单调递增）才会重新触发横幅显示。
+        // 不动 DB / 不动 tasks 列表本身 — 任务页 / 历史记录都正常可见。
+        let initial_banner_dismissed = tasks.iter().map(|t| t.id).max();
+
         let draft_config = config.clone();
+        let search = SearchState {
+            banner_dismissed_for: initial_banner_dismissed,
+            ..SearchState::default()
+        };
+
         Self {
             paths,
             config,
@@ -672,13 +857,14 @@ impl SoNovelApp {
             source_overrides,
             current_page: NavPage::Search,
             draft_config,
+            db,
             toast: None,
             runtime,
             window_chrome_applied: false,
             last_dark_mode: false,
-            search: SearchState::default(),
-            tasks: Vec::new(),
-            next_task_id: 1,
+            search,
+            tasks,
+            next_task_id,
             library: LibraryState::default(),
             sources_state: SourcesState::default(),
         }
@@ -686,6 +872,28 @@ impl SoNovelApp {
 
     pub fn show_toast(&mut self, msg: impl Into<String>) {
         self.toast = Some((msg.into(), Instant::now()));
+    }
+
+    /// 把单条任务 upsert 到 DB。失败仅 warn（toast 也行，但 DB 写失败属于
+    /// 系统层错误，console warn 更合适 — UI 不该为此打断用户）。
+    pub fn save_task_to_db(&self, task: &DownloadTask) {
+        let rec = task.to_record();
+        if let Err(e) = crate::db::tasks::upsert(self.db.conn(), &rec) {
+            tracing::warn!("save_task_to_db failed for id={}: {e}", task.id);
+        }
+    }
+
+    /// 清掉所有已结束的任务（完成 / 失败 / 取消）。运行中的任务保留。
+    /// 同时从 DB 删除对应行。
+    pub fn clear_finished_tasks(&mut self) {
+        let before = self.tasks.len();
+        self.tasks.retain(|t| t.is_running());
+        let removed = before - self.tasks.len();
+        if let Err(e) = crate::db::tasks::delete_finished(self.db.conn()) {
+            tracing::warn!("clear_finished_tasks db delete failed: {e}");
+        } else if removed > 0 {
+            self.show_toast(format!("已清除 {removed} 条记录"));
+        }
     }
 
     /// 派一个新的下载任务到后台。返回新任务的 id。
@@ -732,9 +940,11 @@ impl SoNovelApp {
         let task = DownloadTask {
             id,
             origin: target,
-            rx,
-            cancel,
-            started_at: Instant::now(),
+            rx: Some(rx),
+            cancel: Some(cancel),
+            cancelling: false,
+            started_at_unix: now_unix_secs(),
+            finished_at_unix: None,
             book_meta: None,
             total_chapters: 0,
             completed: 0,
@@ -743,6 +953,7 @@ impl SoNovelApp {
             finished: None,
             failures: Vec::new(),
         };
+        self.save_task_to_db(&task);
         self.tasks.push(task);
         id
     }
@@ -763,6 +974,11 @@ impl SoNovelApp {
         self.search.results.clear();
         self.search.source_status.clear();
         self.search.received = 0;
+        // 重新搜索：列表内容会被刷新，滚动条也得归零，否则用户上一次滚到第 N 条的位置
+        // 会在新结果上沿用 — 视觉上像"新搜索丢了头几条"。
+        self.search.pending_scroll_top = true;
+        self.search.selected = None;
+        self.search.detail_popup_for = None;
 
         // 决定要搜哪些源。
         let target_sources: Vec<crate::rules::Source> = if let Some(id) = self.search.source_id {
@@ -894,18 +1110,17 @@ impl SoNovelApp {
         self.runtime.spawn(async move {
             let url_for_event = url.clone();
             let cf = cf_bypass.clone();
-            let result: Result<crate::models::Book, String> =
-                tokio::task::spawn_blocking(move || {
-                    let opts = crate::http::client::ClientOptions {
-                        unsafe_ssl: rule.ignore_ssl,
-                    };
-                    let client = crate::http::client::build_blocking_client(&cfg, &opts)
-                        .map_err(|e| format!("client: {e:#}"))?;
-                    crate::parser::parse_book_detail(&client, &rule, &url, cf.as_deref())
-                        .map_err(|e| format!("{e}"))
-                })
-                .await
-                .unwrap_or_else(|join_err| Err(format!("spawn_blocking: {join_err}")));
+            let result: Result<crate::models::Book, String> = async {
+                let opts = crate::http::client::ClientOptions {
+                    unsafe_ssl: rule.ignore_ssl,
+                };
+                let client = crate::http::client::build_async_client(&cfg, &opts)
+                    .map_err(|e| format!("client: {e:#}"))?;
+                crate::parser::parse_book_detail(&client, &rule, &url, cf.as_deref())
+                    .await
+                    .map_err(|e| format!("{e}"))
+            }
+            .await;
 
             let state = match result {
                 Ok(book) => DetailState::Loaded(Box::new(book)),
@@ -1102,7 +1317,16 @@ impl eframe::App for SoNovelApp {
                 .spawn_cover_download(sid, &url, &self.config, self.runtime);
         }
         for t in self.tasks.iter_mut() {
+            let was_running = t.is_running();
             any_progress |= t.drain();
+            // running → finished 转换的瞬间：写 DB 一次最终态。
+            // 只在这一刻写，避免每帧 chapter_done 都触发 SQLite 写。
+            if was_running && !t.is_running() {
+                let rec = t.to_record();
+                if let Err(e) = crate::db::tasks::upsert(self.db.conn(), &rec) {
+                    tracing::warn!("save task on finish failed: {e}");
+                }
+            }
         }
         any_progress |= self.sources_state.drain();
         let ctx = ui.ctx().clone();

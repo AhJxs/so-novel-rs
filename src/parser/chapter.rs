@@ -21,7 +21,7 @@
 use anyhow::Result;
 use once_cell::sync::Lazy;
 use regex::Regex;
-use reqwest::blocking::Client;
+use reqwest::Client;
 use scraper::{Html, Selector};
 use thiserror::Error;
 
@@ -51,7 +51,7 @@ pub enum ChapterError {
 /// 未做清洗 / 模板渲染 — 那些在阶段 3 的 ChapterFilter/Formatter 里做）。
 ///
 /// `cf_bypass_base` 同其它 parser。
-pub fn parse_chapter(
+pub async fn parse_chapter(
     client: &Client,
     rule: &Rule,
     chapter: &Chapter,
@@ -63,9 +63,9 @@ pub fn parse_chapter(
         .ok_or(ChapterError::ChapterRuleMissing)?;
 
     let content = if chapter_rule.pagination {
-        fetch_paginated_content(client, rule, &chapter.url, cf_bypass_base)?
+        fetch_paginated_content(client, rule, &chapter.url, cf_bypass_base).await?
     } else {
-        fetch_single_page_content(client, rule, &chapter.url, cf_bypass_base)?
+        fetch_single_page_content(client, rule, &chapter.url, cf_bypass_base).await?
     };
 
     Ok(Chapter {
@@ -93,7 +93,7 @@ pub fn parse_chapter_html(html: &str, rule: &Rule) -> Result<String, ChapterErro
     Ok(content)
 }
 
-fn fetch_single_page_content(
+async fn fetch_single_page_content(
     client: &Client,
     rule: &Rule,
     url: &str,
@@ -104,11 +104,11 @@ fn fetch_single_page_content(
         .as_ref()
         .ok_or(ChapterError::ChapterRuleMissing)?;
 
-    let html = fetch_with_cf_fallback(client, url, chapter_rule.timeout, cf_bypass_base)?;
+    let html = fetch_with_cf_fallback(client, url, chapter_rule.timeout, cf_bypass_base).await?;
     parse_chapter_html(&html, rule)
 }
 
-fn fetch_paginated_content(
+async fn fetch_paginated_content(
     client: &Client,
     rule: &Rule,
     start_url: &str,
@@ -125,43 +125,62 @@ fn fetch_paginated_content(
     // 防御性上限：单章超过 50 页基本是反爬死循环
     for _ in 0..50 {
         let html =
-            fetch_with_cf_fallback(client, &current_url, chapter_rule.timeout, cf_bypass_base)?;
-        let document = Html::parse_document(&html);
+            fetch_with_cf_fallback(client, &current_url, chapter_rule.timeout, cf_bypass_base)
+                .await?;
+        // ⚠️ scraper 的 Html 不是 Send（包含 Rc），不能跨 await 持有。
+        // 把"解析 + 选 + 拼"全部放在一个 sync 子作用域里，先用 `let next_url = { ... }`
+        // 把需要带出 await 之外的值（next_url / 是否终止）抽完，Html 就在子作用域结束时 drop。
+        let (content, next_step) = {
+            let document = Html::parse_document(&html);
 
-        let content = select_and_invoke_js(&document, &chapter_rule.content, ContentType::Html)?;
-        if content.is_empty() {
-            return Err(ChapterError::EmptyContent(format!(
-                "{} returned empty at {current_url}",
-                chapter_rule.content
-            )));
-        }
+            let content =
+                select_and_invoke_js(&document, &chapter_rule.content, ContentType::Html)?;
+            if content.is_empty() {
+                return Err(ChapterError::EmptyContent(format!(
+                    "{} returned empty at {current_url}",
+                    chapter_rule.content
+                )));
+            }
+
+            // 找下一页元素，解析候选 URL
+            let next_sel = if chapter_rule.next_page.is_empty() {
+                None
+            } else {
+                Selector::parse(&chapter_rule.next_page).ok()
+            };
+            let next_els: Vec<scraper::ElementRef<'_>> = match &next_sel {
+                Some(s) => document.select(s).collect(),
+                None => Vec::new(),
+            };
+
+            let candidate_next =
+                resolve_next_url(&document, &next_els, chapter_rule, &current_url)?;
+            let step = if is_last_page(&candidate_next, &next_els, chapter_rule) {
+                NextStep::Stop
+            } else {
+                match candidate_next {
+                    Some(next_url) if next_url != current_url => NextStep::Goto(next_url),
+                    _ => NextStep::Stop,
+                }
+            };
+            (content, step)
+        };
+
         buf.push_str(&content);
 
-        // 找下一页元素，解析候选 URL
-        let next_sel = if chapter_rule.next_page.is_empty() {
-            None
-        } else {
-            Selector::parse(&chapter_rule.next_page).ok()
-        };
-        let next_els: Vec<scraper::ElementRef<'_>> = match &next_sel {
-            Some(s) => document.select(s).collect(),
-            None => Vec::new(),
-        };
-
-        let candidate_next = resolve_next_url(&document, &next_els, chapter_rule, &current_url)?;
-        if is_last_page(&candidate_next, &next_els, chapter_rule) {
-            break;
+        match next_step {
+            NextStep::Stop => break,
+            NextStep::Goto(next_url) => current_url = next_url,
         }
-        let Some(next_url) = candidate_next else {
-            break;
-        };
-        if next_url == current_url {
-            break;
-        }
-        current_url = next_url;
     }
 
     Ok(buf)
+}
+
+/// 分页正文抓取的下一步动作。把 Html 析出 await 之外用的辅助 enum。
+enum NextStep {
+    Stop,
+    Goto(String),
 }
 
 /// 在已解析的页面里找下一页 URL。
@@ -222,7 +241,7 @@ static PAGINATION_URL_RE: Lazy<Regex> =
 static NEXT_CHAPTER_TEXT_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"(下一章|没有了|>>|书末页)").expect("next chapter text re"));
 
-fn fetch_with_cf_fallback(
+async fn fetch_with_cf_fallback(
     client: &Client,
     url: &str,
     timeout: Option<u32>,
@@ -237,11 +256,13 @@ fn fetch_with_cf_fallback(
             timeout_secs: timeout,
         },
     )
+    .await
     .map_err(|e| ChapterError::Http(format!("{e:#}")))?;
 
     if has_cloudflare(&resp.html) {
         match cf_bypass_base.filter(|s| !s.trim().is_empty()) {
             Some(base) => fetch_via_cf_bypass(client, base, url)
+                .await
                 .map_err(|e| ChapterError::Http(format!("cf-bypass: {e:#}"))),
             None => Err(ChapterError::Cloudflare(resp.final_url)),
         }

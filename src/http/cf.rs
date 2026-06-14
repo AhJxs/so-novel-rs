@@ -15,7 +15,7 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use once_cell::sync::Lazy;
 use regex::Regex;
-use reqwest::blocking::Client;
+use reqwest::Client;
 
 const CF_TITLES: &[&str] = &[
     "Just a moment...",
@@ -43,7 +43,7 @@ pub fn has_cloudflare(html: &str) -> bool {
 ///
 /// Java 端用 hutool `HttpUtil.get(...)` 同步请求；这里复用调用方
 /// 已经构造好的 `Client`（保持 cookie / 代理一致）。
-pub fn fetch_via_cf_bypass(
+pub async fn fetch_via_cf_bypass(
     client: &Client,
     cf_bypass_base: &str,
     target_url: &str,
@@ -60,11 +60,13 @@ pub fn fetch_via_cf_bypass(
         .get(&url)
         .timeout(Duration::from_secs(30))
         .send()
+        .await
         .with_context(|| format!("call cf-bypass failed: {url}"))?;
 
     let status = resp.status();
     let text = resp
         .text()
+        .await
         .with_context(|| format!("read cf-bypass body failed: {url}"))?;
 
     if !status.is_success() {

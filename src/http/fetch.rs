@@ -1,7 +1,9 @@
 //! 单次 HTTP 请求封装。对应 Java `util.CrawlUtils#request` + 编码兜底。
 //!
-//! 这一层是同步阻塞接口，让 parser 测试无需 async 框架。
-//! 阶段 3 接下载调度时会再写一份 async fetch，复用同样的编码 / CF 逻辑。
+//! **async 版本**（`fetch`）：用 `reqwest::Client`（非 blocking），配合
+//! `tokio::select!` 可以让外部 cancel 立刻中断 in-flight 请求。
+//! 之前用 `reqwest::blocking::Client` + `tokio::task::spawn_blocking` 那条
+//! 路线在 cancel 时只能等 HTTP 自己超时（最坏 10s），用户感知就是"没反应"。
 //!
 //! 单次抓取的责任：
 //! 1. 加 UA / Referer / Cookie 头；
@@ -13,8 +15,8 @@
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use reqwest::blocking::Client;
 use reqwest::header::{ACCEPT, COOKIE, REFERER, USER_AGENT};
+use reqwest::Client;
 
 use crate::http::encoding::decode_response_bytes;
 use crate::http::ua::random_ua;
@@ -43,7 +45,10 @@ pub struct FetchResponse {
 }
 
 /// 执行一次抓取。
-pub fn fetch(client: &Client, req: &FetchRequest<'_>) -> Result<FetchResponse> {
+///
+/// Async：调用方在 `tokio::select!` 里 race 这个 future 和 cancel 信号，
+/// 取消时 in-flight HTTP 立刻被 drop（reqwest 关闭底层连接），无超时等待。
+pub async fn fetch(client: &Client, req: &FetchRequest<'_>) -> Result<FetchResponse> {
     let referer = origin_or_self(req.url);
     let ua = random_ua();
 
@@ -69,6 +74,7 @@ pub fn fetch(client: &Client, req: &FetchRequest<'_>) -> Result<FetchResponse> {
 
     let resp = builder
         .send()
+        .await
         .with_context(|| format!("HTTP send failed: {}", req.url))?;
 
     let status = resp.status().as_u16();
@@ -81,6 +87,7 @@ pub fn fetch(client: &Client, req: &FetchRequest<'_>) -> Result<FetchResponse> {
 
     let bytes = resp
         .bytes()
+        .await
         .with_context(|| format!("read body failed: {}", req.url))?;
 
     let html = decode_response_bytes(&bytes, content_type.as_deref());

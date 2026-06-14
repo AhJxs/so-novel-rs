@@ -3,7 +3,7 @@
 //! 与 Java 端逻辑一致：随机选 OS + 浏览器 + 主版本号，按 4 种格式拼接。
 //! 主要用途是规避一部分书源对单一 UA 的速率限制。
 
-use rand::Rng;
+use rand::RngExt;
 
 const DESKTOP_OS: &[&str] = &[
     "Windows NT 6.1; Win64; x64",
@@ -20,12 +20,12 @@ const MIN_VERSION: u32 = 86;
 const MAX_VERSION: u32 = 145;
 
 pub fn random_ua() -> String {
-    let mut rng = rand::thread_rng();
-    let os = DESKTOP_OS[rng.gen_range(0..DESKTOP_OS.len())];
-    let browser = BROWSERS[rng.gen_range(0..BROWSERS.len())];
-    let major = rng.gen_range(MIN_VERSION..=MAX_VERSION);
-    let minor = rng.gen_range(0..10);
-    let build = rng.gen_range(0..1000);
+    let mut rng = rand::rng();
+    let os = DESKTOP_OS[rng.random_range(0..DESKTOP_OS.len())];
+    let browser = BROWSERS[rng.random_range(0..BROWSERS.len())];
+    let major = rng.random_range(MIN_VERSION..=MAX_VERSION);
+    let minor = rng.random_range(0..10);
+    let build = rng.random_range(0..1000);
 
     match browser {
         "Chrome" => format!(

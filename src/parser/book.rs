@@ -15,7 +15,7 @@
 //! - CF bypass 旁路（属阶段 2c）。
 
 use anyhow::Result;
-use reqwest::blocking::Client;
+use reqwest::Client;
 use scraper::Html;
 use thiserror::Error;
 
@@ -42,7 +42,7 @@ pub enum BookError {
 /// 抓取 + 解析详情页。
 ///
 /// `cf_bypass_base` 同 `search_one`：CF 命中时若非空则自动重试 bypass 服务。
-pub fn parse_book_detail(
+pub async fn parse_book_detail(
     client: &Client,
     rule: &Rule,
     url: &str,
@@ -59,11 +59,13 @@ pub fn parse_book_detail(
             timeout_secs: book_rule.timeout,
         },
     )
+    .await
     .map_err(|e| BookError::Http(format!("{e:#}")))?;
 
     let html_after_cf = if has_cloudflare(&response.html) {
         match cf_bypass_base.filter(|s| !s.trim().is_empty()) {
             Some(base) => fetch_via_cf_bypass(client, base, url)
+                .await
                 .map_err(|e| BookError::Http(format!("cf-bypass: {e:#}")))?,
             None => return Err(BookError::Cloudflare(response.final_url.clone())),
         }
@@ -292,15 +294,15 @@ mod tests {
     }
 
     /// 真实联网测试：默认 ignore。
-    #[test]
+    #[tokio::test]
     #[ignore = "live network: depends on 22biqu availability"]
-    fn live_22biqu_book_detail_parses() {
+    async fn live_22biqu_book_detail_parses() {
         use crate::config::AppConfig;
-        use crate::http::client::{build_blocking_client, ClientOptions};
+        use crate::http::client::{build_async_client, ClientOptions};
         use crate::parser::search::search_one;
 
         let cfg = AppConfig::default();
-        let client = build_blocking_client(&cfg, &ClientOptions::default()).unwrap();
+        let client = build_async_client(&cfg, &ClientOptions::default()).unwrap();
 
         // 先搜一下，拿到第一个结果的 URL。
         let mut search_rule: Rule = serde_json::from_str(
@@ -327,7 +329,7 @@ mod tests {
         search_rule.id = 5;
         apply_default_rule(&mut search_rule, LangType::ZhCn);
 
-        let results = match search_one(&client, &search_rule, "诡秘之主", Some(1), None) {
+        let results = match search_one(&client, &search_rule, "诡秘之主", Some(1), None).await {
             Ok(v) => v,
             Err(e) => {
                 eprintln!("live search soft-skip: {e}");
@@ -339,7 +341,7 @@ mod tests {
             return;
         };
 
-        let book = match parse_book_detail(&client, &search_rule, &first.url, None) {
+        let book = match parse_book_detail(&client, &search_rule, &first.url, None).await {
             Ok(b) => b,
             Err(e) => {
                 eprintln!("live book detail soft-skip: {e}");

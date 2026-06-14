@@ -19,7 +19,7 @@
 //! - quanben5 加密参数 `b` 的特殊路径（属阶段 2c）。
 
 use anyhow::Result;
-use reqwest::blocking::Client;
+use reqwest::Client;
 use scraper::{Html, Selector};
 use thiserror::Error;
 
@@ -53,7 +53,7 @@ pub enum SearchError {
 /// `cf_bypass_base` 是 `[global] cf-bypass` 配置：若命中 CF 真人验证页
 /// 且该值非空，则自动重试外部 bypass 服务（详见 `http::cf::fetch_via_cf_bypass`）；
 /// 为空时直接返回 `SearchError::Cloudflare`。
-pub fn search_one(
+pub async fn search_one(
     client: &Client,
     rule: &Rule,
     keyword: &str,
@@ -77,7 +77,8 @@ pub fn search_one(
             keyword,
             limit,
             cf_bypass_base,
-        );
+        )
+        .await;
     }
 
     // 1. 构造请求
@@ -101,6 +102,7 @@ pub fn search_one(
                     timeout_secs: s.timeout,
                 },
             )
+            .await
             .map_err(|e| SearchError::Http(format!("{e:#}")))?
         }
         _ => fetch(
@@ -112,6 +114,7 @@ pub fn search_one(
                 timeout_secs: s.timeout,
             },
         )
+        .await
         .map_err(|e| SearchError::Http(format!("{e:#}")))?,
     };
 
@@ -119,6 +122,7 @@ pub fn search_one(
     let html_after_cf = if has_cloudflare(&response.html) {
         match cf_bypass_base.filter(|s| !s.trim().is_empty()) {
             Some(base) => fetch_via_cf_bypass(client, base, &url_with_keyword)
+                .await
                 .map_err(|e| SearchError::Http(format!("cf-bypass: {e:#}")))?,
             None => return Err(SearchError::Cloudflare(response.final_url)),
         }
@@ -358,18 +362,18 @@ mod tests {
     /// **真实联网测试**：默认 ignore，本机用 `cargo test -- --ignored` 跑。
     /// 无法保证书源稳定可用（被限流 / 维护时会失败），所以**不能**作为
     /// 阻塞性测试。本测试只断言"能联通且返回非零结果"。
-    #[test]
+    #[tokio::test]
     #[ignore = "live network: depends on 22biqu availability"]
-    fn live_22biqu_search_returns_non_empty() {
+    async fn live_22biqu_search_returns_non_empty() {
         use crate::config::AppConfig;
-        use crate::http::client::{build_blocking_client, ClientOptions};
+        use crate::http::client::{build_async_client, ClientOptions};
 
         let cfg = AppConfig::default();
-        let client = build_blocking_client(&cfg, &ClientOptions::default()).unwrap();
+        let client = build_async_client(&cfg, &ClientOptions::default()).unwrap();
         let rule = rule_22biqu();
 
         // 用一个常见的关键词；具体能否搜到与书源数据相关。
-        let results = match search_one(&client, &rule, "诡秘之主", Some(5), None) {
+        let results = match search_one(&client, &rule, "诡秘之主", Some(5), None).await {
             Ok(v) => v,
             Err(e) => {
                 eprintln!("live test soft-skip: {e}");

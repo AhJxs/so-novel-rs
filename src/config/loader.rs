@@ -369,6 +369,9 @@ pub struct ConfigPaths {
     /// 用户对书源的覆写（启用/禁用）。sidecar JSON，不污染上游 rules JSON。
     /// 与 `config_file` 同目录。
     pub source_overrides_file: PathBuf,
+    /// SQLite 数据库文件，存下载任务记录（后续书源管理也走这里）。
+    /// 与 `config_file` 同目录。
+    pub download_db_file: PathBuf,
 }
 
 impl ConfigPaths {
@@ -385,6 +388,10 @@ impl ConfigPaths {
                     .parent()
                     .map(|p| p.join("source-overrides.json"))
                     .unwrap_or_else(|| PathBuf::from("source-overrides.json")),
+                download_db_file: dev_cfg
+                    .parent()
+                    .map(|p| p.join("downloads.db"))
+                    .unwrap_or_else(|| PathBuf::from("downloads.db")),
                 config_file: dev_cfg,
                 rules_dir: dev_rules,
             };
@@ -392,6 +399,7 @@ impl ConfigPaths {
 
         Self {
             source_overrides_file: cwd.join("source-overrides.json"),
+            download_db_file: cwd.join("downloads.db"),
             config_file: cwd.join("config.ini"),
             rules_dir: cwd.join("rules"),
         }

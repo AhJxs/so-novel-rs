@@ -18,7 +18,7 @@
 use anyhow::Result;
 use once_cell::sync::Lazy;
 use regex::Regex;
-use reqwest::blocking::Client;
+use reqwest::Client;
 use scraper::{Html, Selector};
 use thiserror::Error;
 
@@ -44,7 +44,7 @@ pub enum TocError {
 ///
 /// `book_url` 是详情页 URL（与 SearchResult.url 一致）。
 /// `cf_bypass_base` 同其它 parser：CF 命中且非空时调用旁路服务。
-pub fn parse_toc(
+pub async fn parse_toc(
     client: &Client,
     rule: &Rule,
     book_url: &str,
@@ -65,7 +65,8 @@ pub fn parse_toc(
     };
 
     // 3. 抓第一页，按需走 CF 旁路。
-    let first_html = fetch_with_cf_fallback(client, &first_url, toc_rule.timeout, cf_bypass_base)?;
+    let first_html =
+        fetch_with_cf_fallback(client, &first_url, toc_rule.timeout, cf_bypass_base).await?;
 
     // 4. 收集所有分页 URL（含第一页，按出现顺序去重）。
     let mut page_urls: Vec<String> = vec![first_url.clone()];
@@ -78,7 +79,8 @@ pub fn parse_toc(
             &toc_rule.next_page,
             toc_rule.timeout,
             cf_bypass_base,
-        )?;
+        )
+        .await?;
         for u in extra {
             if !page_urls.contains(&u) {
                 page_urls.push(u);
@@ -94,7 +96,7 @@ pub fn parse_toc(
             // 第一页 HTML 已经抓过，不重复发请求
             first_html.clone()
         } else {
-            fetch_with_cf_fallback(client, page_url, toc_rule.timeout, cf_bypass_base)?
+            fetch_with_cf_fallback(client, page_url, toc_rule.timeout, cf_bypass_base).await?
         };
         let mut items = parse_one_toc_page(
             &html,
@@ -195,7 +197,7 @@ fn push_chapter(
 /// 1. 先用 nextPage 选择器拿一组元素，若它们带 `value` 属性 →
 ///    把每个的 `value`（或 `href`）作为分页 URL（与 select-option 等价）。
 /// 2. 否则递归翻页：每抓一页都用 nextPage 拿"下一页"那一个 URL，直到拿不到。
-fn collect_pagination_urls(
+async fn collect_pagination_urls(
     client: &Client,
     first_html: &str,
     first_url: &str,
@@ -204,6 +206,57 @@ fn collect_pagination_urls(
     timeout: Option<u32>,
     cf_bypass_base: Option<&str>,
 ) -> Result<Vec<String>, TocError> {
+    // 模式 1（select-option）：完全在 first_html 上就能搞定，不涉及 await。
+    // 用单独 sync 函数隔离 scraper::Html，避免跨 await 持有非 Send 类型。
+    if let Some(option_urls) =
+        collect_option_pagination_urls(first_html, first_url, toc_base_uri, next_page_query)?
+    {
+        return Ok(option_urls);
+    }
+
+    // 模式 2：递归翻页 — 每翻一次都要 await 抓页，所以 Html 不能跨 await 持有。
+    let sel = Selector::parse(next_page_query).map_err(|e| {
+        TocError::Parse(format!("无效的 nextPage 选择器 `{next_page_query}`: {e:?}"))
+    })?;
+    let mut out: Vec<String> = Vec::new();
+    let mut current_html = first_html.to_string();
+    let mut current_url = first_url.to_string();
+    // 保险阀：现实中分页不会超过几十页；上限 200 防止反爬死循环。
+    for _ in 0..200 {
+        // sync 子作用域：解析 + 选 + 拼下一 URL，把 next_url 析出后再 await
+        let next_url_opt: Option<String> = {
+            let doc = Html::parse_document(&current_html);
+            let elements: Vec<scraper::ElementRef<'_>> = doc.select(&sel).collect();
+            (|| {
+                let next_el = elements.first()?;
+                let href = next_el.value().attr("href")?;
+                let next = abs_url(&resolve_base_for_join(toc_base_uri, &current_url), href)?;
+                if next == current_url || out.contains(&next) {
+                    return None;
+                }
+                Some(next)
+            })()
+        };
+        let Some(next_url) = next_url_opt else {
+            break;
+        };
+        out.push(next_url.clone());
+        current_html =
+            fetch_with_cf_fallback(client, &next_url, timeout, cf_bypass_base).await?;
+        current_url = next_url;
+    }
+
+    Ok(out)
+}
+
+/// 模式 1 实现：把 `nextPage` 选中的 option/链接里的 `value`/`href` 全部当成分页 URL。
+/// 返回 `Some(urls)` 表示命中模式 1；返回 `Ok(None)` 表示需要走模式 2（递归翻页）。
+fn collect_option_pagination_urls(
+    first_html: &str,
+    first_url: &str,
+    toc_base_uri: &str,
+    next_page_query: &str,
+) -> Result<Option<Vec<String>>, TocError> {
     let document = Html::parse_document(first_html);
     let sel = Selector::parse(next_page_query).map_err(|e| {
         TocError::Parse(format!("无效的 nextPage 选择器 `{next_page_query}`: {e:?}"))
@@ -212,56 +265,27 @@ fn collect_pagination_urls(
     let elements: Vec<scraper::ElementRef<'_>> = document.select(&sel).collect();
     let base = resolve_base_for_join(toc_base_uri, first_url);
 
-    // 模式 1：option 下拉一次性取全
     let any_value = elements.iter().any(|e| e.value().attr("value").is_some());
-    if any_value {
-        let attr_key = if elements.iter().all(|e| e.value().attr("href").is_none()) {
-            "value"
-        } else {
-            "href"
-        };
-        let mut out = Vec::new();
-        for e in &elements {
-            if let Some(raw) = e.value().attr(attr_key) {
-                if let Some(abs) = abs_url(&base, raw) {
-                    out.push(abs);
-                }
+    if !any_value {
+        return Ok(None);
+    }
+    let attr_key = if elements.iter().all(|e| e.value().attr("href").is_none()) {
+        "value"
+    } else {
+        "href"
+    };
+    let mut out = Vec::new();
+    for e in &elements {
+        if let Some(raw) = e.value().attr(attr_key) {
+            if let Some(abs) = abs_url(&base, raw) {
+                out.push(abs);
             }
         }
-        return Ok(out);
     }
-
-    // 模式 2：递归翻页
-    let mut out: Vec<String> = Vec::new();
-    let mut current_html = first_html.to_string();
-    let mut current_url = first_url.to_string();
-    // 保险阀：现实中分页不会超过几十页；上限 200 防止反爬死循环。
-    for _ in 0..200 {
-        let doc = Html::parse_document(&current_html);
-        let elements: Vec<scraper::ElementRef<'_>> = doc.select(&sel).collect();
-        let Some(next_el) = elements.first() else {
-            break;
-        };
-        let Some(href) = next_el.value().attr("href") else {
-            break;
-        };
-        let Some(next_url) = abs_url(&resolve_base_for_join(toc_base_uri, &current_url), href)
-        else {
-            break;
-        };
-        if next_url == current_url || out.contains(&next_url) {
-            break;
-        }
-
-        out.push(next_url.clone());
-        current_html = fetch_with_cf_fallback(client, &next_url, timeout, cf_bypass_base)?;
-        current_url = next_url;
-    }
-
-    Ok(out)
+    Ok(Some(out))
 }
 
-fn fetch_with_cf_fallback(
+async fn fetch_with_cf_fallback(
     client: &Client,
     url: &str,
     timeout: Option<u32>,
@@ -276,11 +300,13 @@ fn fetch_with_cf_fallback(
             timeout_secs: timeout,
         },
     )
+    .await
     .map_err(|e| TocError::Http(format!("{e:#}")))?;
 
     if has_cloudflare(&resp.html) {
         match cf_bypass_base.filter(|s| !s.trim().is_empty()) {
             Some(base) => fetch_via_cf_bypass(client, base, url)
+                .await
                 .map_err(|e| TocError::Http(format!("cf-bypass: {e:#}"))),
             None => Err(TocError::Cloudflare(resp.final_url)),
         }

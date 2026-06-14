@@ -28,7 +28,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use rand::Rng;
+use rand::RngExt;
 use thiserror::Error;
 use tokio::sync::{mpsc, Semaphore};
 
@@ -37,7 +37,7 @@ use crate::export::{
     build_book_dir_name, exporter_for, write_chapter_files, ExportError, RenderTarget,
     RenderedChapter,
 };
-use crate::http::client::{build_blocking_client, ClientOptions};
+use crate::http::client::{build_async_client, ClientOptions};
 use crate::models::{Book, Chapter};
 use crate::parser::{
     parse_book_detail, parse_chapter, parse_toc, BookError, ChapterError, TocError,
@@ -105,7 +105,8 @@ pub struct DownloadOptions {
     pub cancel: CancelToken,
 }
 
-/// 入口：抓一本书并导出。**异步**：内部用 spawn_blocking 调用同步 parser。
+/// 入口：抓一本书并导出。**全 async**：内部直接 await 各级 parser，
+/// 配合 `tokio::select!` 让外部 `cancel` 信号瞬间中断 in-flight HTTP（reqwest 关闭连接）。
 ///
 /// 返回成品文件路径（一个 `.epub` / `.txt` / `.zip`）。
 pub async fn download_book(
@@ -116,11 +117,13 @@ pub async fn download_book(
 ) -> Result<PathBuf, CrawlerError> {
     let DownloadOptions { progress, cancel } = opts;
 
-    // 1. HTTP 客户端 — 阻塞客户端，parser 是同步的
+    // 1. HTTP 客户端 — async 客户端，跟 parser 的 async 路径一致；
+    //    reqwest::Client::send 在 future 被 drop 时会立即关闭底层连接，
+    //    所以 cancel 触发即"零延迟"中断。
     let client_options = ClientOptions {
         unsafe_ssl: source.rule.ignore_ssl,
     };
-    let client = build_blocking_client(cfg, &client_options)
+    let client = build_async_client(cfg, &client_options)
         .map_err(|e| CrawlerError::Client(format!("{e:#}")))?;
 
     let cf_bypass = if cfg.cf_bypass.trim().is_empty() {
@@ -129,36 +132,30 @@ pub async fn download_book(
         Some(cfg.cf_bypass.as_str())
     };
 
-    // 2. 详情 + 目录（同步调用，但放 spawn_blocking 避免阻塞 runtime）
+    // 2. 详情 + 目录：直接 await，配合 select! 接 cancel
     let rule = source.rule.clone();
     let book_url_owned = book_url.to_string();
     let cf_bypass_owned = cf_bypass.map(String::from);
-    let client_for_meta = client.clone();
-    let book = {
-        let rule = rule.clone();
-        let url = book_url_owned.clone();
-        let cf = cf_bypass_owned.clone();
-        tokio::task::spawn_blocking(move || {
-            parse_book_detail(&client_for_meta, &rule, &url, cf.as_deref())
-        })
-        .await
-        .map_err(|e| CrawlerError::Client(format!("spawn_blocking: {e}")))??
-    };
+    let book = race_with_cancel(
+        parse_book_detail(&client, &rule, &book_url_owned, cf_bypass_owned.as_deref()),
+        &cancel,
+        &progress,
+    )
+    .await?
+    .map_err(CrawlerError::Book)?;
 
     if cancel.is_cancelled() {
         let _ = progress.send(Progress::Cancelled);
         return Err(CrawlerError::Cancelled);
     }
 
-    let toc: Vec<Chapter> = {
-        let rule = rule.clone();
-        let url = book_url_owned.clone();
-        let cf = cf_bypass_owned.clone();
-        let client_for_toc = client.clone();
-        tokio::task::spawn_blocking(move || parse_toc(&client_for_toc, &rule, &url, cf.as_deref()))
-            .await
-            .map_err(|e| CrawlerError::Client(format!("spawn_blocking: {e}")))??
-    };
+    let toc: Vec<Chapter> = race_with_cancel(
+        parse_toc(&client, &rule, &book_url_owned, cf_bypass_owned.as_deref()),
+        &cancel,
+        &progress,
+    )
+    .await?
+    .map_err(CrawlerError::Toc)?;
 
     if toc.is_empty() {
         return Err(CrawlerError::EmptyToc);
@@ -193,6 +190,8 @@ pub async fn download_book(
 
     for chapter in toc {
         if cancel.is_cancelled() {
+            // dispatch 阶段被取消：dir 里还没写过任何章节文件，安全清理。
+            cleanup_chapters_dir_if_empty(&chapters_dir);
             let _ = progress.send(Progress::Cancelled);
             return Err(CrawlerError::Cancelled);
         }
@@ -210,13 +209,19 @@ pub async fn download_book(
             // 限并发
             let _permit = permit.acquire_owned().await.expect("semaphore not closed");
 
-            // 章节内随机间隔（爬取礼貌性）
+            // 章节内随机间隔（爬取礼貌性）。
+            // 用 select! 配合 cancel — interval 一般是 100ms-2s，整段 sleep
+            // 期间用户取消应当瞬间响应，不能傻等到 sleep 结束。
             let interval = {
                 let lo = eff.min_interval_ms.max(1) as u64;
                 let hi = eff.max_interval_ms.max(eff.min_interval_ms + 1) as u64;
-                rand::thread_rng().gen_range(lo..=hi)
+                rand::rng().random_range(lo..=hi)
             };
-            tokio::time::sleep(Duration::from_millis(interval)).await;
+            tokio::select! {
+                biased;
+                _ = wait_cancelled(&cancel) => return ChapterOutcome::Cancelled(chapter),
+                _ = tokio::time::sleep(Duration::from_millis(interval)) => {}
+            }
 
             if cancel.is_cancelled() {
                 return ChapterOutcome::Cancelled(chapter);
@@ -228,13 +233,21 @@ pub async fn download_book(
             let order = chapter.order;
             let title = chapter.title.clone();
 
-            let result = retry::retry_with_backoff(
+            // 把章节抓取整段（含重试）和 cancel 信号 race；cancel 一来 future
+            // 立刻被 drop，reqwest::Client::send 关闭底层连接 — 真·零延迟。
+            let fetch_future = retry::retry_with_backoff(
                 |_attempt| {
-                    if cancel.is_cancelled() {
-                        // 用一个特殊错误表示取消，下面会被忽略
-                        return Err(ChapterError::Http("cancelled".to_string()));
+                    let client = client.clone();
+                    let rule = rule.clone();
+                    let chapter = chapter.clone();
+                    let cf = cf.clone();
+                    let cancel = cancel.clone();
+                    async move {
+                        if cancel.is_cancelled() {
+                            return Err(ChapterError::Http("cancelled".to_string()));
+                        }
+                        parse_chapter(&client, &rule, &chapter, cf.as_deref()).await
                     }
-                    parse_chapter(&client, &rule, &chapter, cf.as_deref())
                 },
                 max_attempts,
                 |attempt| async move {
@@ -242,8 +255,15 @@ pub async fn download_book(
                     let dur = retry::linear_backoff(base, attempt);
                     tokio::time::sleep(dur).await;
                 },
-            )
-            .await;
+            );
+
+            let result = tokio::select! {
+                biased;
+                _ = wait_cancelled(&cancel) => {
+                    return ChapterOutcome::Cancelled(chapter);
+                }
+                r = fetch_future => r,
+            };
 
             match result {
                 Ok(parsed) => {
@@ -276,28 +296,47 @@ pub async fn download_book(
         }));
     }
 
-    // 5. 收尾
+    // 5. 收尾。同时用 select! race "全部 join" 与 "cancel"：
+    //    - 用户取消 → 立即 abort 所有 chapter handle、发 Progress::Cancelled、return
+    //    - 正常完成 → 收 rendered
     let mut rendered: Vec<RenderedChapter> = Vec::new();
-    for h in handles {
-        match h.await {
-            Ok(ChapterOutcome::Done(r)) => rendered.push(r),
-            Ok(ChapterOutcome::Failed { .. }) => {
-                // 已通过 progress 报告失败；不计入 rendered。
-            }
-            Ok(ChapterOutcome::Cancelled(_)) => {
-                // 被取消的章节略过；最终是否取消由 cancel flag 决定。
-            }
-            Err(join_err) => {
-                tracing::warn!("章节任务 join 失败: {join_err}");
+    let drain_handles = async {
+        for h in &mut handles {
+            match h.await {
+                Ok(ChapterOutcome::Done(r)) => rendered.push(r),
+                Ok(ChapterOutcome::Failed { .. }) => {}
+                Ok(ChapterOutcome::Cancelled(_)) => {}
+                Err(join_err) => {
+                    tracing::warn!("章节任务 join 失败: {join_err}");
+                }
             }
         }
+    };
+
+    tokio::select! {
+        biased;
+        _ = wait_cancelled(&cancel) => {
+            // 主动 abort 还在跑的章节 — 它们的 future 被 drop 后 reqwest 立刻关连接
+            for h in &handles {
+                h.abort();
+            }
+            // 章节文件要等到 select! 之后的 write_chapter_files 才落盘，
+            // 所以取消时 chapters_dir 一定是空的（除非用户事先放过文件） — 直接清理。
+            cleanup_chapters_dir_if_empty(&chapters_dir);
+            let _ = progress.send(Progress::Cancelled);
+            return Err(CrawlerError::Cancelled);
+        }
+        () = drain_handles => {}
     }
 
     if cancel.is_cancelled() {
+        cleanup_chapters_dir_if_empty(&chapters_dir);
         let _ = progress.send(Progress::Cancelled);
         return Err(CrawlerError::Cancelled);
     }
     if rendered.is_empty() {
+        // 所有章节都失败：跟取消同等处理 — dir 还是空的，清掉。
+        cleanup_chapters_dir_if_empty(&chapters_dir);
         return Err(CrawlerError::EmptyToc);
     }
 
@@ -310,7 +349,7 @@ pub async fn download_book(
 
     // 封面：仅 EPUB 才下载；失败 soft-skip。
     let cover_bytes = if matches!(render_target, RenderTarget::Epub) {
-        download_cover(&client, book.cover_url.as_deref())
+        download_cover(&client, book.cover_url.as_deref()).await
     } else {
         None
     };
@@ -362,23 +401,99 @@ fn compute_concurrency(source: &Source, toc_len: usize) -> usize {
     raw.min(toc_len.max(1)).max(1)
 }
 
-fn download_cover(client: &reqwest::blocking::Client, cover_url: Option<&str>) -> Option<Vec<u8>> {
+/// 取消 / 提前失败时清理 `chapters_dir`：**只删空目录**。
+///
+/// - 目录里已经写过章节文件（用户成功跑过部分章节但中途取消，下一轮"重试"想接着用）
+///   或用户事先在那放了别的文件 → 保留；
+/// - 目录是空的（典型场景：取消时还没来得及 `write_chapter_files`）→ 删掉，不留垃圾。
+///
+/// 用 `read_dir().next().is_none()` 判空，比 `remove_dir_all` 安全得多。
+/// 任何 IO 错误都只 `tracing::warn!` —— 清理失败不影响 cancel 主流程，下次启动用户
+/// 自己删也不痛。
+fn cleanup_chapters_dir_if_empty(dir: &std::path::Path) {
+    let Ok(mut entries) = std::fs::read_dir(dir) else {
+        // 目录不存在 / 读不了 — 没什么可清的
+        return;
+    };
+    if entries.next().is_some() {
+        // 非空：有人放过东西，保留
+        return;
+    }
+    // read_dir 拿到的迭代器在某些平台会持有目录句柄，必须显式 drop 再 remove，
+    // 否则 Windows 上偶发 "目录正在使用" 错误。
+    drop(entries);
+    if let Err(e) = std::fs::remove_dir(dir) {
+        tracing::warn!(
+            "清理空章节目录失败（已忽略）: {} — {e}",
+            dir.display()
+        );
+    } else {
+        tracing::debug!("已清理空章节目录: {}", dir.display());
+    }
+}
+
+async fn download_cover(client: &reqwest::Client, cover_url: Option<&str>) -> Option<Vec<u8>> {
     let url = cover_url?.trim();
     if url.is_empty() {
         return None;
     }
-    match client
+    let resp = match client
         .get(url)
         .timeout(Duration::from_secs(15))
         .send()
-        .and_then(|r| r.bytes())
+        .await
     {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::warn!("封面下载失败（已忽略，将不带封面导出）: {e}");
+            return None;
+        }
+    };
+    match resp.bytes().await {
         Ok(b) if !b.is_empty() => Some(b.to_vec()),
         Ok(_) => None,
         Err(e) => {
             tracing::warn!("封面下载失败（已忽略，将不带封面导出）: {e}");
             None
         }
+    }
+}
+
+/// 把 future race "用户取消"。cancel 命中时返回 `Err(CrawlerError::Cancelled)`，
+/// 同时主动发一次 `Progress::Cancelled`（保证 UI 立刻能看到）。
+///
+/// 用法是 `race_with_cancel(parse_*(...), &cancel, &progress).await?` —
+/// 返回 `Result<R, CrawlerError>`，业务结果再用 `.map_err(...)` 转换。
+async fn race_with_cancel<R, F>(
+    fut: F,
+    cancel: &CancelToken,
+    progress: &mpsc::UnboundedSender<Progress>,
+) -> Result<R, CrawlerError>
+where
+    F: std::future::Future<Output = R>,
+{
+    tokio::select! {
+        biased;
+        _ = wait_cancelled(cancel) => {
+            let _ = progress.send(Progress::Cancelled);
+            Err(CrawlerError::Cancelled)
+        }
+        r = fut => Ok(r),
+    }
+}
+
+/// 把 `CancelToken` 适配成 future：每 50ms poll 一次 atomic flag。
+///
+/// 之所以走 polling 而不是 tokio::sync::Notify：CancelToken 已经是
+/// `Arc<AtomicBool>`，在 UI / CLI / parser 多处共享，改 API 影响面太大。
+/// 50ms 足够"零延迟"用户感知（一帧 16ms 的 UI 多 50ms 反应人眼看不出），
+/// 并且 atomic load 几乎免费。
+async fn wait_cancelled(cancel: &CancelToken) {
+    loop {
+        if cancel.is_cancelled() {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
     }
 }
 

@@ -1,7 +1,7 @@
 //! 杂项工具。对应 Java `util.CrawlUtils` 中除 `hasCf`/`request` 之外的部分。
 
 use once_cell::sync::Lazy;
-use rand::Rng;
+use rand::RngExt;
 use regex::Regex;
 
 use crate::config::AppConfig;
@@ -82,21 +82,21 @@ fn url_encode_query_value(s: &str) -> String {
 pub fn random_interval_ms(eff: &EffectiveCrawl) -> u64 {
     let lo = eff.min_interval_ms as u64;
     let hi = eff.max_interval_ms.max(eff.min_interval_ms + 1) as u64;
-    rand::thread_rng().gen_range(lo..hi)
+    rand::rng().random_range(lo..hi)
 }
 
 /// 重试随机间隔（毫秒）。对应 Java `CrawlUtils.randomInterval(config, true)`。
 pub fn random_retry_interval_ms(eff: &EffectiveCrawl) -> u64 {
     let lo = eff.retry_min_interval_ms as u64;
     let hi = eff.retry_max_interval_ms.max(eff.retry_min_interval_ms + 1) as u64;
-    rand::thread_rng().gen_range(lo..hi)
+    rand::rng().random_range(lo..hi)
 }
 
 /// 也提供一个直接吃 `AppConfig` 的版本，便于不需要 EffectiveCrawl 的调用方。
 pub fn random_interval_from_cfg(cfg: &AppConfig) -> u64 {
     let lo = cfg.min_interval as u64;
     let hi = cfg.max_interval.max(cfg.min_interval + 1) as u64;
-    rand::thread_rng().gen_range(lo..hi)
+    rand::rng().random_range(lo..hi)
 }
 
 /// 清理不可见字符：控制字符、格式控制符、PUA、零宽字符等

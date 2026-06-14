@@ -2,6 +2,12 @@
 /target
 *.lock.bak
 
+# 运行时生成的 SQLite DB（下载任务持久化），仅本地使用
+/bundle/*.db
+/bundle/*.db-journal
+/bundle/*.db-wal
+/bundle/*.db-shm
+
 # 本地工具状态，不入库
 /.claude/
 /.codegraph/

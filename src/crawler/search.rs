@@ -3,16 +3,15 @@
 //! 在多个书源上并发执行 `search_one`，把结果合并成一个列表。
 //! 不做相似度过滤 / 排序 — 那属于阶段 5（参考 Java `SearchResultsHandler`）。
 //!
-//! 由于 parser 是同步的，这里用 `tokio::task::spawn_blocking` 并发分发，
-//! 与 `download_book` 的 spawn_blocking 模式一致。
+//! parser 是 async 的（基于 `reqwest::Client`），这里直接 spawn async task，
+//! 不再走 spawn_blocking。
 
 use std::sync::Arc;
-use std::time::Duration;
 
-use reqwest::blocking::Client;
+use reqwest::Client;
 use tokio::task::JoinSet;
 
-use crate::http::client::{build_blocking_client, ClientOptions};
+use crate::http::client::{build_async_client, ClientOptions};
 use crate::models::SearchResult;
 use crate::parser::{search_one, SearchError};
 use crate::rules::Source;
@@ -53,23 +52,16 @@ pub async fn search_aggregated(
         set.spawn(async move {
             let source_id = src.rule.id;
             let source_name = src.rule.name.clone();
-            let result = tokio::task::spawn_blocking(move || {
-                let client_opts = ClientOptions {
-                    unsafe_ssl: src.rule.ignore_ssl,
-                };
-                let client = match build_blocking_client(&cfg, &client_opts) {
-                    Ok(c) => c,
-                    Err(e) => {
-                        return Err(SearchError::Http(format!("client: {e:#}")));
-                    }
-                };
-                let cf_borrow: Option<&str> = cf.as_ref().as_ref().map(|s| s.as_str());
-                run_one(&client, &src, kw.as_str(), limit, cf_borrow)
-            })
-            .await
-            .unwrap_or_else(|join_err| {
-                Err(SearchError::Http(format!("spawn_blocking: {join_err}")))
-            });
+            let client_opts = ClientOptions {
+                unsafe_ssl: src.rule.ignore_ssl,
+            };
+            let result = match build_async_client(&cfg, &client_opts) {
+                Ok(client) => {
+                    let cf_borrow: Option<&str> = cf.as_ref().as_ref().map(|s| s.as_str());
+                    run_one(&client, &src, kw.as_str(), limit, cf_borrow).await
+                }
+                Err(e) => Err(SearchError::Http(format!("client: {e:#}"))),
+            };
             SourceSearchOutcome {
                 source_id,
                 source_name,
@@ -90,18 +82,15 @@ pub async fn search_aggregated(
     out
 }
 
-fn run_one(
+async fn run_one(
     client: &Client,
     source: &Source,
     keyword: &str,
     limit: Option<usize>,
     cf_bypass_base: Option<&str>,
 ) -> Result<Vec<SearchResult>, SearchError> {
-    // 给单源加一个保险超时（独立于 reqwest 自身），防止某个慢源拖死整个聚合搜索。
-    // 这里通过 client 自己的 timeout（已在 build_blocking_client 设置 10s）+ 上层
-    // 用户可见的进度显式取消即可；不再叠加 tokio timeout（spawn_blocking 不支持 race）。
-    let _ = Duration::from_secs(0); // 占位防止 unused import 警告，避免改动 use 行
-    search_one(client, &source.rule, keyword, limit, cf_bypass_base)
+    // 单源超时由 reqwest client 自身（10s）+ UI 取消保证；不再叠加 tokio timeout。
+    search_one(client, &source.rule, keyword, limit, cf_bypass_base).await
 }
 
 #[cfg(test)]

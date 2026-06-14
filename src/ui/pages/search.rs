@@ -509,27 +509,41 @@ fn show_results(ui: &mut egui::Ui, app: &mut SoNovelApp) {
 
     // 列表占满整个剩余宽度 + 高度。auto_shrink([false; 2]) 让 ScrollArea
     // 不收缩到内容尺寸，而是撑满父容器；这样下方有大片空白时也能滚动。
-    egui::ScrollArea::vertical()
+    //
+    // 重新搜索后 `pending_scroll_top = true` → 这一帧给 `vertical_scroll_offset(0.0)`
+    // 强制滚到顶；之后清零，用户继续手动滑就不再被打断。直接 every-frame 设 0.0
+    // 会导致永远滑不动。
+    let mut scroll = egui::ScrollArea::vertical()
         .id_salt("search_results_list")
-        .auto_shrink([false; 2])
-        .show(ui, |ui| {
-            let selected = app.search.selected;
-            // 每行一张卡片：宽度撑满（available_width），圆角 8，
-            // selected 时用 selection 强调色，hover 时浅底反馈。
-            for (idx, r) in app.search.results.iter().enumerate() {
-                let is_selected = selected == Some(idx);
-                let action = result_card(ui, idx, r, is_selected);
-                match action {
-                    CardAction::Download => to_download = Some(r.clone()),
-                    CardAction::OpenDetail => {
-                        to_select = Some(idx);
-                        app.search.detail_popup_for = Some(idx);
-                    }
-                    CardAction::None => {}
+        .auto_shrink([false; 2]);
+    if app.search.pending_scroll_top {
+        scroll = scroll.vertical_scroll_offset(0.0);
+        app.search.pending_scroll_top = false;
+    }
+    scroll.show(ui, |ui| {
+        // 把卡片宽度在循环外算一次，所有卡片共用同一个值。
+        // 不能在 result_card 内调 ui.available_width()：在 ScrollArea 里调，
+        // 第一张卡片渲染后的 min_rect 会反馈给 ScrollArea，ScrollArea 缓存到下一帧
+        // 时给的 inner_ui 宽度可能略不同，造成卡片"逐张变宽"的雪球。
+        // 在循环外取一次，硬约束每张卡片用同样的宽度。
+        let card_width = ui.available_width();
+        let selected = app.search.selected;
+        // 每行一张卡片：宽度撑满（available_width），圆角 8，
+        // selected 时用 selection 强调色，hover 时浅底反馈。
+        for (idx, r) in app.search.results.iter().enumerate() {
+            let is_selected = selected == Some(idx);
+            let action = result_card(ui, idx, r, is_selected, card_width);
+            match action {
+                CardAction::Download => to_download = Some(r.clone()),
+                CardAction::OpenDetail => {
+                    to_select = Some(idx);
+                    app.search.detail_popup_for = Some(idx);
                 }
-                ui.add_space(6.0);
+                CardAction::None => {}
             }
-        });
+            ui.add_space(6.0);
+        }
+    });
 
     if let Some(idx) = to_select {
         app.select_search_result(idx);
@@ -697,13 +711,21 @@ enum CardAction {
 
 /// 渲染一张搜索结果卡片。
 ///
+/// `card_width` 由调用方在 ScrollArea 闭包外**一次性**算好传入 —— 不要在本函数
+/// 内调 `ui.available_width()`：ScrollArea 跨帧缓存 content_size，逐张读会让
+/// 卡片宽度雪球扩张。
+///
 /// 布局（从左到右）：序号 → 书名（强、不可点） → 副信息 → ... → 详情 + 下载 按钮（贴右）
-/// - 卡片宽度撑满 `ui.available_width() - 滚动条`
+/// - 卡片宽度严格 = `card_width`（用 `allocate_ui_with_layout(vec2(card_width,0))` 硬钉住）
 /// - 圆角 8px；selected 用 ACCENT 色；hover 浅底（1 帧延迟）
 /// - 书名是普通 label，不可点击；点击进入详情走右侧"详情"按钮
-/// - 详情 / 下载按钮独立 click → `CardAction::{OpenDetail, Download}`
-///   （不会被任何上层 sense 吞掉）
-fn result_card(ui: &mut egui::Ui, idx: usize, r: &SearchResult, selected: bool) -> CardAction {
+fn result_card(
+    ui: &mut egui::Ui,
+    idx: usize,
+    r: &SearchResult,
+    selected: bool,
+    card_width: f32,
+) -> CardAction {
     let visuals = ui.style().visuals.clone();
     let dark_mode = visuals.dark_mode;
 
@@ -719,10 +741,8 @@ fn result_card(ui: &mut egui::Ui, idx: usize, r: &SearchResult, selected: bool) 
         egui::Color32::from_black_alpha(8)
     };
 
-    // 卡片整体宽度：available_width - 12px 滚动条 = 不与滚动条重叠
-    let card_width = (ui.available_width() - 12.0).max(0.0);
-    // frame 的 inner_margin = symmetric(14, 10)，所以 horizontal 内层 ui 的可用
-    // 宽度 = card_width - 28（左右各 14）。
+    // 卡片宽度由调用方钉死；frame 的 inner_margin = symmetric(14, 10)，
+    // 所以 horizontal 内层 ui 的可用宽度 = card_width - 28（左右各 14）。
     let card_inner_width = (card_width - 28.0).max(0.0);
 
     // hover 反馈：Frame::fill 在 show 时定型，借 memory 记上一帧 hover；
@@ -748,76 +768,116 @@ fn result_card(ui: &mut egui::Ui, idx: usize, r: &SearchResult, selected: bool) 
     let mut button_clicked = false;
     let mut detail_clicked = false;
 
-    let frame_resp = egui::Frame::new()
-        .fill(frame_fill)
-        .stroke(frame_stroke)
-        .corner_radius(egui::CornerRadius::same(8))
-        .inner_margin(egui::Margin::symmetric(14, 10))
-        .show(ui, |ui| {
-            // 关键：约束 frame 内层 ui 的宽度 = card_inner_width，
-            // 这样 horizontal 内 children 不会横向溢出到卡片右边沿之外。
-            ui.set_max_width(card_inner_width);
-            ui.set_min_width(card_inner_width);
+    // 关键：硬分配一个 `card_width × auto_height` 的盒子，让 Frame 在固定宽度的
+    // 父 ui 里绘制 —— Frame 只负责绘背景/边框/inner_margin，不再决定卡片外宽。
+    // 这样无论内层内容（书名 / 按钮组）实际像素宽是多少，卡片外沿都不会撑大。
+    let frame_resp = ui
+        .allocate_ui_with_layout(
+            egui::vec2(card_width, 0.0),
+            egui::Layout::top_down(egui::Align::Min),
+            |ui| {
+                ui.set_max_width(card_width);
+                ui.set_min_width(card_width);
 
-            ui.horizontal(|ui| {
-                ui.set_min_height(32.0);
+                egui::Frame::new()
+                    .fill(frame_fill)
+                    .stroke(frame_stroke)
+                    .corner_radius(egui::CornerRadius::same(8))
+                    .inner_margin(egui::Margin::symmetric(14, 10))
+                    .show(ui, |ui| {
+                        ui.set_max_width(card_inner_width);
+                        ui.set_min_width(card_inner_width);
 
-                // 子 scope 改按钮 corner_radius 为 8，与整体一致
-                let mut style: egui::Style = (**ui.style()).clone();
-                let r8 = egui::CornerRadius::same(8);
-                style.visuals.widgets.inactive.corner_radius = r8;
-                style.visuals.widgets.hovered.corner_radius = r8;
-                style.visuals.widgets.active.corner_radius = r8;
-                ui.set_style(style);
+                        ui.horizontal(|ui| {
+                            ui.set_min_height(32.0);
 
-                ui.label(egui::RichText::new(format!("#{}", idx + 1)).small().weak());
-                ui.add_space(8.0);
+                            // 子 scope 改按钮 corner_radius 为 8，与整体一致
+                            let mut style: egui::Style = (**ui.style()).clone();
+                            let r8 = egui::CornerRadius::same(8);
+                            style.visuals.widgets.inactive.corner_radius = r8;
+                            style.visuals.widgets.hovered.corner_radius = r8;
+                            style.visuals.widgets.active.corner_radius = r8;
+                            ui.set_style(style);
 
-                // 书名 — 不可点击的强 label。"打开详情"改由右侧"详情"按钮承担。
-                // 选中态由卡片外框 fill/stroke 体现（见上面 frame_fill/frame_stroke），
-                // 不再需要把书名做成 Button::selectable。
-                ui.label(
-                    egui::RichText::new(truncate(&r.book_name, 36))
-                        .strong()
-                        .size(14.5),
-                );
+                            ui.label(
+                                egui::RichText::new(format!("#{}", idx + 1))
+                                    .small()
+                                    .weak(),
+                            );
+                            ui.add_space(8.0);
 
-                ui.add_space(10.0);
-                ui.label(egui::RichText::new("·").weak());
-                ui.add_space(10.0);
-                ui.label(truncate(r.author.as_deref().unwrap_or("未知"), 16));
-                ui.add_space(10.0);
-                ui.label(egui::RichText::new("·").weak());
-                ui.add_space(10.0);
-                ui.label(egui::RichText::new(format!("{}#{}", r.source_name, r.source_id)).weak());
-                if let Some(latest) = r.latest_chapter.as_deref().filter(|s| !s.is_empty()) {
-                    ui.add_space(10.0);
-                    ui.label(egui::RichText::new("·").weak());
-                    ui.add_space(10.0);
-                    ui.label(
-                        egui::RichText::new(format!("最新：{}", truncate(latest, 28)))
-                            .small()
-                            .weak(),
-                    );
+                            // 书名 — 不可点击的强 label
+                            ui.label(
+                                egui::RichText::new(truncate(&r.book_name, 28))
+                                    .strong()
+                                    .size(14.5),
+                            );
+
+                            ui.add_space(10.0);
+                            ui.label(egui::RichText::new("·").weak());
+                            ui.add_space(10.0);
+                            ui.label(truncate(r.author.as_deref().unwrap_or("未知"), 14));
+                            ui.add_space(10.0);
+                            ui.label(egui::RichText::new("·").weak());
+                            ui.add_space(10.0);
+                            ui.label(
+                                egui::RichText::new(format!(
+                                    "{}#{}",
+                                    r.source_name, r.source_id
+                                ))
+                                .weak(),
+                            );
+                           if let Some(latest) = r.latest_chapter.as_deref().filter(|s| !s.is_empty()) {
+                            ui.add_space(10.0);
+                            ui.label(egui::RichText::new("·").weak());
+                            ui.add_space(10.0);
+                            ui.label(
+                                egui::RichText::new(format!("最新：{}", truncate(latest, 28)))
+                                    .small()
+                                    .weak(),
+                            );
                 }
 
-                // 右侧：详情 + 下载 按钮组，靠 right_to_left 推到行末。
-                // 添加顺序即视觉顺序（第一个最右）：先详情再下载 → 详情在右、下载在左。
-                // 详情按钮承接原"点书名展开详情"的入口；下载仍是次要动作。
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if theme::action_button(ui, "下载").clicked() {
-                        button_clicked = true;
-                    }
-                    if theme::action_button(ui, "详情").clicked() {
-                        detail_clicked = true;
-                    }
-                });
-            });
-        });
+                            // 右侧：详情 + 下载 按钮组，靠 right_to_left 推到行末。
+                            // 添加顺序即视觉顺序（第一个最右）：先下载再详情 →
+                            // 下载在右、详情在左。直接 ui.add Button —— 不嵌
+                            // ui.scope，避免在 right_to_left 里 cursor 重复扣减。
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    let download = ui.add(
+                                        egui::Button::new(
+                                            egui::RichText::new("下载").size(14.0),
+                                        )
+                                        .corner_radius(egui::CornerRadius::same(8))
+                                        .min_size(egui::vec2(56.0, 28.0)),
+                                    );
+                                    if download.clicked() {
+                                        button_clicked = true;
+                                    }
+                                    ui.add_space(6.0);
+                                    let detail = ui.add(
+                                        egui::Button::new(
+                                            egui::RichText::new("详情").size(14.0),
+                                        )
+                                        .corner_radius(egui::CornerRadius::same(8))
+                                        .min_size(egui::vec2(56.0, 28.0)),
+                                    );
+                                    if detail.clicked() {
+                                        detail_clicked = true;
+                                    }
+                                },
+                            );
+                        });
+                    })
+                    .response
+            },
+        )
+        .inner;
 
     // hover 状态写回 memory，供下一帧渲染 fill
     ui.ctx().memory_mut(|m| {
-        m.data.insert_temp(card_id, frame_resp.response.hovered());
+        m.data.insert_temp(card_id, frame_resp.hovered());
     });
 
     if button_clicked {

@@ -449,6 +449,7 @@ mod tests {
             config_file: PathBuf::from("x"),
             rules_dir: PathBuf::from("rel"),
             source_overrides_file: PathBuf::from("y"),
+            download_db_file: PathBuf::from("z"),
         };
         let p = resolve_active_rules(&cfg, &paths);
         assert!(p.is_absolute(), "绝对路径应保留");

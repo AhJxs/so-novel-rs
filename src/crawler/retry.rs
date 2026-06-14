@@ -6,8 +6,8 @@
 //! - 任何一次成功立即返回 `Ok`；
 //! - 全部失败时返回最后一次的 `Err`。
 //!
-//! 操作 op 是个返回 `Result<T, E>` 的同步闭包；调用方在 `download_book`
-//! 里把 `parse_chapter` 包到 spawn_blocking 里再喂给本函数。
+//! 操作 op 是个返回 future 的 async 闭包；调用方在 `download_book`
+//! 里直接喂 `parse_chapter(...)` future（async parser，不再走 spawn_blocking）。
 
 use std::time::Duration;
 
@@ -15,13 +15,14 @@ use std::time::Duration;
 ///
 /// `sleep_fn` 在每次重试**之前**调用，参数 `attempt` 是即将开始的重试次数（从 1 起）。
 /// 测试时传一个无副作用的闭包；生产用 `tokio::time::sleep`.
-pub async fn retry_with_backoff<T, E, Op, S, SFut>(
+pub async fn retry_with_backoff<T, E, Op, OpFut, S, SFut>(
     mut op: Op,
     max_attempts: u32,
     mut sleep_fn: S,
 ) -> Result<T, E>
 where
-    Op: FnMut(u32) -> Result<T, E>,
+    Op: FnMut(u32) -> OpFut,
+    OpFut: std::future::Future<Output = Result<T, E>>,
     S: FnMut(u32) -> SFut,
     SFut: std::future::Future<Output = ()>,
 {
@@ -31,7 +32,7 @@ where
         if attempt > 0 {
             sleep_fn(attempt).await;
         }
-        match op(attempt) {
+        match op(attempt).await {
             Ok(v) => return Ok(v),
             Err(e) => {
                 last_err = Some(e);
@@ -66,7 +67,7 @@ mod tests {
         let sleeps = Rc::new(RefCell::new(0u32));
         let s = sleeps.clone();
         let result: Result<i32, &str> = retry_with_backoff(
-            |_attempt| Ok(42),
+            |_attempt| async { Ok(42) },
             3,
             move |_| {
                 *s.borrow_mut() += 1;
@@ -87,12 +88,15 @@ mod tests {
 
         let result: Result<i32, &str> = retry_with_backoff(
             move |_attempt| {
-                let mut n = c.borrow_mut();
-                *n += 1;
-                if *n < 3 {
-                    Err("transient")
-                } else {
-                    Ok(42)
+                let c = c.clone();
+                async move {
+                    let mut n = c.borrow_mut();
+                    *n += 1;
+                    if *n < 3 {
+                        Err("transient")
+                    } else {
+                        Ok(42)
+                    }
                 }
             },
             5,
@@ -115,8 +119,11 @@ mod tests {
         let c = count.clone();
         let result: Result<i32, &str> = retry_with_backoff(
             move |_attempt| {
-                *c.borrow_mut() += 1;
-                Err("permanent")
+                let c = c.clone();
+                async move {
+                    *c.borrow_mut() += 1;
+                    Err::<i32, &str>("permanent")
+                }
             },
             3,
             no_sleep(),
@@ -133,8 +140,11 @@ mod tests {
         let c = count.clone();
         let result: Result<i32, &str> = retry_with_backoff(
             move |_attempt| {
-                *c.borrow_mut() += 1;
-                Err("nope")
+                let c = c.clone();
+                async move {
+                    *c.borrow_mut() += 1;
+                    Err::<i32, &str>("nope")
+                }
             },
             0,
             no_sleep(),
