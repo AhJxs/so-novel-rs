@@ -7,10 +7,10 @@
 use std::path::PathBuf;
 
 use crate::app::{LibraryEntry, SoNovelApp};
-use crate::ui::theme;
+use crate::design_system::{button, chip, color, input};
 use crate::util::system::{open_path, reveal_in_folder};
 use crate::util::time::format_unix_local_u64;
-use material_icons::icons as mi;
+use crate::material_icons::icons as mi;
 
 pub fn show(ui: &mut egui::Ui, app: &mut SoNovelApp) {
     // 首次进入或下载目录变化时自动扫描。
@@ -30,7 +30,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut SoNovelApp) {
 
     if let Some(err) = &app.library.last_error {
         ui.colored_label(
-            theme::semantic_danger(ui.style().visuals.dark_mode),
+            color::semantic_danger(ui.style().visuals.dark_mode),
             format!("⚠ {err}"),
         );
         ui.add_space(4.0);
@@ -43,7 +43,7 @@ fn show_toolbar(ui: &mut egui::Ui, app: &mut SoNovelApp) {
     ui.horizontal(|ui| {
         // 1. 文件名过滤输入框（与搜索页关键词框同款）
         const INPUT_W: f32 = 280.0;
-        let (_resp, _enter) = theme::search_input(
+        let (_resp, _enter) = input::search_input(
             ui,
             &mut app.library.filter_text,
             "按文件名过滤",
@@ -59,7 +59,7 @@ fn show_toolbar(ui: &mut egui::Ui, app: &mut SoNovelApp) {
             .filter_ext
             .clone()
             .unwrap_or_else(|| "全部".to_string());
-        theme::rounded_combo(ui, "library_ext_filter", current.clone(), 110.0, |ui| {
+        input::rounded_combo(ui, "library_ext_filter", current.clone(), 110.0, |ui| {
             for opt in ["全部", "epub", "txt", "zip", "html", "pdf"] {
                 ui.selectable_value(&mut current, opt.to_string(), opt);
             }
@@ -74,7 +74,7 @@ fn show_toolbar(ui: &mut egui::Ui, app: &mut SoNovelApp) {
 
         // 3. 刷新按钮（亮蓝主按钮，与搜索按钮同款）
         let refresh_label = format!("{} 刷新", mi::ICON_REFRESH.codepoint);
-        if theme::primary_button(ui, &refresh_label, true) {
+        if button::primary_button(ui, &refresh_label, true) {
             app.refresh_library();
         }
     });
@@ -83,7 +83,7 @@ fn show_toolbar(ui: &mut egui::Ui, app: &mut SoNovelApp) {
 fn show_table(ui: &mut egui::Ui, app: &mut SoNovelApp) {
     if app.library.entries.is_empty() {
         // 还没扫到任何书：与下载任务页空态同款（图标 + 主副文案）。
-        theme::empty_state(
+        chip::empty_state(
             ui,
             mi::ICON_LIBRARY_BOOKS,
             "本地书库为空",
@@ -130,7 +130,7 @@ fn show_table(ui: &mut egui::Ui, app: &mut SoNovelApp) {
 
     // 过滤后无结果：同款空态，引导清空过滤条件。
     if visible.is_empty() {
-        theme::empty_state(
+        chip::empty_state(
             ui,
             mi::ICON_SEARCH_OFF,
             "没有匹配的书",
@@ -318,7 +318,7 @@ fn entry_card(
                                                     .size(14.0)
                                                     .color(egui::Color32::WHITE),
                                             )
-                                            .fill(theme::semantic_danger(dark_mode))
+                                            .fill(color::semantic_danger(dark_mode))
                                             .corner_radius(egui::CornerRadius::same(8))
                                             .min_size(egui::vec2(72.0, 28.0)),
                                         );

@@ -443,11 +443,10 @@ mod tests {
 
     #[test]
     fn parses_real_chapter_html_resource() {
-        // src/test/resources/chapter.html 是一段真实章节页
+        // bundle/web/chapter.html 是一段真实章节页
         let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("src")
-            .join("test")
-            .join("resources")
+            .join("bundle")
+            .join("web")
             .join("chapter.html");
         let html = std::fs::read_to_string(&path).unwrap();
         let h = doc(&html);

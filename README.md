@@ -1,108 +1,177 @@
 # so-novel-rs
 
-So Novel 的 Rust + egui 桌面客户端重写。**仍在分阶段迁移中**，详见仓库根的
-[`docs/rust-egui-migration-audit.md`](../docs/rust-egui-migration-audit.md)。
+So Novel 的 Rust + egui 桌面客户端，从 Java 版本完整重写。
 
-旧 Java 实现保留在仓库根 `src/main/java/`，未迁移完成前不要删除。
+## 功能概览
 
-## 当前进度
+| 模块 | 状态 | 说明 |
+|------|------|------|
+| 搜索下载 | ✅ | 多源并发聚合搜索、相似度过滤排序、quanben5 加密搜索、详情面板、封面 |
+| 下载任务 | ✅ | 并发抓取、失败重试、进度跟踪、取消、封面嵌入、持久化 |
+| 本地书库 | ✅ | 扫描已下载书籍、按格式/日期/大小排序、删除二次确认 |
+| 书源管理 | ✅ | 从 JSON 导入、启用/禁用、连通性测速、从数据库删除 |
+| 设置 | ✅ | iOS 风格卡片式设置、主题切换持久化、4 色 toast 通知 |
+| 导出 | ✅ | EPUB / TXT（多编码）/ HTML（zip 打包）；PDF 暂未实现 |
+| CLI | ✅ | `search` / `download` / `sources` / `version` 四个子命令 |
+| 配置 | ✅ | `config.toml`（toml_edit 保留注释）+ `sonovel.db`（SQLite） |
 
-**阶段 1 — 骨架 + 数据/配置/规则（已完成）**
+## 技术栈
 
-- eframe 应用骨架，左侧导航 + 6 页占位（**每页明确显示该功能尚未实现**，不是伪 UI）。
-- 数据模型：`AppConfig` / `Rule` / `Book` / `Chapter` / `SearchResult` / `SourceInfo`。
-- `config.ini` 兼容读写（与 Java 版字段对齐）。
-- 书源规则加载（`*.json` + `*.json5`，支持单文件或目录），含 baseUri / timeout / meta 默认填充。
+- **GUI**: egui 0.34 / eframe 0.34 / egui_extras 0.34
+- **异步**: tokio 1（rt-multi-thread，leak 成 `&'static Runtime`）
+- **HTTP**: reqwest 0.13（rustls，无 OpenSSL 依赖）
+- **HTML 解析**: scraper 0.27 + regex 1
+- **JS 引擎**: boa_engine 0.21（书源规则 `@js:` 后处理）
+- **数据库**: rusqlite 0.40（bundled，书源 + 下载任务 + 用户覆写）
+- **配置**: toml_edit 0.25（保留注释 + 字段顺序）
+- **导出**: epub-builder 0.8 / zip 8 / encoding_rs 0.8
+- **编码检测**: chardetng 1.0
+- **文件选择**: rfd 0.15（原生对话框）
+- **图标**: Material Symbols（Rounded），vendor 在 `src/material_icons/`
+- **平台适配**: Windows 11 DWM 暗色标题栏 / 无控制台窗口
 
-**阶段 2a — HTTP / 编码 / 选择器 / JS（已完成）**
+## 项目结构
 
-- `http/`：reqwest blocking 客户端（rustls，无 OpenSSL）、代理、UA 池、Cloudflare title 检测、编码兜底（Content-Type → meta → chardetng → UTF-8）、`buildData`（hutool 风格宽松 JSON 解析）、`format_url_query`、随机抓取间隔、不可见字符清洗。
-- `js/`：boa_engine 包装；`post_process(body, input)` 等价 Java `JsCaller#call`；`eval_function_returning_string` 用于 quanben5 加密；自动注入 `console` no-op shim。
-- `parser/dom.rs`：scraper CSS 选择器封装 + `@js:` 后处理 + `ContentType` 派发；`clear_all_attributes`、`remove_tags`；XPath 命中返回类型化错误（待阶段 2c 决定改写）。
+```
+so-novel-rs/
+├── config.toml              # 用户配置（首次启动自动生成）
+├── sonovel.db               # SQLite 数据库（书源 + 下载任务 + 覆写）
+├── bundle/
+│   ├── fonts/               # Noto Sans SC 全 9 字重
+│   ├── rules/               # 默认书源 JSON（首次启动 seed 到数据库）
+│   └── web/                 # JS 脚本 + 封面占位图
+├── docs/                    # 迁移审计文档
+└── src/
+    ├── main.rs              # 入口
+    ├── lib.rs               # 模块声明
+    ├── app/                 # SoNovelApp 顶层容器
+    │   ├── mod.rs           # struct + impl eframe::App
+    │   ├── download_task.rs # DownloadTask 模型
+    │   ├── search_state.rs  # 搜索状态（含封面、详情缓存）
+    │   ├── library_state.rs # 本地书库状态
+    │   ├── sources_state.rs # 书源测速状态
+    │   ├── update_state.rs  # GitHub release 检查状态
+    │   ├── cover.rs         # 封面字节解码 + URI 生成
+    │   ├── toast.rs         # ToastKind 枚举
+    │   ├── now.rs           # now_unix_secs
+    │   ├── runtime.rs       # build_shared_runtime
+    │   ├── tasks_db.rs      # load_tasks_from_db
+    │   └── ops/             # 跨多个状态结构的业务方法
+    │       ├── download.rs  # spawn_download / clear_finished_tasks
+    │       ├── search.rs    # spawn_search / select_search_result
+    │       ├── sources.rs   # toggle/add/delete source / spawn_health_check
+    │       ├── library.rs   # refresh_library / delete_library_entry
+    │       ├── update.rs    # spawn_update_check
+    │       └── settings.rs  # persist_settings
+    ├── cli.rs               # clap CLI 子命令
+    ├── config/loader.rs     # config.toml 读写 + AppConfig + ThemePref re-export
+    ├── crawler/             # 搜索 / 下载 / 重试 / 健康检测
+    ├── db/                  # SQLite 表（sources / source_overrides / download_tasks）
+    ├── design_system/       # 配色 / 字体 / 公共 UI 组件
+    │   ├── color.rs         # ACCENT + semantic 色函数
+    │   ├── font.rs          # install_cjk_fonts / install_visuals
+    │   ├── frame.rs         # nav / title_bar / content frame 工厂
+    │   ├── button.rs        # button / small / action / settings / primary / danger / solid
+    │   ├── input.rs         # search_input / rounded_combo
+    │   ├── chip.rs          # stat_chip / empty_state
+    │   ├── toggle.rs        # iOS 风格 toggle_switch
+    │   ├── settings.rs      # settings_row 通用布局
+    │   └── theme_picker.rs  # ThemePref 枚举 + 段控选择器
+    ├── export/              # EPUB / TXT / HTML / PDF(stub) 导出
+    ├── http/                # reqwest 封装 / 代理 / 编码 / CF 旁路 / URL 拼接
+    ├── js/                  # boa_engine 包装（书源 JS 后处理 + quanben5）
+    ├── material_icons/      # Material Symbols 字体 vendor
+    │   ├── mod.rs           # 字体加载 + 图标 API
+    │   ├── icons.rs         # 生成的所有 ICON_* 常量
+    │   └── *.ttf *.codepoints
+    ├── models.rs            # Rule / Book / Chapter / SearchResult 等
+    ├── parser/              # DOM / 搜索 / 详情 / 目录 / 章节 / 过滤 / 格式化
+    ├── rules/               # 从 DB 加载书源 + 用户覆写
+    ├── ui/
+    │   ├── nav.rs           # 顶部水平导航（5 个页面 Tab + toast）
+    │   ├── title_bar.rs     # 无装饰窗口标题栏 + 拖拽 + 窗口控制
+    │   └── pages/
+    │       ├── search.rs    # 搜索下载页
+    │       ├── tasks.rs     # 下载任务页
+    │       ├── library.rs   # 本地书库页
+    │       ├── sources.rs   # 书源管理页
+    │       └── settings.rs  # 设置页
+    └── util/                # 文件名清洗 / 时间格式 / 语言检测 / 系统命令
+```
 
-**阶段 2b — SearchParser + BookParser（已完成）**
+## 设置页结构
 
-- `http/url_join.rs`：`abs_url(base, href)` — 处理相对/绝对/协议相对/dot-paths。
-- `http/fetch.rs`：单次 GET/POST 同步抓取，含 UA / Referer / Cookie 注入与编码兜底。
-- `parser/search.rs`：构造 GET/POST、CF 检测、result 列表抽取（bookName 必填）、href absUrl、limit 截断。
-- `parser/book.rs`：详情解析；以 `meta[` 开头的字段走 ATTR_CONTENT，否则走 TEXT；coverUrl 相对路径 absUrl。
-- 真实联网测试 `#[ignore]` 标注，本机执行通过（笔趣阁22）。
+设置页采用 iOS 风格卡片式布局，同一类设置放在一个卡片内，项间用分割线隔开：
 
-**阶段 2c — TocParser + ChapterParser + CF 旁路（已完成）**
+| 卡片 | 包含设置项 |
+|------|-----------|
+| 外观 | 主题选择（浅色 / 跟随系统 / 深色，段控样式） |
+| 下载 | 缓存保留、进度条、下载目录、默认格式、TXT 编码 |
+| 书源 | 界面语言、搜索条数上限、相似度过滤 |
+| 抓取 | 并发上限、请求间隔、重试开关、重试次数、重试间隔 |
+| 代理 | 启用代理、Host、Port |
+| Cookie | 起点 Cookie |
+| 网络 | GitHub 代理、CF bypass URL |
+| 关于 | 版本号、手动检查更新、项目主页 |
 
-- `http/cf.rs::fetch_via_cf_bypass`：调用外部 `${cf-bypass}/html?url=<target>` 服务获取去 CF 后 HTML；search/book/toc/chapter 全部接入。
-- `parser/dom.rs::xpath_to_css`：极小 XPath → CSS 改写（覆盖现有规则唯一一处 XPath：96读书 nextPageInJs）。
-- `parser/toc.rs`：单页 / option 下拉分页（22biqu）/ 下一页递归 / `isDesc` 倒序（69shuba）/ `Book.url` 正则提取书 ID 注入 toc.url 模板。
-- `parser/chapter.rs`：单页 / 分页递归 / `nextPageInJs`（含 XPath 路径）/ 终止判定（`nextChapterLink` 正则 + 通用兜底）；**不**做正文清洗 / 模板渲染（归阶段 3）。
+## Toast 系统
 
-**阶段 3a — 内容处理纯函数层（已完成）**
+顶部状态栏临时消息支持 4 种类型，按颜色区分：
 
-- `parser/filter.rs`（ChapterFilter）：不可见字符 / HTML 实体 / filterTxt 正则替换（backreference 不支持时降级 warn，不崩）/ filterTag 节点删除 / 重复标题去除 / `1.章节名`→`第1章 章节名` / 空 tag 清理。
-- `parser/formatter.rs`（ChapterFormatter）：clear_all_attributes 后段落整形 — `paragraphTagClosed=true` 替换非 p 闭合标签为 `<p>`，否则按 `paragraphTag` 切分包 `<p>`。
-- `export/render.rs`（ChapterRenderer）：拼装 filter → formatter → 模板渲染；txt 用全角缩进抽段落，html/epub 用内嵌模板（`assets/chapter_{html,epub}.tmpl`，仅 `${title}`/`${content}` 字符串替换），pdf 降级 html + warn 不崩。
+- **Info**（蓝 / ACCENT）— 通用提示
+- **Success**（绿）— 保存成功、导入成功、删除成功
+- **Warn**（橙）— 警告、新版本可用
+- **Failed**（红）— 保存失败、解析失败、打开失败
 
-**阶段 3b — 导出层（已完成）**
-
-- `export/exporter.rs`：`Exporter` trait + `write_chapter_files`（前导零文件名）+ `sort_chapter_files` + `exporter_for` 派发（PDF 降级 Html）。
-- `export/txt.rs`：首页书籍信息 + 全章节合并；UTF-8 / GBK / Big5 等编码切换（`encoding_rs`）；intro 去 HTML 标签 + 实体；空 intro 填"暂无"。
-- `export/html.rs`：每章一文件 + `0_目录.txt` + zip 打包（`zip` crate，仅 deflate，无 C 依赖）。
-- `export/epub.rs`：`epub-builder` 0.8 V3.0；metadata + 章节 XHTML；`merge_with_cover_bytes` 接收外部封面字节（PNG/JPEG magic 自动识别 mime）；export 层**不**联网。
-
-**阶段 3c — 调度层（已完成，整套数据管线端到端可用）**
-
-- `crawler/retry.rs`：泛型 `retry_with_backoff(op, max_attempts, sleep_fn)`；`linear_backoff(base, attempt)` 递增退避。
-- `crawler/mod.rs::download_book`：核心入口；流程 = parse_book → parse_toc → tokio Semaphore 并发抓 chapter（spawn_blocking + 重试 + 随机间隔）→ render → write → 封面下载 soft-skip → `Exporter::merge_with_cover` → 按 preserve_chapter_cache 清理 → 推 Finished。
-- `Progress` 5 种事件 + `CancelToken`（Arc<AtomicBool>，无额外依赖）+ `CrawlerError`。
-- 失败章节**不**中断整本下载（与 Java 一致），通过 `Progress::ChapterFailed` 上报。
-
-**阶段 4a — UI 接入真实后台（已完成）**
-
-- `crawler/search.rs::search_aggregated`：多源并发聚合搜索，每源 spawn_blocking。
-- `app.rs`：Arc<tokio Runtime> + SearchState + DownloadTask 列表；update 循环 try_recv 排空进度通道，绝不阻塞 GUI；任意活动任务 200ms 重绘。
-- `ui/pages/search.rs`：真实搜索框（关键字 + 书源选择）+ 源状态徽章（⏳/✓/∅/✗）+ 结果表格 + 下载按钮 → `spawn_download(...)`。
-- `ui/pages/tasks.rs`：进度条 + 失败章节折叠列表 + 取消按钮。
-- 启动 egui 窗口成功，CJK 字体自动加载，主循环正常。
-
-**阶段 4b — 本地书库页 + 任务页打磨（已完成）**
-
-- `util/system.rs`：跨平台 `open_path` / `reveal_in_folder`（cmd/open/xdg-open/explorer/select），无 opener 依赖。
-- `app.rs`：`LibraryEntry` / `LibraryState` + `refresh_library()` + `delete_library_entry()`，扫描 `download_path` 不递归。
-- `ui/pages/library.rs`：搜索过滤 + 格式下拉 + 刷新 + 表格（文件名/格式/大小/修改时间/操作）+ 打开/位置/删除二次确认。
-- `ui/pages/tasks.rs` 升级：完成任务的"打开"+"位置"按钮、失败任务的"重试"、顶部"清除已完成"。
-
-**阶段 4c — 书源管理升级 + 搜索详情面板（已完成）**
-
-- `rules/overrides.rs::SourceOverrides`：用户启用/禁用 sidecar JSON 持久化（不污染上游 rules），只覆盖"禁用"方向。
-- `crawler/health.rs::check_sources_health`：HEAD 5s 超时，spawn_blocking 并发，mpsc 实时推送。
-- `app.rs`：`SourcesState` + `spawn_health_check`；`SearchState` 加 `selected` + `detail_cache` + `DetailState`，`select_search_result` 缓存命中跳过 + spawn_blocking 调 `parse_book_detail`。
-- `ui/pages/sources.rs`：延迟彩色标记（≤400ms 绿/≤1500ms 黄/其它橙/不通红）+ HTTP 状态色标 + 启用/禁用 toggle 立即持久化。
-- `ui/pages/search.rs`：左右分栏（结果列表 + 详情面板）；书名 `SelectableLabel` 高亮选中行；详情面板 4 状态（无选择 / Pending / Failed / Loaded）。封面预览推阶段 5b。
-
-**阶段 5a — quanben5 加密搜索 + 相似度过滤排序（已完成）**
-
-- 加 `strsim` 依赖（纯 Rust，等价 Java hutool `StrUtil.similar`）。
-- `parser/search_filter.rs::filter_sort`：等价 Java `SearchResultsHandler#filterSort`，按 `cfg.search_filter` 在 SearchState drain 完成时一次性触发。
-- `parser/search_quanben5.rs`：`quanben5.js` 通过 `include_str!` 嵌入；`is_quanben5_pattern` 检测双 `%s` 自动派发；JSONP 解析含 unicode / HTML 实体 / 反斜杠还原 + 花括号配平。
-
-测试：单元 180 + 集成 3 = **183 全过**（2 个 ignored 真实联网）。
-
-## 未实现（按阶段）
-
-- **阶段 5b（视觉/可用性）**：OpenCC 简繁；封面预览（`egui_extras` + `image`）。
-- **阶段 5c（增强）**：CLI（clap）；CoverUpdater (qidian cookie)；批量下载；搜索建议；HTTP 层级取消；PDF（如评估再做）。
+调用方使用 `app.show_toast_*` 系列方法触发。检查更新完成后结果自动 toast 化。
 
 ## 运行
 
 ```sh
-cd so-novel-rs
 cargo run
 ```
 
-工作目录建议在仓库根，使应用能找到 `bundle/config.ini` 和 `bundle/rules/`：
+工作目录建议在仓库根，使应用能找到 `bundle/` 下的字体和默认书源：
 
 ```sh
 cd <repo-root>
 cargo run --manifest-path so-novel-rs/Cargo.toml
+```
+
+### CLI 用法
+
+不带子命令启动 GUI；带子命令走 CLI 模式：
+
+```sh
+# 搜索
+so-novel-rs search "斗破苍穹"
+so-novel-rs search "斗破苍穹" --source 1 --limit 10
+
+# 下载
+so-novel-rs download "https://example.com/book/123" --format epub
+
+# 列出书源
+so-novel-rs sources
+
+# 版本
+so-novel-rs version
+```
+
+### 打包
+
+```sh
+# Windows（无控制台窗口）
+cargo build --release
+
+# Linux
+cargo build --release --target x86_64-unknown-linux-gnu
+```
+
+## 代码质量
+
+```sh
+cargo clippy           # 零警告
+cargo test --lib       # 201 passed (3 ignored 为真实联网)
 ```
 
 ## 测试
@@ -111,4 +180,4 @@ cargo run --manifest-path so-novel-rs/Cargo.toml
 cargo test --manifest-path so-novel-rs/Cargo.toml
 ```
 
-测试默认从 `CARGO_MANIFEST_DIR/../bundle` 读取真实规则与配置文件。
+当前 **201 个测试全通过**（3 个 ignored 为真实联网测试，需 `--ignored` 手动执行）。

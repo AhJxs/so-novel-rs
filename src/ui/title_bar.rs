@@ -6,7 +6,7 @@
 //! - 右侧三个 28x28 的窗口控制按钮，关闭按钮 hover 红色。
 //! - 标题栏背景与 nav 一致（panel_fill），无 stroke，融入整体。
 
-use crate::ui::theme;
+use crate::design_system::frame;
 
 /// 显示标题栏。`ctx` 用于 send_viewport_cmd（拖拽 / 关闭 / 最大化 / 最小化）。
 pub fn show(parent_ui: &mut egui::Ui, ctx: &egui::Context) {
@@ -14,7 +14,7 @@ pub fn show(parent_ui: &mut egui::Ui, ctx: &egui::Context) {
     let is_maximized = ctx.input(|i| i.viewport().maximized.unwrap_or(false));
 
     egui::Panel::top("title_bar")
-        .frame(theme::title_bar_frame(ctx.global_style().as_ref()))
+        .frame(frame::title_bar_frame(ctx.global_style().as_ref()))
         .show_inside(parent_ui, |ui| {
             // 1. 整个标题栏作为窗口拖拽区
             let drag_resp = ui.interact(

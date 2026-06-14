@@ -8,8 +8,8 @@
 
 use crate::app::SoNovelApp;
 use crate::crawler::health::SourceHealth;
-use crate::ui::theme;
-use material_icons::icons as mi;
+use crate::design_system::{button, chip, color, input};
+use crate::material_icons::icons as mi;
 
 pub fn show(ui: &mut egui::Ui, app: &mut SoNovelApp) {
     show_toolbar(ui, app);
@@ -17,7 +17,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut SoNovelApp) {
 
     if let Some(err) = &app.rule_load_error {
         ui.colored_label(
-            theme::semantic_danger(ui.style().visuals.dark_mode),
+            color::semantic_danger(ui.style().visuals.dark_mode),
             format!("规则加载失败: {err}"),
         );
         ui.add_space(8.0);
@@ -28,7 +28,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut SoNovelApp) {
 
 /// 顶部 summary bar：左 chip 组 + 右按钮组。
 ///
-/// chip 设计语言与下载任务页 `show_summary_bar` 完全一致（同 `theme::stat_chip`）：
+/// chip 设计语言与下载任务页 `show_summary_bar` 完全一致（同 `chip::stat_chip`）：
 /// - 总数始终画
 /// - 启用 / 禁用 / 可用：值 > 0 时才出现，避免顶栏永远撑满
 fn show_toolbar(ui: &mut egui::Ui, app: &mut SoNovelApp) {
@@ -55,38 +55,38 @@ fn show_toolbar(ui: &mut egui::Ui, app: &mut SoNovelApp) {
 
     let dark = ui.style().visuals.dark_mode;
     ui.horizontal(|ui| {
-        ui.set_min_height(theme::QUERY_HEIGHT);
+        ui.set_min_height(input::QUERY_HEIGHT);
 
         // ---- 左：统计 chip ----
-        theme::stat_chip(ui, mi::ICON_DNS, "总数", total, theme::semantic_muted(dark));
+        chip::stat_chip(ui, mi::ICON_DNS, "总数", total, color::semantic_muted(dark));
         if enabled > 0 {
             ui.add_space(6.0);
-            theme::stat_chip(
+            chip::stat_chip(
                 ui,
                 mi::ICON_CHECK_CIRCLE,
                 "启用",
                 enabled,
-                theme::semantic_success(dark),
+                color::semantic_success(dark),
             );
         }
         if disabled > 0 {
             ui.add_space(6.0);
-            theme::stat_chip(
+            chip::stat_chip(
                 ui,
                 mi::ICON_BLOCK,
                 "禁用",
                 disabled,
-                theme::semantic_warn(dark),
+                color::semantic_warn(dark),
             );
         }
         if let Some(ok) = available_after_check {
             ui.add_space(6.0);
-            theme::stat_chip(
+            chip::stat_chip(
                 ui,
                 mi::ICON_NETWORK_CHECK,
                 "可用",
                 ok,
-                theme::semantic_info(dark),
+                color::semantic_info(dark),
             );
         }
 
@@ -109,7 +109,7 @@ fn show_toolbar(ui: &mut egui::Ui, app: &mut SoNovelApp) {
             // 测速：检测中 disabled；rules 空时也 disabled
             let speed_label = format!("{} 测速", mi::ICON_SPEED.codepoint);
             let speed_enabled = !app.sources_state.running && !app.rules.is_empty();
-            if theme::primary_button(ui, &speed_label, speed_enabled) {
+            if button::primary_button(ui, &speed_label, speed_enabled) {
                 app.spawn_health_check();
             }
 
@@ -117,7 +117,7 @@ fn show_toolbar(ui: &mut egui::Ui, app: &mut SoNovelApp) {
 
             // 添加：弹原生文件对话框选 JSON
             let add_label = format!("{} 添加", mi::ICON_ADD.codepoint);
-            if theme::primary_button(ui, &add_label, true) {
+            if button::primary_button(ui, &add_label, true) {
                 if let Some(path) = rfd::FileDialog::new()
                     .add_filter("JSON 规则文件", &["json", "json5"])
                     .add_filter("所有文件", &["*"])
@@ -134,7 +134,7 @@ fn show_toolbar(ui: &mut egui::Ui, app: &mut SoNovelApp) {
 fn show_table(ui: &mut egui::Ui, app: &mut SoNovelApp) {
     if app.rules.is_empty() {
         // 与下载任务 / 本地书库空态同款（图标 + 主副文案居中）。
-        theme::empty_state(
+        chip::empty_state(
             ui,
             mi::ICON_DNS,
             "暂无书源",
@@ -323,7 +323,7 @@ fn source_card(
                                         ui.label(
                                             egui::RichText::new("已禁用")
                                                 .small()
-                                                .color(theme::semantic_danger(dark)),
+                                                .color(color::semantic_danger(dark)),
                                         );
                                     }
 
@@ -336,7 +336,7 @@ fn source_card(
                                                 mi::ICON_VPN_KEY.codepoint
                                             ))
                                             .small()
-                                            .color(theme::semantic_warn(dark)),
+                                            .color(color::semantic_warn(dark)),
                                         );
                                     }
                                 });
@@ -389,7 +389,7 @@ fn source_card(
                                                     .size(14.0)
                                                     .color(egui::Color32::WHITE),
                                             )
-                                            .fill(theme::semantic_danger(dark))
+                                            .fill(color::semantic_danger(dark))
                                             .corner_radius(egui::CornerRadius::same(8))
                                             .min_size(egui::vec2(72.0, 28.0)),
                                         );
@@ -454,10 +454,10 @@ fn source_card(
 /// - <=400ms 绿；401..1500ms 黄；>=1500ms 暖橙；error 红 "超时/不通"；无数据 "-" 弱色。
 fn latency_label(h: &SourceHealth, dark: bool) -> (String, egui::Color32) {
     if h.error.is_some() {
-        return ("超时/不通".to_string(), theme::semantic_danger(dark));
+        return ("超时/不通".to_string(), color::semantic_danger(dark));
     }
     let color = match h.delay_ms {
-        0..=400 => theme::semantic_success(dark),
+        0..=400 => color::semantic_success(dark),
         401..=1500 => {
             if dark {
                 egui::Color32::from_rgb(240, 200, 100)
@@ -465,7 +465,7 @@ fn latency_label(h: &SourceHealth, dark: bool) -> (String, egui::Color32) {
                 egui::Color32::from_rgb(220, 180, 80)
             }
         }
-        _ => theme::semantic_warn(dark),
+        _ => color::semantic_warn(dark),
     };
     (format!("{} ms", h.delay_ms), color)
 }
@@ -474,16 +474,16 @@ fn latency_label(h: &SourceHealth, dark: bool) -> (String, egui::Color32) {
 fn status_label(h: &SourceHealth, dark: bool) -> (String, egui::Color32) {
     if let Some(code) = h.http_status {
         let color = if (200..400).contains(&code) {
-            theme::semantic_success(dark)
+            color::semantic_success(dark)
         } else {
-            theme::semantic_warn(dark)
+            color::semantic_warn(dark)
         };
         return (format!("HTTP {code}"), color);
     }
     if let Some(e) = &h.error {
-        return (truncate(e, 32), theme::semantic_danger(dark));
+        return (truncate(e, 32), color::semantic_danger(dark));
     }
-    ("-".to_string(), theme::semantic_muted(dark))
+    ("-".to_string(), color::semantic_muted(dark))
 }
 
 fn truncate(s: &str, n: usize) -> String {

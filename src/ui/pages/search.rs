@@ -12,7 +12,7 @@
 use crate::app::{SearchState, SoNovelApp, SourceStatus};
 use crate::models::SearchResult;
 use crate::ui::nav::NavPage;
-use crate::ui::theme;
+use crate::design_system::{button, color, input};
 
 pub fn show(ui: &mut egui::Ui, app: &mut SoNovelApp) {
     show_query_bar(ui, app);
@@ -107,7 +107,7 @@ fn show_task_banner(ui: &mut egui::Ui, app: &mut SoNovelApp) {
                         dismiss = true;
                     }
                     ui.add_space(4.0);
-                    if theme::action_button(ui, "查看任务").clicked() {
+                    if button::action_button(ui, "查看任务").clicked() {
                         go_tasks = true;
                     }
                 });
@@ -122,16 +122,15 @@ fn show_task_banner(ui: &mut egui::Ui, app: &mut SoNovelApp) {
 }
 
 /// 搜索栏：输入框 + 书源下拉 + 搜索按钮。控件样式统一在 `theme` 模块。
-
 fn show_query_bar(ui: &mut egui::Ui, app: &mut SoNovelApp) {
     ui.horizontal(|ui| {
         // ---- 1. 输入框 ----
         const INPUT_W: f32 = 360.0;
-        let (_resp, enter_pressed) = theme::search_input(
+        let (_resp, enter_pressed) = input::search_input(
             ui,
             &mut app.search.keyword,
             "书名 / 作者",
-            material_icons::icons::ICON_SEARCH,
+            crate::material_icons::icons::ICON_SEARCH,
             INPUT_W,
         );
 
@@ -147,7 +146,7 @@ fn show_query_bar(ui: &mut egui::Ui, app: &mut SoNovelApp) {
                 .map(|r| format!("{} ({})", r.name, r.id))
                 .unwrap_or_else(|| format!("书源 {id}（已下线？）")),
         };
-        theme::rounded_combo(ui, "search_source", current_label, 220.0, |ui| {
+        input::rounded_combo(ui, "search_source", current_label, 220.0, |ui| {
             ui.selectable_value(&mut app.search.source_id, None, "全部书源（聚合）");
             for r in &app.rules {
                 if r.disabled {
@@ -161,8 +160,8 @@ fn show_query_bar(ui: &mut egui::Ui, app: &mut SoNovelApp) {
         ui.add_space(6.0);
 
         // ---- 3. 搜索按钮（亮蓝填充） ----
-        let search_label = format!("{} 搜索", material_icons::icons::ICON_SEARCH.codepoint);
-        let search_clicked = theme::primary_button(ui, &search_label, !app.search.running);
+        let search_label = format!("{} 搜索", crate::material_icons::icons::ICON_SEARCH.codepoint);
+        let search_clicked = button::primary_button(ui, &search_label, !app.search.running);
 
         if (search_clicked || enter_pressed) && !app.search.running {
             let _ = app.spawn_search();
@@ -180,7 +179,7 @@ fn show_query_bar(ui: &mut egui::Ui, app: &mut SoNovelApp) {
     if let Some(err) = &app.search.last_error {
         ui.add_space(4.0);
         ui.colored_label(
-            theme::semantic_danger(ui.style().visuals.dark_mode),
+            color::semantic_danger(ui.style().visuals.dark_mode),
             format!("⚠ {err}"),
         );
     }
@@ -215,7 +214,7 @@ fn chip(ui: &mut egui::Ui, id: i32, name: &str, status: &SourceStatus) {
     // Ok(0) / Ok / Err 都用对应的 success / warn / danger helper。
     let dark = ui.style().visuals.dark_mode;
     let dot_color = match status {
-        SourceStatus::Pending => theme::semantic_muted(dark),
+        SourceStatus::Pending => color::semantic_muted(dark),
         SourceStatus::Ok(0) => {
             // "通了但 0 结果" 用比 success 稍暖的色，与"找得到"区分。
             if dark {
@@ -224,8 +223,8 @@ fn chip(ui: &mut egui::Ui, id: i32, name: &str, status: &SourceStatus) {
                 egui::Color32::from_rgb(220, 170, 60)
             }
         }
-        SourceStatus::Ok(_) => theme::semantic_success(dark),
-        SourceStatus::Err(_) => theme::semantic_danger(dark),
+        SourceStatus::Ok(_) => color::semantic_success(dark),
+        SourceStatus::Err(_) => color::semantic_danger(dark),
     };
 
     // 文字（不再带 suffix；按用户要求）
@@ -377,7 +376,7 @@ fn show_results(ui: &mut egui::Ui, app: &mut SoNovelApp) {
     }
     if let Some(target) = to_download {
         let _id = app.spawn_download(target);
-        app.show_toast("已加入下载，可在『下载任务』查看进度");
+        app.show_toast_success("已加入下载，可在『下载任务』查看进度");
     }
 
     // 详情弹窗（点书名后打开）
@@ -448,7 +447,7 @@ fn render_detail_body(ui: &mut egui::Ui, app: &SoNovelApp, r: &SearchResult) {
         }
         Some(DetailState::Failed(reason)) => {
             ui.colored_label(
-                theme::semantic_warn(ui.style().visuals.dark_mode),
+                color::semantic_warn(ui.style().visuals.dark_mode),
                 format!("详情加载失败：{reason}"),
             );
         }
@@ -471,7 +470,7 @@ fn render_detail_body(ui: &mut egui::Ui, app: &SoNovelApp, r: &SearchResult) {
                             }
                             Some(CoverEntry::Failed(reason)) => {
                                 ui.colored_label(
-                                    theme::semantic_warn(ui.style().visuals.dark_mode),
+                                    color::semantic_warn(ui.style().visuals.dark_mode),
                                     format!("封面加载失败：{reason}"),
                                 );
                             }
@@ -726,13 +725,13 @@ enum TaskStatus {
 }
 
 /// 在 horizontal 布局里画一个 18x18 的状态图标。颜色随主题走
-/// `theme::ACCENT` / `semantic_success` / `semantic_warn`。
+/// `color::ACCENT` / `semantic_success` / `semantic_warn`。
 ///
 /// 用 `material_icons`（Material Symbols Rounded 字体）渲染 — 跟之前
 /// 的 painter 几何方案相比：图标本身跨主题一致、emoji-like 视觉风格，
 /// 仍然不依赖任何 CJK 字形（material 字体是独立 codepoint 空间）。
 fn task_status_icon(ui: &mut egui::Ui, status: TaskStatus) -> egui::Response {
-    use material_icons::icons as mi;
+    use crate::material_icons::icons as mi;
     const SIZE: f32 = 18.0;
 
     let (rect, response) = ui.allocate_exact_size(egui::vec2(SIZE, SIZE), egui::Sense::hover());
@@ -742,9 +741,9 @@ fn task_status_icon(ui: &mut egui::Ui, status: TaskStatus) -> egui::Response {
 
     let dark_mode = ui.style().visuals.dark_mode;
     let (icon, color) = match status {
-        TaskStatus::Running => (mi::ICON_DOWNLOADING, theme::ACCENT),
-        TaskStatus::Completed => (mi::ICON_CHECK_CIRCLE, theme::semantic_success(dark_mode)),
-        TaskStatus::Warning => (mi::ICON_WARNING, theme::semantic_warn(dark_mode)),
+        TaskStatus::Running => (mi::ICON_DOWNLOADING, color::ACCENT),
+        TaskStatus::Completed => (mi::ICON_CHECK_CIRCLE, color::semantic_success(dark_mode)),
+        TaskStatus::Warning => (mi::ICON_WARNING, color::semantic_warn(dark_mode)),
     };
 
     // 用 painter.text 居中绘制，font family 走 material-icons 让 codepoint 命中。
@@ -767,7 +766,7 @@ fn task_status_icon(ui: &mut egui::Ui, status: TaskStatus) -> egui::Response {
 /// `material_icons`），跨主题一致、不依赖 CJK 字形。
 /// hover 时的红底效果保留。
 fn close_x_button(ui: &mut egui::Ui) -> egui::Response {
-    use material_icons::icons::ICON_CLOSE;
+    use crate::material_icons::icons::ICON_CLOSE;
     const SIZE: f32 = 22.0;
     const ICON_PX: f32 = 16.0;
 

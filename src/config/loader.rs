@@ -76,12 +76,15 @@ impl LangType {
     }
 }
 
+/// 主题偏好（从 `design_system` 模块 re-export，保持 `crate::config::ThemePref` 兼容）。
+pub use crate::design_system::theme_picker::ThemePref;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
     pub version: String,
 
     // [global]
-    pub auto_update: bool,
+    pub theme: ThemePref,
     pub gh_proxy: String,
     pub cf_bypass: String,
 
@@ -94,10 +97,6 @@ pub struct AppConfig {
 
     // [source]
     pub language: LangType,
-    /// 兼容字段：旧 INI 用文件名标记当前规则集（如 `main.json`）。
-    /// 规则迁到 SQLite 后，这个字段仅作为"标签"保留：UI 上仍可看到，
-    /// 也可被未来的"规则集分组"功能利用，但运行时不再据此找文件。
-    pub active_rules: String,
     /// `None` 表示未指定（旧 INI `-1`）。
     pub source_id: Option<i32>,
     pub search_limit: Option<i32>,
@@ -111,10 +110,6 @@ pub struct AppConfig {
     pub max_retries: u32,
     pub retry_min_interval: u32,
     pub retry_max_interval: u32,
-
-    // [web]
-    pub web_enabled: bool,
-    pub web_port: u16,
 
     // [cookie]
     pub qidian_cookie: String,
@@ -130,7 +125,7 @@ impl Default for AppConfig {
         Self {
             version: env!("CARGO_PKG_VERSION").to_string(),
 
-            auto_update: false,
+            theme: ThemePref::System,
             gh_proxy: String::new(),
             cf_bypass: String::new(),
 
@@ -141,7 +136,6 @@ impl Default for AppConfig {
             enable_progressbar: true,
 
             language: detect_system_lang(),
-            active_rules: "main.json".to_string(),
             source_id: None,
             search_limit: None,
             search_filter: true,
@@ -154,9 +148,6 @@ impl Default for AppConfig {
             max_retries: 5,
             retry_min_interval: 2000,
             retry_max_interval: 4000,
-
-            web_enabled: false,
-            web_port: 7765,
 
             qidian_cookie: String::new(),
 
@@ -219,8 +210,8 @@ pub fn load_config(path: &Path) -> Result<AppConfig> {
     let mut cfg = AppConfig::default();
 
     // [global]
-    if let Some(v) = t_bool(&doc, "global", "auto-update") {
-        cfg.auto_update = v;
+    if let Some(v) = t_str(&doc, "global", "theme") {
+        cfg.theme = ThemePref::parse(&v);
     }
     if let Some(v) = t_str(&doc, "global", "gh-proxy") {
         cfg.gh_proxy = v;
@@ -252,9 +243,6 @@ pub fn load_config(path: &Path) -> Result<AppConfig> {
             cfg.language = parsed;
         }
     }
-    if let Some(v) = t_str(&doc, "source", "active-rules") {
-        cfg.active_rules = v;
-    }
     cfg.source_id = t_int(&doc, "source", "source-id").map(sat_i32);
     cfg.search_limit = t_int(&doc, "source", "search-limit").map(sat_i32);
     if let Some(v) = t_bool(&doc, "source", "search-filter") {
@@ -280,14 +268,6 @@ pub fn load_config(path: &Path) -> Result<AppConfig> {
     }
     if let Some(v) = t_int(&doc, "crawl", "retry-max-interval") {
         cfg.retry_max_interval = sat_u32(v);
-    }
-
-    // [web]
-    if let Some(v) = t_bool(&doc, "web", "enabled") {
-        cfg.web_enabled = v;
-    }
-    if let Some(v) = t_int(&doc, "web", "port") {
-        cfg.web_port = sat_u16(v);
     }
 
     // [cookie]
@@ -347,7 +327,7 @@ pub fn save_config(path: &Path, cfg: &AppConfig) -> Result<()> {
     }
 
     // [global]
-    set_bool(&mut doc, "global", "auto-update", cfg.auto_update);
+    set_str(&mut doc, "global", "theme", cfg.theme.as_str());
     set_str(&mut doc, "global", "gh-proxy", &cfg.gh_proxy);
     set_str(&mut doc, "global", "cf-bypass", &cfg.cf_bypass);
 
@@ -370,7 +350,6 @@ pub fn save_config(path: &Path, cfg: &AppConfig) -> Result<()> {
 
     // [source]
     set_str(&mut doc, "source", "language", cfg.language.as_str());
-    set_str(&mut doc, "source", "active-rules", &cfg.active_rules);
     match cfg.source_id {
         Some(v) => set_int(&mut doc, "source", "source-id", v as i64),
         None => unset(&mut doc, "source", "source-id"),
@@ -402,10 +381,6 @@ pub fn save_config(path: &Path, cfg: &AppConfig) -> Result<()> {
         "retry-max-interval",
         cfg.retry_max_interval as i64,
     );
-
-    // [web]
-    set_bool(&mut doc, "web", "enabled", cfg.web_enabled);
-    set_int(&mut doc, "web", "port", cfg.web_port as i64);
 
     // [cookie]
     set_str(&mut doc, "cookie", "qidian", &cfg.qidian_cookie);
@@ -452,7 +427,7 @@ fn default_template_doc() -> DocumentMut {
 # 字段语义与旧版 config.ini 一致；规则与下载任务记录已迁到根目录的 sonovel.db。
 
 [global]
-auto-update = false
+theme = "system"
 gh-proxy = ""
 cf-bypass = ""
 
@@ -467,8 +442,6 @@ enable-progressbar = true
 
 [source]
 language = "zh_CN"
-# active-rules 已不再用于定位文件（规则进 DB），保留为标签字段，方便未来分组。
-active-rules = "main.json"
 search-limit = 30
 search-filter = true
 
@@ -479,10 +452,6 @@ enable-retry = true
 max-retries = 5
 retry-min-interval = 2000
 retry-max-interval = 4000
-
-[web]
-enabled = false
-port = 7765
 
 [cookie]
 qidian = ""
@@ -528,12 +497,10 @@ mod tests {
     #[test]
     fn loads_default_when_missing() {
         let cfg = load_config(&PathBuf::from("/definitely/does/not/exist.toml")).unwrap();
-        assert_eq!(cfg.active_rules, "main.json");
         assert_eq!(cfg.min_interval, 200);
         assert_eq!(cfg.max_interval, 400);
         assert!(cfg.enable_retry);
         assert!(cfg.search_filter);
-        assert_eq!(cfg.web_port, 7765);
         assert_eq!(cfg.ext_name, ExportFormat::Epub);
     }
 
@@ -554,6 +521,7 @@ mod tests {
             proxy_port: 1080,
             qidian_cookie: "w_tsfp=demo".to_string(),
             language: LangType::ZhTw,
+            theme: ThemePref::Dark,
             ..AppConfig::default()
         };
 
@@ -571,6 +539,7 @@ mod tests {
         assert_eq!(loaded.proxy_port, cfg.proxy_port);
         assert_eq!(loaded.qidian_cookie, cfg.qidian_cookie);
         assert_eq!(loaded.language, cfg.language);
+        assert_eq!(loaded.theme, ThemePref::Dark);
     }
 
     #[test]

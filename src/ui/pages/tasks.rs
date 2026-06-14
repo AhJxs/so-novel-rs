@@ -7,18 +7,18 @@ use std::path::PathBuf;
 
 use crate::app::{DownloadTask, SoNovelApp};
 use crate::models::SearchResult;
-use crate::ui::theme;
+use crate::design_system::{button, chip, color, input};
 
 use crate::util::system::{open_path, reveal_in_folder};
 use crate::util::time::{format_duration, format_unix_local};
-use material_icons::icons as mi;
+use crate::material_icons::icons as mi;
 
 pub fn show(ui: &mut egui::Ui, app: &mut SoNovelApp) {
     show_summary_bar(ui, app);
     ui.add_space(8.0);
 
     if app.tasks.is_empty() {
-        theme::empty_state(
+        chip::empty_state(
             ui,
             mi::ICON_INBOX,
             "暂无下载任务",
@@ -61,12 +61,12 @@ pub fn show(ui: &mut egui::Ui, app: &mut SoNovelApp) {
 
     if let Some(p) = to_open {
         if let Err(e) = open_path(&p) {
-            app.show_toast(format!("打开失败: {e}"));
+            app.show_toast_error(format!("打开失败: {e}"));
         }
     }
     if let Some(p) = to_reveal {
         if let Err(e) = reveal_in_folder(&p) {
-            app.show_toast(format!("显示位置失败: {e}"));
+            app.show_toast_error(format!("显示位置失败: {e}"));
         }
     }
     if let Some(r) = to_redownload {
@@ -99,49 +99,49 @@ fn show_summary_bar(ui: &mut egui::Ui, app: &mut SoNovelApp) {
 
     let dark = ui.style().visuals.dark_mode;
     ui.horizontal(|ui| {
-        ui.set_min_height(theme::QUERY_HEIGHT);
+        ui.set_min_height(input::QUERY_HEIGHT);
 
         // 左侧：从 5 个统计里挑非 0 的画 chip（"总数"始终画）
-        theme::stat_chip(ui, mi::ICON_INVENTORY, "总数", total, theme::semantic_muted(dark));
+        chip::stat_chip(ui, mi::ICON_INVENTORY, "总数", total, color::semantic_muted(dark));
         if running > 0 {
             ui.add_space(6.0);
-            theme::stat_chip(
+            chip::stat_chip(
                 ui,
                 mi::ICON_DOWNLOADING,
                 "进行中",
                 running,
-                theme::semantic_info(dark),
+                color::semantic_info(dark),
             );
         }
         if done > 0 {
             ui.add_space(6.0);
-            theme::stat_chip(
+            chip::stat_chip(
                 ui,
                 mi::ICON_CHECK_CIRCLE,
                 "完成",
                 done,
-                theme::semantic_success(dark),
+                color::semantic_success(dark),
             );
         }
         if failed > 0 {
             ui.add_space(6.0);
-            theme::stat_chip(
+            chip::stat_chip(
                 ui,
                 mi::ICON_WARNING,
                 "失败",
                 failed,
-                theme::semantic_warn(dark),
+                color::semantic_warn(dark),
             );
         }
         if cancelled > 0 {
             ui.add_space(6.0);
             // 取消属用户主动操作，灰色 muted 不喧宾夺主
-            theme::stat_chip(
+            chip::stat_chip(
                 ui,
                 mi::ICON_CANCEL,
                 "已取消",
                 cancelled,
-                theme::semantic_muted(dark),
+                color::semantic_muted(dark),
             );
         }
 
@@ -149,14 +149,14 @@ fn show_summary_bar(ui: &mut egui::Ui, app: &mut SoNovelApp) {
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             let any_finished = done + failed + cancelled > 0;
             let label = format!("{} 清除记录", mi::ICON_DELETE.codepoint);
-            if theme::danger_button(ui, &label, any_finished) {
+            if button::danger_button(ui, &label, any_finished) {
                 app.clear_finished_tasks();
             }
         });
     });
 }
 
-// chip / 实心按钮 / darken / lighten 已抽到 `crate::ui::theme`，多个页面共用。
+// chip / 实心按钮 / darken / lighten 已抽到 design_system crate，多个页面共用。
 // 见 theme::{stat_chip, primary_button, danger_button, solid_button}。
 
 enum TaskAction {
@@ -191,13 +191,13 @@ fn show_one_task(
 
     // ---- 状态色（与 stat_chip 一致；完成/失败/取消各 1 色） ----
     let status_color = if task.is_running() {
-        theme::ACCENT
+        color::ACCENT
     } else if task.is_cancelled() {
-        theme::semantic_muted(dark)
+        color::semantic_muted(dark)
     } else if task.is_failed() {
-        theme::semantic_warn(dark)
+        color::semantic_warn(dark)
     } else {
-        theme::semantic_success(dark)
+        color::semantic_success(dark)
     };
     let hover_fill = if dark {
         egui::Color32::from_white_alpha(10)
@@ -469,14 +469,14 @@ fn show_task_time_line(ui: &mut egui::Ui, task: &DownloadTask) {
     let dark = ui.style().visuals.dark_mode;
     ui.horizontal(|ui| {
         ui.label(
-            egui::RichText::new(format!("{}", format_unix_local(task.started_at_unix))),
+            egui::RichText::new(format_unix_local(task.started_at_unix).to_string()),
         );
         if let Some(d) = task.elapsed() {
             ui.label(egui::RichText::new("·").small().weak());
             let (label, color) = if task.is_running() {
                 (
                     format!("已运行 {}", format_duration(d)),
-                    theme::semantic_info(dark),
+                    color::semantic_info(dark),
                 )
             } else {
                 (
@@ -503,7 +503,7 @@ fn show_task_extra_meta(ui: &mut egui::Ui, task: &DownloadTask) {
             ui.label(
                 egui::RichText::new(format!("原因 {reason}"))
                     .small()
-                    .color(theme::semantic_warn(dark)),
+                    .color(color::semantic_warn(dark)),
             );
         }
         _ => {}
