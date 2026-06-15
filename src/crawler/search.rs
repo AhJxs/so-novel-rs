@@ -9,6 +9,7 @@
 use std::sync::Arc;
 
 use reqwest::Client;
+use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 
 use crate::http::client::{build_async_client, ClientOptions};
@@ -80,6 +81,63 @@ pub async fn search_aggregated(
     // 按 source_id 升序，UI 显示稳定
     out.sort_by_key(|o| o.source_id);
     out
+}
+
+/// 流式聚合搜索：每源完成后立即通过 `tx` 推送，而不是等全部完成再返回。
+///
+/// 与 `search_aggregated` 的区别：
+/// - `search_aggregated` 收集所有结果到 Vec，适合测试和一次性批量处理。
+/// - `search_streaming` 每完成一源就推送，适合 UI 逐源更新进度。
+pub async fn search_streaming(
+    cfg: &crate::config::AppConfig,
+    sources: Vec<Source>,
+    keyword: String,
+    limit: Option<usize>,
+    cf_bypass_base: Option<String>,
+    tx: mpsc::UnboundedSender<SourceSearchOutcome>,
+) {
+    let mut set: JoinSet<SourceSearchOutcome> = JoinSet::new();
+
+    let cfg = Arc::new(cfg.clone());
+    let kw = Arc::new(keyword);
+    let cf = Arc::new(cf_bypass_base);
+
+    for src in sources {
+        let cfg = Arc::clone(&cfg);
+        let kw = Arc::clone(&kw);
+        let cf = Arc::clone(&cf);
+        set.spawn(async move {
+            let source_id = src.rule.id;
+            let source_name = src.rule.name.clone();
+            let client_opts = ClientOptions {
+                unsafe_ssl: src.rule.ignore_ssl,
+            };
+            let result = match build_async_client(&cfg, &client_opts) {
+                Ok(client) => {
+                    let cf_borrow: Option<&str> = cf.as_ref().as_ref().map(|s| s.as_str());
+                    run_one(&client, &src, kw.as_str(), limit, cf_borrow).await
+                }
+                Err(e) => Err(SearchError::Http(format!("client: {e:#}"))),
+            };
+            SourceSearchOutcome {
+                source_id,
+                source_name,
+                result,
+            }
+        });
+    }
+
+    while let Some(joined) = set.join_next().await {
+        match joined {
+            Ok(o) => {
+                // 接收端已关闭（UI 侧 drop）→ 放弃剩余任务
+                if tx.send(o).is_err() {
+                    break;
+                }
+            }
+            Err(e) => tracing::warn!("聚合搜索任务 join 失败: {e}"),
+        }
+    }
 }
 
 async fn run_one(

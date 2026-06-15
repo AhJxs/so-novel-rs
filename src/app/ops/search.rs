@@ -76,25 +76,43 @@ pub fn spawn_search(
         .filter(|v| *v > 0);
 
     runtime.spawn(async move {
-        let outcomes = crate::crawler::search::search_aggregated(
-            &cfg,
-            target_sources,
-            keyword,
-            limit,
-            cf_bypass,
-        )
-        .await;
-        for o in outcomes {
+        let (inner_tx, mut inner_rx) =
+            mpsc::unbounded_channel::<crate::crawler::search::SourceSearchOutcome>();
+
+        // 把搜索放在独立的 tokio task 里，与下面的桥接循环并发运行。
+        // async move 会把 cfg 移入内部，&cfg 引用的是 task 自己拥有的值，
+        // 满足 'static 要求。
+        let search_handle = tokio::spawn(async move {
+            crate::crawler::search::search_streaming(
+                &cfg,
+                target_sources,
+                keyword,
+                limit,
+                cf_bypass,
+                inner_tx,
+            )
+            .await
+        });
+
+        // 桥接循环：每收到一源结果就立即转发给 UI，与搜索并发。
+        while let Some(o) = inner_rx.recv().await {
             let send_result = match o.result {
                 Ok(list) => Ok(list),
                 Err(e) => Err(format!("{e}")),
             };
-            let _ = tx.send(SourceSearchEvent {
-                source_id: o.source_id,
-                source_name: o.source_name,
-                result: send_result,
-            });
+            if tx
+                .send(SourceSearchEvent {
+                    source_id: o.source_id,
+                    source_name: o.source_name,
+                    result: send_result,
+                })
+                .is_err()
+            {
+                break;
+            }
         }
+
+        let _ = search_handle.await;
     });
 
     true
