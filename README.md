@@ -13,7 +13,7 @@ So Novel 的 Rust + egui 桌面客户端，从 Java 版本完整重写。
 | 设置 | ✅ | iOS 风格卡片式设置、主题切换持久化、4 色 toast 通知 |
 | 导出 | ✅ | EPUB / TXT（多编码）/ HTML（zip 打包）；PDF 暂未实现 |
 | CLI | ✅ | `search` / `download` / `sources` / `version` 四个子命令 |
-| 配置 | ✅ | `config.toml`（toml_edit 保留注释）+ `sonovel.db`（SQLite） |
+| 配置 | ✅ | `~/.sonovel/config.toml`（toml_edit 保留注释）+ `~/.sonovel/sonovel.db`（SQLite） |
 
 ## 技术栈
 
@@ -34,8 +34,9 @@ So Novel 的 Rust + egui 桌面客户端，从 Java 版本完整重写。
 
 ```
 so-novel-rs/
-├── config.toml              # 用户配置（首次启动自动生成）
-├── sonovel.db               # SQLite 数据库（书源 + 下载任务 + 覆写）
+├── ~/.sonovel/                  # 用户数据目录（首次启动自动生成）
+│   ├── config.toml              # 用户配置
+│   └── sonovel.db               # SQLite 数据库（书源 + 下载任务 + 覆写）
 ├── bundle/
 │   ├── fonts/               # Noto Sans SC 全 9 字重
 │   ├── rules/               # 默认书源 JSON（首次启动 seed 到数据库）
@@ -71,8 +72,9 @@ so-novel-rs/
     │   ├── color.rs         # ACCENT + semantic 色函数
     │   ├── font.rs          # install_cjk_fonts / install_visuals
     │   ├── frame.rs         # nav / title_bar / content frame 工厂
-    │   ├── button.rs        # button / small / action / settings / primary / danger / solid
-    │   ├── input.rs         # search_input / rounded_combo
+    │   ├── button.rs        # primary/danger/success/warning/ghost/text/inline/icon 按钮
+    │   ├── input.rs         # icon_text_input / rounded_combo / rounded_text_input / rounded_drag_value
+    │   ├── popup.rs         # Popup 通用弹窗（自定义标题栏 + icon_button 关闭）
     │   ├── chip.rs          # stat_chip / empty_state
     │   ├── toggle.rs        # iOS 风格 toggle_switch
     │   ├── settings.rs      # settings_row 通用布局
@@ -131,7 +133,7 @@ so-novel-rs/
 cargo run
 ```
 
-工作目录建议在仓库根，使应用能找到 `bundle/` 下的字体和默认书源：
+工作目录建议在仓库根，使应用能找到 `bundle/` 下的字体和默认书源。配置和数据文件存放在 `~/.sonovel/` 目录，首次启动自动创建：
 
 ```sh
 cd <repo-root>

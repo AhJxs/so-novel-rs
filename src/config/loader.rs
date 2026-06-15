@@ -475,19 +475,25 @@ pub struct ConfigPaths {
 
 impl ConfigPaths {
     /// 路径约定：
-    /// - 优先使用项目根（`current_dir`，开发态 `cargo run` 时就是仓库根）下的
-    ///   `config.toml` + `sonovel.db`；
-    /// - 这两个文件首次启动时会自动创建。
-    ///
-    /// 老版的 `bundle/config.ini` / `bundle/rules/` / `source-overrides.json` /
-    /// `bundle/downloads.db` 不再被加载（文件可保留，仅作历史参考）。
+    /// - `config.toml` + `sonovel.db` 统一存放在用户主目录下的 `~/.sonovel/` 目录；
+    /// - 首次启动时该目录不存在，`save_config` / `Db::open` 会自动创建；
+    /// - 如果无法获取主目录（极端情况），回落到当前工作目录。
     pub fn discover() -> Self {
-        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        let base = home_dir().join(".sonovel");
         Self {
-            config_file: cwd.join("config.toml"),
-            db_file: cwd.join("sonovel.db"),
+            config_file: base.join("config.toml"),
+            db_file: base.join("sonovel.db"),
         }
     }
+}
+
+/// 获取用户主目录，回落到当前工作目录。
+fn home_dir() -> PathBuf {
+    directories::BaseDirs::new()
+        .map(|d| d.home_dir().to_path_buf())
+        .unwrap_or_else(|| {
+            std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+        })
 }
 
 #[cfg(test)]

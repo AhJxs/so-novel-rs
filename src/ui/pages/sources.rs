@@ -8,7 +8,7 @@
 
 use crate::app::SoNovelApp;
 use crate::crawler::health::SourceHealth;
-use crate::design_system::{button, chip, color, input};
+use crate::design_system::{button, chip, color};
 use crate::material_icons::icons as mi;
 
 pub fn show(ui: &mut egui::Ui, app: &mut SoNovelApp) {
@@ -55,7 +55,7 @@ fn show_toolbar(ui: &mut egui::Ui, app: &mut SoNovelApp) {
 
     let dark = ui.style().visuals.dark_mode;
     ui.horizontal(|ui| {
-        ui.set_min_height(input::QUERY_HEIGHT);
+        ui.set_min_height(button::BAR_HEIGHT);
 
         // ---- 左：统计 chip ----
         chip::stat_chip(ui, mi::ICON_DNS, "总数", total, color::semantic_muted(dark));
@@ -288,13 +288,6 @@ fn source_card(
                         ui.set_min_width(card_inner_width);
 
                         ui.horizontal(|ui| {
-                            // 与卡片整体一致的圆角 8 按钮
-                            let mut style: egui::Style = (**ui.style()).clone();
-                            let r8 = egui::CornerRadius::same(8);
-                            style.visuals.widgets.inactive.corner_radius = r8;
-                            style.visuals.widgets.hovered.corner_radius = r8;
-                            style.visuals.widgets.active.corner_radius = r8;
-                            ui.set_style(style);
 
                             // ---- 左：标题行 + 元数据行 ----
                             ui.vertical(|ui| {
@@ -383,54 +376,27 @@ fn source_card(
                                 |ui| {
                                     if pending_delete {
                                         // 红色 "确认删除"（最右）
-                                        let confirm = ui.add(
-                                            egui::Button::new(
-                                                egui::RichText::new("确认删除")
-                                                    .size(14.0)
-                                                    .color(egui::Color32::WHITE),
-                                            )
-                                            .fill(color::semantic_danger(dark))
-                                            .corner_radius(egui::CornerRadius::same(8))
-                                            .min_size(egui::vec2(72.0, 28.0)),
-                                        );
-                                        if confirm.clicked() {
+                                        if button::inline_danger_icon(ui, "确认删除", mi::ICON_DELETE_FOREVER) {
                                             action = SourceAction::ConfirmDelete;
                                         }
                                         ui.add_space(6.0);
                                         // 普通 "取消"
-                                        let cancel = ui.add(
-                                            egui::Button::new(
-                                                egui::RichText::new("取消").size(14.0),
-                                            )
-                                            .corner_radius(egui::CornerRadius::same(8))
-                                            .min_size(egui::vec2(56.0, 28.0)),
-                                        );
-                                        if cancel.clicked() {
+                                        if button::inline_icon(ui, "取消", mi::ICON_CANCEL) {
                                             action = SourceAction::CancelDelete;
                                         }
                                     } else {
                                         // 删除（最右）
-                                        let del = ui.add(
-                                            egui::Button::new(
-                                                egui::RichText::new("删除").size(14.0),
-                                            )
-                                            .corner_radius(egui::CornerRadius::same(8))
-                                            .min_size(egui::vec2(56.0, 28.0)),
-                                        );
-                                        if del.clicked() {
+                                        if button::inline_danger_icon(ui, "删除", mi::ICON_DELETE) {
                                             action = SourceAction::RequestDelete;
                                         }
                                         ui.add_space(6.0);
                                         // 启用/禁用 toggle
-                                        let label = if r.disabled { "启用" } else { "禁用" };
-                                        let toggle = ui.add(
-                                            egui::Button::new(
-                                                egui::RichText::new(label).size(14.0),
-                                            )
-                                            .corner_radius(egui::CornerRadius::same(8))
-                                            .min_size(egui::vec2(56.0, 28.0)),
-                                        );
-                                        if toggle.clicked() {
+                                        let (label, icon) = if r.disabled {
+                                            ("启用", mi::ICON_CHECK_CIRCLE)
+                                        } else {
+                                            ("禁用", mi::ICON_BLOCK)
+                                        };
+                                        if button::inline_icon(ui, label, icon) {
                                             action = SourceAction::Toggle;
                                         }
                                     }

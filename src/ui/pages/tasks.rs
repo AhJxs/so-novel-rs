@@ -7,7 +7,7 @@ use std::path::PathBuf;
 
 use crate::app::{DownloadTask, SoNovelApp};
 use crate::models::SearchResult;
-use crate::design_system::{button, chip, color, input};
+use crate::design_system::{button, chip, color};
 
 use crate::util::system::{open_path, reveal_in_folder};
 use crate::util::time::{format_duration, format_unix_local};
@@ -99,7 +99,7 @@ fn show_summary_bar(ui: &mut egui::Ui, app: &mut SoNovelApp) {
 
     let dark = ui.style().visuals.dark_mode;
     ui.horizontal(|ui| {
-        ui.set_min_height(input::QUERY_HEIGHT);
+        ui.set_min_height(button::BAR_HEIGHT);
 
         // 左侧：从 5 个统计里挑非 0 的画 chip（"总数"始终画）
         chip::stat_chip(ui, mi::ICON_INVENTORY, "总数", total, color::semantic_muted(dark));
@@ -249,14 +249,6 @@ fn show_one_task(
                         ui.horizontal(|ui| {
                             ui.set_min_height(32.0);
 
-                            // 跟 result_card 一致：子 scope 改按钮 corner_radius = 8
-                            let mut style: egui::Style = (**ui.style()).clone();
-                            let r8 = egui::CornerRadius::same(8);
-                            style.visuals.widgets.inactive.corner_radius = r8;
-                            style.visuals.widgets.hovered.corner_radius = r8;
-                            style.visuals.widgets.active.corner_radius = r8;
-                            ui.set_style(style);
-
                             // #id —— 字号与作者一致（Body 13pt），颜色 = 状态色，strong
                             // 让 #1 / #2 这种序号在卡片左上角有视觉重量，跟边框+进度条
                             // 三位一体共同表达下载状态
@@ -359,58 +351,29 @@ fn render_task_action_buttons(
     let mut action = TaskAction::None;
     match &task.finished {
         Some(Ok(p)) => {
-            // 完成：打开（蓝）+ 位置
-            if ui
-                .add(
-                    egui::Button::new(format!("{} 打开", mi::ICON_OPEN_IN_NEW.codepoint))
-                        .corner_radius(egui::CornerRadius::same(8))
-                        .min_size(egui::vec2(56.0, 28.0)),
-                )
-                .clicked()
-            {
+            // 完成：打开 + 位置
+            if button::inline_icon(ui, "打开", mi::ICON_OPEN_IN_NEW) {
                 action = TaskAction::Open(p.clone());
             }
             ui.add_space(6.0);
-            if ui.add(
-                    egui::Button::new(format!("{} 位置", mi::ICON_FOLDER_OPEN.codepoint))
-                        .corner_radius(egui::CornerRadius::same(8))
-                        .min_size(egui::vec2(56.0, 28.0)),
-                )
-                .clicked()
-                {
+            if button::inline_icon(ui, "位置", mi::ICON_FOLDER_OPEN) {
                 action = TaskAction::Reveal(p.clone());
             }
         }
         Some(Err(_)) => {
             // 失败 / 取消：单 重试
-            if ui
-                .add(
-                    egui::Button::new(format!("{} 重试", mi::ICON_REFRESH.codepoint))
-                        .corner_radius(egui::CornerRadius::same(8))
-                        .min_size(egui::vec2(56.0, 28.0)),
-                )
-                .clicked()
-            {
+            if button::inline_icon(ui, "重试", mi::ICON_REFRESH) {
                 action = TaskAction::Redownload(Box::new(task.origin.clone()));
             }
         }
         None => {
-            // 运行中：单 取消（红）
+            // 运行中：单 取消
             if task.cancelling {
-                ui.add_enabled(
-                    false,
-                    egui::Button::new(format!("{} 取消中…", mi::ICON_CANCEL.codepoint))
-                        .corner_radius(egui::CornerRadius::same(8))
-                        .min_size(egui::vec2(56.0, 28.0)),
-                );
-            } else if ui
-                .add(
-                    egui::Button::new(format!("{} 取消", mi::ICON_CANCEL.codepoint))
-                        .corner_radius(egui::CornerRadius::same(8))
-                        .min_size(egui::vec2(56.0, 28.0)),
-                )
-                .clicked()
-            {
+                button::InlineButton::new("取消中…")
+                    .icon(mi::ICON_CANCEL)
+                    .enabled(false)
+                    .show(ui);
+            } else if button::inline_icon(ui, "取消", mi::ICON_CANCEL) {
                 if let Some(cancel) = task.cancel.as_ref() {
                     cancel.cancel();
                 }

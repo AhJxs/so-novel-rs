@@ -5,7 +5,8 @@
 //! - `font` — CJK 字体安装 + 视觉风格
 //! - `frame` — 面板 / 导航 / 标题栏 frame 工厂
 //! - `button` — 各样式按钮工厂
-//! - `input` — 搜索输入框 + 圆角下拉框
+//! - `input` — 搜索输入框 + 圆角下拉框 + 圆角文本框 + 圆角拖拽值
+//! - `popup` — 通用弹窗（自定义标题栏 + icon_button 关闭）
 //! - `chip` — 统计 chip + 空态视图
 //! - `toggle` — iOS 风格 toggle 开关
 //! - `settings` — 设置行通用布局
@@ -17,6 +18,7 @@ pub mod color;
 pub mod font;
 pub mod frame;
 pub mod input;
+pub mod popup;
 pub mod settings;
 pub mod theme_picker;
 pub mod toggle;

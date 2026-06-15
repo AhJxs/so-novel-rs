@@ -43,12 +43,13 @@ fn show_toolbar(ui: &mut egui::Ui, app: &mut SoNovelApp) {
     ui.horizontal(|ui| {
         // 1. 文件名过滤输入框（与搜索页关键词框同款）
         const INPUT_W: f32 = 280.0;
-        let (_resp, _enter) = input::search_input(
+        let (_resp, _enter) = input::icon_text_input(
             ui,
             &mut app.library.filter_text,
             "按文件名过滤",
-            mi::ICON_SEARCH,
+            mi::ICON_FILTER,
             INPUT_W,
+            input::INPUT_HEIGHT,
         );
 
         ui.add_space(6.0);
@@ -59,7 +60,7 @@ fn show_toolbar(ui: &mut egui::Ui, app: &mut SoNovelApp) {
             .filter_ext
             .clone()
             .unwrap_or_else(|| "全部".to_string());
-        input::rounded_combo(ui, "library_ext_filter", current.clone(), 110.0, |ui| {
+        input::rounded_combo(ui, "library_ext_filter", current.clone(), 110.0, input::INPUT_HEIGHT, |ui| {
             for opt in ["全部", "epub", "txt", "zip", "html", "pdf"] {
                 ui.selectable_value(&mut current, opt.to_string(), opt);
             }
@@ -259,14 +260,6 @@ fn entry_card(
                         // 整体 horizontal：左 vertical（两行内容）+ 右 rtl 按钮组。
                         // rtl 默认 Align::Center，按钮垂直居中于左侧 vertical 整体高度。
                         ui.horizontal(|ui| {
-                            // 与卡片整体一致的圆角 8 按钮
-                            let mut style: egui::Style = (**ui.style()).clone();
-                            let r8 = egui::CornerRadius::same(8);
-                            style.visuals.widgets.inactive.corner_radius = r8;
-                            style.visuals.widgets.hovered.corner_radius = r8;
-                            style.visuals.widgets.active.corner_radius = r8;
-                            ui.set_style(style);
-
                             // ---- 左：书名行 + 元数据行 ----
                             ui.vertical(|ui| {
                                 // 第一行：序号 + 书名
@@ -312,53 +305,23 @@ fn entry_card(
                                     if pending_delete {
                                         // 二次确认：警示色"确认删除"+ 普通"取消"
                                         // rtl 下添加顺序：先取消 → 再确认删除 → 视觉上"确认删除"在最右
-                                        let confirm = ui.add(
-                                            egui::Button::new(
-                                                egui::RichText::new("确认删除")
-                                                    .size(14.0)
-                                                    .color(egui::Color32::WHITE),
-                                            )
-                                            .fill(color::semantic_danger(dark_mode))
-                                            .corner_radius(egui::CornerRadius::same(8))
-                                            .min_size(egui::vec2(72.0, 28.0)),
-                                        );
-                                        if confirm.clicked() {
+                                        if button::inline_danger_icon(ui, "确认删除", mi::ICON_DELETE_FOREVER) {
                                             action = EntryAction::Delete;
                                         }
                                         ui.add_space(6.0);
-                                        let cancel = ui.add(
-                                            egui::Button::new(egui::RichText::new("取消").size(14.0))
-                                                .corner_radius(egui::CornerRadius::same(8))
-                                                .min_size(egui::vec2(56.0, 28.0)),
-                                        );
-                                        if cancel.clicked() {
+                                        if button::inline_icon(ui, "取消", mi::ICON_CANCEL) {
                                             action = EntryAction::CancelDelete;
                                         }
                                     } else {
-                                        let del = ui.add(
-                                            egui::Button::new(egui::RichText::new("删除").size(14.0))
-                                                .corner_radius(egui::CornerRadius::same(8))
-                                                .min_size(egui::vec2(56.0, 28.0)),
-                                        );
-                                        if del.clicked() {
+                                        if button::inline_danger_icon(ui, "删除", mi::ICON_DELETE) {
                                             action = EntryAction::ConfirmDelete;
                                         }
                                         ui.add_space(6.0);
-                                        let reveal = ui.add(
-                                            egui::Button::new(egui::RichText::new("位置").size(14.0))
-                                                .corner_radius(egui::CornerRadius::same(8))
-                                                .min_size(egui::vec2(56.0, 28.0)),
-                                        );
-                                        if reveal.clicked() {
+                                        if button::inline_icon(ui, "位置", mi::ICON_FOLDER_OPEN) {
                                             action = EntryAction::Reveal;
                                         }
                                         ui.add_space(6.0);
-                                        let open = ui.add(
-                                            egui::Button::new(egui::RichText::new("打开").size(14.0))
-                                                .corner_radius(egui::CornerRadius::same(8))
-                                                .min_size(egui::vec2(56.0, 28.0)),
-                                        );
-                                        if open.clicked() {
+                                        if button::inline_icon(ui, "打开", mi::ICON_OPEN_IN_NEW) {
                                             action = EntryAction::Open;
                                         }
                                     }

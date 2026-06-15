@@ -52,8 +52,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut SoNovelApp) {
             separator(ui);
             let mut changed = false;
             settings::settings_row(ui, "下载目录", Some(&current), |ui| {
-                let label = format!("{} 选择", mi::ICON_FOLDER_OPEN.codepoint);
-                if button::settings_button(ui, &label).clicked() {
+                if button::inline_icon(ui, "选择", mi::ICON_FOLDER_OPEN) {
                     if let Some(path) = rfd::FileDialog::new()
                         .set_title("选择下载目录")
                         .pick_folder()
@@ -92,7 +91,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut SoNovelApp) {
                 |ui| {
                     let matched = ENCODINGS.iter().find(|e| **e == current).copied();
                     let selected = matched.unwrap_or("自定义");
-                    input::rounded_combo(ui, "txt_encoding", selected, 130.0, |ui| {
+                    input::rounded_combo(ui, "txt_encoding", selected, 130.0, input::ROW_HEIGHT, |ui| {
                         for enc in ENCODINGS {
                             let is_cur = *enc == current;
                             if ui.selectable_label(is_cur, *enc).clicked() {
@@ -153,7 +152,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut SoNovelApp) {
                 &mut app.config.enable_retry) {
                 app.settings_dirty = true;
             }
-            if drag_row_int(ui, "最大重试次数", None, 0, 20,
+            if drag_row_int(ui, "最大重试次数", None, 0u32, 20u32,
                 &mut app.config.max_retries) {
                 app.settings_dirty = true;
             }
@@ -175,7 +174,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut SoNovelApp) {
                 &mut app.config.proxy_host, 220.0, None) {
                 app.settings_dirty = true;
             }
-            if drag_row_int(ui, "代理 Port", None, 1, 65_535,
+            if drag_row_int(ui, "代理 Port", None, 1u16, 65_535u16,
                 &mut app.config.proxy_port) {
                 app.settings_dirty = true;
             }
@@ -225,14 +224,13 @@ pub fn show(ui: &mut egui::Ui, app: &mut SoNovelApp) {
                     if let Some(latest) = &app.update_state.latest_version {
                         let current = env!("CARGO_PKG_VERSION");
                         if latest.trim_start_matches('v') != current {
-                            if button::settings_button(ui, "查看").clicked() {
+                            if button::inline(ui, "查看") {
                                 ui.ctx().open_url(egui::OpenUrl::new_tab("https://github.com/AhJxs/so-novel-rs/releases/latest"));
                             }
                             ui.add_space(4.0);
                         }
                     }
-                    let label = format!("{} 检查", mi::ICON_SYSTEM_UPDATE.codepoint);
-                    if button::settings_button(ui, &label).clicked() {
+                    if button::inline_icon(ui, "检查", mi::ICON_REFRESH) {
                         app.spawn_update_check();
                     }
                 }
@@ -307,7 +305,7 @@ fn toggle_row(
     changed
 }
 
-/// TextEdit 行（单行字符串）。返回 `changed()`。
+/// TextEdit 行（单行字符串，圆角边框样式）。返回 `changed()`。
 fn text_row(
     ui: &mut Ui,
     title: &str,
@@ -319,11 +317,7 @@ fn text_row(
     separator(ui);
     let mut changed = false;
     settings::settings_row(ui, title, subtitle, |ui| {
-        let mut edit = egui::TextEdit::singleline(target).desired_width(width);
-        if let Some(h) = hint {
-            edit = edit.hint_text(h);
-        }
-        changed = ui.add(edit).changed();
+        changed = input::rounded_text_input(ui, target, width, input::ROW_HEIGHT, hint).changed();
     });
     changed
 }
@@ -345,14 +339,14 @@ fn combo_row<T: Copy + PartialEq>(
     separator(ui);
     settings::settings_row(ui, title, subtitle, |ui| {
         let selected = value_to_str(*target).to_string();
-        input::rounded_combo(ui, id_salt, selected, width, |ui| {
+        input::rounded_combo(ui, id_salt, selected, width, input::ROW_HEIGHT, |ui| {
             fill_options(ui, target);
         });
     });
     *target != before
 }
 
-/// DragValue 行（Option<i32>，None 时回退到 -1 等 sentinel）。
+/// DragValue 行（Option<i32>，None 时回退到 -1 等 sentinel，圆角边框样式）。
 fn drag_row_opt_i32(
     ui: &mut Ui,
     title: &str,
@@ -367,7 +361,7 @@ fn drag_row_opt_i32(
     let mut changed = false;
     settings::settings_row(ui, title, subtitle, |ui| {
         let mut v = target.unwrap_or(none_sentinel);
-        if ui.add(egui::DragValue::new(&mut v).range(lo..=hi)).changed() {
+        if input::rounded_drag_value(ui, &mut v, lo..=hi, 80.0, input::ROW_HEIGHT).changed() {
             *target = if v == none_sentinel { None } else { Some(v) };
             changed = true;
         }
@@ -375,29 +369,26 @@ fn drag_row_opt_i32(
     changed || *target != before
 }
 
-/// DragValue 行（任意整数类型 `T: egui::emath::Numeric`）。
+/// DragValue 行（任意整数类型 `T: egui::emath::Numeric`，圆角边框样式）。
 fn drag_row_int<T: egui::emath::Numeric>(
     ui: &mut Ui,
     title: &str,
     subtitle: Option<&str>,
-    lo: i32,
-    hi: i32,
+    lo: T,
+    hi: T,
     target: &mut T,
 ) -> bool {
     separator(ui);
     let mut changed = false;
     settings::settings_row(ui, title, subtitle, |ui| {
-        if ui
-            .add(egui::DragValue::new(target).range(lo..=hi))
-            .changed()
-        {
+        if input::rounded_drag_value(ui, target, lo..=hi, 80.0, input::ROW_HEIGHT).changed() {
             changed = true;
         }
     });
     changed
 }
 
-/// "min / max" 双 DragValue 行（抓取间隔、重试间隔共用）。
+/// "min / max" 双 DragValue 行（抓取间隔、重试间隔共用，圆角边框样式）。
 fn range_row(
     ui: &mut Ui,
     title: &str,
@@ -408,11 +399,11 @@ fn range_row(
     separator(ui);
     let mut changed = false;
     settings::settings_row(ui, title, subtitle, |ui| {
-        ui.horizontal(|ui| {
+        ui.horizontal_centered(|ui| {
             ui.label("min");
-            let r1 = ui.add(egui::DragValue::new(min).range(0..=60_000));
+            let r1 = input::rounded_drag_value(ui, min, 0..=60_000, 70.0, input::ROW_HEIGHT);
             ui.label("max");
-            let r2 = ui.add(egui::DragValue::new(max).range(0..=60_000));
+            let r2 = input::rounded_drag_value(ui, max, 0..=60_000, 70.0, input::ROW_HEIGHT);
             if r1.changed() || r2.changed() {
                 changed = true;
             }

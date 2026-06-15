@@ -10,9 +10,10 @@
 //!    显示一条最近任务摘要做反馈）。
 
 use crate::app::{SearchState, SoNovelApp, SourceStatus};
+use crate::material_icons::icons as mi;
 use crate::models::SearchResult;
 use crate::ui::nav::NavPage;
-use crate::design_system::{button, color, input};
+use crate::design_system::{button, color, input, popup};
 
 pub fn show(ui: &mut egui::Ui, app: &mut SoNovelApp) {
     show_query_bar(ui, app);
@@ -91,23 +92,17 @@ fn show_task_banner(ui: &mut egui::Ui, app: &mut SoNovelApp) {
                 // 用外层 `ui.horizontal` 的默认 `Align::Center` 做垂直居中 —
                 // 比再嵌一层 `horizontal_centered` 更直接，label 也不再被水平居中（应是左对齐）。
                 ui.set_min_height(36.0);
-                let mut style: egui::Style = (**ui.style()).clone();
-                let r8 = egui::CornerRadius::same(8);
-                style.visuals.widgets.inactive.corner_radius = r8;
-                style.visuals.widgets.hovered.corner_radius = r8;
-                style.visuals.widgets.active.corner_radius = r8;
-                ui.set_style(style);
 
                 task_status_icon(ui, status);
                 ui.add_space(6.0);
                 ui.label(label);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     // ✕ 关闭按钮：手画 X 线段，避免 unicode ✕ 在某些字体下不渲染
-                    if close_x_button(ui).on_hover_text("隐藏此横幅").clicked() {
+                    if button::icon_button(ui, mi::ICON_CLOSE, true).on_hover_text("隐藏此横幅").clicked() {
                         dismiss = true;
                     }
                     ui.add_space(4.0);
-                    if button::action_button(ui, "查看任务").clicked() {
+                    if button::inline_icon(ui, "查看任务", mi::ICON_TASK_ALT) {
                         go_tasks = true;
                     }
                 });
@@ -126,12 +121,13 @@ fn show_query_bar(ui: &mut egui::Ui, app: &mut SoNovelApp) {
     ui.horizontal(|ui| {
         // ---- 1. 输入框 ----
         const INPUT_W: f32 = 360.0;
-        let (_resp, enter_pressed) = input::search_input(
+        let (_resp, enter_pressed) = input::icon_text_input(
             ui,
             &mut app.search.keyword,
             "书名 / 作者",
             crate::material_icons::icons::ICON_SEARCH,
             INPUT_W,
+            input::INPUT_HEIGHT,
         );
 
         ui.add_space(6.0);
@@ -146,7 +142,7 @@ fn show_query_bar(ui: &mut egui::Ui, app: &mut SoNovelApp) {
                 .map(|r| format!("{} ({})", r.name, r.id))
                 .unwrap_or_else(|| format!("书源 {id}（已下线？）")),
         };
-        input::rounded_combo(ui, "search_source", current_label, 220.0, |ui| {
+        input::rounded_combo(ui, "search_source", current_label, 220.0, input::INPUT_HEIGHT, |ui| {
             ui.selectable_value(&mut app.search.source_id, None, "全部书源（聚合）");
             for r in &app.rules {
                 if r.disabled {
@@ -385,7 +381,7 @@ fn show_results(ui: &mut egui::Ui, app: &mut SoNovelApp) {
 
 /// 详情弹窗：根据 `app.search.detail_popup_for` 渲染当前行的详情。
 ///
-/// 弹窗用 `egui::Window`：自带阴影、圆角、可拖动；按 ESC 或点 ✕ 关闭。
+/// 使用 `popup::Popup` 通用弹窗组件，按 ESC 或点关闭按钮关闭。
 /// 详情数据来自 `select_search_result` 触发的 detail_cache（异步加载）。
 fn show_detail_popup(ctx: &egui::Context, app: &mut SoNovelApp) {
     let Some(idx) = app.search.detail_popup_for else {
@@ -397,24 +393,9 @@ fn show_detail_popup(ctx: &egui::Context, app: &mut SoNovelApp) {
         return;
     };
 
-    // ESC 关闭
-    if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-        app.search.detail_popup_for = None;
-        return;
-    }
-
-    let mut open = true;
-    let title = format!("📖 {}", r.book_name);
-    egui::Window::new(title)
-        .open(&mut open)
-        .collapsible(false)
-        .resizable([true, true])
-        .default_width(520.0)
-        .default_height(420.0)
-        .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
-        .show(ctx, |ui| {
-            render_detail_body(ui, app, &r);
-        });
+    let open = popup::Popup::new("detail_popup").show(ctx, |ui| {
+        render_detail_body(ui, app, &r);
+    });
     if !open {
         app.search.detail_popup_for = None;
     }
@@ -423,98 +404,132 @@ fn show_detail_popup(ctx: &egui::Context, app: &mut SoNovelApp) {
 fn render_detail_body(ui: &mut egui::Ui, app: &SoNovelApp, r: &SearchResult) {
     use crate::app::{CoverEntry, DetailState};
 
-    ui.horizontal(|ui| {
-        ui.label(egui::RichText::new("作者：").weak());
-        ui.label(r.author.as_deref().unwrap_or("（未知）"));
-        ui.separator();
-        ui.label(egui::RichText::new("来源：").weak());
-        ui.label(format!("{}#{}", r.source_name, r.source_id));
-    });
-    ui.add_space(6.0);
-    ui.separator();
-    ui.add_space(6.0);
+    // 内容区固定宽度，防止简介文本撑满屏幕
+    const CONTENT_W: f32 = 520.0;
 
-    let key = (r.source_id, r.url.clone());
-    match app.search.detail_cache.get(&key) {
-        None => {
-            ui.label(egui::RichText::new("准备加载详情…").weak());
-        }
-        Some(DetailState::Pending) => {
+    // 上下左右统一 padding
+    egui::Frame::new()
+        .show(ui, |ui| {
+            ui.set_width(CONTENT_W);
+
+            // 书名 · 作者 · 来源 一行
             ui.horizontal(|ui| {
-                ui.spinner();
-                ui.label("正在加载详情…");
+                ui.label(egui::RichText::new(&r.book_name).strong().size(16.0));
+                ui.add_space(8.0);
+                ui.label(egui::RichText::new("·").weak());
+                ui.add_space(8.0);
+                ui.label(egui::RichText::new(r.author.as_deref().unwrap_or("（未知）")).size(14.0));
+                ui.add_space(8.0);
+                ui.label(egui::RichText::new("·").weak());
+                ui.add_space(8.0);
+                ui.label(egui::RichText::new(format!("{}#{}", r.source_name, r.source_id)).size(14.0));
             });
-        }
-        Some(DetailState::Failed(reason)) => {
-            ui.colored_label(
-                color::semantic_warn(ui.style().visuals.dark_mode),
-                format!("详情加载失败：{reason}"),
-            );
-        }
-        Some(DetailState::Loaded(book)) => {
-            // 双栏：左封面（200x280 max），右文字
-            ui.horizontal_top(|ui| {
-                // 左：封面
-                if let Some(cover_url) = book
-                    .cover_url
-                    .as_deref()
-                    .map(str::trim)
-                    .filter(|s| !s.is_empty())
-                {
-                    let ckey = (r.source_id, cover_url.to_string());
-                    let in_flight = app.search.cover_in_flight.contains(&ckey);
-                    ui.allocate_ui(egui::vec2(200.0, 280.0), |ui| {
-                        match app.search.cover_cache.get(&ckey) {
-                            Some(CoverEntry::Ready(img)) => {
-                                ui.add(img.clone().max_size(egui::vec2(200.0, 280.0)));
-                            }
-                            Some(CoverEntry::Failed(reason)) => {
-                                ui.colored_label(
-                                    color::semantic_warn(ui.style().visuals.dark_mode),
-                                    format!("封面加载失败：{reason}"),
-                                );
-                            }
-                            None if in_flight => {
-                                ui.spinner();
-                                ui.label("封面下载中…");
-                            }
-                            None => {
-                                ui.label(egui::RichText::new("封面等待中…").small().weak());
-                            }
-                        }
-                    });
-                    ui.add_space(12.0);
-                }
+            ui.add_space(8.0);
 
-                // 右：元信息 + 简介
-                ui.vertical(|ui| {
-                    if let Some(c) = &book.category {
-                        ui.label(format!("分类：{c}"));
-                    }
-                    if let Some(s) = &book.status {
-                        ui.label(format!("状态：{s}"));
-                    }
-                    if let Some(latest) = &book.latest_chapter {
-                        ui.label(format!("最新章节：{latest}"));
-                    }
-                    if let Some(t) = &book.last_update_time {
-                        ui.label(format!("更新时间：{t}"));
-                    }
-                    if let Some(intro) = &book.intro {
-                        ui.add_space(8.0);
-                        ui.strong("简介");
-                        ui.add_space(4.0);
-                        egui::ScrollArea::vertical()
-                            .id_salt("popup_intro_scroll")
-                            .max_height(220.0)
-                            .show(ui, |ui| {
-                                ui.label(intro);
-                            });
-                    }
-                });
-            });
-        }
-    }
+            let key = (r.source_id, r.url.clone());
+            match app.search.detail_cache.get(&key) {
+                None => {
+                    ui.label(egui::RichText::new("准备加载详情…").weak());
+                }
+                Some(DetailState::Pending) => {
+                    ui.horizontal(|ui| {
+                        ui.spinner();
+                        ui.label("正在加载详情…");
+                    });
+                }
+                Some(DetailState::Failed(reason)) => {
+                    ui.colored_label(
+                        color::semantic_warn(ui.style().visuals.dark_mode),
+                        format!("详情加载失败：{reason}"),
+                    );
+                }
+                Some(DetailState::Loaded(book)) => {
+                    // 双栏：左封面（200x280 max），右文字
+                    ui.horizontal_top(|ui| {
+                        // 左：封面
+                        if let Some(cover_url) = book
+                            .cover_url
+                            .as_deref()
+                            .map(str::trim)
+                            .filter(|s| !s.is_empty())
+                        {
+                            let ckey = (r.source_id, cover_url.to_string());
+                            let in_flight = app.search.cover_in_flight.contains(&ckey);
+                            egui::Frame::group(ui.style())
+                                .corner_radius(egui::CornerRadius::same(8))
+                                .inner_margin(egui::Margin::same(4))
+                                .show(ui, |ui| {
+                                    ui.allocate_ui(egui::vec2(180.0, 260.0), |ui| {
+                                        match app.search.cover_cache.get(&ckey) {
+                                            Some(CoverEntry::Ready(img)) => {
+                                                ui.add(
+                                                    img.clone()
+                                                        .max_size(egui::vec2(180.0, 260.0)),
+                                                );
+                                            }
+                                            Some(CoverEntry::Failed(reason)) => {
+                                                ui.colored_label(
+                                                    color::semantic_warn(
+                                                        ui.style().visuals.dark_mode,
+                                                    ),
+                                                    format!("封面加载失败：{reason}"),
+                                                );
+                                            }
+                                            None if in_flight => {
+                                                ui.spinner();
+                                                ui.label("封面下载中…");
+                                            }
+                                            None => {
+                                                ui.label(
+                                                    egui::RichText::new("封面等待中…")
+                                                        .small()
+                                                        .weak(),
+                                                );
+                                            }
+                                        }
+                                    });
+                                });
+                            ui.add_space(16.0);
+                        }
+
+                        // 右：元信息 + 简介
+                        ui.vertical(|ui| {
+                            if let Some(c) = &book.category {
+                                meta_item(ui, "分类", c);
+                            }
+                            if let Some(s) = &book.status {
+                                meta_item(ui, "状态", s);
+                            }
+                            if let Some(latest) = &book.latest_chapter {
+                                meta_item(ui, "最新章节", latest);
+                            }
+                            if let Some(t) = &book.last_update_time {
+                                meta_item(ui, "更新时间", t);
+                            }
+                            if let Some(intro) = &book.intro {
+                                ui.add_space(8.0);
+                                ui.label(egui::RichText::new("简介").strong());
+                                ui.add_space(4.0);
+                                egui::ScrollArea::vertical()
+                                    .id_salt("popup_intro_scroll")
+                                    .max_height(220.0)
+                                    .show(ui, |ui| {
+                                        ui.label(intro);
+                                    });
+                            }
+                        });
+                    });
+                }
+            }
+        });
+}
+
+/// 弹窗元数据项：标签（弱小字）+ 值
+fn meta_item(ui: &mut egui::Ui, label: &str, value: &str) {
+    ui.horizontal(|ui| {
+        ui.label(egui::RichText::new(format!("{label}：")).weak());
+        ui.label(value);
+    });
 }
 
 fn truncate(s: &str, n: usize) -> String {
@@ -617,14 +632,6 @@ fn result_card(
                         ui.horizontal(|ui| {
                             ui.set_min_height(32.0);
 
-                            // 子 scope 改按钮 corner_radius 为 8，与整体一致
-                            let mut style: egui::Style = (**ui.style()).clone();
-                            let r8 = egui::CornerRadius::same(8);
-                            style.visuals.widgets.inactive.corner_radius = r8;
-                            style.visuals.widgets.hovered.corner_radius = r8;
-                            style.visuals.widgets.active.corner_radius = r8;
-                            ui.set_style(style);
-
                             ui.label(egui::RichText::new(format!("#{}", idx + 1)));
                             ui.add_space(8.0);
 
@@ -667,25 +674,11 @@ fn result_card(
                             ui.with_layout(
                                 egui::Layout::right_to_left(egui::Align::Center),
                                 |ui| {
-                                    let download = ui.add(
-                                        egui::Button::new(
-                                            egui::RichText::new("下载").size(14.0),
-                                        )
-                                        .corner_radius(egui::CornerRadius::same(8))
-                                        .min_size(egui::vec2(56.0, 28.0)),
-                                    );
-                                    if download.clicked() {
+                                    if button::inline_icon(ui, "下载", mi::ICON_DOWNLOAD) {
                                         button_clicked = true;
                                     }
                                     ui.add_space(6.0);
-                                    let detail = ui.add(
-                                        egui::Button::new(
-                                            egui::RichText::new("详情").size(14.0),
-                                        )
-                                        .corner_radius(egui::CornerRadius::same(8))
-                                        .min_size(egui::vec2(56.0, 28.0)),
-                                    );
-                                    if detail.clicked() {
+                                    if button::inline_icon(ui, "详情", mi::ICON_INFO) {
                                         detail_clicked = true;
                                     }
                                 },
@@ -755,49 +748,6 @@ fn task_status_icon(ui: &mut egui::Ui, status: TaskStatus) -> egui::Response {
         icon.codepoint,
         egui::FontId::new(SIZE, icon.font_family()),
         color,
-    );
-
-    response
-}
-
-/// 22x22 的 ✕ 关闭按钮：透明 / 红色 hover 背景 + Material `close` 图标。
-///
-/// 之前用 painter 手画 ✕ 线段；现在改用 `ICON_CLOSE`（vendor 在
-/// `material_icons`），跨主题一致、不依赖 CJK 字形。
-/// hover 时的红底效果保留。
-fn close_x_button(ui: &mut egui::Ui) -> egui::Response {
-    use crate::material_icons::icons::ICON_CLOSE;
-    const SIZE: f32 = 22.0;
-    const ICON_PX: f32 = 16.0;
-
-    let (rect, response) = ui.allocate_exact_size(egui::vec2(SIZE, SIZE), egui::Sense::click());
-    if !ui.is_rect_visible(rect) {
-        return response;
-    }
-
-    let dark_mode = ui.style().visuals.dark_mode;
-    let (bg, icon_color) = if response.hovered() {
-        (Some(egui::Color32::from_rgb(232, 17, 35)), egui::Color32::WHITE)
-    } else {
-        let c = if dark_mode {
-            egui::Color32::from_white_alpha(180)
-        } else {
-            egui::Color32::from_black_alpha(160)
-        };
-        (None, c)
-    };
-
-    if let Some(bg) = bg {
-        ui.painter()
-            .rect_filled(rect, egui::CornerRadius::same(4), bg);
-    }
-
-    ui.painter().text(
-        rect.center(),
-        egui::Align2::CENTER_CENTER,
-        ICON_CLOSE.codepoint,
-        egui::FontId::new(ICON_PX, ICON_CLOSE.font_family()),
-        icon_color,
     );
 
     response
