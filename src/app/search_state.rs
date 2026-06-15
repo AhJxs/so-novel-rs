@@ -5,9 +5,25 @@ use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
 
 use crate::config::AppConfig;
-use crate::models::{Book, SearchResult};
+use crate::models::{Book, Chapter, SearchResult};
 
 use super::cover::{cover_entry_from_bytes, CoverEntry};
+
+/// TOC 预取加载状态。
+#[derive(Debug, Clone)]
+pub enum TocState {
+    Pending,
+    Loaded(Box<Book>, Vec<Chapter>),
+    Failed(String),
+}
+
+/// TOC 预取后台 → UI 通道事件。
+#[derive(Debug)]
+pub struct TocEvent {
+    pub source_id: i32,
+    pub url: String,
+    pub state: TocState,
+}
 
 /// 搜索状态（搜索下载页用）。
 #[derive(Default)]
@@ -53,6 +69,18 @@ pub struct SearchState {
     /// 当前打开的详情弹窗对应的搜索结果索引。`None` 表示未打开。
     /// 点击搜索结果卡片的书名 → 设为 `Some(idx)`；点弹窗 ✕ 或 ESC 关闭。
     pub detail_popup_for: Option<usize>,
+
+    // ---- 下载弹窗（章节范围选择） ----
+    /// 当前打开的下载弹窗对应的搜索结果索引。`None` 表示未打开。
+    pub download_popup_for: Option<usize>,
+    /// TOC 预取缓存：(source_id, url) → TocState。
+    pub toc_cache: HashMap<(i32, String), TocState>,
+    /// TOC 预取后台任务的接收端。
+    pub toc_rx: Option<mpsc::UnboundedReceiver<TocEvent>>,
+    /// 用户选择的章节起始序号（1-based）。
+    pub chapter_range_start: u32,
+    /// 用户选择的章节结束序号（1-based）。
+    pub chapter_range_end: u32,
 
     // ---- 封面（5b 增强） ----
     /// 封面下载完成通道的发送端：保留以便多次 spawn 复用同一通道。
@@ -178,6 +206,7 @@ impl SearchState {
 
         any |= self.drain_detail();
         any |= self.drain_cover();
+        any |= self.drain_toc();
         any
     }
 
@@ -232,6 +261,35 @@ impl SearchState {
                 Err(mpsc::error::TryRecvError::Disconnected) => {
                     self.cover_rx = None;
                     self.cover_tx = None;
+                    break;
+                }
+            }
+        }
+        any
+    }
+
+    /// 排空 TOC 预取后台通道。
+    fn drain_toc(&mut self) -> bool {
+        let Some(rx) = self.toc_rx.as_mut() else {
+            return false;
+        };
+        let mut any = false;
+        loop {
+            match rx.try_recv() {
+                Ok(ev) => {
+                    any = true;
+                    // 首次加载完成时初始化章节范围
+                    if let TocState::Loaded(_, chapters) = &ev.state {
+                        if self.chapter_range_start == 0 || self.chapter_range_end == 0 {
+                            self.chapter_range_start = 1;
+                            self.chapter_range_end = chapters.len() as u32;
+                        }
+                    }
+                    self.toc_cache.insert((ev.source_id, ev.url), ev.state);
+                }
+                Err(mpsc::error::TryRecvError::Empty) => break,
+                Err(mpsc::error::TryRecvError::Disconnected) => {
+                    self.toc_rx = None;
                     break;
                 }
             }

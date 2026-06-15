@@ -115,47 +115,10 @@ pub async fn download_book(
     book_url: &str,
     opts: DownloadOptions,
 ) -> Result<PathBuf, CrawlerError> {
-    let DownloadOptions { progress, cancel } = opts;
+    let cancel = opts.cancel.clone();
+    let progress = opts.progress.clone();
 
-    // 1. HTTP 客户端 — async 客户端，跟 parser 的 async 路径一致；
-    //    reqwest::Client::send 在 future 被 drop 时会立即关闭底层连接，
-    //    所以 cancel 触发即"零延迟"中断。
-    let client_options = ClientOptions {
-        unsafe_ssl: source.rule.ignore_ssl,
-    };
-    let client = build_async_client(cfg, &client_options)
-        .map_err(|e| CrawlerError::Client(format!("{e:#}")))?;
-
-    let cf_bypass = if cfg.cf_bypass.trim().is_empty() {
-        None
-    } else {
-        Some(cfg.cf_bypass.as_str())
-    };
-
-    // 2. 详情 + 目录：直接 await，配合 select! 接 cancel
-    let rule = source.rule.clone();
-    let book_url_owned = book_url.to_string();
-    let cf_bypass_owned = cf_bypass.map(String::from);
-    let book = race_with_cancel(
-        parse_book_detail(&client, &rule, &book_url_owned, cf_bypass_owned.as_deref()),
-        &cancel,
-        &progress,
-    )
-    .await?
-    .map_err(CrawlerError::Book)?;
-
-    if cancel.is_cancelled() {
-        let _ = progress.send(Progress::Cancelled);
-        return Err(CrawlerError::Cancelled);
-    }
-
-    let toc: Vec<Chapter> = race_with_cancel(
-        parse_toc(&client, &rule, &book_url_owned, cf_bypass_owned.as_deref()),
-        &cancel,
-        &progress,
-    )
-    .await?
-    .map_err(CrawlerError::Toc)?;
+    let (book, toc) = resolve_book(cfg, source, book_url, &cancel).await?;
 
     if toc.is_empty() {
         return Err(CrawlerError::EmptyToc);
@@ -171,13 +134,94 @@ pub async fn download_book(
         return Err(CrawlerError::Cancelled);
     }
 
-    // 3. 准备 chapters 目录
-    let book_dir_name = build_book_dir_name(&book, cfg.ext_name);
+    download_chapters(cfg, source, book_url, &book, toc, opts).await
+}
+
+/// 阶段一：获取书籍元信息 + 章节列表（不开始下载）。
+///
+/// 返回 `(Book, Vec<Chapter>)`，供 UI 层展示章节列表、让用户选择范围后再调用
+/// `download_chapters`。
+pub async fn resolve_book(
+    cfg: &AppConfig,
+    source: &Source,
+    book_url: &str,
+    cancel: &CancelToken,
+) -> Result<(Book, Vec<Chapter>), CrawlerError> {
+    // HTTP 客户端
+    let client_options = ClientOptions {
+        unsafe_ssl: source.rule.ignore_ssl,
+    };
+    let client = build_async_client(cfg, &client_options)
+        .map_err(|e| CrawlerError::Client(format!("{e:#}")))?;
+
+    let cf_bypass = if cfg.cf_bypass.trim().is_empty() {
+        None
+    } else {
+        Some(cfg.cf_bypass.as_str())
+    };
+
+    let rule = source.rule.clone();
+    let book_url_owned = book_url.to_string();
+    let cf_bypass_owned = cf_bypass.map(String::from);
+
+    // 详情
+    let book = parse_book_detail(&client, &rule, &book_url_owned, cf_bypass_owned.as_deref())
+        .await
+        .map_err(CrawlerError::Book)?;
+
+    if cancel.is_cancelled() {
+        return Err(CrawlerError::Cancelled);
+    }
+
+    // 目录
+    let toc: Vec<Chapter> = parse_toc(&client, &rule, &book_url_owned, cf_bypass_owned.as_deref())
+        .await
+        .map_err(CrawlerError::Toc)?;
+
+    Ok((book, toc))
+}
+
+/// 阶段二：下载指定章节 + 导出。
+///
+/// `chapters` 已由调用方按用户选择过滤过范围。`DownloadOptions` 中需传入
+/// progress sender 和 cancel token。
+pub async fn download_chapters(
+    cfg: &AppConfig,
+    source: &Source,
+    _book_url: &str,
+    book: &Book,
+    chapters: Vec<Chapter>,
+    opts: DownloadOptions,
+) -> Result<PathBuf, CrawlerError> {
+    let DownloadOptions { progress, cancel } = opts;
+
+    if chapters.is_empty() {
+        return Err(CrawlerError::EmptyToc);
+    }
+
+    // HTTP 客户端（导出封面等用）
+    let client_options = ClientOptions {
+        unsafe_ssl: source.rule.ignore_ssl,
+    };
+    let client = build_async_client(cfg, &client_options)
+        .map_err(|e| CrawlerError::Client(format!("{e:#}")))?;
+
+    let cf_bypass = if cfg.cf_bypass.trim().is_empty() {
+        None
+    } else {
+        Some(cfg.cf_bypass.as_str())
+    };
+
+    let rule = source.rule.clone();
+    let cf_bypass_owned = cf_bypass.map(String::from);
+
+    // 准备 chapters 目录
+    let book_dir_name = build_book_dir_name(book, cfg.ext_name);
     let chapters_dir = std::path::Path::new(&cfg.download_path).join(&book_dir_name);
     std::fs::create_dir_all(&chapters_dir)?;
 
-    // 4. 并发抓章节
-    let max_concurrent = compute_concurrency(source, toc.len());
+    // 并发抓章节
+    let max_concurrent = compute_concurrency(source, chapters.len());
     let render_target: RenderTarget = cfg.ext_name.into();
     let rule_chapter = rule
         .chapter
@@ -186,9 +230,9 @@ pub async fn download_book(
 
     let semaphore = Arc::new(Semaphore::new(max_concurrent));
     let eff = source.effective_crawl.clone();
-    let mut handles = Vec::with_capacity(toc.len());
+    let mut handles = Vec::with_capacity(chapters.len());
 
-    for chapter in toc {
+    for chapter in chapters {
         if cancel.is_cancelled() {
             // dispatch 阶段被取消：dir 里还没写过任何章节文件，安全清理。
             cleanup_chapters_dir_if_empty(&chapters_dir);
@@ -357,7 +401,7 @@ pub async fn download_book(
     let exporter = exporter_for(cfg.ext_name, &cfg.txt_encoding);
     let out_dir = std::path::Path::new(&cfg.download_path);
     let final_path =
-        exporter.merge_with_cover(&book, &chapters_dir, out_dir, cover_bytes.as_deref())?;
+        exporter.merge_with_cover(book, &chapters_dir, out_dir, cover_bytes.as_deref())?;
 
     // 7. 清理章节临时目录
     if !cfg.preserve_chapter_cache {
@@ -464,6 +508,7 @@ async fn download_cover(client: &reqwest::Client, cover_url: Option<&str>) -> Op
 ///
 /// 用法是 `race_with_cancel(parse_*(...), &cancel, &progress).await?` —
 /// 返回 `Result<R, CrawlerError>`，业务结果再用 `.map_err(...)` 转换。
+#[allow(dead_code)]
 async fn race_with_cancel<R, F>(
     fut: F,
     cancel: &CancelToken,

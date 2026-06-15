@@ -6,8 +6,8 @@ So Novel 的 Rust + egui 桌面客户端，从 Java 版本完整重写。
 
 | 模块 | 状态 | 说明 |
 |------|------|------|
-| 搜索下载 | ✅ | 多源并发聚合搜索、相似度过滤排序、quanben5 加密搜索、详情面板、封面 |
-| 下载任务 | ✅ | 并发抓取、失败重试、进度跟踪、取消、封面嵌入、持久化 |
+| 搜索下载 | ✅ | 多源并发聚合搜索、相似度过滤排序、quanben5 加密搜索、详情面板、封面、选章下载 |
+| 下载任务 | ✅ | 并发抓取、失败重试、进度跟踪、取消、封面嵌入、持久化、指定章节范围 |
 | 本地书库 | ✅ | 扫描已下载书籍、按格式/日期/大小排序、删除二次确认 |
 | 书源管理 | ✅ | 从 JSON 导入、启用/禁用、连通性测速、从数据库删除 |
 | 设置 | ✅ | iOS 风格卡片式设置、主题切换持久化、4 色 toast 通知 |
@@ -48,7 +48,7 @@ so-novel-rs/
     ├── app/                 # SoNovelApp 顶层容器
     │   ├── mod.rs           # struct + impl eframe::App
     │   ├── download_task.rs # DownloadTask 模型
-    │   ├── search_state.rs  # 搜索状态（含封面、详情缓存）
+    │   ├── search_state.rs  # 搜索状态（含封面、详情缓存、TOC 预取）
     │   ├── library_state.rs # 本地书库状态
     │   ├── sources_state.rs # 书源测速状态
     │   ├── update_state.rs  # GitHub release 检查状态
@@ -58,7 +58,7 @@ so-novel-rs/
     │   ├── runtime.rs       # build_shared_runtime
     │   ├── tasks_db.rs      # load_tasks_from_db
     │   └── ops/             # 跨多个状态结构的业务方法
-    │       ├── download.rs  # spawn_download / clear_finished_tasks
+    │       ├── download.rs  # spawn_download / spawn_resolve_toc / spawn_download_range
     │       ├── search.rs    # spawn_search / select_search_result
     │       ├── sources.rs   # toggle/add/delete source / spawn_health_check
     │       ├── library.rs   # refresh_library / delete_library_entry
@@ -66,7 +66,7 @@ so-novel-rs/
     │       └── settings.rs  # persist_settings
     ├── cli.rs               # clap CLI 子命令
     ├── config/loader.rs     # config.toml 读写 + AppConfig + ThemePref re-export
-    ├── crawler/             # 搜索 / 下载 / 重试 / 健康检测
+    ├── crawler/             # 搜索 / 下载（两阶段：resolve_book + download_chapters）/ 重试 / 健康检测
     ├── db/                  # SQLite 表（sources / source_overrides / download_tasks）
     ├── design_system/       # 配色 / 字体 / 公共 UI 组件
     │   ├── color.rs         # ACCENT + semantic 色函数
@@ -74,7 +74,7 @@ so-novel-rs/
     │   ├── frame.rs         # nav / title_bar / content frame 工厂
     │   ├── button.rs        # primary/danger/success/warning/ghost/text/inline/icon 按钮
     │   ├── input.rs         # icon_text_input / rounded_combo / rounded_text_input / rounded_drag_value
-    │   ├── popup.rs         # Popup 通用弹窗（自定义标题栏 + icon_button 关闭）
+    │   ├── popup.rs         # Popup 通用弹窗（自定义标题栏 + icon_button 关闭 + 尺寸控制）
     │   ├── chip.rs          # stat_chip / empty_state
     │   ├── toggle.rs        # iOS 风格 toggle_switch
     │   ├── settings.rs      # settings_row 通用布局

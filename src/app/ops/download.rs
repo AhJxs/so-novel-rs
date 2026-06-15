@@ -3,10 +3,126 @@
 use tokio::sync::mpsc;
 
 use crate::crawler::{CancelToken, Progress};
-use crate::models::SearchResult;
+use crate::models::{Book, Chapter, SearchResult};
 
 use super::super::download_task::DownloadTask;
 use super::super::now::now_unix_secs;
+use super::super::search_state::TocEvent;
+
+/// 派一个 TOC 预取任务（获取元数据 + 章节列表，不开始下载）。
+/// 返回接收端，调用方存入 `search.toc_rx`。
+pub fn spawn_resolve_toc(
+    rules: &[crate::models::Rule],
+    config: &crate::config::AppConfig,
+    runtime: &tokio::runtime::Runtime,
+    target: &SearchResult,
+) -> mpsc::UnboundedReceiver<TocEvent> {
+    let (tx, rx) = mpsc::unbounded_channel::<TocEvent>();
+
+    let rule = rules
+        .iter()
+        .find(|r| r.id == target.source_id)
+        .cloned();
+    let cfg = config.clone();
+    let book_url = target.url.clone();
+    let source_id = target.source_id;
+    let url_for_event = target.url.clone();
+
+    runtime.spawn(async move {
+        let state = if let Some(rule) = rule {
+            let source = crate::rules::Source::from(rule, &cfg);
+            let cancel = CancelToken::new();
+            match crate::crawler::resolve_book(&cfg, &source, &book_url, &cancel).await {
+                Ok((book, chapters)) => {
+                    crate::app::search_state::TocState::Loaded(Box::new(book), chapters)
+                }
+                Err(e) => {
+                    crate::app::search_state::TocState::Failed(format!("{e}"))
+                }
+            }
+        } else {
+            crate::app::search_state::TocState::Failed("书源未找到".to_string())
+        };
+        let _ = tx.send(TocEvent {
+            source_id,
+            url: url_for_event,
+            state,
+        });
+    });
+
+    rx
+}
+
+/// 派一个指定章节范围的下载任务。跳过 resolve 阶段，直接进入下载。
+/// `chapters` 已由调用方按用户选择过滤过范围。
+pub fn spawn_download_range(
+    rules: &[crate::models::Rule],
+    config: &crate::config::AppConfig,
+    runtime: &tokio::runtime::Runtime,
+    next_task_id: &mut u64,
+    target: SearchResult,
+    book: Book,
+    chapters: Vec<Chapter>,
+) -> (u64, DownloadTask) {
+    let id = *next_task_id;
+    *next_task_id += 1;
+    let (tx, rx) = mpsc::unbounded_channel::<Progress>();
+    let cancel = CancelToken::new();
+
+    let rule = rules
+        .iter()
+        .find(|r| r.id == target.source_id)
+        .cloned();
+    let cfg = config.clone();
+    let book_url = target.url.clone();
+    let cancel_for_task = cancel.clone();
+    let tx_for_task = tx.clone();
+
+    let total = chapters.len();
+    let book_for_meta = book.clone();
+    let _ = tx_for_task.send(Progress::BookResolved {
+        book: book.clone(),
+        total_chapters: total,
+    });
+
+    runtime.spawn(async move {
+        let Some(rule) = rule else {
+            let _ = tx_for_task.send(Progress::Cancelled);
+            return;
+        };
+        let source = crate::rules::Source::from(rule, &cfg);
+        let opts = crate::crawler::DownloadOptions {
+            progress: tx_for_task,
+            cancel: cancel_for_task,
+        };
+        if let Err(e) =
+            crate::crawler::download_chapters(&cfg, &source, &book_url, &book, chapters, opts)
+                .await
+        {
+            tracing::warn!("download_chapters failed: {e}");
+        }
+    });
+
+    drop(tx);
+
+    let task = DownloadTask {
+        id,
+        origin: target,
+        rx: Some(rx),
+        cancel: Some(cancel),
+        cancelling: false,
+        started_at_unix: now_unix_secs(),
+        finished_at_unix: None,
+        book_meta: Some(book_for_meta),
+        total_chapters: total,
+        completed: 0,
+        failed: 0,
+        last_chapter_title: String::new(),
+        finished: None,
+        failures: Vec::new(),
+    };
+    (id, task)
+}
 
 /// 派一个新的下载任务到后台。返回新任务的 id。
 pub fn spawn_download(

@@ -9,11 +9,11 @@
 //! 4. 下载触发后切到"下载任务"页（阶段 4b 实现，本阶段先在搜索页底部
 //!    显示一条最近任务摘要做反馈）。
 
-use crate::app::{SearchState, SoNovelApp, SourceStatus};
+use crate::app::{SearchState, SoNovelApp, SourceStatus, TocState};
+use crate::design_system::{button, color, input, popup};
 use crate::material_icons::icons as mi;
 use crate::models::SearchResult;
 use crate::ui::nav::NavPage;
-use crate::design_system::{button, color, input, popup};
 
 pub fn show(ui: &mut egui::Ui, app: &mut SoNovelApp) {
     show_query_bar(ui, app);
@@ -98,7 +98,10 @@ fn show_task_banner(ui: &mut egui::Ui, app: &mut SoNovelApp) {
                 ui.label(label);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     // ✕ 关闭按钮：手画 X 线段，避免 unicode ✕ 在某些字体下不渲染
-                    if button::icon_button(ui, mi::ICON_CLOSE, true).on_hover_text("隐藏此横幅").clicked() {
+                    if button::icon_button(ui, mi::ICON_CLOSE, true)
+                        .on_hover_text("隐藏此横幅")
+                        .clicked()
+                    {
                         dismiss = true;
                     }
                     ui.add_space(4.0);
@@ -142,21 +145,31 @@ fn show_query_bar(ui: &mut egui::Ui, app: &mut SoNovelApp) {
                 .map(|r| format!("{} ({})", r.name, r.id))
                 .unwrap_or_else(|| format!("书源 {id}（已下线？）")),
         };
-        input::rounded_combo(ui, "search_source", current_label, 220.0, input::INPUT_HEIGHT, |ui| {
-            ui.selectable_value(&mut app.search.source_id, None, "全部书源（聚合）");
-            for r in &app.rules {
-                if r.disabled {
-                    continue;
+        input::rounded_combo(
+            ui,
+            "search_source",
+            current_label,
+            220.0,
+            input::INPUT_HEIGHT,
+            |ui| {
+                ui.selectable_value(&mut app.search.source_id, None, "全部书源（聚合）");
+                for r in &app.rules {
+                    if r.disabled {
+                        continue;
+                    }
+                    let label = format!("{} ({})", r.name, r.id);
+                    ui.selectable_value(&mut app.search.source_id, Some(r.id), label);
                 }
-                let label = format!("{} ({})", r.name, r.id);
-                ui.selectable_value(&mut app.search.source_id, Some(r.id), label);
-            }
-        });
+            },
+        );
 
         ui.add_space(6.0);
 
         // ---- 3. 搜索按钮（亮蓝填充） ----
-        let search_label = format!("{} 搜索", crate::material_icons::icons::ICON_SEARCH.codepoint);
+        let search_label = format!(
+            "{} 搜索",
+            crate::material_icons::icons::ICON_SEARCH.codepoint
+        );
         let search_clicked = button::primary_button(ui, &search_label, !app.search.running);
 
         if (search_clicked || enter_pressed) && !app.search.running {
@@ -326,7 +339,8 @@ fn show_results(ui: &mut egui::Ui, app: &mut SoNovelApp) {
     ui.add_space(4.0);
 
     // 收集动作（避免 borrow 冲突）
-    let mut to_download: Option<SearchResult> = None;
+    let mut to_download_full: Option<SearchResult> = None;
+    let mut to_download_partial: Option<usize> = None;
     let mut to_select: Option<usize> = None;
 
     // 列表占满整个剩余宽度 + 高度。auto_shrink([false; 2]) 让 ScrollArea
@@ -356,7 +370,8 @@ fn show_results(ui: &mut egui::Ui, app: &mut SoNovelApp) {
             let is_selected = selected == Some(idx);
             let action = result_card(ui, idx, r, is_selected, card_width);
             match action {
-                CardAction::Download => to_download = Some(r.clone()),
+                CardAction::DownloadFull => to_download_full = Some(r.clone()),
+                CardAction::DownloadPartial => to_download_partial = Some(idx),
                 CardAction::OpenDetail => {
                     to_select = Some(idx);
                     app.search.detail_popup_for = Some(idx);
@@ -370,13 +385,27 @@ fn show_results(ui: &mut egui::Ui, app: &mut SoNovelApp) {
     if let Some(idx) = to_select {
         app.select_search_result(idx);
     }
-    if let Some(target) = to_download {
+    if let Some(target) = to_download_full {
         let _id = app.spawn_download(target);
         app.show_toast_success("已加入下载，可在『下载任务』查看进度");
+    }
+    if let Some(idx) = to_download_partial {
+        // 部分下载 → 先预取章节列表，打开下载弹窗
+        let r = app.search.results[idx].clone();
+        let key = (r.source_id, r.url.clone());
+        if let std::collections::hash_map::Entry::Vacant(e) = app.search.toc_cache.entry(key) {
+            e.insert(crate::app::TocState::Pending);
+            app.spawn_resolve_toc(&r);
+        }
+        app.search.download_popup_for = Some(idx);
+        app.search.chapter_range_start = 0;
+        app.search.chapter_range_end = 0;
     }
 
     // 详情弹窗（点书名后打开）
     show_detail_popup(ui.ctx(), app);
+    // 下载弹窗（点下载后打开）
+    show_download_popup(ui.ctx(), app);
 }
 
 /// 详情弹窗：根据 `app.search.detail_popup_for` 渲染当前行的详情。
@@ -408,120 +437,112 @@ fn render_detail_body(ui: &mut egui::Ui, app: &SoNovelApp, r: &SearchResult) {
     const CONTENT_W: f32 = 520.0;
 
     // 上下左右统一 padding
-    egui::Frame::new()
-        .show(ui, |ui| {
-            ui.set_width(CONTENT_W);
+    egui::Frame::new().show(ui, |ui| {
+        ui.set_width(CONTENT_W);
 
-            // 书名 · 作者 · 来源 一行
-            ui.horizontal(|ui| {
-                ui.label(egui::RichText::new(&r.book_name).strong().size(16.0));
-                ui.add_space(8.0);
-                ui.label(egui::RichText::new("·").weak());
-                ui.add_space(8.0);
-                ui.label(egui::RichText::new(r.author.as_deref().unwrap_or("（未知）")).size(14.0));
-                ui.add_space(8.0);
-                ui.label(egui::RichText::new("·").weak());
-                ui.add_space(8.0);
-                ui.label(egui::RichText::new(format!("{}#{}", r.source_name, r.source_id)).size(14.0));
-            });
+        // 书名 · 作者 · 来源 一行
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new(&r.book_name).strong().size(16.0));
             ui.add_space(8.0);
-
-            let key = (r.source_id, r.url.clone());
-            match app.search.detail_cache.get(&key) {
-                None => {
-                    ui.label(egui::RichText::new("准备加载详情…").weak());
-                }
-                Some(DetailState::Pending) => {
-                    ui.horizontal(|ui| {
-                        ui.spinner();
-                        ui.label("正在加载详情…");
-                    });
-                }
-                Some(DetailState::Failed(reason)) => {
-                    ui.colored_label(
-                        color::semantic_warn(ui.style().visuals.dark_mode),
-                        format!("详情加载失败：{reason}"),
-                    );
-                }
-                Some(DetailState::Loaded(book)) => {
-                    // 双栏：左封面（200x280 max），右文字
-                    ui.horizontal_top(|ui| {
-                        // 左：封面
-                        if let Some(cover_url) = book
-                            .cover_url
-                            .as_deref()
-                            .map(str::trim)
-                            .filter(|s| !s.is_empty())
-                        {
-                            let ckey = (r.source_id, cover_url.to_string());
-                            let in_flight = app.search.cover_in_flight.contains(&ckey);
-                            egui::Frame::group(ui.style())
-                                .corner_radius(egui::CornerRadius::same(8))
-                                .inner_margin(egui::Margin::same(4))
-                                .show(ui, |ui| {
-                                    ui.allocate_ui(egui::vec2(180.0, 260.0), |ui| {
-                                        match app.search.cover_cache.get(&ckey) {
-                                            Some(CoverEntry::Ready(img)) => {
-                                                ui.add(
-                                                    img.clone()
-                                                        .max_size(egui::vec2(180.0, 260.0)),
-                                                );
-                                            }
-                                            Some(CoverEntry::Failed(reason)) => {
-                                                ui.colored_label(
-                                                    color::semantic_warn(
-                                                        ui.style().visuals.dark_mode,
-                                                    ),
-                                                    format!("封面加载失败：{reason}"),
-                                                );
-                                            }
-                                            None if in_flight => {
-                                                ui.spinner();
-                                                ui.label("封面下载中…");
-                                            }
-                                            None => {
-                                                ui.label(
-                                                    egui::RichText::new("封面等待中…")
-                                                        .small()
-                                                        .weak(),
-                                                );
-                                            }
-                                        }
-                                    });
-                                });
-                            ui.add_space(16.0);
-                        }
-
-                        // 右：元信息 + 简介
-                        ui.vertical(|ui| {
-                            if let Some(c) = &book.category {
-                                meta_item(ui, "分类", c);
-                            }
-                            if let Some(s) = &book.status {
-                                meta_item(ui, "状态", s);
-                            }
-                            if let Some(latest) = &book.latest_chapter {
-                                meta_item(ui, "最新章节", latest);
-                            }
-                            if let Some(t) = &book.last_update_time {
-                                meta_item(ui, "更新时间", t);
-                            }
-                            if let Some(intro) = &book.intro {
-                                ui.add_space(8.0);
-                                ui.label(egui::RichText::new("简介").strong());
-                                ui.add_space(4.0);
-                                egui::ScrollArea::vertical()
-                                    .id_salt("popup_intro_scroll")
-                                    .max_height(220.0)
-                                    .show(ui, |ui| {
-                                        ui.label(intro);
-                                    });
-                            }
-                        });
-                    });
-                }
-            }
+            ui.label(egui::RichText::new("·").weak());
+            ui.add_space(8.0);
+            ui.label(egui::RichText::new(r.author.as_deref().unwrap_or("（未知）")).size(14.0));
+            ui.add_space(8.0);
+            ui.label(egui::RichText::new("·").weak());
+            ui.add_space(8.0);
+            ui.label(egui::RichText::new(format!("{}#{}", r.source_name, r.source_id)).size(14.0));
         });
+        ui.add_space(8.0);
+
+        let key = (r.source_id, r.url.clone());
+        match app.search.detail_cache.get(&key) {
+            None => {
+                ui.label(egui::RichText::new("准备加载详情…").weak());
+            }
+            Some(DetailState::Pending) => {
+                ui.horizontal(|ui| {
+                    ui.spinner();
+                    ui.label("正在加载详情…");
+                });
+            }
+            Some(DetailState::Failed(reason)) => {
+                ui.colored_label(
+                    color::semantic_warn(ui.style().visuals.dark_mode),
+                    format!("详情加载失败：{reason}"),
+                );
+            }
+            Some(DetailState::Loaded(book)) => {
+                // 双栏：左封面（200x280 max），右文字
+                ui.horizontal_top(|ui| {
+                    // 左：封面
+                    if let Some(cover_url) = book
+                        .cover_url
+                        .as_deref()
+                        .map(str::trim)
+                        .filter(|s| !s.is_empty())
+                    {
+                        let ckey = (r.source_id, cover_url.to_string());
+                        let in_flight = app.search.cover_in_flight.contains(&ckey);
+                        egui::Frame::group(ui.style())
+                            .corner_radius(egui::CornerRadius::same(8))
+                            .inner_margin(egui::Margin::same(4))
+                            .show(ui, |ui| {
+                                ui.allocate_ui(egui::vec2(180.0, 260.0), |ui| {
+                                    match app.search.cover_cache.get(&ckey) {
+                                        Some(CoverEntry::Ready(img)) => {
+                                            ui.add(img.clone().max_size(egui::vec2(180.0, 260.0)));
+                                        }
+                                        Some(CoverEntry::Failed(reason)) => {
+                                            ui.colored_label(
+                                                color::semantic_warn(ui.style().visuals.dark_mode),
+                                                format!("封面加载失败：{reason}"),
+                                            );
+                                        }
+                                        None if in_flight => {
+                                            ui.spinner();
+                                            ui.label("封面下载中…");
+                                        }
+                                        None => {
+                                            ui.label(
+                                                egui::RichText::new("封面等待中…").small().weak(),
+                                            );
+                                        }
+                                    }
+                                });
+                            });
+                        ui.add_space(16.0);
+                    }
+
+                    // 右：元信息 + 简介
+                    ui.vertical(|ui| {
+                        if let Some(c) = &book.category {
+                            meta_item(ui, "分类", c);
+                        }
+                        if let Some(s) = &book.status {
+                            meta_item(ui, "状态", s);
+                        }
+                        if let Some(latest) = &book.latest_chapter {
+                            meta_item(ui, "最新章节", latest);
+                        }
+                        if let Some(t) = &book.last_update_time {
+                            meta_item(ui, "更新时间", t);
+                        }
+                        if let Some(intro) = &book.intro {
+                            ui.add_space(8.0);
+                            ui.label(egui::RichText::new("简介").strong());
+                            ui.add_space(4.0);
+                            egui::ScrollArea::vertical()
+                                .id_salt("popup_intro_scroll")
+                                .max_height(220.0)
+                                .show(ui, |ui| {
+                                    ui.label(intro);
+                                });
+                        }
+                    });
+                });
+            }
+        }
+    });
 }
 
 /// 弹窗元数据项：标签（弱小字）+ 值
@@ -530,6 +551,181 @@ fn meta_item(ui: &mut egui::Ui, label: &str, value: &str) {
         ui.label(egui::RichText::new(format!("{label}：")).weak());
         ui.label(value);
     });
+}
+
+/// 下载弹窗：获取章节列表 → 选择范围 → 确认下载。
+fn show_download_popup(ctx: &egui::Context, app: &mut SoNovelApp) {
+    let Some(idx) = app.search.download_popup_for else {
+        return;
+    };
+    let Some(r) = app.search.results.get(idx).cloned() else {
+        app.search.download_popup_for = None;
+        return;
+    };
+
+    let key = (r.source_id, r.url.clone());
+    let toc_state = app.search.toc_cache.get(&key).cloned();
+
+    let mut should_close = false;
+    let mut should_download = false;
+
+    let open = popup::Popup::new("download_popup").show(ctx, |ui| {
+        const CONTENT_W: f32 = 480.0;
+
+        egui::Frame::new()
+            .inner_margin(egui::Margin::same(16))
+            .show(ui, |ui| {
+                ui.set_width(CONTENT_W);
+
+                // 书名（加载成功后追加章节数）
+                let title_text = match &toc_state {
+                    Some(TocState::Loaded(_, chapters)) => {
+                        format!("{}（共 {} 章）", r.book_name, chapters.len())
+                    }
+                    _ => r.book_name.clone(),
+                };
+                ui.label(egui::RichText::new(&title_text).strong().size(16.0));
+                ui.add_space(12.0);
+
+                match &toc_state {
+                    None | Some(TocState::Pending) => {
+                        ui.horizontal(|ui| {
+                            ui.spinner();
+                            ui.label("正在获取章节列表…");
+                        });
+                    }
+                    Some(TocState::Failed(reason)) => {
+                        ui.colored_label(
+                            color::semantic_danger(ui.style().visuals.dark_mode),
+                            format!("获取章节列表失败：{reason}"),
+                        );
+                    }
+                    Some(TocState::Loaded(_book, chapters)) => {
+                        let total = chapters.len() as u32;
+
+                        // 确保范围有效
+                        if app.search.chapter_range_start == 0 {
+                            app.search.chapter_range_start = 1;
+                        }
+                        if app.search.chapter_range_end == 0 {
+                            app.search.chapter_range_end = total;
+                        }
+                        app.search.chapter_range_start =
+                            app.search.chapter_range_start.clamp(1, total);
+                        app.search.chapter_range_end = app.search.chapter_range_end.clamp(1, total);
+
+                        // 【优化核心】：整体采用垂直居中对齐布局
+                        ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
+                            ui.add_space(8.0);
+
+                            // --- 第一行：起始章节设置 ---
+                            let size = egui::vec2(ui.available_width(), input::ROW_HEIGHT);
+                            ui.allocate_ui_with_layout(
+                                size,
+                                egui::Layout::left_to_right(egui::Align::Center), // 内部组件垂直居中
+                                |ui| {
+                                    // 这一步很关键：消除 egui 默认给水平布局加的额外上下 padding
+                                    ui.spacing_mut().item_spacing.y = 0.0;
+
+                                    ui.label("起始章节：");
+                                    input::rounded_drag_value(
+                                        ui,
+                                        &mut app.search.chapter_range_start,
+                                        1..=total,
+                                        60.0,
+                                        input::ROW_HEIGHT,
+                                    );
+                                    ui.add_space(8.0);
+
+                                    let start_idx =
+                                        (app.search.chapter_range_start as usize).saturating_sub(1);
+                                    if let Some(c) = chapters.get(start_idx) {
+                                        ui.label(
+                                            egui::RichText::new(truncate(&c.title, 18)).size(12.0),
+                                        );
+                                    }
+                                },
+                            );
+
+                            ui.add_space(10.0); // 间隔高度
+
+                            // --- 第二行：结束章节设置 ---
+                            ui.allocate_ui_with_layout(
+                                size,
+                                egui::Layout::left_to_right(egui::Align::Center), // 内部组件垂直居中
+                                |ui| {
+                                    ui.spacing_mut().item_spacing.y = 0.0;
+
+                                    ui.label("结束章节：");
+                                    input::rounded_drag_value(
+                                        ui,
+                                        &mut app.search.chapter_range_end,
+                                        1..=total,
+                                        60.0,
+                                        input::ROW_HEIGHT,
+                                    );
+                                    ui.add_space(8.0);
+
+                                    let end_idx =
+                                        (app.search.chapter_range_end as usize).saturating_sub(1);
+                                    if let Some(c) = chapters.get(end_idx) {
+                                        ui.label(
+                                            egui::RichText::new(truncate(&c.title, 18)).size(12.0),
+                                        );
+                                    }
+                                },
+                            );
+
+                            ui.add_space(16.0);
+                        });
+
+                        // 按钮区域（恢复到靠右布局）
+                        ui.horizontal(|ui| {
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    let confirm_label =
+                                        format!("{} 确认下载", mi::ICON_DOWNLOAD.codepoint);
+                                    if button::primary_button(ui, &confirm_label, true) {
+                                        should_download = true;
+                                    }
+                                    ui.add_space(8.0);
+                                    if button::ghost_button(ui, "取消", true) {
+                                        should_close = true;
+                                    }
+                                },
+                            );
+                        });
+                    }
+                }
+            });
+    });
+
+    if !open || should_close {
+        app.search.download_popup_for = None;
+    }
+
+    if should_download {
+        if let Some(TocState::Loaded(book, chapters)) = toc_state {
+            let book = *book;
+            let start = app
+                .search
+                .chapter_range_start
+                .min(app.search.chapter_range_end) as usize;
+            let end = app
+                .search
+                .chapter_range_start
+                .max(app.search.chapter_range_end) as usize;
+            let filtered: Vec<_> = chapters
+                .into_iter()
+                .filter(|c| c.order as usize >= start && c.order as usize <= end)
+                .collect();
+
+            app.spawn_download_range(r.clone(), book, filtered);
+            app.show_toast_success("已加入下载，可在『下载任务』查看进度");
+            app.search.download_popup_for = None;
+        }
+    }
 }
 
 fn truncate(s: &str, n: usize) -> String {
@@ -544,8 +740,10 @@ fn truncate(s: &str, n: usize) -> String {
 /// 单条搜索结果卡片产生的动作。
 enum CardAction {
     None,
-    /// 触发下载
-    Download,
+    /// 整本下载
+    DownloadFull,
+    /// 部分下载（打开章节选择弹窗）
+    DownloadPartial,
     /// 打开详情弹窗（点详情按钮）— 同时会触发选中（拉详情）
     OpenDetail,
 }
@@ -606,7 +804,8 @@ fn result_card(
         egui::Stroke::new(1.0, visuals.widgets.noninteractive.bg_stroke.color)
     };
 
-    let mut button_clicked = false;
+    let mut full_download_clicked = false;
+    let mut partial_download_clicked = false;
     let mut detail_clicked = false;
 
     // 关键：硬分配一个 `card_width × auto_height` 的盒子，让 Frame 在固定宽度的
@@ -650,22 +849,21 @@ fn result_card(
                             ui.label(egui::RichText::new("·").weak());
                             ui.add_space(10.0);
                             ui.label(
-                                egui::RichText::new(format!(
-                                    "{}#{}",
-                                    r.source_name, r.source_id
-                                ))
-                                .weak(),
-                            );
-                           if let Some(latest) = r.latest_chapter.as_deref().filter(|s| !s.is_empty()) {
-                            ui.add_space(10.0);
-                            ui.label(egui::RichText::new("·").weak());
-                            ui.add_space(10.0);
-                            ui.label(
-                                egui::RichText::new(format!("最新：{}", truncate(latest, 28)))
-                                    .small()
+                                egui::RichText::new(format!("{}#{}", r.source_name, r.source_id))
                                     .weak(),
                             );
-                }
+                            if let Some(latest) =
+                                r.latest_chapter.as_deref().filter(|s| !s.is_empty())
+                            {
+                                ui.add_space(10.0);
+                                ui.label(egui::RichText::new("·").weak());
+                                ui.add_space(10.0);
+                                ui.label(
+                                    egui::RichText::new(format!("最新：{}", truncate(latest, 28)))
+                                        .small()
+                                        .weak(),
+                                );
+                            }
 
                             // 右侧：详情 + 下载 按钮组，靠 right_to_left 推到行末。
                             // 添加顺序即视觉顺序（第一个最右）：先下载再详情 →
@@ -674,8 +872,12 @@ fn result_card(
                             ui.with_layout(
                                 egui::Layout::right_to_left(egui::Align::Center),
                                 |ui| {
-                                    if button::inline_icon(ui, "下载", mi::ICON_DOWNLOAD) {
-                                        button_clicked = true;
+                                    if button::inline_icon(ui, "整本", mi::ICON_DOWNLOAD) {
+                                        full_download_clicked = true;
+                                    }
+                                    ui.add_space(6.0);
+                                    if button::inline_icon(ui, "选章", mi::ICON_PLAYLIST_PLAY) {
+                                        partial_download_clicked = true;
                                     }
                                     ui.add_space(6.0);
                                     if button::inline_icon(ui, "详情", mi::ICON_INFO) {
@@ -695,8 +897,11 @@ fn result_card(
         m.data.insert_temp(card_id, frame_resp.hovered());
     });
 
-    if button_clicked {
-        return CardAction::Download;
+    if full_download_clicked {
+        return CardAction::DownloadFull;
+    }
+    if partial_download_clicked {
+        return CardAction::DownloadPartial;
     }
     if detail_clicked {
         // 详情按钮既触发选中（拉详情），也打开详情弹窗

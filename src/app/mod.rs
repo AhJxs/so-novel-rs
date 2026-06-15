@@ -27,7 +27,8 @@ pub use library_state::{scan_library_dir, LibraryEntry, LibraryState};
 pub use now::now_unix_secs;
 pub use runtime::build_shared_runtime;
 pub use search_state::{
-    CoverEvent, DetailEvent, DetailState, SearchState, SourceSearchEvent, SourceStatus,
+    CoverEvent, DetailEvent, DetailState, SearchState, SourceSearchEvent, SourceStatus, TocEvent,
+    TocState,
 };
 pub use sources_state::SourcesState;
 pub use tasks_db::load_tasks_from_db;
@@ -204,6 +205,39 @@ impl SoNovelApp {
             self.runtime,
             &mut self.next_task_id,
             target,
+        );
+        crate::app::ops::save_task_to_db(&self.db, &task);
+        self.tasks.push(task);
+        id
+    }
+
+    /// 派一个 TOC 预取任务（获取元数据 + 章节列表，不开始下载）。
+    pub fn spawn_resolve_toc(&mut self, target: &crate::models::SearchResult) {
+        let rx = crate::app::ops::spawn_resolve_toc(
+            &self.rules,
+            &self.config,
+            self.runtime,
+            target,
+        );
+        self.search.toc_rx = Some(rx);
+    }
+
+    /// 派一个指定章节范围的下载任务。跳过 resolve 阶段，直接进入下载。
+    /// 返回新任务 id。
+    pub fn spawn_download_range(
+        &mut self,
+        target: crate::models::SearchResult,
+        book: crate::models::Book,
+        chapters: Vec<crate::models::Chapter>,
+    ) -> u64 {
+        let (id, task) = crate::app::ops::spawn_download_range(
+            &self.rules,
+            &self.config,
+            self.runtime,
+            &mut self.next_task_id,
+            target,
+            book,
+            chapters,
         );
         crate::app::ops::save_task_to_db(&self.db, &task);
         self.tasks.push(task);
