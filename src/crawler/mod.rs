@@ -13,8 +13,7 @@
 //! 6. `Exporter::merge_with_cover` 产出最终文件；
 //! 7. `preserve_chapter_cache=false` 时清掉 chapters 临时目录。
 //!
-//! 进度：通过 `mpsc::UnboundedSender<Progress>` 推送事件给 UI；UI 在 egui
-//! update 循环里 `try_recv`。
+//! 进度：通过 `mpsc::UnboundedSender<Progress>` 推送事件给 UI；`events::drain` 排空。
 //!
 //! 取消：`Arc<AtomicBool>`；在每章入口检查；正在跑的章节会跑完才退出
 //! （彻底中断 HTTP 请求需要 hyper 层级取消，复杂度过高，暂不做）。

@@ -126,7 +126,7 @@ pub struct DetailEvent {
     pub state: DetailState,
 }
 
-/// 封面下载完成事件。后台 HTTP 下载 → UI 构造 `egui_extras::RetainedImage`。
+/// 封面下载完成事件。后台 HTTP 下载 → UI 构造 `CoverEntry`。
 #[derive(Debug)]
 pub struct CoverEvent {
     pub source_id: i32,

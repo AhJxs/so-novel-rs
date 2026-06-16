@@ -26,9 +26,7 @@ fn main() -> Result<()> {
         return so_novel_rs::cli::run();
     }
 
-    // 启动 GPUI + gpui-component GUI（Stage 1+）。旧 egui 路径已不再从 main 触达；
-    // `crate::ui` / `crate::design_system` / `crate::material_icons` 暂留参与编译，
-    // Stage 11 整体移除。
+    // 启动 GPUI + gpui-component GUI。
     so_novel_rs::gpui_app::run()
 }
 

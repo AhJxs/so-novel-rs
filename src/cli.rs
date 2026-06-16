@@ -6,7 +6,7 @@
 //! - `so-novel-rs sources` — 列出当前激活书源
 //! - `so-novel-rs version` — 版本
 //!
-//! 不带子命令 → 启动 egui GUI（见 `main.rs` 的分发逻辑）。
+//! 不带子命令 → 启动 GPUI GUI（见 `main.rs` 的分发逻辑）。
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};

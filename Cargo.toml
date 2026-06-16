@@ -122,7 +122,7 @@ windows-sys = { version = "0.61", features = [
 
 [dev-dependencies]
 tempfile = "3"
-# 仅测试用：构造最小 PNG 验证 cover_entry_from_bytes。运行时通过 egui_extras 间接使用。
+# 测试用：构造最小 PNG 验证 cover_entry_from_bytes。
 image = "0.25"
 
 # 在 Windows 上把 assets/logo.ico 嵌入 exe 的资源段（资源管理器/任务栏会看到图标）。
