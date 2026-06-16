@@ -3,7 +3,7 @@ name = "so-novel-rs"
 version = "0.1.0-alpha.1"
 edition = "2021"
 rust-version = "1.75"
-description = "So Novel — Rust + egui desktop client (work in progress migration from Java)."
+description = "So Novel — Rust desktop client (GPUI + gpui-component, migrated from Java + egui)."
 license = "Apache-2.0"
 publish = false
 
@@ -12,11 +12,11 @@ name = "so-novel-rs"
 path = "src/main.rs"
 
 [dependencies]
-# UI（2026-06 升级到 0.34：breaking API 大量）
-eframe = { version = "0.34", default-features = false, features = ["default_fonts", "glow", "persistence"] }
-egui = "0.34"
-# egui_extras 提供 RetainedImage + 各种图片 loader。all_loaders 包含 PNG/JPEG 等常用格式。
-egui_extras = { version = "0.34", features = ["all_loaders"] }
+# UI — GPUI 栈
+gpui = "0.2.2"
+gpui-component = "0.5.1"
+# gpui-component-assets 提供内置 icon 资源；可选，但启用后可避免自己 embed 图标字体
+gpui-component-assets = "0.5.1"
 
 # Async runtime (kept lean — used in later stages; pulled now so tests/integration are stable)
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "fs"] }
@@ -94,6 +94,9 @@ clap = { version = "4", features = ["derive"] }
 # Windows / macOS 走原生 IFileOpenDialog / NSOpenPanel。
 rfd = { version = "0.15", default-features = false, features = ["xdg-portal", "tokio"] }
 
+# 临时目录（启动时给 `ThemeRegistry::watch_dir` 喂一个真实目录，进程退出自动清理）
+tempfile = "3"
+
 # SQLite — bundled 模式零系统依赖，单文件 DB 持久化下载任务记录（后续书源覆写也会走这个库）。
 rusqlite = { version = "0.40", features = ["bundled"] }
 
@@ -101,15 +104,10 @@ rusqlite = { version = "0.40", features = ["bundled"] }
 # 各自调 OS API（GetTimeZoneInformation / localtime_r / ...），跨平台用一个 API 拿偏移秒数。
 time = { version = "0.3", default-features = false, features = ["local-offset"] }
 
-# 跨平台 HWND / X11 / Wayland 句柄类型（egui-winit 已传递依赖，显式声明以便
-# 在 src/window.rs 调 DWM 用）。
-raw-window-handle = "0.6"
-
-# Windows 11 DWM 圆角窗口（仅 Windows 平台；其它平台用空 stub）。
+# Windows DWM 圆角 / 暗色标题栏暂未在 GPUI 路径启用（Stage 12 决定）。
+# 当前只保留 CLI 模式需要的 console attach 那一部分 feature。
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-sys = { version = "0.61", features = [
-    "Win32_Graphics_Dwm",
-    "Win32_Foundation",
     # CLI 模式启动时把 stdio 附到父进程的控制台（cmd / PowerShell），
     # 让 GUI subsystem 的 exe 也能像普通 console app 一样输出。
     "Win32_System_Console",

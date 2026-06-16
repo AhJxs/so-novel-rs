@@ -1,6 +1,6 @@
 # so-novel-rs
 
-So Novel 的 Rust + egui 桌面客户端，从 Java 版本完整重写。
+So Novel 的 Rust + GPUI 桌面客户端，从 Java 版本完整重写。早期版本使用 egui，**Stage 11 已完成 egui → GPUI + gpui-component 全面迁移**。
 
 ## 功能概览
 
@@ -17,7 +17,7 @@ So Novel 的 Rust + egui 桌面客户端，从 Java 版本完整重写。
 
 ## 技术栈
 
-- **GUI**: egui 0.34 / eframe 0.34 / egui_extras 0.34
+- **GUI**: GPUI 0.2 + gpui-component 0.5（Stage 11 全面替换原 egui 0.34 / eframe 0.34 / egui_extras 0.34）
 - **异步**: tokio 1（rt-multi-thread，leak 成 `&'static Runtime`）
 - **HTTP**: reqwest 0.13（rustls，无 OpenSSL 依赖）
 - **HTML 解析**: scraper 0.27 + regex 1
@@ -27,8 +27,8 @@ So Novel 的 Rust + egui 桌面客户端，从 Java 版本完整重写。
 - **导出**: epub-builder 0.8 / zip 8 / encoding_rs 0.8
 - **编码检测**: chardetng 1.0
 - **文件选择**: rfd 0.15（原生对话框）
-- **图标**: Material Symbols（Rounded），vendor 在 `src/material_icons/`
-- **平台适配**: Windows 11 DWM 暗色标题栏 / 无控制台窗口
+- **图标**: gpui-component 内置 IconName（Lucide 系列）
+- **平台适配**: Windows 暗色窗口 / 无控制台窗口
 
 ## 项目结构
 
@@ -45,8 +45,8 @@ so-novel-rs/
 └── src/
     ├── main.rs              # 入口
     ├── lib.rs               # 模块声明
-    ├── app/                 # SoNovelApp 顶层容器
-    │   ├── mod.rs           # struct + impl eframe::App
+    ├── app/                 # AppModel 顶层容器（Stage 2 重命名自 SoNovelApp）
+    │   ├── mod.rs           # struct AppModel + 业务方法（不再 impl eframe::App）
     │   ├── download_task.rs # DownloadTask 模型
     │   ├── search_state.rs  # 搜索状态（含封面、详情缓存、TOC 预取）
     │   ├── library_state.rs # 本地书库状态

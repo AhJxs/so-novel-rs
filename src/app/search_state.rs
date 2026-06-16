@@ -91,7 +91,7 @@ pub struct SearchState {
     pub cover_cache: HashMap<(i32, String), CoverEntry>,
     /// 正在下载中的封面 URL；防止重复 spawn。
     pub cover_in_flight: HashSet<(i32, String)>,
-    /// drain_detail 期间收集到的待 prefetch 封面 URL，drain 后由 SoNovelApp 取出统一派发。
+    /// drain_detail 期间收集到的待 prefetch 封面 URL，drain 后由 AppModel 取出统一派发。
     pub pending_cover_prefetch: Vec<(i32, String)>,
 
     /// 触发一次"结果列表滚回顶部"的一次性标记。

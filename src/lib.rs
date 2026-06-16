@@ -1,9 +1,12 @@
-//! so-novel-rs — Rust + egui 桌面客户端（迁移中）。
+//! so-novel-rs — Rust 桌面客户端（GPUI + gpui-component，egui 已完全移除）。
 //!
-//! 模块划分对应审计文档 §5。当前阶段 1 仅实现：app/config/models/rules/ui/util。
-//! HTTP / 解析 / 下载 / 导出由后续阶段补齐。
+//! 模块划分：
+//! - `gpui_app` — 新 GPUI GUI 入口（Stage 1+）。
+//! - `app` / `db` / `crawler` / `config` / `models` / `parser` / `export` /
+//!   `http` / `js` / `rules` / `util` / `cli` — 业务 + 数据层（GUI 解耦）。
+//! - 旧 `ui` / `design_system` / `material_icons` 已在 Stage 11 整体删除。
 
-// 整个 crate 默认 deny unsafe；window 模块单独允许（Windows DWM FFI）。
+// 整个 crate 默认 deny unsafe（egui 时代的 windows.rs 已删除，目前没有 FFI）。
 #![deny(unsafe_code)]
 
 pub mod app;
@@ -11,14 +14,11 @@ pub mod cli;
 pub mod config;
 pub mod crawler;
 pub mod db;
-pub mod design_system;
 pub mod export;
+pub mod gpui_app;
 pub mod http;
 pub mod js;
-pub mod material_icons;
 pub mod models;
 pub mod parser;
 pub mod rules;
-pub mod ui;
 pub mod util;
-pub mod window;

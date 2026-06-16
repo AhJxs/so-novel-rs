@@ -1,16 +1,25 @@
 //! 封面字节解码 + URI 生成（5b 增强）。
+//!
+//! Stage 11：`CoverEntry` 改为 UI 中立：只存原始字节 + 源 / URL 元信息。
+//! 新 GPUI 路径用 `image::ImageReader` 解码得到 RGBA 字节后渲染，
+//! 旧 egui 的 `egui::Image` 路径已删除。
 
-/// 封面缓存条目。`Ready` 持有 `egui::Image<'static>`（懒上传纹理，按 URI 去重）；
+/// 封面缓存条目。`Ready` 持有 `Vec<u8>`（已校验为有效图片的原始字节）；
 /// `Failed` 保留错误文案以便 UI 给出可见反馈而非静默。
+///
+/// UI 层负责把字节解码为可显示格式（GPUI 可用 `image::ImageBuffer` / RGBA 数组）。
 pub enum CoverEntry {
-    Ready(egui::Image<'static>),
+    Ready {
+        /// 原始图片字节（PNG / JPEG / WebP 等）。
+        bytes: Vec<u8>,
+        /// 唯一 URI（`cover://{source_id}/{hash}`），用于 GPUI 端做纹理缓存去重。
+        uri: String,
+    },
     Failed(String),
 }
 
 /// 把后台下载的字节构造为 `CoverEntry`。
 /// 失败（空 body / 解码错误）时给出中文短文案，UI 仍会显示一行小字提示。
-///
-/// URI 取自 `(source_id, cover_url)`，确保不同书源/不同封面在 egui 内部纹理缓存里互不污染。
 pub(crate) fn cover_entry_from_bytes(
     source_id: i32,
     cover_url: &str,
@@ -19,8 +28,7 @@ pub(crate) fn cover_entry_from_bytes(
     match bytes {
         None => CoverEntry::Failed("下载为空或失败".to_string()),
         Some(b) => {
-            // egui::Image::from_bytes 是懒解码（错误要等 ui.add 时才暴露），
-            // 这里用 image::ImageReader 提前验证字节是真的图片，让 Failed 路径可达。
+            // 提前用 image::ImageReader 验证字节是真的图片（避免 lazy 解码时 ui.add 失败）。
             let probe = image::ImageReader::new(std::io::Cursor::new(&b))
                 .with_guessed_format()
                 .ok()
@@ -28,7 +36,7 @@ pub(crate) fn cover_entry_from_bytes(
             match probe {
                 Some(_) => {
                     let uri = format!("cover://{source_id}/{}", hash_short(cover_url));
-                    CoverEntry::Ready(egui::Image::from_bytes(uri, b))
+                    CoverEntry::Ready { bytes: b, uri }
                 }
                 None => CoverEntry::Failed("图片解码失败（非有效图片或格式不支持）".to_string()),
             }
@@ -66,8 +74,8 @@ mod cover_tests {
         assert!(!png.is_empty(), "PNG 字节流不应为空");
         let entry = cover_entry_from_bytes(7, "https://example.com/cover.png", Some(png));
         match entry {
-            CoverEntry::Ready(img) => {
-                let _ = img;
+            CoverEntry::Ready { bytes: _, uri: _ } => {
+                // Stage 11 后：bytes 持有原图字节，uri 用于 GPUI 纹理缓存去重。
             }
             CoverEntry::Failed(e) => panic!("期望 Ready，实际 Failed: {e}"),
         }
@@ -82,7 +90,7 @@ mod cover_tests {
         );
         match entry {
             CoverEntry::Failed(msg) => assert!(msg.contains("解码失败"), "错误文案: {msg}"),
-            CoverEntry::Ready(_) => panic!("垃圾字节不应成功解码"),
+            CoverEntry::Ready { .. } => panic!("垃圾字节不应成功解码"),
         }
     }
 
@@ -98,9 +106,9 @@ mod cover_tests {
         let a = cover_entry_from_bytes(1, "https://a.com/c.png", Some(png.clone()));
         let b = cover_entry_from_bytes(2, "https://a.com/c.png", Some(png.clone()));
         let c = cover_entry_from_bytes(1, "https://b.com/c.png", Some(png));
-        assert!(matches!(a, CoverEntry::Ready(_)));
-        assert!(matches!(b, CoverEntry::Ready(_)));
-        assert!(matches!(c, CoverEntry::Ready(_)));
+        assert!(matches!(a, CoverEntry::Ready { .. }));
+        assert!(matches!(b, CoverEntry::Ready { .. }));
+        assert!(matches!(c, CoverEntry::Ready { .. }));
     }
 
     #[test]

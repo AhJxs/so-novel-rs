@@ -49,7 +49,7 @@ impl Db {
     }
 
     /// 可变借引；事务（`Connection::transaction`）要求 `&mut Connection`。
-    /// 因为 eframe 是单线程，且 `Db` 在 `SoNovelApp` 里以 owned 形式持有，
+    /// 因为 GPUI / eframe 都是单线程，且 `Db` 在 `AppModel` 里以 owned 形式持有，
     /// 调用方拿 `&mut self.db` 就能拿到 `&mut Connection`。
     pub fn conn_mut(&mut self) -> &mut Connection {
         &mut self.conn

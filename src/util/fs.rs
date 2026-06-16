@@ -50,6 +50,25 @@ pub fn to_absolute(p: impl AsRef<Path>) -> std::path::PathBuf {
         .unwrap_or_else(|_| p.to_path_buf())
 }
 
+/// 把字节数格式化为人类可读的文件大小（"1.5 MB" / "0 B"）。
+///
+/// 复用旧 `src/ui/pages/library.rs` 的实现 — Stage 5 把它移到 `util::fs`，
+/// 旧 UI / 新 GPUI 都能直接调。旧 UI 的本地副本 Stage 11 一起删。
+pub fn format_size(bytes: u64) -> String {
+    const KB: u64 = 1024;
+    const MB: u64 = KB * 1024;
+    const GB: u64 = MB * 1024;
+    if bytes >= GB {
+        format!("{:.2} GB", bytes as f64 / GB as f64)
+    } else if bytes >= MB {
+        format!("{:.2} MB", bytes as f64 / MB as f64)
+    } else if bytes >= KB {
+        format!("{:.1} KB", bytes as f64 / KB as f64)
+    } else {
+        format!("{} B", bytes)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -82,5 +101,14 @@ mod tests {
             std::path::PathBuf::from("/tmp/x")
         };
         assert_eq!(to_absolute(&abs), abs);
+    }
+
+    #[test]
+    fn format_size_units() {
+        assert_eq!(format_size(0), "0 B");
+        assert_eq!(format_size(512), "512 B");
+        assert_eq!(format_size(2048), "2.0 KB");
+        assert_eq!(format_size(2 * 1024 * 1024), "2.00 MB");
+        assert_eq!(format_size(3 * 1024 * 1024 * 1024), "3.00 GB");
     }
 }

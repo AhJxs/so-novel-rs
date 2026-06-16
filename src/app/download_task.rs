@@ -9,6 +9,28 @@ use crate::models::{Book, SearchResult};
 
 use super::now::now_unix_secs;
 
+/// 手动 Clone 跳过 `rx`/`cancel`（不可 Clone 的后台通道）。
+impl Clone for DownloadTask {
+    fn clone(&self) -> Self {
+        Self {
+            id: self.id,
+            origin: self.origin.clone(),
+            rx: None,
+            cancel: None,
+            cancelling: self.cancelling,
+            started_at_unix: self.started_at_unix,
+            finished_at_unix: self.finished_at_unix,
+            book_meta: self.book_meta.clone(),
+            total_chapters: self.total_chapters,
+            completed: self.completed,
+            failed: self.failed,
+            last_chapter_title: self.last_chapter_title.clone(),
+            finished: self.finished.clone(),
+            failures: self.failures.clone(),
+        }
+    }
+}
+
 pub struct DownloadTask {
     /// 任务唯一 id（递增）。
     pub id: u64,

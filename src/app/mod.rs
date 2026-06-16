@@ -6,10 +6,20 @@
 //! - `now` / `runtime` / `tasks_db` — 自由辅助
 //! - `crate::app::ops::download` / `crate::app::ops::search` / `crate::app::ops::sources` / `crate::app::ops::library` / `crate::app::ops::update` / `crate::app::ops::settings` — 业务方法
 //!
-//! 入口：`super::SoNovelApp`（在 `src/app.rs` 中定义）持有所有状态 struct 实例。
+//! 入口：`AppModel`（Stage 2 起替代旧的 `SoNovelApp`）持有所有状态 struct 实例。
+//!
+//! Stage 2 起为 GPUI 迁移做改造：
+//! - 旧的 `SoNovelApp` 名字已重命名为 `AppModel`。
+//! - 不再 `impl eframe::App`；帧轮询逻辑迁到 `crate::app::events`（Stage 3）。
+//! - 字体 / 图片 loader / Material Symbols 仍依赖 egui，封装在
+//!   [`AppModel::install_egui_assets`] 中；旧 `crate::ui` 代码若仍在用，可单独调用。
+//!   GPUI 路径不再触达该函数。
+//! - `current_page` / `window_chrome_applied` / `last_dark_mode` 是旧 egui 渲染期
+//!   字段，保留是给 `crate::ui` 兜底编译；Stage 11 整体删除。
 
 mod cover;
 mod download_task;
+pub(crate) mod events;
 mod library_state;
 mod now;
 mod runtime;
@@ -35,18 +45,18 @@ pub use tasks_db::load_tasks_from_db;
 pub use toast::ToastKind;
 pub use update_state::{check_github_latest_release, UpdateCheckResult, UpdateState};
 
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use tokio::runtime::Runtime;
 
 use crate::config::{load_config, AppConfig, ConfigPaths};
 use crate::db::Db;
 use crate::models::Rule;
-use crate::ui::nav::NavPage;
-use crate::design_system::{font, frame};
 
-/// 应用整体状态。任何 UI 访问的字段都集中在这里，便于持久化与测试。
-pub struct SoNovelApp {
+/// 应用整体状态。Stage 2 起为 UI 中立结构（不再 `impl eframe::App`）。
+///
+/// 字段含义未变（仅名字从 `SoNovelApp` → `AppModel`），便于逐 stage 渐进迁移。
+pub struct AppModel {
     pub paths: ConfigPaths,
     pub config: AppConfig,
     pub rules: Vec<Rule>,
@@ -56,8 +66,6 @@ pub struct SoNovelApp {
     /// 用户对书源的禁用 / 启用覆写。toggle 后立即写 `sonovel.db`
     /// 的 `source_overrides` 表；UI 这里持有的副本仅用于显示状态。
     pub source_overrides: crate::rules::SourceOverrides,
-
-    pub current_page: NavPage,
 
     /// 设置页改动后尚未写盘的标记。任一控件 `.changed()` 都置 true，
     /// 设置页在 UI 末尾统一 `persist_settings()`。避免每改一个字段就写一次盘。
@@ -73,12 +81,6 @@ pub struct SoNovelApp {
     /// 通过 `Box::leak` 得到 `&'static Runtime`，永不 drop ——
     /// 见 `build_shared_runtime` 注释，规避 Runtime drop panic。
     pub runtime: &'static Runtime,
-
-    /// 是否已对 OS 窗口应用 DWM 圆角 + 沉浸式暗色。
-    pub window_chrome_applied: bool,
-
-    /// 上一帧的 dark_mode 状态。
-    pub last_dark_mode: bool,
 
     /// 搜索下载页状态。
     pub search: SearchState,
@@ -97,15 +99,12 @@ pub struct SoNovelApp {
     pub update_state: UpdateState,
 }
 
-impl SoNovelApp {
-    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        // 注入中文字体（egui 默认字体不含 CJK，否则会显示豆腐块）。
-        font::install_cjk_fonts(&cc.egui_ctx);
-        // 注册 Material Symbols 圆角图标字体（vendor 在 src/material_icons/）。
-        crate::material_icons::initialize(&cc.egui_ctx);
-        // 安装 egui_extras 的图片 loader（PNG/JPEG/SVG/GIF/...）。
-        egui_extras::install_image_loaders(&cc.egui_ctx);
-
+impl AppModel {
+    /// UI 中立的构造函数。不再需要 `eframe::CreationContext`。
+    ///
+    /// 旧 egui 路径需要字体 / 图片 loader 时，调用方应再调
+    /// [`AppModel::install_egui_assets`]。GPUI 路径不调它。
+    pub fn new() -> Self {
         let paths = ConfigPaths::discover();
 
         let (config, config_load_error) = match load_config(&paths.config_file) {
@@ -123,9 +122,6 @@ impl SoNovelApp {
                 tracing::info!("首次启动：已生成 {}", paths.config_file.display());
             }
         }
-
-        // 应用持久化的主题偏好
-        cc.egui_ctx.set_theme(config.theme.to_theme_preference());
 
         let runtime = build_shared_runtime();
 
@@ -165,13 +161,10 @@ impl SoNovelApp {
             rule_load_error,
             config_load_error,
             source_overrides,
-            current_page: NavPage::Search,
             settings_dirty: false,
             db,
             toast: None,
             runtime,
-            window_chrome_applied: false,
-            last_dark_mode: false,
             search,
             tasks,
             next_task_id,
@@ -179,6 +172,15 @@ impl SoNovelApp {
             sources_state: SourcesState::default(),
             update_state: UpdateState::default(),
         }
+    }
+
+    /// 安装旧 egui 需要的字体 / 图片 loader / Material Symbols 字体。
+    ///
+    /// Stage 11 后**已删除** — 旧 egui GUI 整体移除，仅留 stub 占位以备未来若有
+    /// 第三方调用方仍依赖此 API。返回 `()` 不做任何事。
+    #[allow(dead_code)]
+    pub fn install_egui_assets(&self) {
+        // 旧实现已删除：见 git history Stage 11 之前。
     }
 
     pub fn show_toast(&mut self, msg: impl Into<String>) {
@@ -377,88 +379,6 @@ impl SoNovelApp {
     /// 把单条任务 upsert 到 DB。
     pub fn save_task_to_db(&self, task: &DownloadTask) {
         crate::app::ops::save_task_to_db(&self.db, task);
-    }
-}
-
-impl eframe::App for SoNovelApp {
-    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
-        // 0. 首次 update：把 OS 窗口设为 Windows 11 圆角 + 沉浸式暗色标题栏。
-        let dark = ui.ctx().global_style().visuals.dark_mode;
-        let need_chrome = !self.window_chrome_applied || self.last_dark_mode != dark;
-        if need_chrome {
-            if let Some(hwnd) = crate::window::platform::extract_hwnd(frame) {
-                crate::window::platform::apply_windows11_chrome(hwnd, dark);
-            }
-            self.window_chrome_applied = true;
-            self.last_dark_mode = dark;
-        }
-
-        // 1. 排空所有后台通道。任何事件都触发一次 repaint。
-        let mut any_progress = self.search.drain();
-        let to_fetch = std::mem::take(&mut self.search.pending_cover_prefetch);
-        for (sid, url) in to_fetch {
-            self.search
-                .spawn_cover_download(sid, &url, &self.config, self.runtime);
-        }
-        for t in self.tasks.iter_mut() {
-            let was_running = t.is_running();
-            any_progress |= t.drain();
-            if was_running && !t.is_running() {
-                let rec = t.to_record();
-                if let Err(e) = crate::db::tasks::upsert(self.db.conn(), &rec) {
-                    tracing::warn!("save task on finish failed: {e}");
-                }
-            }
-        }
-        any_progress |= self.sources_state.drain();
-        if self.update_state.drain() {
-            if let Some(err) = &self.update_state.error {
-                self.show_toast_error(format!("检查更新失败: {err}"));
-            } else if let Some(latest) = &self.update_state.latest_version {
-                let current = env!("CARGO_PKG_VERSION");
-                if latest.trim_start_matches('v') == current {
-                    self.show_toast_success("已是最新版本");
-                } else {
-                    self.show_toast_warn(format!("新版本 {latest} 可用"));
-                }
-            }
-        }
-        let ctx = ui.ctx().clone();
-        if any_progress {
-            ctx.request_repaint();
-        }
-        let any_running = self.search.running
-            || self.sources_state.running
-            || self.tasks.iter().any(|t| t.is_running());
-        if any_running {
-            ctx.request_repaint_after(Duration::from_millis(200));
-        }
-
-        // 2. 渲染顶层 UI
-        crate::ui::title_bar::show(ui, &ctx);
-
-        let visuals = ctx.global_style().visuals.clone();
-        egui::Panel::top("nav")
-            .frame(frame::content_frame(&visuals))
-            .show_inside(ui, |ui| {
-                crate::ui::nav::show_in_panel(ui, self);
-            });
-
-        egui::CentralPanel::default()
-            .frame(frame::content_frame(&visuals))
-            .show_inside(ui, |ui| {
-                crate::ui::pages::show(ui, self);
-            });
-
-        crate::ui::title_bar::handle_window_resize(&ctx);
-
-        // toast 自动消失
-        if let Some((_, _, t)) = self.toast {
-            if t.elapsed() > Duration::from_secs(4) {
-                self.toast = None;
-            }
-            ctx.request_repaint_after(Duration::from_millis(500));
-        }
     }
 }
 

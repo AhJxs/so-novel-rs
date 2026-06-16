@@ -76,8 +76,13 @@ impl LangType {
     }
 }
 
-/// 主题偏好（从 `design_system` 模块 re-export，保持 `crate::config::ThemePref` 兼容）。
-pub use crate::design_system::theme_picker::ThemePref;
+/// 主题偏好：直接存 gpui-component 已注册的主题名（来自 `src/gpui_app/themes/*.json`）。
+///
+/// - 空串 = 使用 gpui-component 自带的默认主题（不主动覆盖）。
+/// - 非空 = 用 `Theme::global_mut(cx).apply_config(&cfg)` 应用同名主题。
+///   Light/Dark 模式本身交给 `gpui_component::Theme::sync_system_appearance` 跟 OS，
+///   所以这里只存一个名字，不分 light/dark 两种值。
+pub type ThemePref = String;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
@@ -125,7 +130,9 @@ impl Default for AppConfig {
         Self {
             version: env!("CARGO_PKG_VERSION").to_string(),
 
-            theme: ThemePref::System,
+            theme: String::new(),
+            // 空串 = "未指定"，启动时 `apply_theme_by_name("")` no-op，
+            // gpui-component 用自带默认主题（light/dark 跟 OS 走）。
             gh_proxy: String::new(),
             cf_bypass: String::new(),
 
@@ -211,7 +218,7 @@ pub fn load_config(path: &Path) -> Result<AppConfig> {
 
     // [global]
     if let Some(v) = t_str(&doc, "global", "theme") {
-        cfg.theme = ThemePref::parse(&v);
+        cfg.theme = v;
     }
     if let Some(v) = t_str(&doc, "global", "gh-proxy") {
         cfg.gh_proxy = v;
@@ -327,7 +334,7 @@ pub fn save_config(path: &Path, cfg: &AppConfig) -> Result<()> {
     }
 
     // [global]
-    set_str(&mut doc, "global", "theme", cfg.theme.as_str());
+    set_str(&mut doc, "global", "theme", &cfg.theme);
     set_str(&mut doc, "global", "gh-proxy", &cfg.gh_proxy);
     set_str(&mut doc, "global", "cf-bypass", &cfg.cf_bypass);
 
@@ -427,7 +434,10 @@ fn default_template_doc() -> DocumentMut {
 # 字段语义与旧版 config.ini 一致；规则与下载任务记录已迁到根目录的 sonovel.db。
 
 [global]
-theme = "system"
+# theme = 留空 = 用 gpui-component 自带默认主题（light/dark 跟 OS 走）。
+# 改成具体主题名（与 `src/gpui_app/themes/*.json` 里的 `name` 字段一致）
+# 即可启用对应主题，例如 `theme = "Catppuccin Mocha"`。
+theme = ""
 gh-proxy = ""
 cf-bypass = ""
 
@@ -527,7 +537,7 @@ mod tests {
             proxy_port: 1080,
             qidian_cookie: "w_tsfp=demo".to_string(),
             language: LangType::ZhTw,
-            theme: ThemePref::Dark,
+            theme: "Catppuccin Mocha".to_string(),
             ..AppConfig::default()
         };
 
@@ -545,7 +555,7 @@ mod tests {
         assert_eq!(loaded.proxy_port, cfg.proxy_port);
         assert_eq!(loaded.qidian_cookie, cfg.qidian_cookie);
         assert_eq!(loaded.language, cfg.language);
-        assert_eq!(loaded.theme, ThemePref::Dark);
+        assert_eq!(loaded.theme, "Catppuccin Mocha");
     }
 
     #[test]
