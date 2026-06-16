@@ -153,7 +153,7 @@ impl LibraryPage {
             })
             .cloned()
             .collect();
-        v.sort_by(|a, b| b.modified_unix_secs.cmp(&a.modified_unix_secs));
+        v.sort_by_key(|e| std::cmp::Reverse(e.modified_unix_secs));
         v
     }
 }
@@ -163,7 +163,7 @@ impl Render for LibraryPage {
         self.maybe_auto_scan(cx);
 
         let model = self.model.read(cx);
-        let entries = Self::filtered_entries(&model);
+        let entries = Self::filtered_entries(model);
         let scan_err = model.library.last_error.clone();
         let ext_filter = model.library.filter_ext.clone();
         let download_path = model.config.download_path.clone();

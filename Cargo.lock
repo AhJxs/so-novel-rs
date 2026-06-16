@@ -6480,6 +6480,7 @@ dependencies = [
  "reqwest",
  "rfd",
  "rusqlite",
+ "rust-i18n",
  "scraper",
  "serde",
  "serde_json",

@@ -17,6 +17,12 @@ gpui = "0.2.2"
 gpui-component = "0.5.1"
 # gpui-component-assets 提供内置 icon 资源；可选，但启用后可避免自己 embed 图标字体
 gpui-component-assets = "0.5.1"
+# 国际化 —— rust-i18n（同 gpui-component 内部用的库），我们直接复用框架机制：
+# - `locales/app.yml` 装翻译表（编译期嵌入）
+# - `rust_i18n::i18n!("locales", fallback = "en")` 初始化
+# - `t!("key")` 宏查当前全局 locale 的翻译
+# 全局 locale 由 `gpui_component::set_locale(lang)` 设置（同时影响 gpui-component 自己的 YAML）。
+rust-i18n = "3"
 
 # Async runtime (kept lean — used in later stages; pulled now so tests/integration are stable)
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "fs"] }
@@ -94,7 +100,8 @@ clap = { version = "4", features = ["derive"] }
 # Windows / macOS 走原生 IFileOpenDialog / NSOpenPanel。
 rfd = { version = "0.15", default-features = false, features = ["xdg-portal", "tokio"] }
 
-# 临时目录（启动时给 `ThemeRegistry::watch_dir` 喂一个真实目录，进程退出自动清理）
+# 临时目录（测试用 — `ConfigPaths::discover` / `load_rules_from_db` 的单元测试
+# 通过 `tempfile::tempdir()` 把 `~/.sonovel` 重定向到临时目录避免污染用户主目录）。
 tempfile = "3"
 
 # SQLite — bundled 模式零系统依赖，单文件 DB 持久化下载任务记录（后续书源覆写也会走这个库）。

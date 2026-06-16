@@ -1,0 +1,351 @@
+# So Novel 自己的 i18n 翻译表。
+#
+# 加载方式：编译期由 `rust_i18n::i18n!("locales", fallback = "en")` 嵌入二进制。
+# 跟 `gpui-component` 的 `locales/ui.yml` **不共享**（各自 crate 独立的 i18n 实例），
+# 但**全局 locale 是同一个**（`gpui_component::set_locale` 写到全局），
+# 所以一次 set_locale 同时影响两边的翻译。
+#
+# 格式参考 gpui-component 的 `locales/ui.yml`：
+# - `_version: 2` 顶层
+# - 顶层 key 大写（Nav / App / Settings / …）
+# - 每 key 下面是 locale → text 映射
+#
+# 3 种语言：zh-CN / zh-HK / en
+
+_version: 2
+
+Nav:
+  search:
+    en: Search
+    zh-CN: 搜索下载
+    zh-HK: 搜尋下載
+  tasks:
+    en: Tasks
+    zh-CN: 下载任务
+    zh-HK: 下載任務
+  library:
+    en: Library
+    zh-CN: 本地书库
+    zh-HK: 本地書庫
+  sources:
+    en: Sources
+    zh-CN: 书源管理
+    zh-HK: 書源管理
+  settings:
+    en: Settings
+    zh-CN: 设置
+    zh-HK: 設定
+
+App:
+  title:
+    en: So Novel
+    zh-CN: So Novel
+    zh-HK: So Novel
+
+Settings:
+  page:
+    general:
+      en: General
+      zh-CN: 常规
+      zh-HK: 常規
+    crawl:
+      en: Crawl
+      zh-CN: 抓取
+      zh-HK: 擷取
+    proxy:
+      en: Proxy
+      zh-CN: 代理
+      zh-HK: 代理
+    about:
+      en: About
+      zh-CN: 关于
+      zh-HK: 關於
+  group:
+    appearance:
+      en: Appearance
+      zh-CN: 外观
+      zh-HK: 外觀
+    network:
+      en: Network
+      zh-CN: 网络
+      zh-HK: 網路
+    download:
+      en: Download
+      zh-CN: 下载
+      zh-HK: 下載
+    source:
+      en: Sources
+      zh-CN: 书源
+      zh-HK: 書源
+    concurrency:
+      en: "Concurrency & interval"
+      zh-CN: 并发与间隔
+      zh-HK: 並發與間隔
+    retry:
+      en: Retry
+      zh-CN: 重试
+      zh-HK: 重試
+    http_proxy:
+      en: "HTTP proxy"
+      zh-CN: "HTTP 代理"
+      zh-HK: "HTTP 代理"
+    cookie:
+      en: Cookie
+      zh-CN: Cookie
+      zh-HK: Cookie
+    info:
+      en: Info
+      zh-CN: 信息
+      zh-HK: 資訊
+  item:
+    theme:
+      en: Theme
+      zh-CN: 主题
+      zh-HK: 主題
+    app_lang:
+      en: "Interface language"
+      zh-CN: 界面语言
+      zh-HK: 界面語言
+    gh_proxy:
+      en: "GitHub proxy"
+      zh-CN: "GitHub 代理"
+      zh-HK: "GitHub 代理"
+    cf_bypass:
+      en: "Cloudflare bypass URL"
+      zh-CN: "Cloudflare bypass URL"
+      zh-HK: "Cloudflare bypass URL"
+    download_path:
+      en: "Download directory"
+      zh-CN: 下载目录
+      zh-HK: 下載目錄
+    default_format:
+      en: "Default format"
+      zh-CN: 默认格式
+      zh-HK: 預設格式
+    txt_encoding:
+      en: "TXT encoding"
+      zh-CN: "TXT 编码"
+      zh-HK: "TXT 編碼"
+    preserve_chapter_cache:
+      en: "Preserve chapter cache"
+      zh-CN: 保留章节缓存目录
+      zh-HK: 保留章節快取目錄
+    enable_progressbar:
+      en: "Enable download progress bar"
+      zh-CN: 启用下载进度条
+      zh-HK: 啟用下載進度條
+    book_lang:
+      en: "Source language"
+      zh-CN: 书源语言
+      zh-HK: 書源語言
+    search_limit:
+      en: "Search result limit"
+      zh-CN: 搜索条数上限
+      zh-HK: 搜尋條數上限
+    search_filter:
+      en: "Filter & sort by similarity"
+      zh-CN: 过滤低相似度并排序搜索结果
+      zh-HK: 過濾低相似度並排序搜尋結果
+    concurrency:
+      en: "Concurrency limit"
+      zh-CN: 并发上限
+      zh-HK: 並發上限
+    min_interval:
+      en: "Request interval min (ms)"
+      zh-CN: 请求间隔最小 (ms)
+      zh-HK: 請求間隔最小 (ms)
+    max_interval:
+      en: "Request interval max (ms)"
+      zh-CN: 请求间隔最大 (ms)
+      zh-HK: 請求間隔最大 (ms)
+    enable_retry:
+      en: "Enable retry on failure"
+      zh-CN: 启用失败重试
+      zh-HK: 啟用失敗重試
+    max_retries:
+      en: "Max retry count"
+      zh-CN: 最大重试次数
+      zh-HK: 最大重試次數
+    retry_min_interval:
+      en: "Retry interval min (ms)"
+      zh-CN: 重试间隔最小 (ms)
+      zh-HK: 重試間隔最小 (ms)
+    retry_max_interval:
+      en: "Retry interval max (ms)"
+      zh-CN: 重试间隔最大 (ms)
+      zh-HK: 重試間隔最大 (ms)
+    proxy_enabled:
+      en: "Enable HTTP proxy"
+      zh-CN: 启用 HTTP 代理
+      zh-HK: 啟用 HTTP 代理
+    proxy_host:
+      en: "Proxy host"
+      zh-CN: 代理 Host
+      zh-HK: 代理 Host
+    proxy_port:
+      en: "Proxy port"
+      zh-CN: 代理 Port
+      zh-HK: 代理 Port
+    qidian_cookie:
+      en: "Qidian cookie"
+      zh-CN: 起点 Cookie
+      zh-HK: 起點 Cookie
+    version:
+      en: Version
+      zh-CN: 版本
+      zh-HK: 版本
+    check_update:
+      en: "Check for updates"
+      zh-CN: 检查更新
+      zh-HK: 檢查更新
+    open_github:
+      en: "Project homepage"
+      zh-CN: 项目主页
+      zh-HK: 項目主頁
+  desc:
+    theme:
+      en: "Choose the UI theme; changes take effect immediately."
+      zh-CN: 选择界面主题；改动即时生效。
+      zh-HK: 選擇界面主題；改動即時生效。
+    app_lang:
+      en: "App UI language; affects Sidebar search / Select / Dialog placeholders, etc. Changes take effect immediately."
+      zh-CN: 应用 UI 显示语言；影响 Sidebar 搜索框 / Select / Dialog 等所有 gpui-component 内部文案。改动即时生效。
+      zh-HK: 應用 UI 顯示語言；影響 Sidebar 搜尋框 / Select / Dialog 等所有 gpui-component 內部文案。改動即時生效。
+    gh_proxy:
+      en: "Used to speed up release / raw asset downloads; leave empty to use default."
+      zh-CN: 用于加速 release / raw 资源下载；留空走默认。
+      zh-HK: 用於加速 release / raw 資源下載；留空走預設。
+    cf_bypass:
+      en: "Base URL of a local or remote sarperavci/CloudflareBypass service."
+      zh-CN: 本地或远端 sarperavci/CloudflareBypass 服务的 base URL。
+      zh-HK: 本地或遠端 sarperavci/CloudflareBypass 服務的 base URL。
+    download_path:
+      en: "Directory to save downloaded book files (absolute path)."
+      zh-CN: 书籍文件保存目录（绝对路径）。
+      zh-HK: 書籍檔案儲存目錄（絕對路徑）。
+    default_format:
+      en: "Output format for downloaded files."
+      zh-CN: 下载完成的文件输出格式。
+      zh-HK: 下載完成的檔案輸出格式。
+    txt_encoding:
+      en: "Character encoding for TXT export; pick GBK for older devices."
+      zh-CN: TXT 导出的字符编码；如需兼容旧设备选 GBK。
+      zh-HK: TXT 匯出的字元編碼；如需相容舊裝置選 GBK。
+    preserve_chapter_cache:
+      en: "When disabled, re-downloading will fetch all chapters from scratch."
+      zh-CN: 关闭后下次重新下载会全章节再爬。
+      zh-HK: 關閉後下次重新下載會全章節再爬。
+    enable_progressbar:
+      en: "Takes effect in terminal / CLI mode."
+      zh-CN: 终端/CLI 模式下生效。
+      zh-HK: 終端/CLI 模式下生效。
+    book_lang:
+      en: "Locale hint used when matching sources (zh_CN / zh_TW / zh_Hant); affects source filtering only, not the app UI."
+      zh-CN: 书源匹配时使用的 locale hint（zh_CN / zh_TW / zh_Hant）；只影响书源筛选，不影响应用 UI。
+      zh-HK: 書源比對時使用的 locale hint（zh_CN / zh_TW / zh_Hant）；只影響書源篩選，不影響應用 UI。
+    search_limit:
+      en: "Max results per source; -1 means unlimited."
+      zh-CN: 每源最多返回条数；-1 表示不限。
+      zh-HK: 每源最多返回條數；-1 表示不限。
+    search_filter:
+      en: "Filter out low-similarity results and sort by title/author similarity."
+      zh-CN: 根据标题/作者相似度过滤无效结果并按相似度排序。
+      zh-HK: 根據標題/作者相似度過濾無效結果並按相似度排序。
+    concurrency:
+      en: "-1 = auto: min(50, chapter count)."
+      zh-CN: "-1 = 自动：min(50, 章节数)。"
+      zh-HK: "-1 = 自動：min(50, 章節數)。"
+    min_interval:
+      en: "min ≤ max; wait a random ms in [min..max] before each chapter fetch."
+      zh-CN: min ≤ max；抓每章前等 [min..max] 内的随机 ms。
+      zh-HK: min ≤ max；擷取每章前等 [min..max] 內的隨機 ms。
+    max_interval:
+      en: "See the previous item."
+      zh-CN: 见上一项。
+      zh-HK: 見上一項。
+    enable_retry:
+      en: "On chapter fetch failure, retry with the intervals below; give up after max retries."
+      zh-CN: 章节下载失败时按下方间隔重试，达到上限后视为放弃。
+      zh-HK: 章節下載失敗時按下方間隔重試，達到上限後視為放棄。
+    max_retries:
+      en: "0 = no retry."
+      zh-CN: "0 = 不重试。"
+      zh-HK: "0 = 不重試。"
+    retry_min_interval:
+      en: "min ≤ max; wait a random ms in [min..max] between retries."
+      zh-CN: min ≤ max；两次重试之间等 [min..max] 内的随机 ms。
+      zh-HK: min ≤ max；兩次重試之間等 [min..max] 內的隨機 ms。
+    retry_max_interval:
+      en: "See the previous item."
+      zh-CN: 见上一项。
+      zh-HK: 見上一項。
+    proxy_enabled:
+      en: "Route all outbound requests through this proxy (source fetch + health check)."
+      zh-CN: 所有出站请求都走此代理（书源 fetch + 测速）。
+      zh-HK: 所有出站請求都走此代理（書源 fetch + 測速）。
+    proxy_host:
+      en: "Proxy server address (IP or domain)."
+      zh-CN: 代理服务器地址（IP 或域名）。
+      zh-HK: 代理伺服器地址（IP 或域名）。
+    proxy_port:
+      en: "Proxy server port (1-65535)."
+      zh-CN: 代理服务器端口（1-65535）。
+      zh-HK: 代理伺服器埠（1-65535）。
+    qidian_cookie:
+      en: "Required for qidian.com / qidian overseas sites; can be ignored for other sources."
+      zh-CN: 起点中文网 / 起点海外站点需要；其它书源可忽略。
+      zh-HK: 起點中文網 / 起點海外站點需要；其它書源可忽略。
+    version:
+      en: "So Novel — Rust + GPUI desktop client."
+      zh-CN: "So Novel — Rust + GPUI 桌面客户端。"
+      zh-HK: "So Novel — Rust + GPUI 桌面用戶端。"
+    check_update:
+      en: "Query GitHub releases for a newer version."
+      zh-CN: 查询 GitHub releases 是否有新版本。
+      zh-HK: 查詢 GitHub releases 是否有新版本。
+    open_github:
+      en: "Source code / issue tracker / latest release are all on GitHub."
+      zh-CN: 项目源码 / 问题反馈 / 最新版本都在 GitHub。
+      zh-HK: 項目源碼 / 問題回饋 / 最新版本都在 GitHub。
+  # 按钮 label（SettingsField::render 渲染的 button 上的 label）
+  check_update_button:
+    en: "Check GitHub for updates"
+    zh-CN: 检查 GitHub 最新版本
+    zh-HK: 檢查 GitHub 最新版本
+  open_github_button:
+    en: "Open GitHub"
+    zh-CN: 访问 GitHub
+    zh-HK: 訪問 GitHub
+  # 「下载目录」右侧「浏览」按钮弹出的原生文件夹选择器标题。
+  choose_download_dir_dialog_title:
+    en: "Select download directory"
+    zh-CN: 选择下载目录
+    zh-HK: 選擇下載目錄
+  # dropdown option 标签（LangType 书源语言 / AppLang 应用语言）
+  option:
+    booklang:
+      zh_cn:
+        en: "Simplified Chinese"
+        zh-CN: 简体中文
+        zh-HK: 簡體中文
+      zh_tw:
+        en: "Traditional Chinese"
+        zh-CN: 繁體中文
+        zh-HK: 繁體中文
+      zh_hant:
+        en: "Traditional Chinese (generic)"
+        zh-CN: 繁體中文(通用)
+        zh-HK: 繁體中文(通用)
+    applang:
+      zh_cn:
+        en: "Simplified Chinese"
+        zh-CN: 简体中文
+        zh-HK: 簡體中文
+      zh_tw:
+        en: "Traditional Chinese"
+        zh-CN: 繁體中文
+        zh-HK: 繁體中文
+      en:
+        en: English
+        zh-CN: English
+        zh-HK: English

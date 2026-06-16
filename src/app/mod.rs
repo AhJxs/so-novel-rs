@@ -97,6 +97,20 @@ pub struct AppModel {
 
     /// 版本更新检查状态。
     pub update_state: UpdateState,
+
+    /// 待推送到 gpui-component Notification 层的通知队列。
+    ///
+    /// `events::drain` 跑在 `AsyncApp::update_entity` 闭包里，**拿不到 `&mut Window`**；
+    /// 而 `WindowExt::push_notification` 必须 `&mut Window` + `&mut App`。
+    /// 解法：drain 把构造好的 [`gpui_component::notification::Notification`] 推到这个 Vec，
+    /// 由 `RootView::render`（拿得到 `&mut Window`）排空 + 调 `push_notification`。
+    pub pending_notifications: Vec<gpui_component::notification::Notification>,
+}
+
+impl Default for AppModel {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl AppModel {
@@ -171,6 +185,7 @@ impl AppModel {
             library: LibraryState::default(),
             sources_state: SourcesState::default(),
             update_state: UpdateState::default(),
+            pending_notifications: Vec::new(),
         }
     }
 
@@ -314,18 +329,23 @@ impl AppModel {
     }
 
     /// 把当前 config 写回 config.toml。
+    ///
+    /// **Auto-save 模式**：每个 setter 改完字段后立即调本方法写盘 —— 没有"立即保存"
+    /// 按钮，没有 dirty 概念。成功时静默（tracing::debug 留痕），失败时弹 error toast
+    /// 让用户知道（极少见：磁盘满 / 权限问题 / 路径不存在等）。
+    ///
+    /// `settings_dirty` 字段保留只是为了兼容（其他代码可能读），但**本方法不再检查它**。
+    /// 如果以后想加 debounce 写入（比如连续拖动 number input），可以在 setter 里加
+    /// cx.spawn(timer 500ms) 合并多次 persist_settings 调用 —— 单次写盘本来就很快
+    /// （小 TOML 几 ms），目前不做 debounce。
     pub fn persist_settings(&mut self) {
-        if !self.settings_dirty {
-            return;
-        }
         self.settings_dirty = false;
-        match crate::app::ops::persist_settings(&self.config, &self.paths.config_file) {
-            Ok(_) => self.show_toast_success("已保存到 config.toml"),
-            Err(msg) => {
-                tracing::warn!("自动保存 config.toml 失败: {msg}");
-                self.show_toast_error(msg);
-                self.settings_dirty = true;
-            }
+        if let Err(msg) = crate::app::ops::persist_settings(&self.config, &self.paths.config_file)
+        {
+            tracing::warn!("自动保存 config.toml 失败: {msg}");
+            self.show_toast_error(msg);
+        } else {
+            tracing::debug!("config.toml 自动保存成功");
         }
     }
 

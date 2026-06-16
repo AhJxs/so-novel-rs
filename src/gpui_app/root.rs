@@ -1,24 +1,33 @@
-//! Stage 4 + Stage 12：现代侧边栏 Shell + 键盘打磨。
+//! Stage 4 + Stage 12 + 可折叠 Sidebar：现代侧边栏 Shell + 键盘打磨。
 //!
 //! - 左侧 `Sidebar`：`SidebarMenuItem` × 5（Search / Tasks / Library / Sources / Settings）。
-//! - 右侧内容区：按 `current_page` 渲染对应 page。
+//!   - 可折叠：`SidebarCollapsible::Icon` — 折叠到 48px 图标宽度，展开/收起 200ms 缓动。
+//!   - `SidebarToggleButton` 放在 TitleBar 最左侧；`Cmd+B` 快捷键也可切换。
+//!   - **无 footer** — sidebar 只渲染 menu + header，干净。
+//! - 右侧内容区：按 `current_page` 渲染对应 page（`SettingsPage` 也用 gpui-component
+//!   的 `Settings` 组件搭）。
 //! - GPUI actions + keybindings：
 //!   - `ShowSearch/Tasks/Library/Sources/Settings` + `cmd-1` ~ `cmd-5` 直接跳。
-//!   - `NextPage` / `PrevPage` + `ctrl-tab` / `ctrl-shift-tab` 循环翻页（Stage 12）。
+//!   - `NextPage` / `PrevPage` + `f6` / `shift-f6` 循环翻页（Stage 12）。
+//!   - `ToggleSidebar` + `cmd-b` 折叠/展开侧边栏。
 //!   - `Escape` 由 `gpui-component::Root` 自动处理关闭顶层 dialog / sheet / notification。
 //! - 顶层 `Root::render_dialog_layer / sheet_layer / notification_layer` 渲染覆盖层。
 
 use gpui::{
     actions, div, px, AnyElement, App, AppContext, ClickEvent, Context, Entity, InteractiveElement,
-    IntoElement, KeyBinding, ParentElement, Render, Styled, Window,
+    IntoElement, KeyBinding, ParentElement, Render, SharedString, Styled, Window,
 };
+use gpui::prelude::FluentBuilder;
 use gpui_component::{
-    sidebar::{Sidebar, SidebarMenu, SidebarMenuItem},
-    ActiveTheme as _, Icon, IconName, Root, TitleBar,
+    sidebar::{Sidebar, SidebarMenu, SidebarMenuItem, SidebarToggleButton},
+    ActiveTheme as _, Icon, IconName, Root, TitleBar, WindowExt as _,
 };
 
 use crate::app::AppModel;
-use crate::gpui_app::pages::{LibraryPage, SearchPage, SettingsPage, SourcesPage, TasksPage};
+use crate::gpui_app::pages::{
+    LibraryPage, SearchPage, SettingsPage, SourcesPage, TasksPage,
+};
+use crate::gpui_app::i18n::ts;
 
 actions!(
     gpui_app,
@@ -30,6 +39,7 @@ actions!(
         ShowSettings,
         NextPage,
         PrevPage,
+        ToggleSidebar,
     ]
 );
 
@@ -48,16 +58,21 @@ pub enum NavPage {
 }
 
 impl NavPage {
-    /// 5 个 nav item 的元数据：(label_zh, icon, 默认 page 名占位)。
-    /// Stage 5+ 替换为真实页面。
-    fn label_zh(self) -> &'static str {
+    /// NavPage → i18n key（`i18n::tr` 用）。
+    fn label_key(self) -> &'static str {
         match self {
-            NavPage::Search => "搜索下载",
-            NavPage::Tasks => "下载任务",
-            NavPage::Library => "本地书库",
-            NavPage::Sources => "书源管理",
-            NavPage::Settings => "设置",
+            NavPage::Search => "Nav.search",
+            NavPage::Tasks => "Nav.tasks",
+            NavPage::Library => "Nav.library",
+            NavPage::Sources => "Nav.sources",
+            NavPage::Settings => "Nav.settings",
         }
+    }
+
+    /// 当前应用语言下的用户可见 label —— `t!` 走全局 locale（语言切换时由
+    /// `gpui_component::set_locale` 同步），所以这里不需要 `lang` 参数。
+    fn label(self) -> SharedString {
+        ts(self.label_key())
     }
 
     fn icon(self) -> IconName {
@@ -95,10 +110,10 @@ impl NavPage {
 /// 全局 key bindings 注册。`gpui_app::run` 启动时调一次。
 ///
 /// Stage 12 加 `F6` / `Shift+F6` 翻页：
-/// - `F6` → 下一页（搜索 → 任务 → 书库 → 书源 → 设置 → 搜索 ...）
+/// - `F6` → 下一页（搜索 → 任务 → 书库 → 书源 → 搜索 ...）
 /// - `Shift+F6` → 上一页
 ///
-/// 保留 `cmd-1..5` 直接跳。
+/// `cmd-1..4` 跳 page，`cmd-5` 打开设置窗口，`cmd-b` 折叠 sidebar。
 ///
 /// 为什么不用 `Ctrl+Tab` / `Ctrl+Shift+Tab`：
 /// `gpui-component::InputState` 把 `tab` / `shift-tab` 绑到了自己的 `IndentInline` / `OutdentInline`
@@ -107,7 +122,7 @@ impl NavPage {
 /// → 应用级翻页 action 拿不到事件。改用 `F6` 避开 Input 的 Tab 绑定。
 pub fn register_key_bindings(cx: &mut App) {
     cx.bind_keys([
-        // 直接跳
+        // 直接跳（5 个 page）
         KeyBinding::new("cmd-1", ShowSearch, Some(KEY_CONTEXT)),
         KeyBinding::new("cmd-2", ShowTasks, Some(KEY_CONTEXT)),
         KeyBinding::new("cmd-3", ShowLibrary, Some(KEY_CONTEXT)),
@@ -116,15 +131,21 @@ pub fn register_key_bindings(cx: &mut App) {
         // 翻页 — F6 避开 Input 的 Tab 绑定
         KeyBinding::new("f6", NextPage, Some(KEY_CONTEXT)),
         KeyBinding::new("shift-f6", PrevPage, Some(KEY_CONTEXT)),
+        // 折叠/展开 sidebar（VSCode 风格 cmd-b）
+        KeyBinding::new("cmd-b", ToggleSidebar, Some(KEY_CONTEXT)),
     ]);
 }
 
 /// Stage 4 root view：sidebar shell + 当前页面占位。
 pub struct RootView {
-    // model 在 new() 时持有；后续 stage 用作 sidebar 状态展示。当前 render 没读它。
+    // 持有 model 用于后续阶段把 sidebar / 全局 toasts 接进 AppModel。
+    // 当前主要在 `new()` 里 clone 给子 page。
     #[allow(dead_code)]
     model: Entity<AppModel>,
     current_page: NavPage,
+    /// Sidebar 是否折叠（true = 仅图标宽度）。由 `toggle_sidebar` / `Cmd+B` 翻转。
+    /// 这是 UI 临时状态，不持久化。
+    sidebar_collapsed: bool,
     /// 焦点 handle — 在 new() 里 window.focus(&_focus) 让 RootView 拥有初始焦点，
     /// 这样 `F6` / `Cmd+1..5` 等 KEY_CONTEXT 绑定的快捷键能稳定 fire
     /// （不依赖 focus 落到哪个具体子元素上）。
@@ -143,8 +164,6 @@ impl RootView {
         let _focus = cx.focus_handle();
         window.focus(&_focus);
 
-        // 一次性创建所有 page。Library 是 Stage 6 真实实现；其他四个当前是占位，
-        // Stage 7/8/9/10 替换。
         let library_page = cx.new(|cx| LibraryPage::new(model.clone(), window, cx));
         let search_page = cx.new(|cx| SearchPage::new(model.clone(), window, cx));
         let tasks_page = cx.new(|cx| TasksPage::new(model.clone(), window, cx));
@@ -154,6 +173,7 @@ impl RootView {
         Self {
             model,
             current_page: NavPage::default(),
+            sidebar_collapsed: false,
             _focus,
             library_page,
             search_page,
@@ -170,6 +190,12 @@ impl RootView {
         }
     }
 
+    /// 切换 sidebar 折叠状态。由 `ToggleSidebar` action / `Cmd+B` / `SidebarToggleButton` 三处入口调用。
+    fn toggle_sidebar(&mut self, cx: &mut Context<Self>) {
+        self.sidebar_collapsed = !self.sidebar_collapsed;
+        cx.notify();
+    }
+
     /// 渲染当前选中的 page。
     fn render_current_page(&self) -> AnyElement {
         match self.current_page {
@@ -181,8 +207,23 @@ impl RootView {
         }
     }
 
-    /// 构建左侧 Sidebar。
+    /// 设置 modal：半透明 backdrop + 居中可拖动 panel。
+    /// 构建左侧 Sidebar。支持折叠（`sidebar_collapsed`）：
+    ///
+    /// - 展开态（默认）：宽 220px，header 显示 "So Novel" 文字（居中）；
+    ///   5 个 `SidebarMenuItem`（Search / Tasks / Library / Sources / Settings）。
+    /// - 折叠态：宽 48px（gpui-component `COLLAPSED_WIDTH`），**header 不渲染**；
+    ///   5 个菜单项自动收成 icon-only。`SidebarMenuItem` 通过 `Collapsible` trait
+    ///   自动隐藏文字。
+    /// - **无 footer** — sidebar 只渲染 menu + header，干净。
+    ///
+    /// 折叠按钮在 TitleBar 最左侧（`render_title_bar`）；header 只作标题区，折叠后隐藏。
+    ///
+    /// 200ms `ease_in_out_cubic` 缓动由 `gpui-component::Sidebar` 内部 `Transition` 提供，
+    /// 折叠/展开丝滑过渡。
     fn render_sidebar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let collapsed = self.sidebar_collapsed;
+
         let items: Vec<SidebarMenuItem> = [
             NavPage::Search,
             NavPage::Tasks,
@@ -194,7 +235,7 @@ impl RootView {
         .map(|page| {
             let active = *page == self.current_page;
             let page = *page;
-            SidebarMenuItem::new(page.label_zh())
+            SidebarMenuItem::new(page.label())
                 .icon(Icon::new(page.icon()))
                 .active(active)
                 .on_click(cx.listener(move |this, _: &ClickEvent, _window, cx| {
@@ -203,47 +244,43 @@ impl RootView {
         })
         .collect();
 
+        // Header — 仅展开态显示 "So Novel" 文字居中。折叠态不调用 `.header(...)`，
+        // gpui-component 内部 `when_some(self.header.take(), ...)` 会跳过整个 header 容器，
+        // 不占任何垂直空间。文本走 `i18n::tr`（项目名 3 种语言都是 "So Novel"，但 key
+        // 还是走 i18n 表以保持一致性）。
         let header = div()
-            .px_3()
-            .py_2() // 高度小一点（原 .py_3）— 紧凑标题区
+            .w_full()
             .flex()
-            .flex_row()
-            .items_center()    // 垂直居中
-            .justify_center()  // 水平居中（图标 + 文字一起居中显示）
-            .gap_2()
-            .child(Icon::new(IconName::BookOpen).text_color(cx.theme().primary))
+            .items_center()
+            .justify_center()
             .child(
                 div()
                     .font_weight(gpui::FontWeight::SEMIBOLD)
                     .text_base()
-                    .child("So Novel"),
+                    .child(ts("App.title"),
+                ),
             );
-
-        let footer = div()
-            .px_3()
-            .py_2()
-            .flex()
-            .flex_col()
-            .gap_1()
-            .text_xs()
-            .text_color(cx.theme().muted_foreground)
-            .child(format!("v{}", env!("CARGO_PKG_VERSION")))
-            .child(div().child("Cmd+1..5 直达"))
-            .child(div().child("F6 / Shift+F6 翻页"));
 
         Sidebar::left()
             .w(px(220.0))
+            // true → SidebarCollapsible::Icon：折叠到图标宽度（48px），带 200ms 缓动。
+            .collapsible(true)
+            .collapsed(collapsed)
             .bg(cx.theme().sidebar)
             .border_color(cx.theme().border)
-            .header(header)
-            .footer(footer)
+            // 仅展开态注入 header。`header` 被闭包 move 捕获，未调用时直接 drop，
+            // gpui-component 内部 `when_some(self.header.take(), ...)` 跳过整个 header 容器。
+            .when(!collapsed, |sb| sb.header(header))
+            // 无 footer —— 不调 `.footer(...)`，gpui-component 内部 `when_some` 跳过整个
+            // footer 容器，sidebar 底部自然空白。
             .child(SidebarMenu::new().children(items))
     }
 
     /// 渲染 gpui-component `TitleBar`。
     ///
-    /// **完全空白 — 不传任何 children**。TitleBar 自身按平台处理（`WindowDecorations::Client`
-    /// 在 `mod.rs` 设置）：
+    /// **最左侧放 `SidebarToggleButton`**（用默认 small ghost 样式，24×24），
+    /// 右侧自动渲染 `WindowControls`。TitleBar 自身按平台处理
+    /// （`WindowDecorations::Client` 在 `mod.rs` 设置）：
     ///
     /// | 平台 | 左 padding | 按钮 | 双击 | 特殊 |
     /// |------|-----------|------|------|------|
@@ -254,10 +291,21 @@ impl RootView {
     /// 通用：
     /// - 背景色 + 底边：`cx.theme().title_bar` / `title_bar_border` — 自动主题适配
     /// - 整个左半区域 = drag area（鼠标拖动 → `start_window_move()`）通过 `WindowControlArea::Drag`
+    ///   — 但 toggle button 自己消费 mousedown，不会触发拖动
     /// - Linux 可选 `on_close_window` 回调（已 ready，未挂 — 默认行为：关闭窗口）
-    fn render_title_bar(&self) -> impl IntoElement {
-        // 仅 TitleBar 本身 — 右侧自动渲染 WindowControls。
-        TitleBar::new()
+    fn render_title_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        // 闭包签名：`SidebarToggleButton::on_click` 收 `Fn(&ClickEvent, &mut Window, &mut App)`，
+        // 不能直接用 cx.listener，所以走 entity.update 桥接到 `toggle_sidebar`。
+        let root_entity = cx.entity();
+        TitleBar::new().child(
+            SidebarToggleButton::left()
+                .collapsed(self.sidebar_collapsed)
+                .on_click(move |_ev, _window, app_cx| {
+                    root_entity.update(app_cx, |this, ctx| {
+                        this.toggle_sidebar(ctx);
+                    });
+                }),
+        )
     }
 
     /// 右侧内容区。按 current_page 渲染对应 page entity。
@@ -271,7 +319,7 @@ impl RootView {
             .child(self.render_current_page())
     }
 
-    /// 7 个导航 action 的 listener 挂到传入的 div 上，返回挂好后的 div。
+    /// 8 个导航 action 的 listener 挂到传入的 div 上，返回挂好后的 div。
     /// 抽出到独立方法，避免 render 主体被 action 链淹没。
     fn bind_nav_actions(&self, root: gpui::Div, cx: &mut Context<Self>) -> gpui::Div {
         root.on_action(cx.listener(Self::navigate_to::<ShowSearch>))
@@ -281,6 +329,17 @@ impl RootView {
             .on_action(cx.listener(Self::navigate_to::<ShowSettings>))
             .on_action(cx.listener(Self::cycle_page::<NextPage>))
             .on_action(cx.listener(Self::cycle_page::<PrevPage>))
+            .on_action(cx.listener(Self::toggle_sidebar_action))
+    }
+
+    /// `ToggleSidebar` action 入口。`on_click` 走 `toggle_sidebar` 直接调。
+    fn toggle_sidebar_action(
+        &mut self,
+        _action: &ToggleSidebar,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.toggle_sidebar(cx);
     }
 
     /// 5 个 `ShowXxx` action → 跳到目标 page。
@@ -328,11 +387,24 @@ impl RootView {
 
 impl Render for RootView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // 排空 `AppModel::pending_notifications` —— `events::drain` 没 `&mut Window`，
+        // 把构造好的 `Notification` 推到 model 队列；这里拿到 window 后真正 push。
+        //
+        // 用 `mem::take` 拿走整个 Vec 而不是逐个 pop：避免 1) drain 期间 model
+        // 被其他路径新增 notification 时迭代器失效；2) 多次 push 同一帧时把
+        // 全部都消费完。
+        let pending = std::mem::take(&mut self.model.update(cx, |m, _| {
+            std::mem::take(&mut m.pending_notifications)
+        }));
+        for note in pending {
+            window.push_notification(note, cx);
+        }
+
         self.bind_nav_actions(div().key_context(KEY_CONTEXT), cx)
             .size_full()
             .flex()
             .flex_col()
-            .child(self.render_title_bar())
+            .child(self.render_title_bar(cx))
             // 主体：sidebar + 内容。`track_focus` 放在 body 内部，让 KEY_CONTEXT 上下文链稳定。
             .child(
                 div()

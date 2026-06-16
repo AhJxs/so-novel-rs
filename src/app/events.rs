@@ -64,16 +64,38 @@ pub fn drain(model: &mut AppModel) -> bool {
     // 4. 书源健康检查。
     any |= model.sources_state.drain();
 
-    // 5. 更新检查。返回 true 时按状态推 toast。
+    // 5. 更新检查。返回 true 时按状态推 notification。
+    //
+    // 注意：用 `gpui_component::notification::Notification` 而不是顶部 toast。
+    // toast 是 titlebar 上的小 pill（4s 自动消失），不适合放"新版本可用"这类
+    // 用户需要进一步操作的信息。Notification 是右下角浮层，用户能看清、能点。
+    //
+    // `events::drain` 跑在 `AsyncApp::update_entity` 闭包里 → 没有 `&mut Window`，
+    // 不能直接 `window.push_notification(...)`。把构造好的 `Notification` 推到
+    // `model.pending_notifications`，由 `RootView::render` 排空 + 真正 push。
     if model.update_state.drain() {
         if let Some(err) = &model.update_state.error {
-            model.show_toast_error(format!("检查更新失败: {err}"));
+            model
+                .pending_notifications
+                .push(gpui_component::notification::Notification::error(format!(
+                    "检查更新失败: {err}"
+                )));
         } else if let Some(latest) = &model.update_state.latest_version {
             let current = env!("CARGO_PKG_VERSION");
             if latest.trim_start_matches('v') == current {
-                model.show_toast_success("已是最新版本");
+                model
+                    .pending_notifications
+                    .push(gpui_component::notification::Notification::success("已是最新版本"));
             } else {
-                model.show_toast_warn(format!("新版本 {latest} 可用"));
+                model.pending_notifications.push(
+                    gpui_component::notification::Notification::warning(format!(
+                        "新版本 {latest} 可用",
+                    ))
+                    // 点击 → 打开 release 页
+                    .on_click(|_ev, _window, cx| {
+                        cx.open_url("https://github.com/AhJxs/so-novel-rs/releases/latest");
+                    }),
+                );
             }
         }
     }

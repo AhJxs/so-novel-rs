@@ -1,26 +1,32 @@
 //! 主题加载 + 应用 + 列表。
 //!
 //! 策略：21 个 JSON **直接 `include_str!` 进二进制**（编译期嵌入）。
-//! 启动时把 embed 字节写到 `tempfile::tempdir()` 拿到的进程级临时目录，
-//! 然后调 `ThemeRegistry::watch_dir(temp_dir, cx, _)` 让 gpui-component
-//! 扫目录、parse 为 `ThemeSet`、把每个变体注册到 global `HashMap<SharedString, Rc<ThemeConfig>>`。
-//! 进程退出时 `tempdir` 自动清理（`Drop for TempDir`）。
+//! 启动时把 embed 字节同步到用户主目录下的 `~/.sonovel/themes/`，然后调
+//! `ThemeRegistry::watch_dir(themes_dir, cx, _)` 让 gpui-component 扫目录、
+//! parse 为 `ThemeSet`、把每个变体注册到 global `HashMap<SharedString, Rc<ThemeConfig>>`。
+//!
+//! `themes_dir` 同步规则（见 [`ensure_user_themes_dir`]）：
+//! - 目录不存在 → 创建 + 写入全部 21 个 embed 主题
+//! - 目录存在 → 只补缺失的 embed 文件（app 升级加新主题时自动加进来），
+//!   **不覆盖**已有文件 —— 用户可能改过
+//! - 用户也可手动放自定义 *.json 进去，gpui-component 的 file watcher 会自动 reload
 //!
 //! 业务层 API：
-//! - [`watch_themes_dir`] — 启动时调一次
+//! - [`init`] — 启动时调一次
 //! - [`apply_theme_by_name`] — 把指定名称主题装到 `Theme::global_mut`；找不到 → fallback 默认 light
 //! - [`list_theme_names`] — 列出全部主题名（设置页 Select 用）
 //!
 //! 不做的事：
 //! - 不在 dev / release 之间区分路径（统一 embed）
-//! - 不依赖 CWD / exe 同目录 / 用户主目录
-//! - 不热重载（gpui-component watch_dir 会启 notify，但 temp 目录程序退出就删，热重载无意义）
+//! - 不依赖 CWD / exe 同目录
+//! - 不删用户已有的 themes（即使看着像 embed 默认）
 
-use std::path::PathBuf;
+use std::path::Path;
 
 use gpui::{App, SharedString};
 use gpui_component::{Theme, ThemeRegistry};
-use tempfile::TempDir;
+
+use crate::config::ConfigPaths;
 
 // ----- 21 个主题 JSON embed（编译期嵌入；`include_str!` 路径必须字面量）-----
 pub const THEME_ADVENTURE: &str = include_str!("themes/adventure.json");
@@ -45,7 +51,7 @@ pub const THEME_SPACEDUCK: &str = include_str!("themes/spaceduck.json");
 pub const THEME_TOKYONIGHT: &str = include_str!("themes/tokyonight.json");
 pub const THEME_TWILIGHT: &str = include_str!("themes/twilight.json");
 
-/// `(file_name, json_content)` 列表。watch_dir 时写到 temp。
+/// `(file_name, json_content)` 列表。init 时按需写到用户 themes 目录。
 fn embedded_themes() -> Vec<(&'static str, &'static str)> {
     vec![
         ("adventure.json", THEME_ADVENTURE),
@@ -75,74 +81,84 @@ fn embedded_themes() -> Vec<(&'static str, &'static str)> {
 /// 启动时调用一次：把 embed JSON 喂给 `ThemeRegistry::watch_dir`，
 /// reload 完成后用 `saved_theme` 名字应用主题 + refresh 所有窗口。
 ///
-/// gpui-component 的 `ThemeRegistry::themes` 字段是私有的，公开 API 只有
-/// `watch_dir(path, cx, on_load)`，所以无论怎么走，最终都得有一个真实目录。
-/// 我们用 `tempfile::tempdir()` 拿进程级临时目录（`Drop` 自动清理），写 21 个
-/// JSON 进去，立即 `watch_dir`。
+/// 主题目录走 `paths.themes_dir`（`~/.sonovel/themes/`，由 [`ensure_user_themes_dir`]
+/// 同步），`gpui-component::ThemeRegistry::themes` 字段私有，公开 API 只有
+/// `watch_dir(path, cx, on_load)`，所以还是需要一个真实目录 —— 这次用持久用户目录，
+/// 不用 `tempfile::tempdir()` + `mem::forget` 泄漏。
 ///
-/// **关键时序**：`watch_dir` 内部是 `cx.spawn(...)` **异步** 跑 reload，
-/// 它立即返回。`on_load` 回调在 reload 完成后被调，那里才应该
-/// `apply_theme_by_name` + `cx.refresh_windows()` —— 不然 UI 看到的 registry
-/// 还在 reload 前（仅 2 个内置默认主题），Select 下拉是空的。
+/// **关键时序**：`watch_dir` 内部 `cx.spawn(...)` **异步** 跑 reload，立即返回。
+/// `on_load` 回调在 reload 完成后被调，那时 registry 才包含全部主题，
+/// `apply_theme_by_name` 在那里调用才对。
 ///
 /// - `saved_theme`：config.toml 里的主题名；空串 = 保持 gpui-component 默认
 /// - 主题名找不到时 `apply_theme_by_name` 内部静默 fallback
-pub fn init(cx: &mut App, saved_theme: &str) {
-    let tmp = match prepare_temp_themes_dir() {
-        Ok((tmp, path)) => {
-            tracing::info!("loaded {} embedded themes to {:?}", count_embedded(), path);
-            tmp
-        }
-        Err(e) => {
-            tracing::warn!("prepare temp themes dir failed: {e}; using default");
-            return;
-        }
-    };
-
-    let path: PathBuf = tmp.path().to_path_buf();
-    // `TempDir` 在 drop 时 rmrf；这里 leak 它以保持目录存活整个程序生命周期。
-    // 进程退出 OS 自动回收；内存里只多 1 个 Arc + path 字符串。
-    std::mem::forget(tmp);
+pub fn init(cx: &mut App, paths: &ConfigPaths, saved_theme: &str) {
+    let themes_dir = paths.themes_dir.clone();
+    if let Err(e) = ensure_user_themes_dir(&themes_dir) {
+        tracing::warn!("prepare user themes dir {:?} failed: {e}; using default", themes_dir);
+        return;
+    }
 
     let saved = saved_theme.to_string();
-    if let Err(e) = ThemeRegistry::watch_dir(path.clone(), cx, move |cx| {
+    let themes_dir_for_log = themes_dir.clone();
+    if let Err(e) = ThemeRegistry::watch_dir(themes_dir.clone(), cx, move |cx| {
         // on_load: reload 已完成，registry 现在有 21 个 embed 主题（变体展开后
         // 30+ 项）。应用持久化主题（如果还匹配）。
         // 不再手动 `cx.refresh_windows()` — `Theme::global_mut(cx).apply_config`
         // 内部会触发 gpui-component 内置的 Theme 变化 observer，observer
         // 自己会 refresh；手动再调一次就是重复。
         tracing::info!(
-            "themes loaded: {} entries",
-            list_theme_names(cx).len()
+            "themes loaded: {} entries from {:?}",
+            list_theme_names(cx).len(),
+            themes_dir
         );
         apply_theme_by_name(&saved, cx);
     }) {
-        tracing::warn!("watch themes dir {:?} failed: {e}", path);
+        tracing::warn!("watch themes dir {:?} failed: {e}", themes_dir_for_log);
     } else {
-        tracing::info!("watching themes dir: {:?}", path);
+        tracing::info!("watching themes dir: {:?}", themes_dir_for_log);
     }
 }
 
-fn prepare_temp_themes_dir() -> std::io::Result<(TempDir, PathBuf)> {
-    let tmp = tempfile::Builder::new()
-        .prefix("sonovel-themes-")
-        .tempdir()?;
-    let path = tmp.path().to_path_buf();
-    for (name, content) in embedded_themes() {
-        std::fs::write(path.join(name), content)?;
+/// 把 embed 主题同步到用户 themes 目录：
+/// - 不存在 → 创建 + 写全部 21 个
+/// - 已存在 → 只补缺失的（app 升级新增主题时自动加进来）
+/// - **不覆盖任何已存在文件** —— 用户可能改过、或全是自定义主题
+fn ensure_user_themes_dir(path: &Path) -> std::io::Result<()> {
+    if !path.exists() {
+        std::fs::create_dir_all(path)?;
+        for (name, content) in embedded_themes() {
+            std::fs::write(path.join(name), content)?;
+        }
+        tracing::info!(
+            "created themes dir at {:?} with {} embedded themes",
+            path,
+            embedded_themes().len()
+        );
+    } else {
+        let mut added = 0usize;
+        for (name, content) in embedded_themes() {
+            let target = path.join(name);
+            if !target.exists() {
+                std::fs::write(&target, content)?;
+                added += 1;
+            }
+        }
+        if added > 0 {
+            tracing::info!(
+                "added {} new themes to existing {:?}",
+                added,
+                path
+            );
+        }
     }
-    Ok((tmp, path))
-}
-
-fn count_embedded() -> usize {
-    embedded_themes().len()
+    Ok(())
 }
 
 /// 按名称把主题装进 `Theme::global_mut`。
 ///
 /// - 空串 → no-op（保持当前主题，符合 config.toml 留空的语义）
-/// - 找不到同名主题 → **静默 fallback 到 gpui-component 默认 light**（用
-///   `Theme::change(ThemeMode::Light, ...)` 切回内置默认 — 不报错）
+/// - 找不到同名主题 → **静默 fallback 到 gpui-component 默认 light**
 ///
 /// 装好之后 gpui-component 的 `cx.observe_global::<ThemeRegistry>` observer 会自动
 /// `cx.refresh_windows()`，所有窗口重绘（见 gpui-component `theme/registry.rs:47-73`）。
@@ -209,22 +225,68 @@ mod tests {
         }
     }
 
-    /// prepare_temp_themes_dir 写出来的目录里恰好 21 个 *.json，
-    /// 且每个文件都能 parse 回合法 JSON。
+    /// 首次调用 → 创建目录 + 写入 21 个 embed 主题。
     #[test]
-    fn prepare_temp_dir_writes_all_themes() {
-        let (_tmp, path) = prepare_temp_themes_dir().expect("prepare temp dir");
-        let written: Vec<_> = std::fs::read_dir(&path)
-            .expect("read dir")
+    fn ensure_user_themes_dir_creates_when_missing() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let path = tmp.path().join("themes");
+        assert!(!path.exists(), "precondition: dir should not exist");
+
+        ensure_user_themes_dir(&path).expect("first call");
+
+        assert!(path.is_dir(), "should create dir");
+        let count = std::fs::read_dir(&path)
+            .unwrap()
             .filter_map(|e| e.ok())
             .filter(|e| e.path().extension().and_then(|s| s.to_str()) == Some("json"))
-            .collect();
-        assert_eq!(written.len(), 21, "expected 21 JSON files in temp dir");
-        for entry in written {
+            .count();
+        assert_eq!(count, 21, "should write all 21 embedded themes");
+
+        // 每个文件都能 parse 回合法 JSON。
+        for entry in std::fs::read_dir(&path).unwrap().flatten() {
             let p = entry.path();
             let s = std::fs::read_to_string(&p).expect("read back");
             let _: serde_json::Value =
                 serde_json::from_str(&s).unwrap_or_else(|e| panic!("bad json {:?}: {e}", p));
         }
+    }
+
+    /// 后续调用 → 已存在文件**不覆盖**（保留用户修改）。
+    #[test]
+    fn ensure_user_themes_dir_preserves_user_modifications() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let path = tmp.path().join("themes");
+        ensure_user_themes_dir(&path).expect("first call");
+
+        // 用户改了 adventure.json
+        let modified = path.join("adventure.json");
+        let custom_payload = r#"{"themes":[{"name":"my-custom","mode":"light"}]}"#;
+        std::fs::write(&modified, custom_payload).expect("user modification");
+
+        // 第二次调用不应覆盖
+        ensure_user_themes_dir(&path).expect("second call");
+        let content = std::fs::read_to_string(&modified).expect("read back");
+        assert_eq!(
+            content, custom_payload,
+            "user-modified file should NOT be overwritten"
+        );
+    }
+
+    /// 后续调用 → 缺失文件被补齐（模拟 app 升级新增主题）。
+    #[test]
+    fn ensure_user_themes_dir_adds_missing_files() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let path = tmp.path().join("themes");
+        ensure_user_themes_dir(&path).expect("first call");
+
+        // 用户删了一个 embed 主题
+        let removed = path.join("adventure.json");
+        std::fs::remove_file(&removed).expect("delete");
+
+        // 第二次调用应补回来
+        ensure_user_themes_dir(&path).expect("second call");
+        assert!(removed.exists(), "missing embedded theme should be re-added");
+        let content = std::fs::read_to_string(&removed).expect("read back");
+        assert_eq!(content, THEME_ADVENTURE, "should match embedded content");
     }
 }

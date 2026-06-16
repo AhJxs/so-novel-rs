@@ -76,6 +76,40 @@ impl LangType {
     }
 }
 
+/// **应用 UI 语言**（与 `LangType` 区分：`LangType` 是**书源**语言，影响书源筛选 /
+/// 抓取时的 locale hint；`AppLang` 是**应用界面**语言，决定 Sidebar placeholder /
+/// Select placeholder / Dialog OK|Cancel 等所有 gpui-component `t!("...")` 调用的文案）。
+///
+/// 三种：简体中文 / 繁體中文 / English。存到 TOML `[global].app-lang`。
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub enum AppLang {
+    /// 简体中文
+    ZhCn,
+    /// 繁體中文
+    ZhTw,
+    /// English
+    En,
+}
+
+impl AppLang {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            AppLang::ZhCn => "zh-CN",
+            AppLang::ZhTw => "zh-TW",
+            AppLang::En => "en",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s.trim() {
+            "zh-CN" | "zh_CN" | "zh-cn" | "zh-Hans" | "zh_Hans" => Some(AppLang::ZhCn),
+            "zh-TW" | "zh_TW" | "zh-tw" | "zh-Hant" | "zh_Hant" => Some(AppLang::ZhTw),
+            "en" | "en-US" | "English" => Some(AppLang::En),
+            _ => None,
+        }
+    }
+}
+
 /// 主题偏好：直接存 gpui-component 已注册的主题名（来自 `src/gpui_app/themes/*.json`）。
 ///
 /// - 空串 = 使用 gpui-component 自带的默认主题（不主动覆盖）。
@@ -90,6 +124,7 @@ pub struct AppConfig {
 
     // [global]
     pub theme: ThemePref,
+    pub app_lang: AppLang,
     pub gh_proxy: String,
     pub cf_bypass: String,
 
@@ -133,6 +168,7 @@ impl Default for AppConfig {
             theme: String::new(),
             // 空串 = "未指定"，启动时 `apply_theme_by_name("")` no-op，
             // gpui-component 用自带默认主题（light/dark 跟 OS 走）。
+            app_lang: AppLang::ZhCn,
             gh_proxy: String::new(),
             cf_bypass: String::new(),
 
@@ -219,6 +255,11 @@ pub fn load_config(path: &Path) -> Result<AppConfig> {
     // [global]
     if let Some(v) = t_str(&doc, "global", "theme") {
         cfg.theme = v;
+    }
+    if let Some(v) = t_str(&doc, "global", "app-lang") {
+        if let Some(parsed) = AppLang::parse(&v) {
+            cfg.app_lang = parsed;
+        }
     }
     if let Some(v) = t_str(&doc, "global", "gh-proxy") {
         cfg.gh_proxy = v;
@@ -335,6 +376,7 @@ pub fn save_config(path: &Path, cfg: &AppConfig) -> Result<()> {
 
     // [global]
     set_str(&mut doc, "global", "theme", &cfg.theme);
+    set_str(&mut doc, "global", "app-lang", cfg.app_lang.as_str());
     set_str(&mut doc, "global", "gh-proxy", &cfg.gh_proxy);
     set_str(&mut doc, "global", "cf-bypass", &cfg.cf_bypass);
 
@@ -438,6 +480,9 @@ fn default_template_doc() -> DocumentMut {
 # 改成具体主题名（与 `src/gpui_app/themes/*.json` 里的 `name` 字段一致）
 # 即可启用对应主题，例如 `theme = "Catppuccin Mocha"`。
 theme = ""
+# app-lang = 应用 UI 语言（Sidebar placeholder / Select / Dialog 等所有 gpui-component
+# 内部 `t!("...")` 文案的语言）。三选一：zh-CN / zh-TW / en。
+app-lang = "zh-CN"
 gh-proxy = ""
 cf-bypass = ""
 
@@ -481,18 +526,22 @@ pub struct ConfigPaths {
     pub config_file: PathBuf,
     /// SQLite 数据库文件 `sonovel.db`：装下载任务 + 书源 + 用户覆写。
     pub db_file: PathBuf,
+    /// 主题目录 `~/.sonovel/themes/`：首次启动写入 21 个 embed 主题，
+    /// 之后 watcher 监听这个目录，用户可手动放自定义 *.json 进去热加载。
+    pub themes_dir: PathBuf,
 }
 
 impl ConfigPaths {
     /// 路径约定：
-    /// - `config.toml` + `sonovel.db` 统一存放在用户主目录下的 `~/.sonovel/` 目录；
-    /// - 首次启动时该目录不存在，`save_config` / `Db::open` 会自动创建；
+    /// - `config.toml` + `sonovel.db` + `themes/` 统一存放在用户主目录下的 `~/.sonovel/`；
+    /// - 首次启动时各目录/文件不存在，`save_config` / `Db::open` / `themes::init` 会自动创建；
     /// - 如果无法获取主目录（极端情况），回落到当前工作目录。
     pub fn discover() -> Self {
         let base = home_dir().join(".sonovel");
         Self {
             config_file: base.join("config.toml"),
             db_file: base.join("sonovel.db"),
+            themes_dir: base.join("themes"),
         }
     }
 }
@@ -537,6 +586,7 @@ mod tests {
             proxy_port: 1080,
             qidian_cookie: "w_tsfp=demo".to_string(),
             language: LangType::ZhTw,
+            app_lang: AppLang::En,
             theme: "Catppuccin Mocha".to_string(),
             ..AppConfig::default()
         };
@@ -555,6 +605,7 @@ mod tests {
         assert_eq!(loaded.proxy_port, cfg.proxy_port);
         assert_eq!(loaded.qidian_cookie, cfg.qidian_cookie);
         assert_eq!(loaded.language, cfg.language);
+        assert_eq!(loaded.app_lang, AppLang::En);
         assert_eq!(loaded.theme, "Catppuccin Mocha");
     }
 

@@ -74,24 +74,28 @@ impl SourcesPage {
     }
 
     /// 调 `rfd` 文件选择器选 JSON 文件，调 `add_sources_from_file`。
-    /// `rfd` 同步；放 GPUI 后台 executor 不阻塞主线程。
+    ///
+    /// 用 `rfd::AsyncFileDialog` —— 内部走 `tokio::task::spawn_blocking`，
+    /// dialog 在 tokio 专门的 blocking thread pool 上跑，正确初始化 COM
+    /// apartment + message pump。
+    ///
+    /// **别用同步 `rfd::FileDialog::pick_file()` 丢 `cx.background_executor().spawn`
+    /// 上** —— Windows 下 `IFileOpenDialog::Show()` 需要 STA + message pump，
+    /// tokio worker thread 都没有，`Show()` 静默失败立即返回 None 且 dialog
+    /// 不显示。详见 memory `rfd-windows-async-file-dialog-only.md`。
     fn pick_and_add(&mut self, cx: &mut Context<Self>) {
         let model = self.model.clone();
         let page_handle = cx.entity().downgrade();
         // Context::spawn 签名：fn(WeakEntity<Self>, &mut AsyncApp) -> R + 'static
         cx.spawn(async move |_weak, async_cx| {
-            // 在 background executor 上跑（FileDialog 阻塞）。
-            let path = async_cx
-                .background_executor()
-                .spawn(async {
-                    rfd::FileDialog::new()
-                        .add_filter("JSON 规则文件", &["json", "json5"])
-                        .add_filter("所有文件", &["*"])
-                        .set_title("选择书源 JSON 文件")
-                        .pick_file()
-                })
+            let file = rfd::AsyncFileDialog::new()
+                .add_filter("JSON 规则文件", &["json", "json5"])
+                .add_filter("所有文件", &["*"])
+                .set_title("选择书源 JSON 文件")
+                .pick_file()
                 .await;
-            if let Some(path) = path {
+            if let Some(file) = file {
+                let path = file.path().to_path_buf();
                 let _ = page_handle.update(async_cx, |_page, cx| {
                     model.update(cx, |m, _cx| {
                         m.add_sources_from_file(&path);
@@ -354,7 +358,7 @@ fn health_status_kind(
 fn health_status_label(h: Option<&crate::crawler::health::SourceHealth>) -> String {
     match h {
         None => "未测".to_string(),
-        Some(h) if h.error.is_some() => format!("错误"),
+        Some(h) if h.error.is_some() => "错误".to_string(),
         Some(h) => match h.http_status {
             Some(s) => format!("HTTP {}", s),
             None => format!("{:?}", h.error),
