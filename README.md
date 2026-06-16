@@ -60,7 +60,6 @@ so-novel-rs/
     │   ├── sources_state.rs     # 书源测速状态
     │   ├── update_state.rs      # GitHub release 检查状态
     │   ├── cover.rs             # 封面字节解码 + URI 生成
-    │   ├── toast.rs             # ToastKind 枚举
     │   ├── now.rs               # now_unix_secs
     │   ├── runtime.rs           # build_shared_runtime
     │   ├── tasks_db.rs          # load_tasks_from_db

@@ -193,7 +193,6 @@ pub fn clear_finished_tasks(
     if let Err(e) = crate::db::tasks::delete_finished(db.conn()) {
         tracing::warn!("clear_finished_tasks db delete failed: {e}");
     } else if removed > 0 {
-        // toast 由调用方在能访问 self.toast 的地方处理
         tracing::info!("已清除 {removed} 条任务");
     }
 }

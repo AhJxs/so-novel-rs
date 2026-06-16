@@ -2,7 +2,7 @@
 
 /// 把当前 config 写回 config.toml。
 ///
-/// 写盘失败时返回错误信息（toast 由调用方在能访问 self.toast 的地方处理）。
+/// 写盘失败时返回错误信息（由调用方决定是否推 notification）。
 pub fn persist_settings(
     config: &crate::config::AppConfig,
     config_file: &std::path::Path,

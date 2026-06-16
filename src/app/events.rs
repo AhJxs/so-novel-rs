@@ -20,7 +20,7 @@ use std::time::Duration;
 use gpui::{App, AppContext, Entity};
 use tracing::warn;
 
-use super::AppModel;
+use super::{AppModel, UpdateOutcome};
 
 /// 排空 `AppModel` 中所有后台通道。返回是否产生过事件。
 ///
@@ -28,8 +28,9 @@ use super::AppModel;
 /// - 更新 `search` / `tasks` / `sources_state` / `update_state` 的累积字段。
 /// - 完成的任务自动 `upsert` 到 SQLite（替代旧 `ui()` 里的同名逻辑）。
 /// - 派发 `search.pending_cover_prefetch`（详情后端返回 cover_url 时挂的）。
-/// - `update_state` 完成时按结果推 toast（成功 / 失败 / 新版本 / 已是最新）。
-/// - toast 超过 4 秒自动清空。
+/// - `update_state` 完成时按结果推 `gpui_component::notification::Notification`
+///   （成功 / 失败 / 新版本 / 已是最新），推到 `model.pending_notifications` 由
+///   `RootView::render` 真正 push 到 UI。
 ///
 /// 调用方：拿到 `&mut AppModel` 时调一次。如果返回 `true`，调 `cx.notify()` 触发
 /// 当前 view 的 `Render` 重绘。
@@ -64,49 +65,23 @@ pub fn drain(model: &mut AppModel) -> bool {
     // 4. 书源健康检查。
     any |= model.sources_state.drain();
 
-    // 5. 更新检查。返回 true 时按状态推 notification。
-    //
-    // 注意：用 `gpui_component::notification::Notification` 而不是顶部 toast。
-    // toast 是 titlebar 上的小 pill（4s 自动消失），不适合放"新版本可用"这类
-    // 用户需要进一步操作的信息。Notification 是右下角浮层，用户能看清、能点。
+    // 5. 更新检查。`UpdateState::drain` 给出语义化结果，events 这里只负责翻译成通知。
     //
     // `events::drain` 跑在 `AsyncApp::update_entity` 闭包里 → 没有 `&mut Window`，
     // 不能直接 `window.push_notification(...)`。把构造好的 `Notification` 推到
     // `model.pending_notifications`，由 `RootView::render` 排空 + 真正 push。
-    if model.update_state.drain() {
-        if let Some(err) = &model.update_state.error {
-            model
-                .pending_notifications
-                .push(gpui_component::notification::Notification::error(format!(
-                    "检查更新失败: {err}"
-                )));
-        } else if let Some(latest) = &model.update_state.latest_version {
-            let current = env!("CARGO_PKG_VERSION");
-            if latest.trim_start_matches('v') == current {
-                model
-                    .pending_notifications
-                    .push(gpui_component::notification::Notification::success("已是最新版本"));
-            } else {
-                model.pending_notifications.push(
-                    gpui_component::notification::Notification::warning(format!(
-                        "新版本 {latest} 可用",
-                    ))
+    if let Some(outcome) = model.update_state.drain() {
+        use UpdateOutcome::{Failed, NewVersion, UpToDate};
+        match outcome {
+            UpToDate => model.push_success_notification("已是最新版本"),
+            NewVersion(latest) => model.push_notification(
+                gpui_component::notification::Notification::warning(format!("新版本 {latest} 可用"))
                     // 点击 → 打开 release 页
                     .on_click(|_ev, _window, cx| {
                         cx.open_url("https://github.com/AhJxs/so-novel-rs/releases/latest");
                     }),
-                );
-            }
-        }
-    }
-
-    // 6. toast 自动消失。
-    if let Some((_, _, t)) = model.toast {
-        if t.elapsed() > Duration::from_secs(4) {
-            model.toast = None;
-        } else {
-            // 还有效 — 100ms 内还会再排空；不强制 cx.notify()，因为 UI 一般被其它
-            // 事件带起来；如果无其它事件，toast 消失会有 ~100ms 延迟，无害。
+            ),
+            Failed(err) => model.push_error_notification(format!("检查更新失败: {err}")),
         }
     }
 

@@ -2,7 +2,7 @@
 //!
 //! 拆分子模块：
 //! - `download_task`  / `search_state` / `library_state` / `sources_state` / `update_state` — 5 个状态结构体
-//! - `cover` / `toast` — UI 辅助
+//! - `cover` — UI 辅助（封面字节解码 + URI 生成）
 //! - `now` / `runtime` / `tasks_db` — 自由辅助
 //! - `crate::app::ops::download` / `crate::app::ops::search` / `crate::app::ops::sources` / `crate::app::ops::library` / `crate::app::ops::update` / `crate::app::ops::settings` — 业务方法
 //!
@@ -11,11 +11,6 @@
 //! Stage 2 起为 GPUI 迁移做改造：
 //! - 旧的 `SoNovelApp` 名字已重命名为 `AppModel`。
 //! - 不再 `impl eframe::App`；帧轮询逻辑迁到 `crate::app::events`（Stage 3）。
-//! - 字体 / 图片 loader / Material Symbols 仍依赖 egui，封装在
-//!   [`AppModel::install_egui_assets`] 中；旧 `crate::ui` 代码若仍在用，可单独调用。
-//!   GPUI 路径不再触达该函数。
-//! - `current_page` / `window_chrome_applied` / `last_dark_mode` 是旧 egui 渲染期
-//!   字段，保留是给 `crate::ui` 兜底编译；Stage 11 整体删除。
 
 mod cover;
 mod download_task;
@@ -26,7 +21,6 @@ mod runtime;
 mod search_state;
 mod sources_state;
 mod tasks_db;
-mod toast;
 mod update_state;
 
 pub(crate) mod ops;
@@ -42,10 +36,9 @@ pub use search_state::{
 };
 pub use sources_state::SourcesState;
 pub use tasks_db::load_tasks_from_db;
-pub use toast::ToastKind;
-pub use update_state::{check_github_latest_release, UpdateCheckResult, UpdateState};
-
-use std::time::Instant;
+pub use update_state::{
+    check_github_latest_release, UpdateCheckResult, UpdateOutcome, UpdateState,
+};
 
 use tokio::runtime::Runtime;
 
@@ -67,15 +60,8 @@ pub struct AppModel {
     /// 的 `source_overrides` 表；UI 这里持有的副本仅用于显示状态。
     pub source_overrides: crate::rules::SourceOverrides,
 
-    /// 设置页改动后尚未写盘的标记。任一控件 `.changed()` 都置 true，
-    /// 设置页在 UI 末尾统一 `persist_settings()`。避免每改一个字段就写一次盘。
-    pub settings_dirty: bool,
-
     /// 持久化层（SQLite）。下载任务记录全走这里。
     pub db: Db,
-
-    /// 顶部状态栏的临时消息（保存成功 / 加载失败等）。
-    pub toast: Option<(String, ToastKind, Instant)>,
 
     /// 后台任务运行时。所有 spawn 都走它。
     /// 通过 `Box::leak` 得到 `&'static Runtime`，永不 drop ——
@@ -114,10 +100,7 @@ impl Default for AppModel {
 }
 
 impl AppModel {
-    /// UI 中立的构造函数。不再需要 `eframe::CreationContext`。
-    ///
-    /// 旧 egui 路径需要字体 / 图片 loader 时，调用方应再调
-    /// [`AppModel::install_egui_assets`]。GPUI 路径不调它。
+    /// UI 中立的构造函数。
     pub fn new() -> Self {
         let paths = ConfigPaths::discover();
 
@@ -175,9 +158,7 @@ impl AppModel {
             rule_load_error,
             config_load_error,
             source_overrides,
-            settings_dirty: false,
             db,
-            toast: None,
             runtime,
             search,
             tasks,
@@ -189,29 +170,41 @@ impl AppModel {
         }
     }
 
-    /// 安装旧 egui 需要的字体 / 图片 loader / Material Symbols 字体。
+    /// 推一条通用 [`gpui_component::notification::Notification`] 到 UI 通知队列。
     ///
-    /// Stage 11 后**已删除** — 旧 egui GUI 整体移除，仅留 stub 占位以备未来若有
-    /// 第三方调用方仍依赖此 API。返回 `()` 不做任何事。
-    #[allow(dead_code)]
-    pub fn install_egui_assets(&self) {
-        // 旧实现已删除：见 git history Stage 11 之前。
+    /// 适用于需要 `.on_click(...)` / `.title(...)` 等 builder 方法的复杂场景；
+    /// 简单纯文本通知优先用 [`Self::push_info_notification`] /
+    /// [`Self::push_success_notification`] / [`Self::push_warning_notification`] /
+    /// [`Self::push_error_notification`]。
+    ///
+    /// 实际 `window.push_notification` 由 [`crate::gpui_app::RootView::render`] 排空
+    /// `pending_notifications` 后调 —— [`crate::app::events::drain`] 跑在
+    /// `AsyncApp::update_entity` 闭包里，**拿不到 `&mut Window`**。
+    pub fn push_notification(
+        &mut self,
+        notification: gpui_component::notification::Notification,
+    ) {
+        self.pending_notifications.push(notification);
     }
 
-    pub fn show_toast(&mut self, msg: impl Into<String>) {
-        self.toast = Some((msg.into(), ToastKind::Info, Instant::now()));
+    /// 推一条 info 级通知。语义见 [`Self::push_notification`]。
+    pub fn push_info_notification(&mut self, msg: impl Into<gpui::SharedString>) {
+        self.push_notification(gpui_component::notification::Notification::info(msg));
     }
 
-    pub fn show_toast_success(&mut self, msg: impl Into<String>) {
-        self.toast = Some((msg.into(), ToastKind::Success, Instant::now()));
+    /// 推一条 success 级通知。语义见 [`Self::push_notification`]。
+    pub fn push_success_notification(&mut self, msg: impl Into<gpui::SharedString>) {
+        self.push_notification(gpui_component::notification::Notification::success(msg));
     }
 
-    pub fn show_toast_warn(&mut self, msg: impl Into<String>) {
-        self.toast = Some((msg.into(), ToastKind::Warn, Instant::now()));
+    /// 推一条 warning 级通知。语义见 [`Self::push_notification`]。
+    pub fn push_warning_notification(&mut self, msg: impl Into<gpui::SharedString>) {
+        self.push_notification(gpui_component::notification::Notification::warning(msg));
     }
 
-    pub fn show_toast_error(&mut self, msg: impl Into<String>) {
-        self.toast = Some((msg.into(), ToastKind::Error, Instant::now()));
+    /// 推一条 error 级通知。语义见 [`Self::push_notification`]。
+    pub fn push_error_notification(&mut self, msg: impl Into<gpui::SharedString>) {
+        self.push_notification(gpui_component::notification::Notification::error(msg));
     }
 
     /// 派一个新的下载任务。返回新任务 id。
@@ -300,14 +293,14 @@ impl AppModel {
             &mut self.rule_load_error,
             path,
         ) {
-            Ok(n) => self.show_toast_success(format!("已导入 {n} 个书源")),
+            Ok(n) => self.push_success_notification(format!("已导入 {n} 个书源")),
             Err(msg) => {
                 if msg.starts_with("文件内容为空")
                     || msg.starts_with("文件中未找到有效")
                 {
-                    self.show_toast_warn(msg);
+                    self.push_warning_notification(msg);
                 } else {
-                    self.show_toast_error(msg);
+                    self.push_error_notification(msg);
                 }
             }
         }
@@ -322,28 +315,27 @@ impl AppModel {
             &mut self.sources_state,
             source_id,
         ) {
-            Ok(true) => self.show_toast_success(format!("已删除书源 #{source_id}")),
-            Ok(false) => self.show_toast_warn("书源已不存在"),
-            Err(msg) => self.show_toast_error(msg),
+            Ok(true) => self.push_success_notification(format!("已删除书源 #{source_id}")),
+            Ok(false) => self.push_warning_notification("书源已不存在"),
+            Err(msg) => self.push_error_notification(msg),
         }
     }
 
     /// 把当前 config 写回 config.toml。
     ///
     /// **Auto-save 模式**：每个 setter 改完字段后立即调本方法写盘 —— 没有"立即保存"
-    /// 按钮，没有 dirty 概念。成功时静默（tracing::debug 留痕），失败时弹 error toast
-    /// 让用户知道（极少见：磁盘满 / 权限问题 / 路径不存在等）。
+    /// 按钮，没有 dirty 概念。成功时静默（tracing::debug 留痕），失败时弹 error
+    /// notification 让用户知道（极少见：磁盘满 / 权限问题 / 路径不存在等）。
     ///
-    /// `settings_dirty` 字段保留只是为了兼容（其他代码可能读），但**本方法不再检查它**。
+    /// 每个 setter 改完字段后立即调本方法（auto-save），无需「立即保存」按钮。
     /// 如果以后想加 debounce 写入（比如连续拖动 number input），可以在 setter 里加
     /// cx.spawn(timer 500ms) 合并多次 persist_settings 调用 —— 单次写盘本来就很快
     /// （小 TOML 几 ms），目前不做 debounce。
     pub fn persist_settings(&mut self) {
-        self.settings_dirty = false;
         if let Err(msg) = crate::app::ops::persist_settings(&self.config, &self.paths.config_file)
         {
             tracing::warn!("自动保存 config.toml 失败: {msg}");
-            self.show_toast_error(msg);
+            self.push_error_notification(msg);
         } else {
             tracing::debug!("config.toml 自动保存成功");
         }
@@ -352,7 +344,7 @@ impl AppModel {
     /// 派一个连通性检测任务。
     pub fn spawn_health_check(&mut self) {
         if self.rules.is_empty() {
-            self.show_toast_warn("没有可检测的书源");
+            self.push_warning_notification("没有可检测的书源");
             return;
         }
         crate::app::ops::spawn_health_check(
@@ -380,9 +372,9 @@ impl AppModel {
             &self.config.download_path,
             path,
         ) {
-            Ok(msg) if !msg.is_empty() => self.show_toast_success(msg),
+            Ok(msg) if !msg.is_empty() => self.push_success_notification(msg),
             Ok(_) => {}
-            Err(msg) => self.show_toast_error(msg),
+            Err(msg) => self.push_error_notification(msg),
         }
     }
 
@@ -392,7 +384,7 @@ impl AppModel {
         crate::app::ops::clear_finished_tasks(&mut self.tasks, &self.db);
         let removed = before - self.tasks.len();
         if removed > 0 {
-            self.show_toast_success(format!("已清除 {removed} 条记录"));
+            self.push_success_notification(format!("已清除 {removed} 条记录"));
         }
     }
 

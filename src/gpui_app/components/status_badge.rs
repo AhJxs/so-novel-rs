@@ -6,7 +6,7 @@
 use gpui::{div, App, IntoElement, ParentElement, RenderOnce, SharedString, Styled, Window};
 use gpui_component::{ActiveTheme as _, badge::Badge};
 
-/// 业务状态的 4 个语义色（与 ToastKind / gpui-component 主题色对齐）。
+/// 业务状态的 4 个语义色（与 gpui-component 主题色对齐）。
 #[derive(Debug, Clone, Copy)]
 pub enum StatusKind {
     Info,
