@@ -138,13 +138,14 @@ pub fn register_key_bindings(cx: &mut App) {
 
 /// Stage 4 root view：sidebar shell + 当前页面占位。
 pub struct RootView {
-    // 持有 model 用于后续阶段把 sidebar / 全局 toasts 接进 AppModel。
-    // 当前主要在 `new()` 里 clone 给子 page。
-    #[allow(dead_code)]
+    // 持有 model 用于：1) `new()` 里 clone 给子 page；2) `toggle_sidebar` 读 / 写
+    // `config.sidebar_collapsed` 并触发持久化。
     model: Entity<AppModel>,
     current_page: NavPage,
     /// Sidebar 是否折叠（true = 仅图标宽度）。由 `toggle_sidebar` / `Cmd+B` 翻转。
-    /// 这是 UI 临时状态，不持久化。
+    ///
+    /// 初始值来自 `AppConfig.sidebar_collapsed`，每次翻转后写回 config 并自动
+    /// 落盘（`persist_settings`），所以重启后保持上次状态。
     sidebar_collapsed: bool,
     /// 焦点 handle — 在 new() 里 window.focus(&_focus) 让 RootView 拥有初始焦点，
     /// 这样 `F6` / `Cmd+1..5` 等 KEY_CONTEXT 绑定的快捷键能稳定 fire
@@ -170,10 +171,13 @@ impl RootView {
         let sources_page = cx.new(|cx| SourcesPage::new(model.clone(), window, cx));
         let settings_page = cx.new(|cx| SettingsPage::new(model.clone(), window, cx));
 
+        // 从 config 恢复上次折叠状态 — 不持久化的话，每次启动 sidebar 都会弹开。
+        let sidebar_collapsed = model.read(cx).config.sidebar_collapsed;
+
         Self {
             model,
             current_page: NavPage::default(),
-            sidebar_collapsed: false,
+            sidebar_collapsed,
             _focus,
             library_page,
             search_page,
@@ -191,8 +195,16 @@ impl RootView {
     }
 
     /// 切换 sidebar 折叠状态。由 `ToggleSidebar` action / `Cmd+B` / `SidebarToggleButton` 三处入口调用。
+    ///
+    /// 同时把新值写回 `AppConfig.sidebar_collapsed` 并 `persist_settings()` 落盘 —
+    /// 重启后保留。Cmd+B 频率很低，每次写盘完全可接受（config.toml 小，几 ms）。
     fn toggle_sidebar(&mut self, cx: &mut Context<Self>) {
         self.sidebar_collapsed = !self.sidebar_collapsed;
+        let new_value = self.sidebar_collapsed;
+        self.model.update(cx, |m, _| {
+            m.config.sidebar_collapsed = new_value;
+            m.persist_settings();
+        });
         cx.notify();
     }
 

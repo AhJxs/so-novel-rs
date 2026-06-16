@@ -127,6 +127,8 @@ pub struct AppConfig {
     pub app_lang: AppLang,
     pub gh_proxy: String,
     pub cf_bypass: String,
+    /// 左侧 Sidebar 是否折叠。重启后保持上次状态。
+    pub sidebar_collapsed: bool,
 
     // [download]
     pub download_path: String,
@@ -171,6 +173,7 @@ impl Default for AppConfig {
             app_lang: AppLang::ZhCn,
             gh_proxy: String::new(),
             cf_bypass: String::new(),
+            sidebar_collapsed: false,
 
             download_path: default_download_path(),
             ext_name: ExportFormat::Epub,
@@ -266,6 +269,9 @@ pub fn load_config(path: &Path) -> Result<AppConfig> {
     }
     if let Some(v) = t_str(&doc, "global", "cf-bypass") {
         cfg.cf_bypass = v;
+    }
+    if let Some(v) = t_bool(&doc, "global", "sidebar-collapsed") {
+        cfg.sidebar_collapsed = v;
     }
 
     // [download]
@@ -379,6 +385,12 @@ pub fn save_config(path: &Path, cfg: &AppConfig) -> Result<()> {
     set_str(&mut doc, "global", "app-lang", cfg.app_lang.as_str());
     set_str(&mut doc, "global", "gh-proxy", &cfg.gh_proxy);
     set_str(&mut doc, "global", "cf-bypass", &cfg.cf_bypass);
+    set_bool(
+        &mut doc,
+        "global",
+        "sidebar-collapsed",
+        cfg.sidebar_collapsed,
+    );
 
     // [download]
     set_str(&mut doc, "download", "download-path", &cfg.download_path);
@@ -485,6 +497,8 @@ theme = ""
 app-lang = "zh-CN"
 gh-proxy = ""
 cf-bypass = ""
+# 左侧 Sidebar 是否折叠。重启后保持上次状态。
+sidebar-collapsed = false
 
 [download]
 # download-path 默认为系统 Documents/Novel/（由 AppConfig::default() 注入）。
@@ -588,6 +602,7 @@ mod tests {
             language: LangType::ZhTw,
             app_lang: AppLang::En,
             theme: "Catppuccin Mocha".to_string(),
+            sidebar_collapsed: true,
             ..AppConfig::default()
         };
 
@@ -607,6 +622,7 @@ mod tests {
         assert_eq!(loaded.language, cfg.language);
         assert_eq!(loaded.app_lang, AppLang::En);
         assert_eq!(loaded.theme, "Catppuccin Mocha");
+        assert!(loaded.sidebar_collapsed);
     }
 
     #[test]
