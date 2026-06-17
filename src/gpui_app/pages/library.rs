@@ -469,7 +469,7 @@ impl Render for LibraryPage {
                                 Button::new("ext-epub")
                                     .small()
                                     .ghost()
-                                    .selected(current_ext.as_deref() == Some(&"epub".to_string()))
+                                    .selected(current_ext.as_deref() == Some("epub"))
                                     .label("epub")
                                     .on_click(cx.listener(|this, _, _window, cx| {
                                         this.set_ext_filter(Some("epub".to_string()), cx);
@@ -479,7 +479,7 @@ impl Render for LibraryPage {
                                 Button::new("ext-txt")
                                     .small()
                                     .ghost()
-                                    .selected(current_ext.as_deref() == Some(&"txt".to_string()))
+                                    .selected(current_ext.as_deref() == Some("txt"))
                                     .label("txt")
                                     .on_click(cx.listener(|this, _, _window, cx| {
                                         this.set_ext_filter(Some("txt".to_string()), cx);
@@ -489,7 +489,7 @@ impl Render for LibraryPage {
                                 Button::new("ext-zip")
                                     .small()
                                     .ghost()
-                                    .selected(current_ext.as_deref() == Some(&"zip".to_string()))
+                                    .selected(current_ext.as_deref() == Some("zip"))
                                     .label("zip")
                                     .on_click(cx.listener(|this, _, _window, cx| {
                                         this.set_ext_filter(Some("zip".to_string()), cx);
@@ -499,7 +499,7 @@ impl Render for LibraryPage {
                                 Button::new("ext-html")
                                     .small()
                                     .ghost()
-                                    .selected(current_ext.as_deref() == Some(&"html".to_string()))
+                                    .selected(current_ext.as_deref() == Some("html"))
                                     .label("html")
                                     .on_click(cx.listener(|this, _, _window, cx| {
                                         this.set_ext_filter(Some("html".to_string()), cx);
@@ -509,7 +509,7 @@ impl Render for LibraryPage {
                                 Button::new("ext-pdf")
                                     .small()
                                     .ghost()
-                                    .selected(current_ext.as_deref() == Some(&"pdf".to_string()))
+                                    .selected(current_ext.as_deref() == Some("pdf"))
                                     .label("pdf")
                                     .on_click(cx.listener(|this, _, _window, cx| {
                                         this.set_ext_filter(Some("pdf".to_string()), cx);
@@ -558,17 +558,19 @@ impl Render for LibraryPage {
                     .child(List::new(&self.list_state).p(px(12.)).size_full())
                     .into_any_element()
             })
-            // ---- 分页页脚（永远渲染；≤1 页时 prev/next disabled，单一数字按钮）----
+            // ---- 分页页脚（仅在列表非空时渲染 —— 空态不显示，避免无意义的"第 1 页 / 共 0 条"）----
             // 通用组件 `components::Pagination`，on_change 回调把 `current_page`
             // 写回 LibraryPage 字段 + cx.notify() 触发重渲染。
-            .child(Pagination::new(
-                self.current_page,
-                page_count,
-                cx.listener(|this, &new_page, _window, _cx| {
-                    this.current_page = new_page;
-                    _cx.notify();
-                }),
-            ))
+            .when(total > 0, |this| {
+                this.child(Pagination::new(
+                    self.current_page,
+                    page_count,
+                    cx.listener(|this, &new_page, _window, _cx| {
+                        this.current_page = new_page;
+                        _cx.notify();
+                    }),
+                ))
+            })
             // 防止 window 参数未使用警告 —— `cx.entity().clone()` 已经借用了 cx，
             // 这里其实没用 window，留着以备未来扩展（例如 List::focus）。
             .map(|this| {
@@ -670,7 +672,7 @@ impl ListDelegate for LibraryDelegate {
 
 /// 渲染一行 entry（5 列：文件名 / 格式 / 大小 / 修改时间 / 3 动作）。
 ///
-/// 跟旧版几乎一样：h_flex 5 个固定宽度的子节点，第 4 列 `flex_1` 占满剩余。
+/// h_flex 5 个固定宽度的子节点，第 4 列 `flex_1` 占满剩余。
 /// 删除按钮走 `LibraryPage::prompt_delete`（page 通过 Entity handle 转发）。
 fn render_row(
     index: usize,

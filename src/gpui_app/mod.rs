@@ -1,15 +1,12 @@
-//! 新 GUI 栈：GPUI + gpui-component。
+//! GUI 栈：GPUI + gpui-component。
 //!
-//! Stage 1：占位窗口 + gpui-component 主题已能渲染。
-//! Stage 2：`AppModel` 已是 UI 中立结构。
-//! Stage 3：后台通道 → GPUI 事件桥接已通过 `app::events::spawn_drain_loop` 跑起来。
-//! Stage 4：sidebar shell（5 nav items + actions/keybindings + Root 覆盖层）。
-//! Stage 5：共享 GPUI 组件（EmptyState / PageHeader / StatusBadge / 格式化工具）。
-//! Stage 6-10：5 个 page（Library / Sources / Tasks / Settings / Search）。
-//! Stage 11：egui 全部移除（~7000 行代码）。
-//! Stage 12：窗口 Chrome（原生 title bar）+ 键盘导航打磨。
+//! 架构：
+//! - `RootView` 是顶层窗口视图，含 TitleBar + 可折叠 Sidebar + 内容区 + 覆盖层（dialog / sheet / notification）。
+//! - 5 个一级页面（Library / Sources / Tasks / Settings / Search）在 `pages/`，各自持有 `Entity<AppModel>`。
+//! - 共享组件（EmptyState / PageHeader / StatusBadge / Pagination / 格式化工具）在 `components/`。
+//! - 后台通道 → UI 重绘由 `app::events::spawn_drain_loop` 每 100ms 排空 + `cx.notify()` 驱动。
 //!
-//! 旧 egui 路径已完全删除；本模块仅依赖 GPUI + gpui-component + 业务模块。
+//! 本模块仅依赖 GPUI + gpui-component + 业务模块（`crate::app`）。
 
 use anyhow::Result;
 use gpui::{
@@ -68,7 +65,7 @@ pub fn locale_for(lang: AppLang) -> &'static str {
 /// 5. 打开窗口（**自定义 TitleBar** + native 拖拽 + 3 按钮）：
 ///    root 是 `Root`（包裹 [`RootView`]，持有 `AppModel` + sidebar + TitleBar + actions）。
 ///
-/// Stage 12：参考官方 `gpui-component` example — 用 `TitleBar::title_bar_options()`
+/// 参考官方 `gpui-component` example — 用 `TitleBar::title_bar_options()`
 /// 配置 `WindowOptions.titlebar`：
 /// - `title: None` — OS 任务栏仍会显示 "So Novel"（由 `RootView` 内的 TitleBar child 渲染标题）
 /// - `appears_transparent: true` — 告诉 OS 不画原生 chrome；GPUI 接管所有视觉和事件

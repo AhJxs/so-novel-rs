@@ -1,13 +1,12 @@
-//! 封面字节解码 + URI 生成（5b 增强）。
+//! 封面字节解码 + URI 生成。
 //!
-//! Stage 11：`CoverEntry` 改为 UI 中立：只存原始字节 + 源 / URL 元信息。
-//! 新 GPUI 路径用 `image::ImageReader` 解码得到 RGBA 字节后渲染，
-//! 旧 egui 的 `egui::Image` 路径已删除。
+//! `CoverEntry` 是 UI 中立结构：只存原始图片字节 + 源 / URL 元信息，
+//! 解码成可显示格式由 UI 层负责（GPUI 端用 `image::ImageReader` 解码 RGBA）。
 
 /// 封面缓存条目。`Ready` 持有 `Vec<u8>`（已校验为有效图片的原始字节）；
 /// `Failed` 保留错误文案以便 UI 给出可见反馈而非静默。
 ///
-/// UI 层负责把字节解码为可显示格式（GPUI 可用 `image::ImageBuffer` / RGBA 数组）。
+/// UI 层负责把字节解码为可显示格式。
 pub enum CoverEntry {
     Ready {
         /// 原始图片字节（PNG / JPEG / WebP 等）。
@@ -75,7 +74,7 @@ mod cover_tests {
         let entry = cover_entry_from_bytes(7, "https://example.com/cover.png", Some(png));
         match entry {
             CoverEntry::Ready { bytes: _, uri: _ } => {
-                // Stage 11 后：bytes 持有原图字节，uri 用于 GPUI 纹理缓存去重。
+                // bytes 持有原图字节，uri 用于 GPUI 纹理缓存去重。
             }
             CoverEntry::Failed(e) => panic!("期望 Ready，实际 Failed: {e}"),
         }

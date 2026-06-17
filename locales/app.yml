@@ -36,6 +36,56 @@ Nav:
     zh-CN: 设置
     zh-HK: 設定
 
+# 跨页面 / 跨模块的通用 toast 文案（不归属某个页面）。
+Toasts:
+  # 通用动作结果
+  delete_source_ok:
+    en: "Source #{id} deleted"
+    zh-CN: "已删除书源 #{id}"
+    zh-HK: "已刪除書源 #{id}"
+  delete_source_missing:
+    en: "Source no longer exists"
+    zh-CN: 书源已不存在
+    zh-HK: 書源已不存在
+  no_sources_detected:
+    en: "No sources detected"
+    zh-CN: 没有可检测的书源
+    zh-HK: 沒有可檢測的書源
+  clear_tasks_ok:
+    en: "Cleared {n} record(s)"
+    zh-CN: "已清除 {n} 条记录"
+    zh-HK: "已清除 {n} 條記錄"
+  # 更新检查（AppModel::update_state → events::drain 翻译）
+  update_up_to_date:
+    en: "Already up to date"
+    zh-CN: 已是最新版本
+    zh-HK: 已是最新版本
+  update_new_version:
+    en: "New version {ver} available"
+    zh-CN: "新版本 {ver} 可用"
+    zh-HK: "新版本 {ver} 可用"
+  update_failed:
+    en: "Update check failed: {err}"
+    zh-CN: "检查更新失败: {err}"
+    zh-HK: "檢查更新失敗: {err}"
+  # 本地书库扫描 / 删除错误文案（AppModel::library.last_error 值）
+  library_scan_failed:
+    en: "Failed to scan download directory: {err}"
+    zh-CN: "扫描下载目录失败: {err}"
+    zh-HK: "掃描下載目錄失敗: {err}"
+  library_delete_ok:
+    en: "Deleted: {file}"
+    zh-CN: "已删除: {file}"
+    zh-HK: "已刪除: {file}"
+  library_delete_unknown:
+    en: "(unknown)"
+    zh-CN: "(未知)"
+    zh-HK: "(未知)"
+  library_delete_failed:
+    en: "Delete failed: {err}"
+    zh-CN: "删除失败: {err}"
+    zh-HK: "刪除失敗: {err}"
+
 App:
   title:
     en: So Novel
@@ -355,6 +405,215 @@ Settings:
 # - 序号（#xx）是 row 内的全局序号列文本，由 Rust 端 format!，不需要翻译。
 # - 「全部」/「打开」/「位置」/「删除」/「取消」是按钮标签，跟 Settings 按钮分开
 #   命名空间（Library.*）—— 即便日后 Settings 改文案也不会牵扯 Library。
+# 下载任务管理页。原 tasks.rs 全是硬编码中文，这次迁移到 i18n + 新增 tab / 删除文案。
+Tasks:
+  page_title:
+    en: Downloads
+    zh-CN: 下载任务
+    zh-HK: 下載任務
+  # Header subtitle —— 不再堆统计数字，给一句功能描述
+  subtitle:
+    en: "Track download progress; manage completed / failed / cancelled tasks"
+    zh-CN: "查看下载进度，管理已完成 / 失败 / 已取消的任务"
+    zh-HK: "查看下載進度，管理已完成 / 失敗 / 已取消的任務"
+  # 按状态分组的过滤按钮 label —— 后缀由 Rust 端拼上数量（如 "已完成 10"）。
+  # 「全部」是第一个按钮，不限状态。
+  tab:
+    all:
+      en: All
+      zh-CN: 全部
+      zh-HK: 全部
+    running:
+      en: Running
+      zh-CN: 运行中
+      zh-HK: 運行中
+    completed:
+      en: Completed
+      zh-CN: 已完成
+      zh-HK: 已完成
+    failed:
+      en: Failed
+      zh-CN: 失败
+      zh-HK: 失敗
+    cancelled:
+      en: Cancelled
+      zh-CN: 已取消
+      zh-HK: 已取消
+  # 删除单条任务的二次确认 Dialog
+  delete_dialog:
+    title:
+      en: "Confirm delete"
+      zh-CN: 确认删除
+      zh-HK: 確認刪除
+    # {book_name} 占位符
+    message:
+      en: "Delete the download record for \"{book_name}\"? This action cannot be undone."
+      zh-CN: "确定要删除《{book_name}》的下载记录吗？此操作无法撤销。"
+      zh-HK: "確定要刪除《{book_name}》的下載記錄嗎？此操作無法撤銷。"
+    confirm_button:
+      en: Delete
+      zh-CN: 删除
+      zh-HK: 刪除
+    cancel_button:
+      en: Cancel
+      zh-CN: 取消
+      zh-HK: 取消
+  # 下载完成 toast（事件桥接在 events::drain 检测 was_running → finished 转换时推）。
+  # {book_name} 占位符。
+  download_finished:
+    completed:
+      en: "Download completed: \"{book_name}\""
+      zh-CN: "下载完成：《{book_name}》"
+      zh-HK: "下載完成：《{book_name}》"
+    failed:
+      en: "Download failed: \"{book_name}\""
+      zh-CN: "下载失败：《{book_name}》"
+      zh-HK: "下載失敗：《{book_name}》"
+    cancelled:
+      en: "Download cancelled: \"{book_name}\""
+      zh-CN: "下载已取消：《{book_name}》"
+      zh-HK: "下載已取消：《{book_name}》"
+  # 空态：每个过滤各自的空态文案
+  empty:
+    all:
+      title:
+        en: "No downloads yet"
+        zh-CN: 暂无下载任务
+        zh-HK: 暫無下載任務
+      subtitle:
+        en: "Downloads from the Search page will appear here."
+        zh-CN: 从「搜索下载」页面下载一本书后，任务会出现在这里。
+        zh-HK: 從「搜尋下載」頁面下載一本書後，任務會出現在這裡。
+    running:
+      title:
+        en: "No active downloads"
+        zh-CN: 没有正在下载的任务
+        zh-HK: 沒有正在下載的任務
+      subtitle:
+        en: "New downloads will show up here."
+        zh-CN: 从「搜索下载」页面下载一本书后，运行中的任务会出现在这里。
+        zh-HK: 從「搜尋下載」頁面下載一本書後，運行中的任務會出現在這裡。
+    completed:
+      title:
+        en: "No completed downloads"
+        zh-CN: 没有已完成的任务
+        zh-HK: 沒有已完成的任務
+      subtitle:
+        en: "Finished downloads will be listed here."
+        zh-CN: 下载完成的任务会出现在这里。
+        zh-HK: 下載完成的任務會出現在這裡。
+    failed:
+      title:
+        en: "No failed downloads"
+        zh-CN: 没有失败的任务
+        zh-HK: 沒有失敗的任務
+      subtitle:
+        en: "Failed downloads will be listed here for retry."
+        zh-CN: 下载失败的任务会出现在这里，可重试。
+        zh-HK: 下載失敗的任務會出現在這裡，可重試。
+    cancelled:
+      title:
+        en: "No cancelled downloads"
+        zh-CN: 没有已取消的任务
+        zh-HK: 沒有已取消的任務
+      subtitle:
+        en: "Cancelled downloads will be listed here."
+        zh-CN: 已取消的任务会出现在这里。
+        zh-HK: 已取消的任務會出現在這裡。
+  # 任务卡片内的状态标签 / 按钮文案（原硬编码）
+  card:
+    status:
+      running:
+        en: Running
+        zh-CN: 运行中
+        zh-HK: 運行中
+      completed:
+        en: Completed
+        zh-CN: 已完成
+        zh-HK: 已完成
+      failed:
+        en: Failed
+        zh-CN: 失败
+        zh-HK: 失敗
+      cancelled:
+        en: Cancelled
+        zh-CN: 已取消
+        zh-HK: 已取消
+      unknown:
+        en: Unknown
+        zh-CN: 未知
+        zh-HK: 未知
+    # "源 #{id} · {completed}/{total} 章 · 失败 {failed}" 拼接用的片段
+    meta:
+      chapters:
+        en: "{completed}/{total} chapters"
+        zh-CN: "{completed}/{total} 章"
+        zh-HK: "{completed}/{total} 章"
+      failed:
+        en: "Failed {n}"
+        zh-CN: "失败 {n}"
+        zh-HK: "失敗 {n}"
+      # 下载开始时间 label（"开始: YYYY-MM-DD HH:MM"）
+      started:
+        en: "Started"
+        zh-CN: 开始
+        zh-HK: 開始
+      # 时间格式化失败 / 0 时的 fallback
+      time_unknown:
+        en: "(unknown time)"
+        zh-CN: "(未知时间)"
+        zh-HK: "(未知時間)"
+    # 失败章节折叠标题
+    failures:
+      en: "Failed chapters ({n})"
+      zh-CN: "失败章节明细 ({n})"
+      zh-HK: "失敗章節明細 ({n})"
+    # "第 {idx} 章 — {title}" / "原因: {reason}"
+    failure_chapter:
+      en: "Chapter {idx} — {title}"
+      zh-CN: "第 {idx} 章 — {title}"
+      zh-HK: "第 {idx} 章 — {title}"
+    failure_reason:
+      en: "Reason: {reason}"
+      zh-CN: "原因: {reason}"
+      zh-HK: "原因: {reason}"
+    # 动作按钮
+    action:
+      cancel:
+        en: Cancel
+        zh-CN: 取消
+        zh-HK: 取消
+      cancelling:
+        en: "Cancelling..."
+        zh-CN: "正在取消..."
+        zh-HK: "正在取消..."
+      retry:
+        en: Retry
+        zh-CN: 重试
+        zh-HK: 重試
+      open:
+        en: Open
+        zh-CN: 打开
+        zh-HK: 打開
+      reveal:
+        en: Location
+        zh-CN: 位置
+        zh-HK: 位置
+      delete:
+        en: Delete
+        zh-CN: 删除
+        zh-HK: 刪除
+  # 无书名时的 fallback
+  fallback_unknown_book:
+    en: "(unknown book)"
+    zh-CN: "(未知书名)"
+    zh-HK: "(未知書名)"
+  # 无作者时的 fallback（书名行里显示）
+  fallback_unknown_author:
+    en: "(unknown author)"
+    zh-CN: "(未知作者)"
+    zh-HK: "(未知作者)"
+
 # - 文件扩展名（epub/txt/zip/html/pdf）是技术名词，**不翻译**——用户看的就是扩展名，
 #   翻译成"电子出版物"反而看不懂。
 Library:
@@ -634,10 +893,6 @@ Search:
       en: "Select Chapters"
       zh-CN: 选章
       zh-HK: 選章
-    select_chapters_unavailable:
-      en: "Coming soon"
-      zh-CN: "功能即将推出"
-      zh-HK: "功能即將推出"
     # 行内全本按钮 label
     download_whole:
       en: "Whole Book"
@@ -648,6 +903,63 @@ Search:
       en: "Download queued"
       zh-CN: "已派下载任务"
       zh-HK: "已派下載任務"
+  # 选章下载 Dialog：行内"选章"按钮 → 拉 TOC → confirm Dialog 输入起止章节 → 按范围下载。
+  # 用 gpui-component Dialog .confirm()（OK=下载 / Cancel=取消），反应式读 toc_cache。
+  range:
+    # Dialog 标题
+    title:
+      en: "Select Chapters to Download"
+      zh-CN: "选择下载章节"
+      zh-HK: "選擇下載章節"
+    # 起止章节输入 label
+    start:
+      en: Start
+      zh-CN: 起始
+      zh-HK: 起始
+    end:
+      en: End
+      zh-CN: 结束
+      zh-HK: 結束
+    # "共 N 章" 的 N 占位符文案
+    total:
+      en: "{n} chapters in total"
+      zh-CN: "共 {n} 章"
+      zh-HK: "共 {n} 章"
+    # 选中范围预览行 label
+    preview:
+      en: Selected
+      zh-CN: 选中
+      zh-HK: 選中
+    # TOC 还在拉的占位
+    loading:
+      en: "Loading chapter list…"
+      zh-CN: "正在获取章节列表…"
+      zh-HK: "正在取得章節列表…"
+    # TOC 拉取失败
+    failed:
+      en: "Failed to load chapter list"
+      zh-CN: "章节列表获取失败"
+      zh-HK: "章節列表取得失敗"
+    # 范围无效（非数字 / start>end / 超界）toast
+    invalid:
+      en: "Please enter a valid chapter range"
+      zh-CN: "请输入有效的章节范围"
+      zh-HK: "請輸入有效的章節範圍"
+    # confirm Dialog 的 OK 按钮（=开始下载）
+    confirm:
+      en: Download
+      zh-CN: 下载
+      zh-HK: 下載
+    # confirm Dialog 的 Cancel 按钮
+    cancel:
+      en: Cancel
+      zh-CN: 取消
+      zh-HK: 取消
+    # 章节名为空时的 fallback（显示在预览里）
+    no_title:
+      en: "(no title)"
+      zh-CN: "(无标题)"
+      zh-HK: "(無標題)"
   empty:
     title:
       en: "Enter a keyword to start searching"
@@ -669,15 +981,6 @@ Search:
       zh-CN: 条
       zh-HK: 條
   result:
-    # 元信息列的两个 label（"作者: X" / "最新: Y"）
-    author:
-      en: Author
-      zh-CN: 作者
-      zh-HK: 作者
-    latest_chapter:
-      en: Latest
-      zh-CN: 最新
-      zh-HK: 最新
     # r.author 为 None 时的 fallback
     unknown_author:
       en: "(Unknown)"
@@ -698,3 +1001,77 @@ Search:
       en: "(Unknown source)"
       zh-CN: "(未知书源)"
       zh-HK: "(未知書源)"
+  # 详情 Dialog：行内"详情"按钮 → 弹 Dialog 展示 SearchResult 全字段。
+  # 用纯 Dialog（.title + .child），无 footer 按钮 —— 默认 close_button / overlay_closable /
+  # keyboard(Esc) 全开，只读信息用 X / 点遮罩 / Esc 关闭即可，比塞个 OK 按钮更干净。
+  detail:
+    # 行内"详情"按钮 label
+    action:
+      en: Details
+      zh-CN: 详情
+      zh-HK: 詳情
+    # Dialog 标题
+    title:
+      en: Book Details
+      zh-CN: 书籍详情
+      zh-HK: 書籍詳情
+    # 字段为 None / 空时的 fallback
+    unknown:
+      en: "(unknown)"
+      zh-CN: "(未知)"
+      zh-HK: "(未知)"
+    # 封面占位文案（封面需异步拉详情拿 cover_url 再下载，期间 / 失败 / 无封面时显示）
+    cover:
+      # 正在加载（detail 或封面字节还在后台跑）
+      loading:
+        en: "Loading cover…"
+        zh-CN: "封面加载中…"
+        zh-HK: "封面載入中…"
+      # 下载 / 解码失败
+      failed:
+        en: "Cover unavailable"
+        zh-CN: "封面获取失败"
+        zh-HK: "封面取得失敗"
+      # 书源详情里没有 cover_url
+      none:
+        en: "No cover"
+        zh-CN: "无封面"
+        zh-HK: "無封面"
+    # 字段 label（左侧固定宽度列）
+    field:
+      book_name:
+        en: Title
+        zh-CN: 书名
+        zh-HK: 書名
+      author:
+        en: Author
+        zh-CN: 作者
+        zh-HK: 作者
+      source:
+        en: Source
+        zh-CN: 书源
+        zh-HK: 書源
+      category:
+        en: Category
+        zh-CN: 分类
+        zh-HK: 分類
+      status:
+        en: Status
+        zh-CN: 状态
+        zh-HK: 狀態
+      latest_chapter:
+        en: Latest
+        zh-CN: 最新章节
+        zh-HK: 最新章節
+      last_update:
+        en: Updated
+        zh-CN: 最近更新
+        zh-HK: 最近更新
+      intro:
+        en: Intro
+        zh-CN: 简介
+        zh-HK: 簡介
+      url:
+        en: URL
+        zh-CN: 链接
+        zh-HK: 連結

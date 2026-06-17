@@ -543,12 +543,15 @@ pub struct ConfigPaths {
     /// 主题目录 `~/.sonovel/themes/`：首次启动写入 21 个 embed 主题，
     /// 之后 watcher 监听这个目录，用户可手动放自定义 *.json 进去热加载。
     pub themes_dir: PathBuf,
+    /// 日志目录 `~/.sonovel/logs/`：tracing 文件 appender 按天滚动输出 `so-novel-rs.YYYY-MM-DD.log`。
+    /// 启动时清理超过 30 天的旧文件（保留策略跟 tracing_appender 解耦，自己做）。
+    pub log_dir: PathBuf,
 }
 
 impl ConfigPaths {
     /// 路径约定：
-    /// - `config.toml` + `sonovel.db` + `themes/` 统一存放在用户主目录下的 `~/.sonovel/`；
-    /// - 首次启动时各目录/文件不存在，`save_config` / `Db::open` / `themes::init` 会自动创建；
+    /// - `config.toml` + `sonovel.db` + `themes/` + `logs/` 统一存放在用户主目录下的 `~/.sonovel/`；
+    /// - 首次启动时各目录/文件不存在，`save_config` / `Db::open` / `themes::init` / 日志 appender 会自动创建；
     /// - 如果无法获取主目录（极端情况），回落到当前工作目录。
     pub fn discover() -> Self {
         let base = home_dir().join(".sonovel");
@@ -556,6 +559,7 @@ impl ConfigPaths {
             config_file: base.join("config.toml"),
             db_file: base.join("sonovel.db"),
             themes_dir: base.join("themes"),
+            log_dir: base.join("logs"),
         }
     }
 }

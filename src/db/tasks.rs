@@ -6,9 +6,57 @@
 use std::path::PathBuf;
 
 use rusqlite::{params, Connection, OptionalExtension};
+use serde::{Deserialize, Serialize};
 
 use crate::models::{Book, SearchResult};
-use serde::{Deserialize, Serialize};
+
+/// 任务结束原因 —— 替代原先用字符串字面量做语义 tag 的反模式。
+///
+/// 定义在持久化层（`db::tasks`）：JSON schema 跟着这里走，UI / 业务层复用。
+///
+/// `is_cancelled` / `is_failed` 直接 match enum，不再依赖字符串等值检测。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum FinishedReason {
+    /// 用户在 UI 点了"取消"，后台响应后通知。
+    UserCancelled,
+    /// 应用重启 / 进程被杀时正在跑的任务，重新打开 app 时识别为此状态。
+    AppRestarted,
+    /// 真正失败（网络 / parser / 后台异常）。消息展示给用户，UI 走 i18n。
+    Failed { message: String },
+}
+
+impl FinishedReason {
+    /// 给 UI 用的错误消息文案（仅 `Failed` 有内容）。
+    pub fn user_message(&self) -> Option<&str> {
+        match self {
+            FinishedReason::Failed { message } => Some(message.as_str()),
+            FinishedReason::UserCancelled | FinishedReason::AppRestarted => None,
+        }
+    }
+
+    /// 用户取消 或 应用重启中断（"非真正的失败"）。
+    pub fn is_cancelled(&self) -> bool {
+        matches!(
+            self,
+            FinishedReason::UserCancelled | FinishedReason::AppRestarted
+        )
+    }
+
+    /// db 兼容：把旧 `String` 错误（`"用户已取消"` / `"应用重启时中断"` /
+    /// `"后台任务异常退出（通道已断开）"` 等）映射成 enum。
+    /// 新代码不应再调它 —— 派发方直接 `FinishedReason::UserCancelled` 等。
+    pub fn from_legacy_reason(s: &str) -> Self {
+        if s == "用户已取消" {
+            FinishedReason::UserCancelled
+        } else if s == "应用重启时中断" {
+            FinishedReason::AppRestarted
+        } else {
+            // 旧版本的"后台异常退出"及其他任意失败消息都归类为 Failed。
+            FinishedReason::Failed { message: s.to_string() }
+        }
+    }
+}
 
 /// 任务表持久化形态。所有字段对应 `DownloadTask` 里需要落盘的部分；
 /// 运行时字段（rx / cancel / started_at Instant）不存。
@@ -25,8 +73,9 @@ pub struct DownloadTaskRecord {
     pub completed: u32,
     pub failed: u32,
     pub last_chapter_title: String,
-    /// `Some(Ok(path))` = 完成；`Some(Err(reason))` = 失败 / 取消；`None` = 还在跑。
-    pub finished: Option<Result<PathBuf, String>>,
+    /// `Some(Ok(path))` = 完成；`Some(Err(reason))` = 失败 / 取消（语义分类见 `FinishedReason`）；
+    /// `None` = 还在跑。
+    pub finished: Option<Result<PathBuf, FinishedReason>>,
     pub failures: Vec<FailureRecord>,
 }
 

@@ -6,11 +6,8 @@
 //! - `now` / `runtime` / `tasks_db` — 自由辅助
 //! - `crate::app::ops::download` / `crate::app::ops::search` / `crate::app::ops::sources` / `crate::app::ops::library` / `crate::app::ops::update` / `crate::app::ops::settings` — 业务方法
 //!
-//! 入口：`AppModel`（Stage 2 起替代旧的 `SoNovelApp`）持有所有状态 struct 实例。
-//!
-//! Stage 2 起为 GPUI 迁移做改造：
-//! - 旧的 `SoNovelApp` 名字已重命名为 `AppModel`。
-//! - 不再 `impl eframe::App`；帧轮询逻辑迁到 `crate::app::events`（Stage 3）。
+//! 入口：`AppModel` 持有所有状态 struct 实例，UI 中立（不依赖任何 GUI 框架）。
+//! 后台通道排空 + UI 重绘触发由 `crate::app::events` 负责。
 
 mod cover;
 mod download_task;
@@ -45,11 +42,10 @@ use tokio::runtime::Runtime;
 
 use crate::config::{load_config, AppConfig, ConfigPaths};
 use crate::db::Db;
+use crate::gpui_app::i18n::{ts, ts_fmt};
 use crate::models::Rule;
 
-/// 应用整体状态。Stage 2 起为 UI 中立结构（不再 `impl eframe::App`）。
-///
-/// 字段含义未变（仅名字从 `SoNovelApp` → `AppModel`），便于逐 stage 渐进迁移。
+/// 应用整体状态。UI 中立结构 —— 不依赖任何 GUI 框架，由 `gpui_app` 层渲染。
 pub struct AppModel {
     pub paths: ConfigPaths,
     pub config: AppConfig,
@@ -330,8 +326,11 @@ impl AppModel {
             &mut self.sources_state,
             source_id,
         ) {
-            Ok(true) => self.push_success_notification(format!("已删除书源 #{source_id}")),
-            Ok(false) => self.push_warning_notification("书源已不存在"),
+            Ok(true) => self.push_success_notification(ts_fmt(
+                "Toasts.delete_source_ok",
+                &[("id", &source_id.to_string())],
+            )),
+            Ok(false) => self.push_warning_notification(ts("Toasts.delete_source_missing")),
             Err(msg) => self.push_error_notification(msg),
         }
     }
@@ -359,7 +358,7 @@ impl AppModel {
     /// 派一个连通性检测任务。
     pub fn spawn_health_check(&mut self) {
         if self.rules.is_empty() {
-            self.push_warning_notification("没有可检测的书源");
+            self.push_warning_notification(ts("Toasts.no_sources_detected"));
             return;
         }
         crate::app::ops::spawn_health_check(
@@ -399,8 +398,32 @@ impl AppModel {
         crate::app::ops::clear_finished_tasks(&mut self.tasks, &self.db);
         let removed = before - self.tasks.len();
         if removed > 0 {
-            self.push_success_notification(format!("已清除 {removed} 条记录"));
+            self.push_success_notification(ts_fmt(
+                "Toasts.clear_tasks_ok",
+                &[("n", &removed.to_string())],
+            ));
         }
+    }
+
+    /// 删除单条任务记录（仅已结束的，运行中跳过）。
+    ///
+    /// 内存 `tasks` retain 移除 + DB `delete_one`。运行中的任务不能删（会留下孤儿后台
+    /// 任务 + cancel token 丢失），调用方（UI）本就只对已结束任务显示删除按钮，这里再兜底。
+    /// 返回是否真的删了（false = 任务还在跑或不存在）。
+    pub fn delete_task(&mut self, id: u64) -> bool {
+        // 兜底：运行中的不删。
+        if self.tasks.iter().any(|t| t.id == id && t.is_running()) {
+            return false;
+        }
+        let existed = self.tasks.iter().any(|t| t.id == id);
+        if !existed {
+            return false;
+        }
+        self.tasks.retain(|t| t.id != id);
+        if let Err(e) = crate::db::tasks::delete_one(self.db.conn(), id) {
+            tracing::warn!("delete_task db delete_one failed for id={id}: {e:#}");
+        }
+        true
     }
 
     /// 把单条任务 upsert 到 DB。

@@ -366,31 +366,31 @@ impl Render for SourcesPage {
                 h_flex()
                     .gap_2()
                     .items_center()
-                    .child(
-                        Tag::secondary()
-                            .small()
-                            .child(format!("{} {}", ts("Sources.stat.total"), total_rules)),
-                    )
+                    .child(Tag::secondary().small().child(format!(
+                        "{} {}",
+                        ts("Sources.stat.total"),
+                        total_rules
+                    )))
                     .when(enabled > 0, |this| {
-                        this.child(
-                            Tag::success()
-                                .small()
-                                .child(format!("{} {}", ts("Sources.stat.enabled"), enabled)),
-                        )
+                        this.child(Tag::success().small().child(format!(
+                            "{} {}",
+                            ts("Sources.stat.enabled"),
+                            enabled
+                        )))
                     })
                     .when(disabled > 0, |this| {
-                        this.child(
-                            Tag::warning()
-                                .small()
-                                .child(format!("{} {}", ts("Sources.stat.disabled"), disabled)),
-                        )
+                        this.child(Tag::warning().small().child(format!(
+                            "{} {}",
+                            ts("Sources.stat.disabled"),
+                            disabled
+                        )))
                     })
                     .when_some(available_after_check, |this, n| {
-                        this.child(
-                            Tag::info()
-                                .small()
-                                .child(format!("{} {}", ts("Sources.stat.available"), n)),
-                        )
+                        this.child(Tag::info().small().child(format!(
+                            "{} {}",
+                            ts("Sources.stat.available"),
+                            n
+                        )))
                     })
                     .when(running, |this| {
                         this.child(Spinner::new().small()).child(
@@ -439,25 +439,22 @@ impl Render for SourcesPage {
                     .border_1()
                     .border_color(cx.theme().border)
                     .rounded_md()
-                    .child(
-                        List::new(&self.list_state)
-                            .px(px(12.))
-                            .py(px(4.))
-                            .size_full(),
-                    )
+                    .child(List::new(&self.list_state).p(px(12.)).size_full())
                     .into_any_element()
             })
-            // ---- 分页页脚 ----
-            // 永远渲染 —— Sources 通常 < 30 条，page_count=1，prev/next disabled，
+            // ---- 分页页脚（仅在列表非空时渲染 —— 空态不显示，避免无意义的"第 1 页 / 共 0 条"）----
+            // Sources 通常 < 30 条，page_count=1，prev/next disabled，
             // 单个数字按钮 "1" 高亮，给用户"完整列表已展示"的视觉锚点。
-            .child(Pagination::new(
-                self.current_page,
-                page_count,
-                cx.listener(|this, &new_page, _window, _cx| {
-                    this.current_page = new_page;
-                    _cx.notify();
-                }),
-            ))
+            .when(total > 0, |this| {
+                this.child(Pagination::new(
+                    self.current_page,
+                    page_count,
+                    cx.listener(|this, &new_page, _window, _cx| {
+                        this.current_page = new_page;
+                        _cx.notify();
+                    }),
+                ))
+            })
     }
 }
 

@@ -1,4 +1,4 @@
-//! Stage 4 + Stage 12 + 可折叠 Sidebar：现代侧边栏 Shell + 键盘打磨。
+//! 顶层 `RootView`：TitleBar + 可折叠 Sidebar + 内容区 + 覆盖层。
 //!
 //! - 左侧 `Sidebar`：`SidebarMenuItem` × 5（Search / Tasks / Library / Sources / Settings）。
 //!   - 可折叠：`SidebarCollapsible::Icon` — 折叠到 48px 图标宽度，展开/收起 200ms 缓动。
@@ -8,7 +8,7 @@
 //!   的 `Settings` 组件搭）。
 //! - GPUI actions + keybindings：
 //!   - `ShowSearch/Tasks/Library/Sources/Settings` + `cmd-1` ~ `cmd-5` 直接跳。
-//!   - `NextPage` / `PrevPage` + `f6` / `shift-f6` 循环翻页（Stage 12）。
+//!   - `NextPage` / `PrevPage` + `f6` / `shift-f6` 循环翻页。
 //!   - `ToggleSidebar` + `cmd-b` 折叠/展开侧边栏。
 //!   - `Escape` 由 `gpui-component::Root` 自动处理关闭顶层 dialog / sheet / notification。
 //! - 顶层 `Root::render_dialog_layer / sheet_layer / notification_layer` 渲染覆盖层。
@@ -46,7 +46,7 @@ actions!(
 /// GPUI key context 名。`div().key_context("AppShell")` 时激活。
 const KEY_CONTEXT: &str = "AppShell";
 
-/// 新 GUI 的 5 个一级导航页面（Stage 4 起替代旧 `crate::ui::nav::NavPage`）。
+/// 5 个一级导航页面。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum NavPage {
     #[default]
@@ -109,7 +109,7 @@ impl NavPage {
 
 /// 全局 key bindings 注册。`gpui_app::run` 启动时调一次。
 ///
-/// Stage 12 加 `F6` / `Shift+F6` 翻页：
+/// `F6` / `Shift+F6` 翻页：
 /// - `F6` → 下一页（搜索 → 任务 → 书库 → 书源 → 搜索 ...）
 /// - `Shift+F6` → 上一页
 ///
@@ -136,7 +136,7 @@ pub fn register_key_bindings(cx: &mut App) {
     ]);
 }
 
-/// Stage 4 root view：sidebar shell + 当前页面占位。
+/// Root view：sidebar shell + 当前页面占位。
 pub struct RootView {
     // 持有 model 用于：1) `new()` 里 clone 给子 page；2) `toggle_sidebar` 读 / 写
     // `config.sidebar_collapsed` 并触发持久化。

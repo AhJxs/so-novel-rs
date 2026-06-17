@@ -40,7 +40,8 @@ so-novel-rs/
 ├── ~/.sonovel/                  # 用户数据目录（首次启动自动生成）
 │   ├── config.toml              # 用户配置（toml_edit 保留注释）
 │   ├── sonovel.db               # SQLite（书源 + 下载任务 + 覆写）
-│   └── themes/                  # 用户主题目录（JSON 文件，可热重载）
+│   ├── themes/                  # 用户主题目录（JSON 文件，可热重载）
+│   └── logs/                    # tracing 日志（按天滚动 `<日期>.log`，见「日志」一节）
 ├── bundle/
 │   ├── fonts/                   # Noto Sans SC 全 9 字重
 │   ├── rules/                   # 默认书源 JSON（首次启动 seed 到数据库）
@@ -155,6 +156,17 @@ so-novel-rs/
 
 UI 中调 `ts!("Settings.item.theme")` 拿当前 locale 翻译；缺翻译时 fallback 返回 key 字符串本身（开发期可见漏翻译）。
 
+## 日志
+
+`tracing` 双层输出：
+
+- **stdout**：开发期直接看 trace；用 `EnvFilter`（`RUST_LOG` 环境变量可覆盖，默认 `info,so_novel_rs=debug`）。
+- **文件**：按天滚动到 `~/.sonovel/logs/<YYYY-MM-DD>.log`，文件名带 `tracing_appender::rolling::daily` 的日期后缀。
+
+文件 layer 启动失败（如权限不足）静默退化为只有 stdout，不阻塞主程序。
+
+Retention 由用户 / 部署环境自管（`tracing_appender::rolling::daily` 不自带 retention，手写清理容易在日期边界 / 文件锁上踩坑；推荐 `cron` / `logrotate` 或自己定期删）。
+
 ## 文件选择器（rfd / Windows 踩坑）
 
 GUI 里两处用 `rfd` 弹原生对话框：
@@ -209,7 +221,7 @@ cargo build --release --target x86_64-unknown-linux-gnu
 
 ```sh
 cargo clippy           # 零警告
-cargo test --lib       # 211 passed (3 ignored 为真实联网)
+cargo test --lib       # 216 passed (3 ignored 为真实联网)
 ```
 
 ## 测试
@@ -218,4 +230,4 @@ cargo test --lib       # 211 passed (3 ignored 为真实联网)
 cargo test
 ```
 
-当前 **211 个测试全通过**（3 个 ignored 为真实联网测试，需 `--ignored` 手动执行）。
+当前 **216 个测试全通过**（3 个 ignored 为真实联网测试，需 `--ignored` 手动执行）。

@@ -32,3 +32,26 @@ future 内部 await 的 timer / channel 必须用 smol 系：
 smol 没有自己的 `select!` 宏，tokio 的 `tokio::select!` 在 smol future 里也用不上。两种替代：
 - 轮询：`loop { timer.await; try_recv().for_each(...) }`（结构化差但简单够用）。
 - 真正的 select：`futures::future::FutureExt` 提供 `select`，但 `futures` crate 不在直接依赖里。需要时再加。
+
+## 在 `InputEvent::Change` 订阅里调 `set_value` 会死循环，耗尽 Windows 句柄配额崩溃
+
+gpui-component 0.5.1 的 `InputState::set_value` → `replace_text` → `cx.emit(InputEvent::Change)`（state.rs:2009）。所以**订阅 `InputEvent::Change` 后在处理器里无条件 `set_value` 会形成 Change→set_value→Change 死循环**。
+
+症状：日志狂刷 `Error { code: HRESULT(0x80070718), message: "配额不足，无法处理此命令。" }`，进程 `exit code: 0xcfffffff`。`0x80070718` = `ERROR_NOT_ENOUGH_QUOTA`（Windows 桌面堆 / 句柄配额耗尽）——死循环每轮创建句柄，几秒内打满。
+
+**正确 pattern**：Change 处理器里只在 clamp / 规整后的值与当前显示值**不同**时才 `set_value`：
+```rust
+InputEvent::Change => {
+    let cur = input.read(cx).value().to_string();
+    let want = normalize(&cur);            // clamp / 格式化
+    if want != cur {                        // 相等就跳过，断开重入循环
+        input.update(cx, |s, cx| s.set_value(want, window, cx));
+        cx.notify();
+    }
+}
+```
+`set_value` 写回的值已是规整后的，二次 Change 进来时 `want == cur` 直接跳过，循环立即终止。
+
+**对照**：`search.rs` 关键词输入框在 Change 里只更新 model、不调 `set_value`，所以没事；选章起止输入框要在 Change 里 clamp 写回，踩了这个坑。`NumberInputEvent::Step`（按 +/-）不受影响——`set_value` 只 emit `Change` 不 emit `Step`，不会回环。
+
+**通用教训**：任何「订阅事件 A → 在处理器里调用会再次 emit 事件 A 的 API」都要加去重守卫，否则就是隐式递归。GPUI / gpui-component 里 `set_value` / `set_placeholder` 这类带 emit 的 setter 都适用。

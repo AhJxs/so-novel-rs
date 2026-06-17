@@ -3,15 +3,22 @@
 //
 // 注意：CLI 模式下 stdout/stderr 在 GUI subsystem 里是 invalid handle —
 // 见下方 `attach_parent_console` 的处理。
-#![cfg_attr(all(target_os = "windows", not(debug_assertions)), windows_subsystem = "windows")]
+#![cfg_attr(
+    all(target_os = "windows", not(debug_assertions)),
+    windows_subsystem = "windows"
+)]
 
 use anyhow::Result;
-use tracing_subscriber::{fmt, prelude::*, EnvFilter};
+use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 
 fn main() -> Result<()> {
     // 任意 argv（除程序名外）→ CLI 模式；不带任何参数 → GUI。
     // 与 Unix 惯例一致：so-novel-rs search <kw> / so-novel-rs sources / etc.
     let is_cli = std::env::args().len() > 1;
+
+    // 解析日志目录 —— tracing 文件 layer 需要它（按天滚到 `log_dir/so-novel-rs.YYYY-MM-DD.log`）。
+    // 这里不算完整 paths（gpui_app::run 内部自己 discover），只为 tracing 拿 log_dir。
+    let log_dir = so_novel_rs::config::ConfigPaths::discover().log_dir;
 
     // GUI subsystem 的 exe 默认没有 stdio 句柄；从 cmd / PowerShell 跑 CLI 子命令
     // 时附加到父进程的控制台，这样 println! / tracing 都能正常输出。
@@ -20,7 +27,7 @@ fn main() -> Result<()> {
         attach_parent_console();
     }
 
-    init_tracing();
+    init_tracing(&log_dir);
 
     if is_cli {
         return so_novel_rs::cli::run();
@@ -41,7 +48,7 @@ fn main() -> Result<()> {
 fn attach_parent_console() {
     // SAFETY: 单纯调 Win32 API；失败用返回值判断，不依赖 GetLastError 也能容错。
     unsafe {
-        use windows_sys::Win32::System::Console::{AttachConsole, ATTACH_PARENT_PROCESS};
+        use windows_sys::Win32::System::Console::{ATTACH_PARENT_PROCESS, AttachConsole};
         AttachConsole(ATTACH_PARENT_PROCESS);
     }
 }
@@ -49,11 +56,33 @@ fn attach_parent_console() {
 #[cfg(not(target_os = "windows"))]
 fn attach_parent_console() {}
 
-fn init_tracing() {
+fn init_tracing(log_dir: &std::path::Path) {
     let filter = EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| EnvFilter::new("info,so_novel_rs=debug"));
-    tracing_subscriber::registry()
+
+    // stdout layer（保持原行为）。
+    let stdout_layer = fmt::layer().with_target(false);
+
+    let registry = tracing_subscriber::registry()
         .with(filter)
-        .with(fmt::layer().with_target(false))
-        .init();
+        .with(stdout_layer);
+
+    // 文件 layer：按天滚动到 `log_dir/so-novel-rs.YYYY-MM-DD.log`。
+    // 用 `match` 内联构造让 Rust 推断 Layer<S> 的 S —— helper 函数的返回类型
+    // 写不出嵌套的 Layered<...>。文件 appender 失败不 panic —— 静默退化为只有 stdout。
+    match std::fs::create_dir_all(log_dir) {
+        Ok(()) => {
+            // 日志文件名 `<日期>.log`（如 `2026-06-18.log`）：传空 prefix 让 rolling 直接拼日期后缀。
+            let appender = tracing_appender::rolling::daily(log_dir, "");
+            let (writer, guard) = tracing_appender::non_blocking(appender);
+            // guard 进 leak 让文件 writer 后台线程存活到进程退出 —— tracing_appender 标准用法。
+            Box::leak(Box::new(guard));
+            let file_layer = fmt::layer().with_writer(writer).with_target(true);
+            registry.with(file_layer).init();
+        }
+        Err(e) => {
+            eprintln!("init_tracing: file layer disabled ({e})");
+            registry.init();
+        }
+    }
 }

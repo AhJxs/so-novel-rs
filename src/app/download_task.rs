@@ -4,10 +4,13 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 
 use crate::crawler::{CancelToken, Progress};
-use crate::db::tasks::{DownloadTaskRecord, FailureRecord};
+use crate::db::tasks::{DownloadTaskRecord, FailureRecord, FinishedReason};
 use crate::models::{Book, SearchResult};
 
 use super::now::now_unix_secs;
+
+// `FinishedReason` 定义在 `db::tasks`（持久化层 —— JSON schema 跟着 db 走）。
+// 直接 use 即可，业务层复用同一枚举类型。
 
 /// 手动 Clone 跳过 `rx`/`cancel`（不可 Clone 的后台通道）。
 impl Clone for DownloadTask {
@@ -59,8 +62,9 @@ pub struct DownloadTask {
     pub completed: u32,
     pub failed: u32,
     pub last_chapter_title: String,
-    /// `Some(Ok(path))` 完成；`Some(Err(reason))` 失败 / 取消；`None` 还在跑。
-    pub finished: Option<Result<std::path::PathBuf, String>>,
+    /// `Some(Ok(path))` 完成；`Some(Err(reason))` 失败 / 取消（语义分类见 `FinishedReason`）。
+    /// `None` 还在跑。
+    pub finished: Option<Result<std::path::PathBuf, FinishedReason>>,
     /// 失败章节明细（用于任务页详情显示）。持久化时通过 `FailureRecord` 转换。
     pub failures: Vec<(u32, String, String)>,
 }
@@ -102,15 +106,17 @@ impl DownloadTask {
                             self.finished = Some(Ok(output_path));
                         }
                         Progress::Cancelled => {
-                            self.finished = Some(Err("用户已取消".to_string()));
+                            self.finished = Some(Err(FinishedReason::UserCancelled));
                             self.cancelling = false;
                         }
                     }
                 }
                 Err(mpsc::error::TryRecvError::Empty) => break,
                 Err(mpsc::error::TryRecvError::Disconnected) => {
+                    // 后台 task 异常退出（panic / 进程被 kill 等）—— 标记为 AppRestarted，
+                    // 因为用户没主动取消，理论上应该自动恢复重跑。当前简化处理：直接标记结束。
                     if self.finished.is_none() {
-                        self.finished = Some(Err("后台任务异常退出（通道已断开）".to_string()));
+                        self.finished = Some(Err(FinishedReason::AppRestarted));
                         self.cancelling = false;
                     }
                     break;
@@ -127,18 +133,17 @@ impl DownloadTask {
         self.finished.is_none()
     }
 
-    /// "用户主动取消" / "应用重启时中断"算 cancelled；
-    /// 后台异常 / 网络错误 / parser 错误算 failed。
+    /// 用户主动取消 → cancelled。
     pub fn is_cancelled(&self) -> bool {
         matches!(
             self.finished.as_ref(),
-            Some(Err(reason)) if reason == "用户已取消" || reason == "应用重启时中断"
+            Some(Err(FinishedReason::UserCancelled | FinishedReason::AppRestarted))
         )
     }
 
     /// 已结束且不是取消 → 失败。
     pub fn is_failed(&self) -> bool {
-        matches!(self.finished.as_ref(), Some(Err(_))) && !self.is_cancelled()
+        matches!(self.finished.as_ref(), Some(Err(FinishedReason::Failed { .. })))
     }
 
     pub fn book_name(&self) -> &str {

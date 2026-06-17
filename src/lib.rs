@@ -4,10 +4,6 @@
 //! - `gpui_app` — 新 GPUI GUI 入口（Stage 1+）。
 //! - `app` / `db` / `crawler` / `config` / `models` / `parser` / `export` /
 //!   `http` / `js` / `rules` / `util` / `cli` — 业务 + 数据层（GUI 解耦）。
-//! - 旧 `ui` / `design_system` / `material_icons` 已在 Stage 11 整体删除。
-
-// 整个 crate 默认 deny unsafe（egui 时代的 windows.rs 已删除，目前没有 FFI）。
-#![deny(unsafe_code)]
 
 // `rust_i18n::i18n!` 必须在 crate root 调一次 —— 它在 crate root 生成 `_rust_i18n_t`
 // 函数 + locale 表，`t!` 宏和 `rust_i18n::set_locale` 都依赖它。

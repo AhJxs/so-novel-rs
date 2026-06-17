@@ -18,8 +18,7 @@
 //! ## 保存机制（auto-save，无手动按钮）
 //!
 //! 每个 setter 改完字段后**立即**调 `model.persist_settings()` 写盘 ——
-//! 区别于旧 egui 版的"dirty 标记 + 末尾统一写盘"，现在没有"立即保存"按钮：
-//! 改主题 → 立刻落盘；改 host → 立刻落盘；任何字段改动都是 O(1) 写盘。
+//! 没有单独的"立即保存"按钮：任何字段改动都 O(1) 立刻落盘（改主题 / 改 host 均如此）。
 //!
 //! 主题列表（`SettingField::dropdown`）每次 Render 重新 snapshot —— 用户装了
 //! 新主题 → `ThemeRegistry::watch_dir` reload → observer 触发 `cx.notify()` → 本页
@@ -299,7 +298,7 @@ impl SettingsPage {
         ];
 
         // 7 种常见 TXT 编码 → (value_str, label)
-        // 与旧 egui 版 `ENCODINGS` 常量保持一致。
+        // 与 `ENCODINGS` 常量一致。
         let encoding_options: Vec<(SharedString, SharedString)> = TXT_ENCODINGS
             .iter()
             .map(|e| ((*e).into(), (*e).into()))
@@ -1060,7 +1059,7 @@ impl Render for SettingsPage {
 
 // -------- 常量 + helper --------
 
-/// 7 种常见 TXT 编码（与旧 egui 版 `ENCODINGS` 常量保持一致）。
+/// 7 种常见 TXT 编码。
 const TXT_ENCODINGS: &[&str] = &[
     "UTF-8",
     "GBK",

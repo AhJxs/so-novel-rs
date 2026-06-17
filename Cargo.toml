@@ -1,9 +1,9 @@
 [package]
 name = "so-novel-rs"
-version = "0.1.0-alpha.1"
-edition = "2021"
-rust-version = "1.75"
-description = "So Novel — Rust desktop client (GPUI + gpui-component, migrated from Java + egui)."
+version = "0.2.0"
+edition = "2024"
+rust-version = "1.85"
+description = "So Novel — Rust desktop client (gpui + gpui-component)."
 license = "Apache-2.0"
 publish = false
 
@@ -42,6 +42,9 @@ anyhow = "1"
 thiserror = "2"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# 按天滚动的日志文件 appender（main.rs 注册到 tracing subscriber，跟 stdout 一起输出）。
+# 保留策略（30 天）由启动时清理逻辑自己做 —— tracing-appender 不自带 retention。
+tracing-appender = "0.2"
 
 # Config / serde
 serde = { version = "1", features = ["derive"] }
@@ -91,8 +94,8 @@ boa_engine = "0.21"
 once_cell = "1"
 rand = "0.10"
 
-# 图片解码校验（5b）：egui::Image 是懒加载（错误要等 ui.add 时才暴露），
-# 这里提前用 image::ImageReader 验证字节是真的图片，避免 Failed 路径不可达。
+# 图片解码校验：下载的封面字节在缓存前用 image::ImageReader 校验是否真的是有效图片，
+# 避免 UI 渲染时才发现 Failed（GPUI 不会在下载阶段做解码）。
 image = "0.25"
 
 # URL 解析与拼接（absUrl）
@@ -107,7 +110,6 @@ epub-builder = "0.8"
 # zip 打包（HTML 整本下载用）。关掉 bzip2/lzma 等带 C 依赖的特性，只保留 deflate；
 # 减少在 Windows MSVC 上编译时对 cl.exe 的潜在依赖。
 zip = { version = "8", default-features = false, features = ["deflate-flate2"] }
-flate2 = "1"
 
 # CLI 子命令（5c）。
 clap = { version = "4", features = ["derive"] }

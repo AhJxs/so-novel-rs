@@ -1,23 +1,18 @@
 //! GPUI 事件桥接：把 tokio 后台通道排空 + 触发 UI 重绘。
 //!
-//! 旧 egui 的做法是 `impl eframe::App::ui()` 每帧 `try_recv` 排空所有 `mpsc::Receiver`，
-//! 有进展就 `request_repaint` / `request_repaint_after(200ms)`。Stage 3 替换为：
-//!
 //! 1. [`drain`] 是无副作用的纯逻辑：把 `AppModel` 的所有后台接收端排空一次，
 //!    返回"是否产生过事件"。
 //! 2. [`spawn_drain_loop`] 在 GPUI 前台 executor 上 spawn 一个循环：每 100ms
 //!    `background_executor.timer` 醒来一次 → 拿到 `&mut AppModel` 调一次 [`drain`] →
 //!    有进展就 `cx.notify()` 触发该 view 的 `Render` 重绘。
 //!
-//! 这样 6 个后台通道（搜索 / 详情 / 封面 / TOC / 下载进度 / 书源健康检查 / 更新检查）
+//! 这样后台通道（搜索 / 详情 / 封面 / TOC / 下载进度 / 书源健康检查 / 更新检查）
 //! 都能把进度推到 UI，且不依赖帧轮询。
-//!
-//! 注：旧 egui 的 `ui()` 还在用 `request_repaint_after(200ms)` 是为了"有任务在跑时
-//! 也按一定频率重绘"；本设计用一个固定 100ms 的 timer 替代。
 
 use std::time::Duration;
 
 use gpui::{App, AppContext, Entity};
+use gpui_component::notification::NotificationType;
 use tracing::warn;
 
 use super::{AppModel, UpdateOutcome};
@@ -50,16 +45,50 @@ pub fn drain(model: &mut AppModel) -> bool {
     }
 
     // 3. 下载任务进度。每个 task.drain 内部排空自己的 mpsc。
+    //    循环里借了 `&mut model.tasks`，不能再借 `&mut model` 调 push_notification，
+    //    所以先把要推的通知收进 `finished_notes`，循环结束后统一 flush。
+    let mut finished_notes: Vec<gpui_component::notification::Notification> = Vec::new();
     for t in &mut model.tasks {
         let was_running = t.is_running();
         any |= t.drain();
         if was_running && !t.is_running() {
-            // 任务刚结束（完成 / 失败 / 取消）→ 持久化。
+            // 任务刚结束（完成 / 失败 / 取消）→ 持久化 + 提示。
             let rec = t.to_record();
             if let Err(e) = crate::db::tasks::upsert(model.db.conn(), &rec) {
                 warn!("save task on finish failed: {e:#}");
             }
+            // 提示：书名优先用详情拉的（完整），fallback 搜索结果。truncate 防超长。
+            let book_name = t
+                .book_meta
+                .as_ref()
+                .map(|b| b.book_name.as_str())
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or(t.origin.book_name.as_str());
+            let book_name = crate::gpui_app::components::truncate(book_name, 50);
+            let (msg_key, ty) = match &t.finished {
+                Some(Ok(_)) => (
+                    "Tasks.download_finished.completed",
+                    NotificationType::Success,
+                ),
+                Some(Err(reason)) if reason.is_cancelled() => {
+                    ("Tasks.download_finished.cancelled", NotificationType::Info)
+                }
+                Some(Err(_)) => ("Tasks.download_finished.failed", NotificationType::Error),
+                None => continue, // 不该进这分支
+            };
+            finished_notes.push(
+                gpui_component::notification::Notification::new()
+                    .message(crate::gpui_app::i18n::ts_fmt(
+                        msg_key,
+                        &[("book_name", &book_name)],
+                    ))
+                    .with_type(ty)
+                    .autohide(true),
+            );
         }
+    }
+    for n in finished_notes {
+        model.push_notification(n);
     }
 
     // 4. 书源健康检查。
@@ -73,15 +102,22 @@ pub fn drain(model: &mut AppModel) -> bool {
     if let Some(outcome) = model.update_state.drain() {
         use UpdateOutcome::{Failed, NewVersion, UpToDate};
         match outcome {
-            UpToDate => model.push_success_notification("已是最新版本"),
+            UpToDate => model
+                .push_success_notification(crate::gpui_app::i18n::ts("Toasts.update_up_to_date")),
             NewVersion(latest) => model.push_notification(
-                gpui_component::notification::Notification::warning(format!("新版本 {latest} 可用"))
-                    // 点击 → 打开 release 页
-                    .on_click(|_ev, _window, cx| {
-                        cx.open_url("https://github.com/AhJxs/so-novel-rs/releases/latest");
-                    }),
+                gpui_component::notification::Notification::warning(crate::gpui_app::i18n::ts_fmt(
+                    "Toasts.update_new_version",
+                    &[("ver", &latest)],
+                ))
+                // 点击 → 打开 release 页
+                .on_click(|_ev, _window, cx| {
+                    cx.open_url("https://github.com/AhJxs/so-novel-rs/releases/latest");
+                }),
             ),
-            Failed(err) => model.push_error_notification(format!("检查更新失败: {err}")),
+            Failed(err) => model.push_error_notification(crate::gpui_app::i18n::ts_fmt(
+                "Toasts.update_failed",
+                &[("err", &err)],
+            )),
         }
     }
 

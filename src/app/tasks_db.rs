@@ -6,6 +6,7 @@
 use crate::db::{Db, DownloadTaskRecord};
 
 use super::download_task::DownloadTask;
+use crate::db::tasks::FinishedReason;
 use super::now::now_unix_secs;
 
 pub fn load_tasks_from_db(db: &Db) -> (Vec<DownloadTask>, u64) {
@@ -24,7 +25,9 @@ pub fn load_tasks_from_db(db: &Db) -> (Vec<DownloadTask>, u64) {
         max_id = max_id.max(rec.id);
         let mut task = DownloadTask::from_record(rec.clone());
         if task.finished.is_none() {
-            task.finished = Some(Err("应用重启时中断".to_string()));
+            // 加载自 DB 时 rx/cancel 都是 None —— 没有活动后台任务。
+            // 之前跑着的任务实际是应用退出时被中断的，标 AppRestarted 让 UI 正确归类。
+            task.finished = Some(Err(FinishedReason::AppRestarted));
             task.finished_at_unix = Some(now);
             need_rewrite.push(task.to_record());
         }
