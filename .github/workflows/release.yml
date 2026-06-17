@@ -41,23 +41,26 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # Linux 走 GitHub ubuntu runner 原生 toolchain，rustup target 已装。
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             archive: tar.gz
+          # Linux aarch64 用 cross（ubuntu runner 无 aarch64-gcc 原生 toolchain）。
           - os: ubuntu-latest
             target: aarch64-unknown-linux-gnu
             archive: tar.gz
             cross: true
+          # macOS Apple Silicon 原生。
           - os: macos-latest
             target: aarch64-apple-darwin
             archive: tar.gz
-          - os: macos-latest
-            target: x86_64-apple-darwin
-            archive: tar.gz
-            cross: true
+          # Windows x86_64 原生 MSVC。
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             archive: zip
+          # 注：去掉 `macos-latest / x86_64-apple-darwin / cross: true`：
+          # cross 装 macOS x86 toolchain 在 GitHub Actions 上经常卡 / 失败，
+      # 且 Intel Mac 用户少。如需加回来改用 `macos-13` runner 原生编译。
 
     steps:
       - uses: actions/checkout@v4
@@ -76,13 +79,10 @@ jobs:
             libxcb1-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
             libwayland-dev libgl1-mesa-dev libegl1-mesa-dev \
             libglib2.0-dev libssl-dev \
-            mesa-vulkan-drivers vulkan-validationlayers-dev
-
-      - name: Install cross
-        if: matrix.cross
-        uses: taiki-e/install-action@v2
-        with:
-          tool: cross
+            mesa-vulkan-drivers
+          # vulkan-validationlayers-dev 在 ubuntu-latest 已不可用（被 vulkan-utility-libraries-dev 替代），
+          # 链接 vulkan 只需要 headers —— vulkan-utility-libraries-dev 提供。
+          sudo apt-get install -y vulkan-utility-libraries-dev || true
 
       - name: Build (release)
         shell: bash
