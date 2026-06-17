@@ -117,7 +117,15 @@ clap = { version = "4", features = ["derive"] }
 # 原生文件选择对话框（书源管理「添加」按钮：选 JSON 文件导入）。
 # Linux 走 xdg-portal 而非默认 GTK3，避免引入 gtk3 系统依赖；
 # Windows / macOS 走原生 IFileOpenDialog / NSOpenPanel。
-rfd = { version = "0.15", default-features = false, features = ["xdg-portal", "tokio"] }
+#
+# 用 `async-std` feature（不用 `tokio`）：
+# - 项目顶层 async runtime 是 smol（gpui 0.2.2 + 项目自己），与 async-std 接口兼容
+# - rfd 的 `tokio` feature 启 ashpd `tokio` feature；rfd 的 `async-std` feature
+#   启 ashpd `async-std` feature。gpui 0.2.2 默认已经启 ashpd `async-std`，
+#   如果再启 ashpd `tokio` 会触发 ashpd 0.11.1 源码的 compile_error
+#   ("You can't enable both async-std & tokio features at once")
+#   在 Linux build 报 7 个 E0061/E0252/E0277。
+rfd = { version = "0.15", default-features = false, features = ["xdg-portal", "async-std"] }
 
 # 临时目录（测试用 — `ConfigPaths::discover` / `load_rules_from_db` 的单元测试
 # 通过 `tempfile::tempdir()` 把 `~/.sonovel` 重定向到临时目录避免污染用户主目录）。
