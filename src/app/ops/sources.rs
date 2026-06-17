@@ -34,15 +34,18 @@ pub fn toggle_source_disabled(
 
 /// 从用户选中的 JSON 文件导入书源到 sonovel.db。
 ///
-/// 返回 (导入数量, 错误信息 toast 文本)
-/// - 成功：`Some(n)`
-/// - 失败：`None` + 错误文案
+/// **去重**：DB 中已存在的 `url`（忽略大小写、首尾空格）会被跳过，不重复插入。
+/// 返回 `ImportResult { inserted, skipped }` —— `skipped` 即被去重跳过的条数。
+/// 全部被跳过时返回 `Ok(ImportResult { inserted: 0, skipped: n })`（不视为错误，
+/// 调用方据此给用户一个 info 文案）。
+///
+/// 失败：返回 `Err(msg)`，msg 走 toast notification。
 pub fn add_sources_from_file(
     db: &mut Db,
     rules: &mut Vec<Rule>,
     rule_load_error: &mut Option<String>,
     path: &Path,
-) -> Result<usize, String> {
+) -> Result<ImportResult, String> {
     let bytes = std::fs::read(path).map_err(|e| format!("读取文件失败: {e}"))?;
     let text = String::from_utf8_lossy(&bytes);
 
@@ -72,7 +75,32 @@ pub fn add_sources_from_file(
         return Err("文件中未找到有效的书源条目".to_string());
     }
 
-    let n = crate::db::sources::insert_many(db.conn_mut(), &rules_vec)
+    // **去重**：先查 DB 已有的 url 集合，过滤掉文件中 url 重复的条目。
+    //
+    // 用 lowercase 比较：https://Foo.com 和 https://foo.com 视为同一源。trim 头尾
+    // 空格后空字符串跳过（"占位规则"靠 name 唯一性区分，不靠 url）。
+    let existing_urls = crate::db::sources::list_existing_urls(db.conn())
+        .map_err(|e| format!("查询已有书源失败: {e}"))?;
+    let mut to_insert: Vec<Rule> = Vec::with_capacity(rules_vec.len());
+    let mut skipped: usize = 0;
+    for r in rules_vec {
+        let key = r.url.trim().to_lowercase();
+        if !key.is_empty() && existing_urls.contains(&key) {
+            skipped += 1;
+        } else {
+            to_insert.push(r);
+        }
+    }
+
+    if to_insert.is_empty() {
+        // 全部 url 都已存在 —— 不写库，提示"全部已存在"。
+        return Ok(ImportResult {
+            inserted: 0,
+            skipped,
+        });
+    }
+
+    let n = crate::db::sources::insert_many(db.conn_mut(), &to_insert)
         .map_err(|e| format!("导入失败: {e}"))?;
 
     match crate::rules::load_rules_from_db(db.conn()) {
@@ -84,7 +112,18 @@ pub fn add_sources_from_file(
             tracing::warn!("插入成功但重载规则失败: {e:#}");
         }
     }
-    Ok(n)
+    Ok(ImportResult {
+        inserted: n,
+        skipped,
+    })
+}
+
+/// 导入文件的结果统计。`inserted` 实际写入 DB 的条数，`skipped` 因 url 重复被
+/// 去重跳过的条数。
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ImportResult {
+    pub inserted: usize,
+    pub skipped: usize,
 }
 
 /// 删除一条书源（DB + 内存中的 rules / overrides / health 都同步清掉）。
@@ -107,7 +146,6 @@ pub fn delete_source(
         // id 已不在 DB；同步内存即可
         rules.retain(|r| r.id != source_id);
     }
-    sources_state.pending_delete = None;
     Ok(deleted)
 }
 

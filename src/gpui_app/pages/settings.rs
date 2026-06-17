@@ -327,7 +327,24 @@ impl SettingsPage {
                             ts("Settings.item.theme"),
                             SettingField::render({
                                 let theme_state = self.theme_state.clone();
-                                move |_opts, _window, _cx| Select::new(&theme_state)
+                                move |options, _window, _cx| {
+                                    // 主题下拉默认宽度太窄，长主题名（如
+                                    // "Ayu Light / Ayu Dark / ..."）会被截断。
+                                    // `.min_w_48()` = 12rem = 192px 兜底，
+                                    // 同时按 layout 设主宽度：horizontal → 256px
+                                    // （与 `SettingField::input` 默认行为一致），
+                                    // 其他 → 占满整行。`with_size(options.size)`
+                                    // 保持与同 group 其他 field 字号一致。
+                                    let mut el = Select::new(&theme_state)
+                                        .with_size(options.size)
+                                        .min_w_48();
+                                    if options.layout.is_horizontal() {
+                                        el = el.w_64();
+                                    } else {
+                                        el = el.w_full();
+                                    }
+                                    el
+                                }
                             }),
                         )
                         .description(ts("Settings.desc.theme"),),

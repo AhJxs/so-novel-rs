@@ -27,6 +27,16 @@ rust-i18n = "3"
 # Async runtime (kept lean — used in later stages; pulled now so tests/integration are stable)
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "fs"] }
 
+# smol：gpui 0.2.2 的 `cx.spawn` 用的是 smol executor（在 smol 之上封了一层），
+# 不是 tokio。在 cx.spawn 的 future 内部**不能**用 `tokio::time::sleep` /
+# `tokio::sync::mpsc::channel` —— 那边没有 tokio reactor，会 panic。
+# LibraryPage 的 watcher 任务必须用 smol 的 channel + smol 定时器（通过
+# `async_cx.background_executor().timer(...)` 拿）。
+# 选 smol 而非给项目新加 tokio runtime：项目顶层只有 gpui 一个 runtime，
+# 再起一个 tokio runtime 会导致两套 executor 共存、background task 跨线程
+# 调度难以追踪。
+smol = "2"
+
 # Errors / logging
 anyhow = "1"
 thiserror = "2"
@@ -44,6 +54,13 @@ toml_edit = { version = "0.25", features = ["serde"] }
 
 # Filesystem helpers
 directories = "6"
+
+# 文件系统监听（本地书库实时刷新）。gpui-component 0.5.1 内部也用 7.0.0，
+# default-features 在三大平台都给出可用后端（Windows ReadDirectoryChangesW /
+# macOS FSEvents / Linux inotify）。debounce 由 LibraryPage 的 watcher 任务
+# 内部用 tokio::time::sleep + AtomicU64 计数器自行实现，不再引入
+# notify-debouncer-mini 增加编译时间和依赖图复杂度。
+notify = "7"
 
 # HTTP client (rustls 避免 OpenSSL 依赖；cookies 用于规则中的 Cookie 头注入；
 # gzip/brotli 解压由 reqwest 透明处理)。

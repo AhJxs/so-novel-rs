@@ -28,9 +28,7 @@ pub fn spawn_search(
     search.results.clear();
     search.source_status.clear();
     search.received = 0;
-    search.pending_scroll_top = true;
     search.selected = None;
-    search.detail_popup_for = None;
 
     let target_sources: Vec<crate::rules::Source> = if let Some(id) = search.source_id {
         rules

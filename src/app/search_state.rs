@@ -62,17 +62,6 @@ pub struct SearchState {
     /// spawn_search 时拷自 cfg.search_filter；全部源返回后用它决定是否调用 filter_sort。
     pub filter_after_done: bool,
 
-    /// 用户手动隐藏的"最近任务横幅"对应的任务 id。
-    /// 只有当最新任务 id 不等于此值时才显示横幅 — 这样新触发下载会自动重新显示。
-    pub banner_dismissed_for: Option<u64>,
-
-    /// 当前打开的详情弹窗对应的搜索结果索引。`None` 表示未打开。
-    /// 点击搜索结果卡片的书名 → 设为 `Some(idx)`；点弹窗 ✕ 或 ESC 关闭。
-    pub detail_popup_for: Option<usize>,
-
-    // ---- 下载弹窗（章节范围选择） ----
-    /// 当前打开的下载弹窗对应的搜索结果索引。`None` 表示未打开。
-    pub download_popup_for: Option<usize>,
     /// TOC 预取缓存：(source_id, url) → TocState。
     pub toc_cache: HashMap<(i32, String), TocState>,
     /// TOC 预取后台任务的接收端。
@@ -94,10 +83,6 @@ pub struct SearchState {
     /// drain_detail 期间收集到的待 prefetch 封面 URL，drain 后由 AppModel 取出统一派发。
     pub pending_cover_prefetch: Vec<(i32, String)>,
 
-    /// 触发一次"结果列表滚回顶部"的一次性标记。
-    /// `spawn_search` 设 true，下一次 `show_results` 在 `ScrollArea` 上应用
-    /// `.vertical_scroll_offset(0.0)` 后清零。
-    pub pending_scroll_top: bool,
 }
 
 /// 详情面板加载状态。

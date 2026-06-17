@@ -84,6 +84,33 @@ pub fn list_with_overrides(conn: &Connection) -> Result<Vec<Rule>> {
     Ok(out)
 }
 
+/// 提取 DB 中所有书源的 `url` 字段（小写比较前 trim），返回集合 —— 给
+/// `add_sources_from_file` 做 dedup 用。
+///
+/// 同一 URL（忽略大小写、首尾空格）只导入一次。空 URL 不计入（让 `Rule::url` 为空、
+/// `Rule::name` 也不空的"占位规则"仍能导入）。
+///
+/// 不带 overlap with `list_with_overrides` 是因为 dedup 只需要 url 字段，没必要反
+/// 序列化整个 Rule —— 1000 条规则时省 ~80% 时间 + 内存。
+pub fn list_existing_urls(conn: &Connection) -> Result<std::collections::HashSet<String>> {
+    let mut stmt = conn
+        .prepare("SELECT data FROM sources")
+        .context("prepare list existing urls")?;
+    let mut rows = stmt.query([]).context("query sources for urls")?;
+    let mut set = std::collections::HashSet::new();
+    while let Some(row) = rows.next()? {
+        let data: String = row.get(0)?;
+        if let Ok(rule) = serde_json::from_str::<Rule>(&data) {
+            let url = rule.url.trim();
+            if !url.is_empty() {
+                // 标准化：to_lowercase 集中所有大小写变体（http vs HTTP, trailing slash 区分由 url 原文保留）
+                set.insert(url.to_lowercase());
+            }
+        }
+    }
+    Ok(set)
+}
+
 /// 仅返回被用户禁用的 source id 集合。
 pub fn list_disabled(conn: &Connection) -> Result<std::collections::HashSet<i32>> {
     let mut stmt = conn

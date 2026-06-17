@@ -43,7 +43,7 @@ impl RenderOnce for PageHeader {
             .flex_row()
             .items_center()
             .justify_between()
-            .pb_4()
+            .pb_2()
             .border_b_1()
             .border_color(cx.theme().border)
             .child(
@@ -53,7 +53,7 @@ impl RenderOnce for PageHeader {
                     .gap_1()
                     .child(
                         div()
-                            .text_2xl()
+                            .text_lg()
                             .font_weight(gpui::FontWeight::BOLD)
                             .text_color(cx.theme().foreground)
                             .child(self.title),
@@ -61,7 +61,7 @@ impl RenderOnce for PageHeader {
                     .when_some(self.subtitle, |this, sub| {
                         this.child(
                             div()
-                                .text_sm()
+                                .text_xs()
                                 .text_color(cx.theme().muted_foreground)
                                 .child(sub),
                         )

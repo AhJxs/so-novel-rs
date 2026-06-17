@@ -20,6 +20,7 @@ mod now;
 mod runtime;
 mod search_state;
 mod sources_state;
+pub use sources_state::SourcesFilterStatus;
 mod tasks_db;
 mod update_state;
 
@@ -144,12 +145,7 @@ impl AppModel {
         let (tasks, next_task_id) = load_tasks_from_db(&db);
         tracing::info!("从 DB 加载 {} 个历史下载任务", tasks.len());
 
-        let initial_banner_dismissed = tasks.iter().map(|t| t.id).max();
-
-        let search = SearchState {
-            banner_dismissed_for: initial_banner_dismissed,
-            ..SearchState::default()
-        };
+        let search = SearchState::default();
 
         Self {
             paths,
@@ -286,6 +282,9 @@ impl AppModel {
     }
 
     /// 从 JSON 文件导入书源。
+    ///
+    /// 自动按 `url` 去重 —— DB 已有的 url（忽略大小写、首尾空格）跳过，不重复插入。
+    /// 反馈给用户的 toast 同时显示"导入 X / 跳过 Y"。
     pub fn add_sources_from_file(&mut self, path: &std::path::Path) {
         match crate::app::ops::add_sources_from_file(
             &mut self.db,
@@ -293,7 +292,23 @@ impl AppModel {
             &mut self.rule_load_error,
             path,
         ) {
-            Ok(n) => self.push_success_notification(format!("已导入 {n} 个书源")),
+            Ok(result) => {
+                // i18n 模板：`"Imported {inserted}, skipped {skipped} duplicates"`
+                // 全部重复（inserted=0）降级为 warning，否则 success。
+                let msg = crate::gpui_app::i18n::ts_fmt(
+                    "Sources.import.result",
+                    &[
+                        ("inserted", &result.inserted.to_string()),
+                        ("skipped", &result.skipped.to_string()),
+                    ],
+                )
+                .to_string();
+                if result.inserted == 0 && result.skipped > 0 {
+                    self.push_warning_notification(msg);
+                } else {
+                    self.push_success_notification(msg);
+                }
+            }
             Err(msg) => {
                 if msg.starts_with("文件内容为空")
                     || msg.starts_with("文件中未找到有效")
