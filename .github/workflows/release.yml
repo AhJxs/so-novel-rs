@@ -9,7 +9,7 @@
 # - macos-aarch64   → tar.gz（arm64，Apple Silicon）
 # - macos-x86_64    → tar.gz（Intel，cross 到 x86_64-apple-darwin）
 # - linux-x86_64    → tar.gz（复用 scripts/package-linux.sh）
-# - linux-aarch64   → tar.gz（cross 编译）
+# - linux-aarch64   → tar.gz（原生 arm64 runner）
 #
 # 产物命名：so-novel-rs-<version>-<os>-<arch>.<ext>，发 Release 时按名上传。
 #
@@ -45,11 +45,10 @@ jobs:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             archive: tar.gz
-          # Linux aarch64 用 cross（ubuntu runner 无 aarch64-gcc 原生 toolchain）。
-          - os: ubuntu-latest
+          # Linux aarch64 走 GitHub 原生 arm64 runner（ubuntu-24.04-arm），无需 cross/qemu。
+          - os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
             archive: tar.gz
-            cross: true
           # macOS Apple Silicon 原生。
           - os: macos-latest
             target: aarch64-apple-darwin
@@ -86,12 +85,7 @@ jobs:
 
       - name: Build (release)
         shell: bash
-        run: |
-          if [ "${{ matrix.cross }}" = "true" ]; then
-            cross build --release --target ${{ matrix.target }}
-          else
-            cargo build --release --target ${{ matrix.target }}
-          fi
+        run: cargo build --release --target ${{ matrix.target }}
 
       - name: Read version
         id: ver
