@@ -6468,7 +6468,7 @@ checksum = "dd538fb6910ac1099850255cf94a94df6551fbdd602454387d0adb2d1ca6dead"
 
 [[package]]
 name = "so-novel-rs"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "boa_engine",
