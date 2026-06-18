@@ -297,6 +297,10 @@ pub async fn download_chapters(
         let cancel = cancel.clone();
         let eff = eff.clone();
         let enable_retry = cfg.enable_retry;
+        // 简繁转换需要源/目标语言。`source` / `cfg` 是借用，闭包 'static 要求 owned
+        // 值；clone Rule（Arc 浅拷贝，开销小）和 target LangType（Copy）。
+        let rule_lang = source.rule.language.clone();
+        let target_lang = cfg.language;
 
         handles.push(tokio::spawn(async move {
             // 限并发
@@ -364,8 +368,13 @@ pub async fn download_chapters(
 
             match result {
                 Ok(parsed) => {
-                    let (final_title, body) =
-                        crate::export::render_chapter(&parsed, &rule_chapter, render_target);
+                    let (final_title, body) = crate::export::render_chapter(
+                        &parsed,
+                        &rule_chapter,
+                        render_target,
+                        &rule_lang,
+                        &target_lang,
+                    );
                     let _ = progress.send(Progress::ChapterDone {
                         index: order,
                         title: final_title.clone(),

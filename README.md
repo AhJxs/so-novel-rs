@@ -7,14 +7,15 @@ So Novel 的 Rust + GPUI 桌面客户端，从 Java 版本完整重写。GUI 栈
 | 模块 | 状态 | 说明 |
 |------|------|------|
 | 搜索下载 | ✅ | 多源并发聚合搜索、相似度过滤排序、quanben5 加密搜索、详情面板、封面、选章下载 |
-| 下载任务 | ✅ | 并发抓取、失败重试、进度跟踪、取消、封面嵌入、持久化、指定章节范围 |
-| 本地书库 | ✅ | 扫描已下载书籍、按格式/日期/大小排序、删除二次确认 |
-| 书源管理 | ✅ | 从 JSON 导入（原生对话框）、启用/禁用、连通性测速、从数据库删除 |
-| 设置 | ✅ | gpui-component `Settings` 组件 4-page 布局；改任一字段立即落盘 |
-| 导出 | ✅ | EPUB / TXT（多编码）/ HTML（zip 打包）；PDF 暂未实现 |
+| 下载任务 | ✅ | 并发抓取、失败重试（retry-min/max 真正生效）、进度跟踪、取消、封面嵌入、持久化、指定章节范围、下载内容**简繁自动转换** |
+| 本地书库 | ✅ | 扫描已下载书籍、按格式/日期/大小排序、删除二次确认（外科式移除 + watcher 抑制，无空态闪烁） |
+| 书源管理 | ✅ | 从 JSON 导入（原生对话框）、启用/禁用、连通性测速、从数据库删除、URL 可点击跳浏览器 |
+| 设置 | ✅ | gpui-component `Settings` 组件 4-page 布局；改任一字段立即落盘；检查更新按钮在有新版时切换成"下载新版"跳浏览器 |
+| 导出 | ✅ | EPUB / TXT（多编码）/ HTML（zip 打包）；PDF 暂未实现；含**简繁中文自动转换** |
 | 主题系统 | ✅ | 38 个可用主题；embed 21 个 + 用户 `~/.sonovel/themes/`；文件 watcher 热重载 |
 | 多语言 | ✅ | zh-CN / zh-HK / en 三语；切换即时生效（locale 全局 + Settings id 重建） |
-| CLI | ✅ | `search` / `download` / `sources` / `version` 四个子命令 |
+| CLI | ✅ | `search` / `download` / `sources` 三个子命令；`--json` 机器可读输出；结果与 GUI 一致（共享 `filter_sort`） |
+| 更新检查 | ✅ | 检测 GitHub release，有新版时按钮变"下载新版 vX.Y.Z"（ExternalLink 图标） |
 | 配置 | ✅ | `~/.sonovel/config.toml`（toml_edit 保留注释）+ `~/.sonovel/sonovel.db`（SQLite） |
 
 ## 技术栈
@@ -29,6 +30,7 @@ So Novel 的 Rust + GPUI 桌面客户端，从 Java 版本完整重写。GUI 栈
 - **国际化**: rust-i18n 3（locales/app.yml 编译期嵌入，与 gpui-component 共享全局 locale）
 - **导出**: epub-builder 0.8 / zip 8 / encoding_rs 0.8
 - **编码检测**: chardetng 1.0
+- **简繁转换**: zhconv 0.4（OpenCC + MediaWiki 词表，Aho-Corasick 匹配；纯 Rust 嵌入词表，无 FFI 依赖）
 - **文件选择**: rfd 0.15 + `AsyncFileDialog`（**必须用 async API**，见下文踩坑说明）
 - **图标**: gpui-component 内置 IconName（Lucide 系列）
 - **平台适配**: Windows 暗色窗口 / 无控制台窗口
@@ -85,6 +87,7 @@ so-novel-rs/
     │   │   ├── page_header.rs   # 标题 + 副标题 + 右侧 actions
     │   │   ├── empty_state.rs   # 空态占位
     │   │   ├── status_badge.rs  # 状态标签（成功/失败/警告）
+    │   │   ├── pagination.rs    # 分页页脚 + `compute_page_window` 公共 helper
     │   │   └── formatting.rs    # 文件大小 / 时间 / 数量格式化
     │   └── pages/               # 5 个一级页面（NavPage）
     │       ├── search.rs        # 搜索下载
@@ -97,7 +100,7 @@ so-novel-rs/
     ├── models/                  # Rule / Book / Chapter / SearchResult / SourceInfo / ContentType
     ├── parser/                  # DOM / 搜索 / 详情 / 目录 / 章节 / 过滤 / 格式化
     ├── rules/                   # 从 DB 加载书源 + 用户覆写
-    └── util/                    # 文件名清洗 / 时间格式 / 语言检测 / 系统命令
+    └── util/                    # 文件名清洗 / 时间格式 / 语言检测 / 系统命令 / 简繁转换
 ```
 
 ## Sidebar 导航（Stage 4+）
@@ -122,10 +125,10 @@ so-novel-rs/
 |  | 下载 | 下载目录（Input + suffix 图标 → rfd `AsyncFileDialog`）/ 默认格式 / TXT 编码 / 保留章节缓存 / 启用下载进度条 |
 |  | 书源 | 书源语言 / 搜索条数上限 / 相似度过滤 |
 | **抓取** | 并发与间隔 | 并发上限 / 请求间隔 min/max |
-|  | 重试 | 启用重试 / 最大重试次数 / 重试间隔 min/max |
+|  | 重试 | 启用重试 / 最大重试次数 / 重试间隔 min/max（`retry-min/max` 真正生效） |
 | **代理** | HTTP 代理 | 启用 / Host / Port |
 |  | Cookie | 起点 Cookie |
-| **关于** | 信息 | 版本号 / 检查更新 / 项目主页 |
+| **关于** | 信息 | 版本号 / 检查更新（按钮在有新版时变"下载新版"）/ 项目主页 |
 
 任一字段改动 → `model.update → persist_settings()` 立即落盘，**无「保存」按钮**。
 
@@ -193,18 +196,21 @@ cargo run
 不带子命令启动 GUI；带子命令走 CLI 模式：
 
 ```sh
-# 搜索
+# 搜索（结果与 GUI 一致：自动按 config.search_filter 过滤 + 排序）
 so-novel-rs search "斗破苍穹"
 so-novel-rs search "斗破苍穹" --source 1 --limit 10
+so-novel-rs search "斗破苍穹" --json | jq length   # 机器可读输出
 
 # 下载
 so-novel-rs download "https://example.com/book/123" --format epub
+so-novel-rs download "https://example.com/book/123" --output D:\novels --format txt
 
-# 列出书源
+# 列出书源（--json 输出 rules 数组）
 so-novel-rs sources
+so-novel-rs sources --json
 
-# 版本
-so-novel-rs version
+# 版本（clap 自动注入的 -V/--version flag，version 子命令已移除）
+so-novel-rs --version
 ```
 
 ### 打包
@@ -220,8 +226,8 @@ cargo build --release --target x86_64-unknown-linux-gnu
 ## 代码质量
 
 ```sh
-cargo clippy           # 零警告
-cargo test --lib       # 216 passed (3 ignored 为真实联网)
+cargo clippy --all-targets -- -D warnings   # 零警告（CI 严格模式）
+cargo test --lib                          # 234 passed (3 ignored 为真实联网)
 ```
 
 ## 测试
@@ -230,4 +236,28 @@ cargo test --lib       # 216 passed (3 ignored 为真实联网)
 cargo test
 ```
 
-当前 **216 个测试全通过**（3 个 ignored 为真实联网测试，需 `--ignored` 手动执行）。
+当前 **234 个测试全通过**（3 个 ignored 为真实联网测试，需 `--ignored` 手动执行）。
+
+## 简繁中文转换
+
+下载章节时若 `Rule.language`（书源自带语言标记）与 `config.language`（用户目标语言）不同，自动把章节正文做简繁转换：
+
+- TXT：zhconv 整串转换（含台湾用词差异，如"软件"→"軟體"）
+- HTML / EPUB：跳过 `<script>` / `<style>` 块，其它内容（标签外文本、属性值）走 zhconv（ASCII 字符不会被改 → 标签结构稳定）
+- PDF：阶段 1 降级为 HTML 模板，照走转换
+
+`Settings → 书源语言` 即决定目标语言。
+
+底层用 [zhconv 0.4](https://crates.io/crates/zhconv)（OpenCC + MediaWiki 词表合并，Aho-Corasick 匹配，编译期嵌入数据），纯 Rust 无 FFI 依赖。注意：`t2s` 是字面繁→简（如"軟體"→"软体"），不会反向做台湾→大陆用词映射。
+
+## 更新检查
+
+`Settings → 关于 → 检查更新` 按钮：
+- 未检查 / 正在检查：spinner + "检查 GitHub 最新版本"
+- 检查完成且有新版本：ExternalLink 图标 + `下载新版 vX.Y.Z`（带实际版本号），点击跳 `https://github.com/AhJxs/so-novel-rs/releases/latest`
+
+底层 `update_state.rs` 用 `serde_json` 解析 GitHub API 响应（旧版按行匹配 pretty-print 会在压缩 JSON 下误报"(empty result)"）。
+
+## 本地书库删除
+
+`delete_library_entry` 外科式从 `entries` 中 `retain` 掉被删条目（不做全量 rescan），同时设 `watcher_skip_until_unix_ms = now + 1000ms` 抑制 watcher 在 1s 内触发 rescan。效果：删除时 UI 立即少一行，无空态闪烁。1s 后窗口过期，新文件添加等正常 fs 事件仍会触发 rescan。

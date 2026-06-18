@@ -15,27 +15,28 @@ use std::collections::HashMap;
 
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    div, px, App, AppContext, ClickEvent, Context, Entity, IntoElement, ParentElement, Render,
-    SharedString, Styled, Window,
+    App, AppContext, ClickEvent, Context, Entity, IntoElement, ParentElement, Render, SharedString,
+    Styled, Window, div, px,
 };
 use gpui_component::StyledExt;
 use gpui_component::{
+    ActiveTheme as _, Disableable, Icon, IconName, IndexPath, Selectable, Sizable, WindowExt,
     button::{Button, ButtonVariant, ButtonVariants as _},
     dialog::{Dialog, DialogButtonProps},
     h_flex,
     input::{Input, InputEvent, InputState},
+    link::Link,
     list::{List, ListDelegate, ListItem, ListState},
     spinner::Spinner,
     switch::Switch,
     tag::Tag,
-    v_flex, ActiveTheme as _, Disableable, Icon, IconName, IndexPath, Selectable, Sizable,
-    WindowExt,
+    v_flex,
 };
 
 use crate::app::{AppModel, SourcesFilterStatus};
 use crate::crawler::health::SourceHealth;
 use crate::gpui_app::components::{
-    compute_page_window, truncate, EmptyState, PageHeader, Pagination, StatusBadge,
+    EmptyState, PageHeader, Pagination, StatusBadge, compute_page_window, truncate,
 };
 use crate::gpui_app::i18n::{ts, ts_fmt};
 use crate::models::Rule;
@@ -593,19 +594,14 @@ fn render_source_row(
                         ),
                 ),
         )
-        // ---- URL ----
+        // ---- URL（可点击跳浏览器；Link 内置 link 色 + 下划线 + hover 反馈）----
         .child(
-            div()
+            Link::new(("source-url", index as u64))
+                .href(SharedString::from(rule.url.clone()))
                 .w(px(250.))
-                .overflow_x_hidden()
                 .text_xs()
-                .text_color(cx.theme().muted_foreground)
-                .child(
-                    div()
-                        .whitespace_nowrap()
-                        .text_ellipsis()
-                        .child(truncate(&rule.url, 60)),
-                ),
+                .overflow_x_hidden()
+                .child(truncate(&rule.url, 60)),
         )
         // ---- 健康状态 Badge ----
         .child(div().w(px(150.)).justify_end().child({

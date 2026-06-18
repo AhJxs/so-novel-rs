@@ -224,12 +224,34 @@ impl LibraryPage {
                 let now = counter.load(Ordering::Relaxed);
                 if now != last_seen {
                     last_seen = now;
-                    let _ = page_weak.update(async_cx, |_p, cx| {
-                        model_for_watcher.update(cx, |m, cx| {
-                            m.refresh_library_async(cx);
+                    // 如果刚发生删除（delete_library_entry 置了 1s skip 窗口），
+                    // 跳过此次 rescan —— 避免 entries.clear() + 后台 fill 制造的
+                    // "empty → 重新加载" 闪一下。1s 后窗口过期，正常的 add/modify
+                    // 事件仍会触发 rescan。
+                    let skip_due_to_delete = page_weak
+                        .update(async_cx, |_p, _cx| {
+                            model_for_watcher
+                                .read(_cx)
+                                .library
+                                .watcher_skip_until_unix_ms
+                        })
+                        .unwrap_or(None)
+                        .map(|until| {
+                            let now_ms = std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .map(|d| d.as_millis() as u64)
+                                .unwrap_or(0);
+                            now_ms < until
+                        })
+                        .unwrap_or(false);
+                    if !skip_due_to_delete {
+                        let _ = page_weak.update(async_cx, |_p, cx| {
+                            model_for_watcher.update(cx, |m, cx| {
+                                m.refresh_library_async(cx);
+                            });
+                            cx.notify();
                         });
-                        cx.notify();
-                    });
+                    }
                 }
             }
         })

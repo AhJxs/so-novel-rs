@@ -14,7 +14,7 @@
 //!
 //! 模板内嵌：避免拉 FreeMarker 等价物。仅 `${title}` / `${content}` 两个占位。
 
-use crate::config::ExportFormat;
+use crate::config::{ExportFormat, LangType};
 use crate::models::{Chapter, RuleChapter};
 use crate::parser::{filter::filter_chapter, formatter::format_chapter};
 
@@ -43,6 +43,9 @@ impl From<ExportFormat> for RenderTarget {
 ///
 /// 入参 `chapter` 是 ChapterParser 拿到的 `(url, title, content=原 HTML, order)`；
 /// `rule_chapter` 提供 filterTxt / filterTag / paragraphTagClosed / paragraphTag。
+/// `source_lang_raw` 是 `Rule.language`（书源自带的语言标记，如 "zh_CN" / "zh_TW" /
+/// "zh_Hant"），用于判断是否需要简繁转换；`target_lang` 是用户在 Settings 选的目标
+/// 语言。source == target 或 source 解析失败 → 跳过转换。
 ///
 /// 返回 `(title, body)` — 调用方负责落盘（阶段 3b 导出层）。返回的 `title`
 /// 是经过"`1.章节名` → `第1章 章节名`"重写后的版本。
@@ -50,6 +53,8 @@ pub fn render_chapter(
     chapter: &Chapter,
     rule_chapter: &RuleChapter,
     target: RenderTarget,
+    source_lang_raw: &str,
+    target_lang: &LangType,
 ) -> (String, String) {
     let filtered = filter_chapter(chapter, rule_chapter);
     let formatted_html = format_chapter(&filtered.content, rule_chapter);
@@ -67,7 +72,34 @@ pub fn render_chapter(
         }
     };
 
-    (filtered.title, body)
+    maybe_convert_chinese(filtered.title, body, target, source_lang_raw, target_lang)
+}
+
+/// 若源语言与目标语言不同，把章节标题 + body 简繁转换。
+/// TXT body 整串转；HTML/EPUB/PDF 走 `convert_html_body`（跳过 `<script>/<style>`，其它
+/// 原文走 zhconv —— zhconv 不会改 ASCII 字符，所以标签结构稳定）。
+fn maybe_convert_chinese(
+    title: String,
+    body: String,
+    target: RenderTarget,
+    source_lang_raw: &str,
+    target_lang: &LangType,
+) -> (String, String) {
+    use crate::util::zhconv::{convert_html_body, convert_text};
+    let Some(source) = LangType::parse(source_lang_raw) else {
+        return (title, body);
+    };
+    if source == *target_lang {
+        return (title, body);
+    }
+    let new_title = convert_text(&title, target_lang);
+    let new_body = match target {
+        RenderTarget::Txt => convert_text(&body, target_lang),
+        RenderTarget::Html | RenderTarget::Epub | RenderTarget::Pdf => {
+            convert_html_body(&body, target_lang)
+        }
+    };
+    (new_title, new_body)
 }
 
 /// TXT：从 `<p>...</p>` 中抽段落文字，全角缩进 2 字符 + 换行。
@@ -156,6 +188,16 @@ mod tests {
         }
     }
 
+    /// 测试便利 wrapper：source="" 解析失败 → 跳过转换，行为与原签名等价。
+    /// 已有 6 个测试用 `render(...)` 调它，避免每个测试都传 lang。
+    fn render(
+        chapter: &Chapter,
+        rule_chapter: &RuleChapter,
+        target: RenderTarget,
+    ) -> (String, String) {
+        render_chapter(chapter, rule_chapter, target, "", &LangType::ZhCn)
+    }
+
     fn raw_chapter() -> Chapter {
         Chapter {
             url: "https://x/c1.html".into(),
@@ -170,7 +212,7 @@ mod tests {
     #[test]
     fn render_txt_extracts_paragraphs_with_indent() {
         let (title, body) =
-            render_chapter(&raw_chapter(), &rule_closed_with_ad(), RenderTarget::Txt);
+            render(&raw_chapter(), &rule_closed_with_ad(), RenderTarget::Txt);
         assert_eq!(title, "第1章 起航");
         let lines: Vec<&str> = body.split('\n').collect();
         // 标题 + 空行 + 段一 + 段二 + 末尾空行
@@ -200,7 +242,7 @@ mod tests {
             content: "段一<br><br>段二<br>段三".into(),
             order: 1,
         };
-        let (_t, body) = render_chapter(&raw, &rule, RenderTarget::Txt);
+        let (_t, body) = render(&raw, &rule, RenderTarget::Txt);
         assert!(body.contains("段一"));
         assert!(body.contains("段二"));
         assert!(body.contains("段三"));
@@ -210,7 +252,7 @@ mod tests {
 
     #[test]
     fn render_html_template_wraps_correctly() {
-        let (_t, body) = render_chapter(&raw_chapter(), &rule_closed_with_ad(), RenderTarget::Html);
+        let (_t, body) = render(&raw_chapter(), &rule_closed_with_ad(), RenderTarget::Html);
         // 模板里有完整 HTML 文档结构
         assert!(body.contains("<html"), "missing <html: {body}");
         assert!(body.contains("<title>第1章 起航</title>"));
@@ -230,7 +272,7 @@ mod tests {
             content: "<p>x</p>".into(),
             order: 1,
         };
-        let (_t, body) = render_chapter(
+        let (_t, body) = render(
             &raw,
             &RuleChapter {
                 paragraph_tag_closed: true,
@@ -245,7 +287,7 @@ mod tests {
 
     #[test]
     fn render_epub_template_uses_xhtml_doctype() {
-        let (_t, body) = render_chapter(&raw_chapter(), &rule_closed_with_ad(), RenderTarget::Epub);
+        let (_t, body) = render(&raw_chapter(), &rule_closed_with_ad(), RenderTarget::Epub);
         assert!(body.contains("<?xml"));
         assert!(body.contains("xhtml"));
         assert!(body.contains("<h2>第1章 起航</h2>"));
@@ -256,7 +298,7 @@ mod tests {
 
     #[test]
     fn render_pdf_degrades_to_html_template() {
-        let (_t, body) = render_chapter(&raw_chapter(), &rule_closed_with_ad(), RenderTarget::Pdf);
+        let (_t, body) = render(&raw_chapter(), &rule_closed_with_ad(), RenderTarget::Pdf);
         // 与 Html 模板等同
         assert!(body.contains("<html"));
         assert!(body.contains("<h1>第1章 起航</h1>"));
@@ -282,7 +324,7 @@ mod tests {
             content: "<p>x</p>".into(),
             order: 5,
         };
-        let (title, body) = render_chapter(
+        let (title, body) = render(
             &raw,
             &RuleChapter {
                 paragraph_tag_closed: true,
@@ -292,5 +334,99 @@ mod tests {
         );
         assert_eq!(title, "第5章 归航");
         assert!(body.contains("<title>第5章 归航</title>"));
+    }
+
+    // ---------- 简繁转换集成 ----------
+
+    /// 端到端：源 zh_CN + 目标 zh_TW → TXT body 简体转繁体（含台湾用词）。
+    #[test]
+    fn render_converts_simplified_to_traditional_tw_for_txt() {
+        let raw = Chapter {
+            url: "https://x/".into(),
+            title: "软件".into(), // 测试"软体"用词转换
+            content: "<p>头发的颜色</p>".into(),
+            order: 1,
+        };
+        let (title, body) = render_chapter(
+            &raw,
+            &RuleChapter::default(),
+            RenderTarget::Txt,
+            "zh_CN",
+            &LangType::ZhTw,
+        );
+        // 简体"软件" → 台湾繁体"軟體"
+        assert_eq!(title, "軟體");
+        // 简体"头发" → "頭髮"；"颜色" → "顏色"
+        assert!(body.contains("頭髮"), "got: {body}");
+        assert!(body.contains("顏色"), "got: {body}");
+    }
+
+    /// 端到端：源 zh_TW + 目标 zh_CN → HTML body 繁体转简体（标签保护）。
+    /// 注：zhconv 的 t2s 是字面繁→简（"軟體"→"软体"），不会反向做台湾用词→大陆用词
+    /// 的映射（这是 OpenCC 算法的限制，不算 bug —— 用户拿到"软体"在大陆可读）。
+    #[test]
+    fn render_converts_traditional_to_simplified_for_html() {
+        let raw = Chapter {
+            url: "https://x/".into(),
+            title: "軟體".into(),
+            content: r#"<p class="c">頭髮顏色</p><script>var x = "不转这里";</script>"#.into(),
+            order: 1,
+        };
+        let (title, body) = render_chapter(
+            &raw,
+            &RuleChapter::default(),
+            RenderTarget::Html,
+            "zh_TW",
+            &LangType::ZhCn,
+        );
+        assert_eq!(title, "软体");
+        // 标签外中文转简体（"<p class="c">..." 被模板再包一层 <p>，所以查子串）
+        assert!(body.contains("头发颜色"), "text not converted: {body}");
+        assert!(
+            !body.contains("头髮") && !body.contains("顏色"),
+            "traditional chars not converted: {body}"
+        );
+        // script 块原样保留（不转）
+        assert!(body.contains(r#"var x = "不转这里";"#), "script mutated: {body}");
+    }
+
+    /// source == target → 跳过转换（不引入 zhconv 错误风险）。
+    #[test]
+    fn render_skips_conversion_when_source_equals_target() {
+        let raw = Chapter {
+            url: "https://x/".into(),
+            title: "头发".into(),
+            content: "<p>头发</p>".into(),
+            order: 1,
+        };
+        let (title, body) = render_chapter(
+            &raw,
+            &RuleChapter::default(),
+            RenderTarget::Txt,
+            "zh_CN",
+            &LangType::ZhCn,
+        );
+        assert_eq!(title, "头发");
+        assert!(body.contains("头发"), "should be unchanged: {body}");
+    }
+
+    /// source 无法解析 → 跳过转换（保守，不误转）。
+    #[test]
+    fn render_skips_conversion_when_source_unparseable() {
+        let raw = Chapter {
+            url: "https://x/".into(),
+            title: "头发".into(),
+            content: "<p>头发</p>".into(),
+            order: 1,
+        };
+        let (title, body) = render_chapter(
+            &raw,
+            &RuleChapter::default(),
+            RenderTarget::Txt,
+            "garbage_lang",
+            &LangType::ZhCn,
+        );
+        assert_eq!(title, "头发");
+        assert!(body.contains("头发"), "should be unchanged: {body}");
     }
 }

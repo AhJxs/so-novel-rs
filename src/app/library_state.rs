@@ -36,6 +36,9 @@ pub struct LibraryState {
     /// 后台扫描任务的 smol channel 接收端 —— 阻塞的 `read_dir` / `metadata` 跑在
     /// `background_executor`，结果通过这里回到主线程。
     pub scan_rx: Option<smol::channel::Receiver<LibraryScanEvent>>,
+    /// 删除后置位：watcher 在此时间戳之前看到的 fs 事件应忽略（避免 delete → watcher
+    /// 触发 clear+rescan 闪一下空态）。Unix 毫秒。None = 不抑制。
+    pub watcher_skip_until_unix_ms: Option<u64>,
 }
 
 /// 扫描下载目录得到 LibraryEntry 列表。

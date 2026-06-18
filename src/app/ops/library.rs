@@ -40,11 +40,17 @@ pub fn refresh_library(library: &mut LibraryState, download_path: &str) {
     }
 }
 
-/// 真正删除一个本地文件；删完后立即重扫。
+/// 真正删除一个本地文件；**外科式**从 `entries` 中移除（不调用 `refresh_library`）。
 /// 返回 Ok(成功 toast 文案) / Err(错误 toast 文案)。
+///
+/// **为什么不做 rescan**：`refresh_library` 会 `entries.clear()` 后再 fill，
+/// 中间会被 watcher 后续 fs 事件再次触发 → 用户看到 "empty → 重新加载" 的闪一下。
+/// 删除本身是可预测的（删哪个文件已知），直接 `retain` 掉对应 entry 即可：
+/// 瞬间、零空态。watcher 在 1s 内看到的 fs 事件由 `watcher_skip_until_unix_ms` 抑制，
+/// 避免 race。
 pub fn delete_library_entry(
     library: &mut LibraryState,
-    download_path: &str,
+    _download_path: &str,
     path: &Path,
 ) -> Result<String, String> {
     let result = match std::fs::remove_file(path) {
@@ -75,8 +81,17 @@ pub fn delete_library_entry(
             Err(msg)
         }
     };
-    // 即使删成功也清掉 pending 并重扫
     library.pending_delete = None;
-    refresh_library(library, download_path);
+    // 外科式移除：路径完全相等才删，避开 path 末尾不同但 basename 相同的边界情况。
+    // 即便文件已经成功删除（result=Ok），entry 仍在内存里 → 显式过滤。
+    library.entries.retain(|e| e.path != path);
+    // 抑制 watcher 在接下来 1 秒内因 fs 事件触发的 rescan —— 删除瞬间文件系统
+    // 一定会发 Modify/Remove 事件，watcher 300ms debounce 后会调 refresh_library_async
+    // 把 entries.clear() 再 fill，制造"empty → 重新加载"闪一下。1s 覆盖 rescan 全程。
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    library.watcher_skip_until_unix_ms = Some(now_ms + 1000);
     result
 }

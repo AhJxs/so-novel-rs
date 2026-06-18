@@ -41,7 +41,10 @@ use gpui_component::{
 
 use crate::app::AppModel;
 use crate::config::{AppLang, ExportFormat, LangType};
-use crate::gpui_app::{i18n::ts, locale_for, themes};
+use crate::gpui_app::{
+    i18n::{ts, ts_fmt},
+    locale_for, themes,
+};
 
 /// 「下载目录」按钮 click handler 的类型别名（owner-cache 闭包用）。
 ///
@@ -967,7 +970,7 @@ impl SettingsPage {
                         }),
                     )
                     .description(ts("Settings.desc.version"),),
-                    // -- 检查更新 --
+                    // -- 检查更新 / 下载新版 --
                     SettingItem::new(
                         ts("Settings.item.check_update"),
                         SettingField::render({
@@ -976,7 +979,33 @@ impl SettingsPage {
                                 // 网络请求在跑时 → Button::loading(true) 自动显示
                                 // spinner + 屏蔽 click（gpui-component 0.5.1 button.rs:365：
                                 // `!(self.disabled || self.loading) && self.on_click.is_some()`）。
-                                let checking = m.read(cx).update_state.checking;
+                                let state = m.read(cx);
+                                let checking = state.update_state.checking;
+                                // 检查完成后若有新版本 → 按钮变"下载新版"跳浏览器。
+                                if !checking
+                                    && let Some(latest) =
+                                        state.update_state.latest_version.as_deref()
+                                    && latest.trim_start_matches('v')
+                                        != env!("CARGO_PKG_VERSION")
+                                {
+                                    let ver = latest.trim_start_matches('v');
+                                    return Button::new("check-update")
+                                        .icon(Icon::new(IconName::ExternalLink))
+                                        .label(
+                                            ts_fmt(
+                                                "Settings.download_new_version_button",
+                                                &[("ver", ver)],
+                                            )
+                                            .to_string(),
+                                        )
+                                        .small()
+                                        .on_click(|_ev, _window, cx| {
+                                            cx.open_url(
+                                                "https://github.com/AhJxs/so-novel-rs/releases/latest",
+                                            );
+                                        })
+                                        .into_any_element();
+                                }
                                 Button::new("check-update")
                                     .icon(Icon::new(IconName::Loader))
                                     .label(ts("Settings.check_update_button"))
@@ -991,10 +1020,11 @@ impl SettingsPage {
                                             });
                                         }
                                     })
+                                    .into_any_element()
                             }
                         }),
                     )
-                    .description(ts("Settings.desc.check_update"),),
+                    .description(ts("Settings.desc.check_update")),
                     // -- 项目主页 --
                     SettingItem::new(
                         ts("Settings.item.open_github"),

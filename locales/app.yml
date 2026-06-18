@@ -290,9 +290,9 @@ Settings:
       zh-CN: 终端/CLI 模式下生效。
       zh-HK: 終端/CLI 模式下生效。
     book_lang:
-      en: "Locale hint used when matching sources (zh_CN / zh_TW / zh_Hant); affects source filtering only, not the app UI."
-      zh-CN: 书源匹配时使用的 locale hint（zh_CN / zh_TW / zh_Hant）；只影响书源筛选，不影响应用 UI。
-      zh-HK: 書源比對時使用的 locale hint（zh_CN / zh_TW / zh_Hant）；只影響書源篩選，不影響應用 UI。
+      en: "Target language for downloaded chapters: text content is automatically converted (e.g. zh_CN → zh_TW). Source book rules usually ship with this matching their content language."
+      zh-CN: 下载章节正文的目标语言：抓到的内容会自动转换（如 zh_CN → zh_TW）。书源规则通常自带与内容一致的语言标记。
+      zh-HK: 下載章節正文的目標語言：抓到的內容會自動轉換（如 zh_CN → zh_TW）。書源規則通常自帶與內容一致的語言標記。
     search_limit:
       en: "Max results per source; -1 means unlimited."
       zh-CN: 每源最多返回条数；-1 表示不限。
@@ -362,6 +362,10 @@ Settings:
     en: "Check GitHub for updates"
     zh-CN: 检查 GitHub 最新版本
     zh-HK: 檢查 GitHub 最新版本
+  download_new_version_button:
+    en: "Download v{ver}"
+    zh-CN: 下载新版 v{ver}
+    zh-HK: 下載新版 v{ver}
   open_github_button:
     en: "Open GitHub"
     zh-CN: 访问 GitHub

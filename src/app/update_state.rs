@@ -55,6 +55,15 @@ impl UpdateState {
             }
         }
     }
+
+    /// 检查完成后 `latest_version` 与当前版本不同时为 true —— Settings 页据此把
+    /// "检查更新"按钮切换成"下载新版"。`v` 前缀按 `classify` 同款方式剥除。
+    pub fn is_new_version_available(&self) -> bool {
+        match &self.latest_version {
+            Some(latest) => latest.trim_start_matches('v') != env!("CARGO_PKG_VERSION"),
+            None => false,
+        }
+    }
 }
 
 /// 把后台回报的 [`UpdateCheckResult`] 分类成 [`UpdateOutcome`]。
@@ -125,15 +134,11 @@ pub async fn check_github_latest_release(gh_proxy: &str) -> UpdateCheckResult {
             }
             match resp.text().await {
                 Ok(body) => {
-                    // 从 JSON 中提取 "tag_name" 字段
-                    let tag = body
-                        .lines()
-                        .find(|l| l.trim().starts_with("\"tag_name\""))
-                        .and_then(|l| {
-                            l.split(':')
-                                .nth(1)
-                                .map(|v| v.trim().trim_matches('"').trim_matches(',').to_string())
-                        });
+                    // GitHub API 现在返回压缩 JSON（无换行）；用 serde_json 解析取 tag_name。
+                    // 旧实现按行匹配 pretty-print 格式，在压缩响应下永远找不到 → 误报 "(empty result)"。
+                    let tag = serde_json::from_str::<serde_json::Value>(&body)
+                        .ok()
+                        .and_then(|v| v.get("tag_name").and_then(|t| t.as_str()).map(String::from));
                     UpdateCheckResult {
                         latest_version: tag,
                         error: None,
@@ -196,5 +201,50 @@ mod tests {
     fn drain_returns_none_without_rx() {
         let mut s = UpdateState::default();
         assert!(s.drain().is_none());
+    }
+
+    #[test]
+    fn is_new_version_available_none() {
+        let s = UpdateState::default();
+        assert!(!s.is_new_version_available());
+    }
+
+    #[test]
+    fn is_new_version_available_same() {
+        let s = UpdateState {
+            latest_version: Some(format!("v{}", env!("CARGO_PKG_VERSION"))),
+            ..Default::default()
+        };
+        assert!(!s.is_new_version_available());
+    }
+
+    #[test]
+    fn is_new_version_available_differs() {
+        let s = UpdateState {
+            latest_version: Some("v999.0.0".into()),
+            ..Default::default()
+        };
+        assert!(s.is_new_version_available());
+    }
+
+    /// 压缩 JSON（GitHub API 实际响应格式）能被正确解析 tag_name。
+    /// 旧实现按行匹配 pretty-print，找不到会误报 "(empty result)"。
+    #[test]
+    fn parse_tag_name_from_actual_github_response() {
+        // 真实 /releases/latest 响应（压缩格式，无换行）。author 留最小有效结构。
+        let body = r#"{"url":"https://api.github.com/repos/AhJxs/so-novel-rs/releases/341144353","html_url":"https://github.com/AhJxs/so-novel-rs/releases/tag/v0.2.3","id":341144353,"author":{"login":"github-actions[bot]","id":41898282},"node_id":"RE_kwDOS6YKu84UVXMh","tag_name":"v0.2.3","target_commitish":"master","name":"v0.2.3","draft":false,"immutable":false,"prerelease":false,"created_at":"2026-06-18T03:12:36Z","updated_at":"2026-06-18T03:28:50Z","published_at":"2026-06-18T03:28:50Z","assets":[],"tarball_url":"x","zipball_url":"y","body":"x"}"#;
+        let tag = serde_json::from_str::<serde_json::Value>(body)
+            .ok()
+            .and_then(|v| v.get("tag_name").and_then(|t| t.as_str()).map(String::from));
+        assert_eq!(tag.as_deref(), Some("v0.2.3"));
+    }
+
+    #[test]
+    fn parse_tag_name_missing_yields_none() {
+        let body = r#"{"html_url":"x","name":"v0.2.3"}"#;
+        let tag = serde_json::from_str::<serde_json::Value>(body)
+            .ok()
+            .and_then(|v| v.get("tag_name").and_then(|t| t.as_str()).map(String::from));
+        assert!(tag.is_none());
     }
 }

@@ -11,6 +11,7 @@
 //!   1. `//*[@id="readbg"]/script[4]`（`bundle/rules/cloudflare.json` 96 读书）；
 //!   2. 纯绝对路径 `/html`、`/html/body`…（`bundle/rules/main.json` wxsy.net 的
 //!      `toc.list = "/html@js:..."`，选中 `<html>` 根元素后 @js 后处理）。
+//!
 //!   `xpath_to_css` 覆盖以上两种精确模式；其它 XPath 返回 `XPathNotSupported`。
 //! - `@js:` 后处理：交给 `crate::js::post_process`。
 
