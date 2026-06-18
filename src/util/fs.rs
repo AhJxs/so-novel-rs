@@ -24,10 +24,12 @@ pub fn sanitize_filename(name: &str) -> String {
     } else if cfg!(any(target_os = "linux", target_os = "macos")) {
         let mut out = String::with_capacity(name.len());
         for c in name.chars() {
+            // Unix 只禁 `/`（路径分隔符）和 `\0`；`\` 不是分隔符但与 Windows
+            // 跨平台一致地清掉，避免同名文件在不同平台行为不一。
+            // **不替换 `.`** —— 扩展名点（如 `.pdf`/`.epub`）必须保留，否则
+            // `书名(作者).pdf` 会被洗成 `书名(作者)。pdf` 导致找不到文件。
             let replaced = match c {
-                '.' => '。',
-                ':' => '：',
-                '/' => '／',
+                '/' | '\\' => '_',
                 '\0' => '_',
                 _ => c,
             };
@@ -35,7 +37,7 @@ pub fn sanitize_filename(name: &str) -> String {
         }
         out
     } else {
-        name.replace('/', "")
+        name.replace(['/', '\\'], "")
     }
 }
 
