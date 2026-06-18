@@ -88,16 +88,14 @@ fn classify(result: &UpdateCheckResult) -> UpdateOutcome {
 /// 向 GitHub API 查询最新 release 版本号。
 pub async fn check_github_latest_release(gh_proxy: &str) -> UpdateCheckResult {
     let url = "https://api.github.com/repos/AhJxs/so-novel-rs/releases/latest";
-    let client = reqwest::Client::builder()
-        .user_agent("so-novel-rs")
-        .build();
+    let client = reqwest::Client::builder().user_agent("so-novel-rs").build();
     let client = match client {
         Ok(c) => c,
         Err(e) => {
             return UpdateCheckResult {
                 latest_version: None,
                 error: Some(format!("构建 HTTP 客户端失败: {e}")),
-            }
+            };
         }
     };
 
@@ -116,7 +114,7 @@ pub async fn check_github_latest_release(gh_proxy: &str) -> UpdateCheckResult {
                     return UpdateCheckResult {
                         latest_version: None,
                         error: Some(format!("构建代理客户端失败: {e}")),
-                    }
+                    };
                 }
             }
         } else {

@@ -7,7 +7,7 @@ use tokio::sync::mpsc;
 use crate::config::AppConfig;
 use crate::models::{Book, Chapter, SearchResult};
 
-use super::cover::{cover_entry_from_bytes, CoverEntry};
+use super::cover::{CoverEntry, cover_entry_from_bytes};
 
 /// TOC 预取加载状态。
 #[derive(Debug, Clone)]
@@ -82,7 +82,6 @@ pub struct SearchState {
     pub cover_in_flight: HashSet<(i32, String)>,
     /// drain_detail 期间收集到的待 prefetch 封面 URL，drain 后由 AppModel 取出统一派发。
     pub pending_cover_prefetch: Vec<(i32, String)>,
-
 }
 
 /// 详情面板加载状态。
@@ -316,9 +315,7 @@ impl SearchState {
         let source_id_send = source_id;
         runtime.spawn(async move {
             let key_send = (source_id_send, url_owned.clone());
-            let opts = crate::http::client::ClientOptions {
-                unsafe_ssl: false,
-            };
+            let opts = crate::http::client::ClientOptions { unsafe_ssl: false };
             let referer = crate::http::origin_or_self(&url_owned);
             let ua = crate::http::ua::random_ua();
             let result: Option<Vec<u8>> = match crate::http::client::build_async_client(&cfg, &opts)

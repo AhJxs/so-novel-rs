@@ -3,6 +3,5 @@
 mod loader;
 
 pub use loader::{
-    load_config, save_config, AppConfig, AppLang, ConfigPaths, ExportFormat, LangType,
-    ThemePref,
+    AppConfig, ConfigPaths, ExportFormat, LangType, Language, ThemePref, load_config, save_config,
 };

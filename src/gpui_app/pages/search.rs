@@ -24,10 +24,11 @@ use std::io::Cursor;
 use std::sync::Arc;
 
 use gpui::{
-    div, img, prelude::FluentBuilder as _, px, App, AppContext, Context, Entity, ImageSource,
-    IntoElement, ObjectFit, ParentElement, Render, RenderImage, SharedString, Styled, Window,
+    App, AppContext, Context, Entity, ImageSource, IntoElement, ObjectFit, ParentElement, Render,
+    RenderImage, SharedString, Styled, Window, div, img, prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
+    ActiveTheme as _, Disableable, Icon, IconName, IndexPath, Sizable, WindowExt,
     button::Button,
     dialog::{Dialog, DialogButtonProps},
     h_flex,
@@ -38,14 +39,14 @@ use gpui_component::{
     select::{SearchableVec, Select, SelectDelegate, SelectEvent, SelectItem, SelectState},
     spinner::Spinner,
     tag::Tag,
-    v_flex, ActiveTheme as _, Disableable, Icon, IconName, IndexPath, Sizable, WindowExt,
+    v_flex,
 };
 
 use gpui::StyledImage as _;
 
 use crate::app::{AppModel, CoverEntry, DetailState, SourceStatus, TocState};
 use crate::gpui_app::components::{
-    compute_page_window, truncate, EmptyState, PageHeader, Pagination,
+    EmptyState, PageHeader, Pagination, compute_page_window, truncate,
 };
 use crate::gpui_app::i18n::{ts, ts_fmt};
 use crate::models::SearchResult;

@@ -81,11 +81,7 @@ mod tests {
                 async move {
                     let mut n = c.borrow_mut();
                     *n += 1;
-                    if *n < 3 {
-                        Err("transient")
-                    } else {
-                        Ok(42)
-                    }
+                    if *n < 3 { Err("transient") } else { Ok(42) }
                 }
             },
             5,
@@ -142,5 +138,4 @@ mod tests {
         assert!(result.is_err());
         assert_eq!(*count.borrow(), 1, "max_attempts=0 means try once");
     }
-
 }

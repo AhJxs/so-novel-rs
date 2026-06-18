@@ -24,11 +24,11 @@ use scraper::{Html, Selector};
 use thiserror::Error;
 
 use crate::http::{
-    build_form_data, fetch, fetch_via_cf_bypass, format_url_query, has_cloudflare, FetchRequest,
-    HttpMethod,
+    FetchRequest, HttpMethod, build_form_data, fetch, fetch_via_cf_bypass, format_url_query,
+    has_cloudflare,
 };
 use crate::models::{ContentType, Rule, SearchResult};
-use crate::parser::dom::{select_and_invoke_js_within, SelectError};
+use crate::parser::dom::{SelectError, select_and_invoke_js_within};
 
 #[derive(Debug, Error)]
 pub enum SearchError {
@@ -38,7 +38,9 @@ pub enum SearchError {
     SourceDisabled,
     #[error("HTTP 错误: {0}")]
     Http(String),
-    #[error("命中 Cloudflare 验证页，未配置 cf-bypass 旁路（请在 config.toml [global] cf-bypass 填地址）: {0}")]
+    #[error(
+        "命中 Cloudflare 验证页，未配置 cf-bypass 旁路（请在 config.toml [global] cf-bypass 填地址）: {0}"
+    )]
     Cloudflare(String),
     #[error("HTML 解析失败: {0}")]
     Parse(String),
@@ -366,7 +368,7 @@ mod tests {
     #[ignore = "live network: depends on 22biqu availability"]
     async fn live_22biqu_search_returns_non_empty() {
         use crate::config::AppConfig;
-        use crate::http::client::{build_async_client, ClientOptions};
+        use crate::http::client::{ClientOptions, build_async_client};
 
         let cfg = AppConfig::default();
         let client = build_async_client(&cfg, &ClientOptions::default()).unwrap();

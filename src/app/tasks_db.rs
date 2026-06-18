@@ -6,8 +6,8 @@
 use crate::db::{Db, DownloadTaskRecord};
 
 use super::download_task::DownloadTask;
-use crate::db::tasks::FinishedReason;
 use super::now::now_unix_secs;
+use crate::db::tasks::FinishedReason;
 
 pub fn load_tasks_from_db(db: &Db) -> (Vec<DownloadTask>, u64) {
     let records = match crate::db::tasks::list(db.conn()) {

@@ -15,8 +15,8 @@
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use reqwest::header::{ACCEPT, COOKIE, REFERER, USER_AGENT};
 use reqwest::Client;
+use reqwest::header::{ACCEPT, COOKIE, REFERER, USER_AGENT};
 
 use crate::http::encoding::decode_response_bytes;
 use crate::http::ua::random_ua;
@@ -103,7 +103,7 @@ pub async fn fetch(client: &Client, req: &FetchRequest<'_>) -> Result<FetchRespo
 mod tests {
     use super::*;
     use crate::config::AppConfig;
-    use crate::http::client::{build_blocking_client, ClientOptions};
+    use crate::http::client::{ClientOptions, build_blocking_client};
 
     /// 这条测试只验证 fetch 函数能编译、能用 builder 模式调用；
     /// 不真发请求。真实联网测试在 search/book 模块下用 `#[ignore]` 标记。

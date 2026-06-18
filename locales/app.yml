@@ -152,7 +152,7 @@ Settings:
       en: Theme
       zh-CN: 主题
       zh-HK: 主題
-    app_lang:
+    language:
       en: "Interface language"
       zh-CN: 界面语言
       zh-HK: 界面語言
@@ -184,10 +184,6 @@ Settings:
       en: "Enable download progress bar"
       zh-CN: 启用下载进度条
       zh-HK: 啟用下載進度條
-    book_lang:
-      en: "Source language"
-      zh-CN: 书源语言
-      zh-HK: 書源語言
     search_limit:
       en: "Search result limit"
       zh-CN: 搜索条数上限
@@ -257,10 +253,10 @@ Settings:
       en: "Choose the UI theme; changes take effect immediately."
       zh-CN: 选择界面主题；改动即时生效。
       zh-HK: 選擇界面主題；改動即時生效。
-    app_lang:
-      en: "App UI language; affects Sidebar search / Select / Dialog placeholders, etc. Changes take effect immediately."
-      zh-CN: 应用 UI 显示语言；影响 Sidebar 搜索框 / Select / Dialog 等所有 gpui-component 内部文案。改动即时生效。
-      zh-HK: 應用 UI 顯示語言；影響 Sidebar 搜尋框 / Select / Dialog 等所有 gpui-component 內部文案。改動即時生效。
+    language:
+      en: "App UI language; also determines downloaded chapter text language (Simplified → Simplified, Traditional → Traditional, English → Simplified). Changes take effect immediately."
+      zh-CN: 应用 UI 显示语言；同时决定下载章节正文的语言（简→简，繁→繁，英文→简体）。影响 Sidebar 搜索框 / Select / Dialog 等所有 gpui-component 内部文案。改动即时生效。
+      zh-HK: 應用 UI 顯示語言；同時決定下載章節正文的語言（簡→簡，繁→繁，英文→簡體）。影響 Sidebar 搜尋框 / Select / Dialog 等所有 gpui-component 內部文案。改動即時生效。
     gh_proxy:
       en: "Used to speed up release / raw asset downloads; leave empty to use default."
       zh-CN: 用于加速 release / raw 资源下载；留空走默认。
@@ -289,10 +285,6 @@ Settings:
       en: "Takes effect in terminal / CLI mode."
       zh-CN: 终端/CLI 模式下生效。
       zh-HK: 終端/CLI 模式下生效。
-    book_lang:
-      en: "Target language for downloaded chapters: text content is automatically converted (e.g. zh_CN → zh_TW). Source book rules usually ship with this matching their content language."
-      zh-CN: 下载章节正文的目标语言：抓到的内容会自动转换（如 zh_CN → zh_TW）。书源规则通常自带与内容一致的语言标记。
-      zh-HK: 下載章節正文的目標語言：抓到的內容會自動轉換（如 zh_CN → zh_TW）。書源規則通常自帶與內容一致的語言標記。
     search_limit:
       en: "Max results per source; -1 means unlimited."
       zh-CN: 每源最多返回条数；-1 表示不限。
@@ -375,22 +367,9 @@ Settings:
     en: "Select download directory"
     zh-CN: 选择下载目录
     zh-HK: 選擇下載目錄
-  # dropdown option 标签（LangType 书源语言 / AppLang 应用语言）
+  # dropdown option 标签（Language 应用语言）
   option:
-    booklang:
-      zh_cn:
-        en: "Simplified Chinese"
-        zh-CN: 简体中文
-        zh-HK: 簡體中文
-      zh_tw:
-        en: "Traditional Chinese"
-        zh-CN: 繁體中文
-        zh-HK: 繁體中文
-      zh_hant:
-        en: "Traditional Chinese (generic)"
-        zh-CN: 繁體中文(通用)
-        zh-HK: 繁體中文(通用)
-    applang:
+    language:
       zh_cn:
         en: "Simplified Chinese"
         zh-CN: 简体中文

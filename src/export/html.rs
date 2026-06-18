@@ -17,10 +17,10 @@ use std::path::{Path, PathBuf};
 
 use once_cell::sync::Lazy;
 use regex::Regex;
-use zip::write::SimpleFileOptions;
 use zip::CompressionMethod;
+use zip::write::SimpleFileOptions;
 
-use crate::export::exporter::{sort_chapter_files, ExportError, Exporter};
+use crate::export::exporter::{ExportError, Exporter, sort_chapter_files};
 use crate::models::Book;
 use crate::util::fs::sanitize_filename;
 
@@ -123,7 +123,7 @@ fn zip_directory(src: &Path, dst: &Path) -> Result<(), ExportError> {
 mod tests {
     use super::*;
     use crate::config::ExportFormat;
-    use crate::export::exporter::{write_chapter_files, RenderedChapter};
+    use crate::export::exporter::{RenderedChapter, write_chapter_files};
     use std::io::Read;
 
     fn sample_book() -> Book {
@@ -163,11 +163,13 @@ mod tests {
         let exp = HtmlExporter;
         let zip_path = exp.merge(&sample_book(), &chapters, &out).unwrap();
         assert!(zip_path.exists(), "missing zip: {}", zip_path.display());
-        assert!(zip_path
-            .file_name()
-            .and_then(|s| s.to_str())
-            .unwrap()
-            .contains("起航"));
+        assert!(
+            zip_path
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap()
+                .contains("起航")
+        );
 
         // 打开 zip 验证内容
         let f = File::open(&zip_path).unwrap();

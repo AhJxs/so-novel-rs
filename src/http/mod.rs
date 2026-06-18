@@ -15,9 +15,9 @@ pub mod url_join;
 pub mod util;
 
 pub use cf::{fetch_via_cf_bypass, has_cloudflare};
-pub use client::{build_blocking_client, ClientOptions};
+pub use client::{ClientOptions, build_blocking_client};
 pub use encoding::decode_response_bytes;
-pub use fetch::{fetch, FetchRequest, FetchResponse, HttpMethod};
+pub use fetch::{FetchRequest, FetchResponse, HttpMethod, fetch};
 pub use ua::random_ua;
 pub use url_join::{abs_url, origin_or_self};
 pub use util::{

@@ -31,12 +31,12 @@
 use std::rc::Rc;
 
 use gpui::{
-    div, AnyElement, App, ClickEvent, Component, IntoElement, ParentElement, RenderOnce, Styled,
-    Window,
+    AnyElement, App, ClickEvent, Component, IntoElement, ParentElement, RenderOnce, Styled, Window,
+    div,
 };
 use gpui_component::{
-    button::{Button, ButtonVariants as _},
     ActiveTheme as _, Disableable, IconName, Selectable, Sizable,
+    button::{Button, ButtonVariants as _},
 };
 
 /// 统一的列表分页大小。4 个 page（library / sources / tasks / search）共用。

@@ -1,0 +1,7 @@
+# rustfmt 配置。全部使用 stable 选项，`cargo fmt` 在稳定工具链下即可用。
+# 贡献者无需 nightly；如需更激进的 import 分组，再评估引入 unstable 选项。
+
+edition = "2024"
+max_width = 100
+use_field_init_shorthand = true
+use_try_shorthand = true

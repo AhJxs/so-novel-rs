@@ -31,6 +31,8 @@ pub enum ExportError {
     Zip(String),
     #[error("编码转换失败: {0}")]
     Encoding(String),
+    #[error("PDF 生成失败: {0}")]
+    Pdf(String),
 }
 
 /// 导出器统一接口。
@@ -65,17 +67,14 @@ pub trait Exporter {
     }
 }
 
-/// 按 `ExportFormat` 选择导出器。Pdf 走 Html 兜底（与 render 层一致，
-/// 阶段 1 锁定不实现 PDF；详见 audit §6.4）。
+/// 按 `ExportFormat` 选择导出器。Pdf 用 `pdf_oxide` 真生成 PDF（章节文件由
+/// `render_chapter(target=Pdf)` 写出成 Html，`PdfExporter` 内部再合并成 PDF）。
 pub fn exporter_for(format: ExportFormat, txt_encoding: &str) -> Box<dyn Exporter + Send + Sync> {
     match format {
         ExportFormat::Txt => Box::new(super::txt::TxtExporter::new(txt_encoding)),
         ExportFormat::Html => Box::new(super::html::HtmlExporter),
         ExportFormat::Epub => Box::new(super::epub::EpubExporter),
-        ExportFormat::Pdf => {
-            tracing::warn!("ExportFormat::Pdf 阶段 1 不实现，降级为 Html 导出。");
-            Box::new(super::html::HtmlExporter)
-        }
+        ExportFormat::Pdf => Box::new(super::pdf::PdfExporter),
     }
 }
 

@@ -1,0 +1,36 @@
+#!/bin/sh
+# pre-commit hook：自动格式化暂存的 .rs 文件并重新暂存。
+#
+# 机制：tracked `.githooks/` 目录 + `git config core.hooksPath .githooks`
+# （见 scripts/install-hooks.sh）。克隆后跑一次 install-hooks.sh 即启用。
+#
+# 行为：
+# - 只处理本次暂存（added/copied/modified）的 *.rs；
+# - rustfmt --edition 2024 逐文件格式化；
+# - 被改动的文件重新 git add 进暂存区；
+# - 任一文件格式化失败 → 非 0 退出，阻断提交；
+# - 无 .rs 暂存 → 立即放行（零开销）。
+#
+# 跨平台：git 在 Windows 上经 git-bash 执行，POSIX shell 可用；rustfmt 与 cargo 同 PATH。
+
+# 仅暂存区、且状态为 A/C/M 的文件
+staged=$(git diff --cached --name-only --diff-filter=ACM -- '*.rs')
+
+[ -z "$staged" ] && exit 0
+
+fail=0
+# 用 IFS 换行遍历，避免管道子壳导致 exit 无法退出脚本
+IFS='
+'
+for file in $staged; do
+    [ -f "$file" ] || continue
+    if ! rustfmt --edition 2024 "$file"; then
+        echo "rustfmt 失败：$file（提交已阻断，请修复后重试）" >&2
+        fail=1
+        continue
+    fi
+    git add "$file"
+done
+unset IFS
+
+exit $fail

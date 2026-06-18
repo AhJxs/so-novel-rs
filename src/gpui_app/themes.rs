@@ -95,7 +95,10 @@ fn embedded_themes() -> Vec<(&'static str, &'static str)> {
 pub fn init(cx: &mut App, paths: &ConfigPaths, saved_theme: &str) {
     let themes_dir = paths.themes_dir.clone();
     if let Err(e) = ensure_user_themes_dir(&themes_dir) {
-        tracing::warn!("prepare user themes dir {:?} failed: {e}; using default", themes_dir);
+        tracing::warn!(
+            "prepare user themes dir {:?} failed: {e}; using default",
+            themes_dir
+        );
         return;
     }
 
@@ -145,11 +148,7 @@ fn ensure_user_themes_dir(path: &Path) -> std::io::Result<()> {
             }
         }
         if added > 0 {
-            tracing::info!(
-                "added {} new themes to existing {:?}",
-                added,
-                path
-            );
+            tracing::info!("added {} new themes to existing {:?}", added, path);
         }
     }
     Ok(())
@@ -187,11 +186,7 @@ pub fn apply_theme_by_name(name: &str, cx: &mut App) {
 ///
 /// `HashMap` 迭代顺序不稳定，必须显式排序才能给 Select 稳定选项顺序。
 pub fn list_theme_names(cx: &App) -> Vec<SharedString> {
-    let mut names: Vec<SharedString> = ThemeRegistry::global(cx)
-        .themes()
-        .keys()
-        .cloned()
-        .collect();
+    let mut names: Vec<SharedString> = ThemeRegistry::global(cx).themes().keys().cloned().collect();
     names.sort_by_key(|a| a.to_lowercase());
     names
 }
@@ -285,7 +280,10 @@ mod tests {
 
         // 第二次调用应补回来
         ensure_user_themes_dir(&path).expect("second call");
-        assert!(removed.exists(), "missing embedded theme should be re-added");
+        assert!(
+            removed.exists(),
+            "missing embedded theme should be re-added"
+        );
         let content = std::fs::read_to_string(&removed).expect("read back");
         assert_eq!(content, THEME_ADVENTURE, "should match embedded content");
     }

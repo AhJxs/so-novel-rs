@@ -15,7 +15,7 @@
 //! ## 改语言时的流程
 //!
 //! 1. 用户在设置页选 en
-//! 2. `AppConfig.app_lang = AppLang::En; persist_settings()`
+//! 2. `AppConfig.language = Language::English; persist_settings()`
 //! 3. `gpui_component::set_locale("en")` 写到全局 locale
 //! 4. `cx.refresh_windows()` 触发整 app 重 render
 //! 5. 所有 `ts!()` 调用的 `t!` 读新全局 locale 拿新翻译

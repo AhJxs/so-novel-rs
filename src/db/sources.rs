@@ -13,7 +13,7 @@
 //! - `toggle_disabled()` 直接改 `source_overrides` 表。
 
 use anyhow::{Context, Result};
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 
 use crate::models::Rule;
 
@@ -184,7 +184,9 @@ pub fn insert_many(conn: &mut Connection, rules: &[Rule]) -> Result<usize> {
         .query_row("SELECT COALESCE(MAX(id), 0) FROM sources", [], |r| r.get(0))
         .unwrap_or(0);
     let max_ord: i64 = tx
-        .query_row("SELECT COALESCE(MAX(ord), -1) FROM sources", [], |r| r.get(0))
+        .query_row("SELECT COALESCE(MAX(ord), -1) FROM sources", [], |r| {
+            r.get(0)
+        })
         .unwrap_or(-1);
 
     for (idx, rule) in rules.iter().enumerate() {
@@ -275,7 +277,8 @@ mod tests {
     }
 
     #[test]
-    fn insert_many_appends_with_new_ids_after_seed() {        let mut db = fresh_db();
+    fn insert_many_appends_with_new_ids_after_seed() {
+        let mut db = fresh_db();
         seed_from_default(db.conn()).unwrap();
         let before = list_with_overrides(db.conn()).unwrap();
         let max_before = before.iter().map(|r| r.id).max().unwrap();

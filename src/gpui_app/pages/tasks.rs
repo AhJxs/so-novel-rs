@@ -28,7 +28,7 @@ use gpui_component::{
 
 use crate::app::AppModel;
 use crate::gpui_app::components::{
-    compute_page_window, EmptyState, PageHeader, Pagination, StatusBadge, StatusKind, truncate,
+    EmptyState, PageHeader, Pagination, StatusBadge, StatusKind, compute_page_window, truncate,
 };
 use crate::gpui_app::i18n::{ts, ts_fmt};
 use crate::models::{Book, SearchResult};
@@ -670,7 +670,12 @@ fn render_task_row(task: TaskSummary, page: Entity<TasksPage>, cx: &mut App) -> 
                                         )),
                                 ),
                         )
-                        .child(Progress::new().value(progress_pct).w_full())
+                        .child(
+                            Progress::new()
+                                .value(progress_pct)
+                                .w_full()
+                                .bg(cx.theme().success),
+                        )
                         // 失败章节折叠
                         .when(!task.failures.is_empty(), |this| {
                             let fail_count = task.failures.len();

@@ -1,8 +1,8 @@
 //! 通用页面顶栏：左侧 title + subtitle，右侧 actions slot。
 
 use gpui::{
-    div, prelude::FluentBuilder as _, App, Div, IntoElement, ParentElement, RenderOnce,
-    SharedString, Styled, Window,
+    App, Div, IntoElement, ParentElement, RenderOnce, SharedString, Styled, Window, div,
+    prelude::FluentBuilder as _,
 };
 use gpui_component::ActiveTheme as _;
 

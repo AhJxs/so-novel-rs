@@ -24,7 +24,7 @@ pub enum RenderTarget {
     Txt,
     Html,
     Epub,
-    /// 阶段 1 锁定不实现；命中时降级 Html 渲染并 warn。
+    /// 章节文件沿用 Html 模板写到 `chapters_dir`，由 `PdfExporter` 读取并合成 PDF。
     Pdf,
 }
 
@@ -64,10 +64,8 @@ pub fn render_chapter(
         RenderTarget::Html => render_html_template(&filtered.title, &formatted_html),
         RenderTarget::Epub => render_epub_template(&filtered.title, &formatted_html),
         RenderTarget::Pdf => {
-            tracing::warn!(
-                "PDF 渲染未实现，章节《{}》降级为 Html 模板输出。详见 audit §6.4。",
-                filtered.title
-            );
+            // Pdf 模式：每章先用 Html 模板写到 chapters_dir，PdfExporter 后续读取
+            // 这些 HTML 合并成 PDF。无需单独的 Pdf 模板。
             render_html_template(&filtered.title, &formatted_html)
         }
     };
@@ -211,8 +209,7 @@ mod tests {
 
     #[test]
     fn render_txt_extracts_paragraphs_with_indent() {
-        let (title, body) =
-            render(&raw_chapter(), &rule_closed_with_ad(), RenderTarget::Txt);
+        let (title, body) = render(&raw_chapter(), &rule_closed_with_ad(), RenderTarget::Txt);
         assert_eq!(title, "第1章 起航");
         let lines: Vec<&str> = body.split('\n').collect();
         // 标题 + 空行 + 段一 + 段二 + 末尾空行
@@ -387,7 +384,10 @@ mod tests {
             "traditional chars not converted: {body}"
         );
         // script 块原样保留（不转）
-        assert!(body.contains(r#"var x = "不转这里";"#), "script mutated: {body}");
+        assert!(
+            body.contains(r#"var x = "不转这里";"#),
+            "script mutated: {body}"
+        );
     }
 
     /// source == target → 跳过转换（不引入 zhconv 错误风险）。

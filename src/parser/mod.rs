@@ -11,14 +11,14 @@ pub mod search_filter;
 pub mod search_quanben5;
 pub mod toc;
 
-pub use book::{parse_book_detail, BookError};
-pub use chapter::{parse_chapter, ChapterError};
+pub use book::{BookError, parse_book_detail};
+pub use chapter::{ChapterError, parse_chapter};
 pub use dom::{
-    clear_all_attributes, dom_select_text, remove_tags, select_and_invoke_js, ContentType,
-    SelectError,
+    ContentType, SelectError, clear_all_attributes, dom_select_text, remove_tags,
+    select_and_invoke_js,
 };
 pub use filter::filter_chapter;
 pub use formatter::format_chapter;
-pub use search::{parse_search_results, search_one, SearchError};
+pub use search::{SearchError, parse_search_results, search_one};
 pub use search_filter::filter_sort;
-pub use toc::{parse_one_toc_page, parse_toc, TocError};
+pub use toc::{TocError, parse_one_toc_page, parse_toc};

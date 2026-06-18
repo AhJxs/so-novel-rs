@@ -11,7 +11,7 @@ use reqwest::header::{ACCEPT, USER_AGENT};
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 
-use crate::http::client::{build_async_client, ClientOptions};
+use crate::http::client::{ClientOptions, build_async_client};
 use crate::http::ua::random_ua;
 use crate::models::Rule;
 

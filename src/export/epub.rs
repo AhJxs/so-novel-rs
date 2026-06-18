@@ -21,7 +21,7 @@ use std::path::{Path, PathBuf};
 
 use epub_builder::{EpubBuilder, EpubContent, EpubVersion, ReferenceType, ZipLibrary};
 
-use crate::export::exporter::{sort_chapter_files, ExportError, Exporter};
+use crate::export::exporter::{ExportError, Exporter, sort_chapter_files};
 use crate::models::Book;
 use crate::util::fs::sanitize_filename;
 
@@ -221,7 +221,7 @@ fn pad_zero(n: u32, width: usize) -> String {
 mod tests {
     use super::*;
     use crate::config::ExportFormat;
-    use crate::export::exporter::{write_chapter_files, RenderedChapter};
+    use crate::export::exporter::{RenderedChapter, write_chapter_files};
 
     fn sample_book() -> Book {
         Book {
@@ -267,11 +267,12 @@ mod tests {
 
         let path = EpubExporter.merge(&sample_book(), &chapters, &out).unwrap();
         assert!(path.exists(), "missing epub: {}", path.display());
-        assert!(path
-            .file_name()
-            .and_then(|s| s.to_str())
-            .unwrap()
-            .ends_with(".epub"));
+        assert!(
+            path.file_name()
+                .and_then(|s| s.to_str())
+                .unwrap()
+                .ends_with(".epub")
+        );
 
         // EPUB 是 ZIP；用 zip crate 打开校验关键文件
         let f = File::open(&path).unwrap();

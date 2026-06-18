@@ -200,11 +200,7 @@ fn xpath_to_css(s: &str) -> Option<String> {
     // 纯绝对路径：`/tag/tag/...`，每段是合法标签名（无 `*`/属性/谓词）。
     if s.starts_with('/') && !s.starts_with("//") {
         let segments: Vec<&str> = s.split('/').filter(|seg| !seg.is_empty()).collect();
-        if !segments.is_empty()
-            && segments
-                .iter()
-                .all(|seg| is_plain_tag_name(seg))
-        {
+        if !segments.is_empty() && segments.iter().all(|seg| is_plain_tag_name(seg)) {
             return Some(segments.join(" > "));
         }
     }
@@ -429,7 +425,9 @@ mod tests {
         // main.json wxsy.net 的 toc.list = "/html@js:..."：选中 <html> 根元素，
         // 取 inner_html（ ContentType::Html ）后交给 @js 后处理。
         // 这里端到端验证：/html 改写成 css `html`，能取到文档 HTML。
-        let h = doc(r#"<html><body><ul class="section-list ycxsid"><li>a</li><li>b</li></ul></body></html>"#);
+        let h = doc(
+            r#"<html><body><ul class="section-list ycxsid"><li>a</li><li>b</li></ul></body></html>"#,
+        );
         let q = "/html";
         let s = select_and_invoke_js(&h, q, ContentType::Html).unwrap();
         assert!(s.contains("section-list"), "got: {s}");
@@ -439,7 +437,9 @@ mod tests {
     #[test]
     fn xpath_absolute_html_root_with_js_postprocess() {
         // 端到端：/html 选根 + @js 后处理（模拟 wxsy.net 真实 list 规则的精简版）。
-        let h = doc(r#"<html><body><ul class="section-list ycxsid"><li>a</li><li>b</li></ul></body></html>"#);
+        let h = doc(
+            r#"<html><body><ul class="section-list ycxsid"><li>a</li><li>b</li></ul></body></html>"#,
+        );
         let q = "/html@js:r=r.replace(/<li>b<\\/li>/,'')";
         let s = select_and_invoke_js(&h, q, ContentType::Html).unwrap();
         assert!(s.contains("<li>a</li>"), "got: {s}");

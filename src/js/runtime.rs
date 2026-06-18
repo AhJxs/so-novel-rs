@@ -221,9 +221,7 @@ mod tests {
 
     #[test]
     fn quanben5_search_js_runs() {
-        let js_path = repo_web()
-            .join("js")
-            .join("quanben5.com-search.js");
+        let js_path = repo_web().join("js").join("quanben5.com-search.js");
         let module = std::fs::read_to_string(&js_path).unwrap();
         // 这个脚本只定义函数，没有顶层副作用，eval 通过即可。
         let out = eval_function_returning_string(&module, "getParamB", &["三体"]).unwrap();

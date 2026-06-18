@@ -13,9 +13,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use toml_edit::{value, DocumentMut, Item};
-
-use crate::util::lang::detect_system_lang;
+use toml_edit::{DocumentMut, Item, value};
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub enum ExportFormat {
@@ -76,36 +74,58 @@ impl LangType {
     }
 }
 
-/// **应用 UI 语言**（与 `LangType` 区分：`LangType` 是**书源**语言，影响书源筛选 /
-/// 抓取时的 locale hint；`AppLang` 是**应用界面**语言，决定 Sidebar placeholder /
-/// Select placeholder / Dialog OK|Cancel 等所有 gpui-component `t!("...")` 调用的文案）。
+/// **应用语言**（与 `LangType` 区分：`LangType` 是 zhconv 用的目标语言变体；
+/// `Language` 是**应用**语言，决定 Sidebar placeholder / Select placeholder /
+/// Dialog OK|Cancel 等所有 gpui-component `t!("...")` 调用的文案，同时也决定
+/// 下载章节正文的目标语言 —— 见 `Language::to_book_target_lang`）。
 ///
-/// 三种：简体中文 / 繁體中文 / English。存到 TOML `[global].app-lang`。
+/// 三种：简体中文 / 繁體中文 / English。存到 TOML `[global].language`
+/// （旧名 `[global].app-lang` 仍可加载 —— 仅做向后兼容）。
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Serialize, Deserialize)]
-pub enum AppLang {
+pub enum Language {
     /// 简体中文
-    ZhCn,
+    SimplifiedChinese,
     /// 繁體中文
-    ZhTw,
+    TraditionalChinese,
     /// English
-    En,
+    English,
 }
 
-impl AppLang {
+impl Language {
     pub fn as_str(self) -> &'static str {
         match self {
-            AppLang::ZhCn => "zh-CN",
-            AppLang::ZhTw => "zh-TW",
-            AppLang::En => "en",
+            Language::SimplifiedChinese => "zh-CN",
+            Language::TraditionalChinese => "zh-TW",
+            Language::English => "en",
         }
     }
 
     pub fn parse(s: &str) -> Option<Self> {
         match s.trim() {
-            "zh-CN" | "zh_CN" | "zh-cn" | "zh-Hans" | "zh_Hans" => Some(AppLang::ZhCn),
-            "zh-TW" | "zh_TW" | "zh-tw" | "zh-Hant" | "zh_Hant" => Some(AppLang::ZhTw),
-            "en" | "en-US" | "English" => Some(AppLang::En),
+            "zh-CN" | "zh_CN" | "zh-cn" | "zh-Hans" | "zh_Hans" => {
+                Some(Language::SimplifiedChinese)
+            }
+            "zh-TW" | "zh_TW" | "zh-tw" | "zh-Hant" | "zh_Hant" => {
+                Some(Language::TraditionalChinese)
+            }
+            "en" | "en-US" | "English" => Some(Language::English),
             _ => None,
+        }
+    }
+
+    /// 把界面语言映射到下载书籍的目标语言（zhconv 用的 `LangType`）。
+    ///
+    /// 合并设置后，**用户只设一个 `Language`**，下载时的简繁转换目标语言从这里推：
+    /// - 简体中文界面 → 下载正文用简体中文（LangType::ZhCn）
+    /// - 繁體中文界面 → 下载正文用繁體中文（LangType::ZhTw，台湾用词）
+    /// - 英文 / 其它  → 回落简体中文（LangType::ZhCn）
+    ///
+    /// 注意：`LangType::ZhHant`（通用繁体）不再从 UI 暴露 —— 之前的 Source language
+    /// 下拉被合并掉了。如果用户想要"通用繁体"输出，得改用其它工具后处理。
+    pub fn to_book_target_lang(self) -> LangType {
+        match self {
+            Language::SimplifiedChinese | Language::English => LangType::ZhCn,
+            Language::TraditionalChinese => LangType::ZhTw,
         }
     }
 }
@@ -124,7 +144,7 @@ pub struct AppConfig {
 
     // [global]
     pub theme: ThemePref,
-    pub app_lang: AppLang,
+    pub language: Language,
     pub gh_proxy: String,
     pub cf_bypass: String,
     /// 左侧 Sidebar 是否折叠。重启后保持上次状态。
@@ -138,7 +158,6 @@ pub struct AppConfig {
     pub enable_progressbar: bool,
 
     // [source]
-    pub language: LangType,
     /// `None` 表示未指定（旧 INI `-1`）。
     pub source_id: Option<i32>,
     pub search_limit: Option<i32>,
@@ -170,7 +189,7 @@ impl Default for AppConfig {
             theme: String::new(),
             // 空串 = "未指定"，启动时 `apply_theme_by_name("")` no-op，
             // gpui-component 用自带默认主题（light/dark 跟 OS 走）。
-            app_lang: AppLang::ZhCn,
+            language: Language::SimplifiedChinese,
             gh_proxy: String::new(),
             cf_bypass: String::new(),
             sidebar_collapsed: false,
@@ -181,7 +200,6 @@ impl Default for AppConfig {
             preserve_chapter_cache: false,
             enable_progressbar: true,
 
-            language: detect_system_lang(),
             source_id: None,
             search_limit: None,
             search_filter: true,
@@ -259,9 +277,14 @@ pub fn load_config(path: &Path) -> Result<AppConfig> {
     if let Some(v) = t_str(&doc, "global", "theme") {
         cfg.theme = v;
     }
-    if let Some(v) = t_str(&doc, "global", "app-lang") {
-        if let Some(parsed) = AppLang::parse(&v) {
-            cfg.app_lang = parsed;
+    // 新 TOML 键 `[global].language`；旧键 `[global].app-lang` 兼容 —— 老用户配置无需手动迁移。
+    if let Some(v) = t_str(&doc, "global", "language") {
+        if let Some(parsed) = Language::parse(&v) {
+            cfg.language = parsed;
+        }
+    } else if let Some(v) = t_str(&doc, "global", "app-lang") {
+        if let Some(parsed) = Language::parse(&v) {
+            cfg.language = parsed;
         }
     }
     if let Some(v) = t_str(&doc, "global", "gh-proxy") {
@@ -292,11 +315,9 @@ pub fn load_config(path: &Path) -> Result<AppConfig> {
     }
 
     // [source]
-    if let Some(v) = t_str(&doc, "source", "language") {
-        if let Some(parsed) = LangType::parse(&v) {
-            cfg.language = parsed;
-        }
-    }
+    // 注：`[source].language` 在合并 UI / 书源语言设置后被删除（用户只设 Language，
+    // 下载目标语言从 `Language::to_book_target_lang()` 推导）。TOML 里残留的旧键
+    // 会被 toml_edit 自然忽略 —— 老配置文件不需要手动改。
     cfg.source_id = t_int(&doc, "source", "source-id").map(sat_i32);
     cfg.search_limit = t_int(&doc, "source", "search-limit").map(sat_i32);
     if let Some(v) = t_bool(&doc, "source", "search-filter") {
@@ -382,7 +403,7 @@ pub fn save_config(path: &Path, cfg: &AppConfig) -> Result<()> {
 
     // [global]
     set_str(&mut doc, "global", "theme", &cfg.theme);
-    set_str(&mut doc, "global", "app-lang", cfg.app_lang.as_str());
+    set_str(&mut doc, "global", "language", cfg.language.as_str());
     set_str(&mut doc, "global", "gh-proxy", &cfg.gh_proxy);
     set_str(&mut doc, "global", "cf-bypass", &cfg.cf_bypass);
     set_bool(
@@ -410,7 +431,8 @@ pub fn save_config(path: &Path, cfg: &AppConfig) -> Result<()> {
     );
 
     // [source]
-    set_str(&mut doc, "source", "language", cfg.language.as_str());
+    // 旧的 `[source].language` 不再写：新用户配置文件不会再有这个键；
+    // 老用户配置文件里的孤儿键会被忽略（toml_edit 不会主动清理）。
     match cfg.source_id {
         Some(v) => set_int(&mut doc, "source", "source-id", v as i64),
         None => unset(&mut doc, "source", "source-id"),
@@ -492,9 +514,10 @@ fn default_template_doc() -> DocumentMut {
 # 改成具体主题名（与 `src/gpui_app/themes/*.json` 里的 `name` 字段一致）
 # 即可启用对应主题，例如 `theme = "Catppuccin Mocha"`。
 theme = ""
-# app-lang = 应用 UI 语言（Sidebar placeholder / Select / Dialog 等所有 gpui-component
-# 内部 `t!("...")` 文案的语言）。三选一：zh-CN / zh-TW / en。
-app-lang = "zh-CN"
+# language = 应用语言（Sidebar placeholder / Select / Dialog 等所有 gpui-component
+# 内部 `t!("...")` 文案的语言，同时决定下载章节正文的目标语言 —— 见
+# `Language::to_book_target_lang`）。三选一：zh-CN / zh-TW / en。
+language = "zh-CN"
 gh-proxy = ""
 cf-bypass = ""
 # 左侧 Sidebar 是否折叠。重启后保持上次状态。
@@ -510,7 +533,6 @@ preserve-chapter-cache = false
 enable-progressbar = true
 
 [source]
-language = "zh_CN"
 search-limit = 30
 search-filter = true
 
@@ -568,9 +590,7 @@ impl ConfigPaths {
 fn home_dir() -> PathBuf {
     directories::BaseDirs::new()
         .map(|d| d.home_dir().to_path_buf())
-        .unwrap_or_else(|| {
-            std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
-        })
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
 }
 
 #[cfg(test)]
@@ -603,8 +623,7 @@ mod tests {
             proxy_host: "10.0.0.1".to_string(),
             proxy_port: 1080,
             qidian_cookie: "w_tsfp=demo".to_string(),
-            language: LangType::ZhTw,
-            app_lang: AppLang::En,
+            language: Language::English,
             theme: "Catppuccin Mocha".to_string(),
             sidebar_collapsed: true,
             ..AppConfig::default()
@@ -623,8 +642,7 @@ mod tests {
         assert_eq!(loaded.proxy_host, cfg.proxy_host);
         assert_eq!(loaded.proxy_port, cfg.proxy_port);
         assert_eq!(loaded.qidian_cookie, cfg.qidian_cookie);
-        assert_eq!(loaded.language, cfg.language);
-        assert_eq!(loaded.app_lang, AppLang::En);
+        assert_eq!(loaded.language, Language::English);
         assert_eq!(loaded.theme, "Catppuccin Mocha");
         assert!(loaded.sidebar_collapsed);
     }
@@ -676,5 +694,71 @@ search-filter = true
         assert!(cfg.source_id.is_none());
         assert!(cfg.search_limit.is_none());
         assert!(cfg.concurrency.is_none());
+    }
+
+    #[test]
+    fn language_maps_to_book_target_lang() {
+        // 合并设置后，UI 语言的繁体选项 → 下载目标语言为 ZhTw（不是 ZhHant）。
+        assert_eq!(
+            Language::SimplifiedChinese.to_book_target_lang(),
+            LangType::ZhCn
+        );
+        assert_eq!(
+            Language::TraditionalChinese.to_book_target_lang(),
+            LangType::ZhTw
+        );
+        // 英文 / 其它 → 回落简体（用户要求）。
+        assert_eq!(Language::English.to_book_target_lang(), LangType::ZhCn);
+    }
+
+    #[test]
+    fn load_ignores_orphan_source_language_key() {
+        // 老用户配置文件里可能还留着 `[source].language = "..."`，加载时必须容忍。
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(
+            &path,
+            r#"[source]
+language = "zh_TW"
+search-filter = true
+"#,
+        )
+        .unwrap();
+
+        let cfg = load_config(&path).unwrap();
+        // 字段被忽略，AppConfig 不再持有 language —— 但加载本身不应失败。
+        // Language 仍是 default（SimplifiedChinese），因为该字段没在文件里。
+        assert_eq!(cfg.language, Language::SimplifiedChinese);
+        assert!(cfg.search_filter);
+    }
+
+    #[test]
+    fn load_falls_back_to_legacy_app_lang_key() {
+        // 老用户配置里可能是 `[global].app-lang = "..."`，新键 `language` 未设置时
+        // 必须能正常加载（向后兼容）。
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(
+            &path,
+            r#"[global]
+app-lang = "zh-TW"
+"#,
+        )
+        .unwrap();
+
+        let cfg = load_config(&path).unwrap();
+        assert_eq!(cfg.language, Language::TraditionalChinese);
+
+        // 新键优先：language 设置后忽略 app-lang。
+        std::fs::write(
+            &path,
+            r#"[global]
+language = "zh-CN"
+app-lang = "zh-TW"
+"#,
+        )
+        .unwrap();
+        let cfg = load_config(&path).unwrap();
+        assert_eq!(cfg.language, Language::SimplifiedChinese);
     }
 }

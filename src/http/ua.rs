@@ -31,9 +31,7 @@ pub fn random_ua() -> String {
         "Chrome" => format!(
             "Mozilla/5.0 ({os}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{major}.0.{build} Safari/537.36"
         ),
-        "Firefox" => format!(
-            "Mozilla/5.0 ({os}; rv:{major}.0) Gecko/20100101 Firefox/{major}.0"
-        ),
+        "Firefox" => format!("Mozilla/5.0 ({os}; rv:{major}.0) Gecko/20100101 Firefox/{major}.0"),
         "Safari" => format!(
             "Mozilla/5.0 ({os}) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/{major}.1 Safari/537.36"
         ),

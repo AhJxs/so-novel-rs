@@ -29,18 +29,21 @@
 use std::rc::Rc;
 
 use gpui::{
-    div, App, AppContext, ClickEvent, Context, Entity, IntoElement, ParentElement, Render,
-    SharedString, Styled, Window,
+    App, AppContext, ClickEvent, Context, Entity, IntoElement, ParentElement, Render, SharedString,
+    Styled, Window, div,
 };
 
 use gpui_component::{
-    ActiveTheme as _, AxisExt as _, Disableable, Icon, IconName, Sizable as _, button::{Button, ButtonVariants as _}, group_box::GroupBoxVariant, input::{Input, InputEvent, InputState}, select::{SearchableVec, Select, SelectDelegate, SelectEvent, SelectState}, setting::{
-        NumberFieldOptions, SettingField, SettingGroup, SettingItem, SettingPage, Settings,
-    }
+    ActiveTheme as _, AxisExt as _, Disableable, Icon, IconName, Sizable as _,
+    button::{Button, ButtonVariants as _},
+    group_box::GroupBoxVariant,
+    input::{Input, InputEvent, InputState},
+    select::{SearchableVec, Select, SelectDelegate, SelectEvent, SelectState},
+    setting::{NumberFieldOptions, SettingField, SettingGroup, SettingItem, SettingPage, Settings},
 };
 
 use crate::app::AppModel;
-use crate::config::{AppLang, ExportFormat, LangType};
+use crate::config::{ExportFormat, Language};
 use crate::gpui_app::{
     i18n::{ts, ts_fmt},
     locale_for, themes,
@@ -109,12 +112,10 @@ impl SettingsPage {
         // 初始选中：当前 `config.theme` 可能在 items 里（embed 主题），也可能不在
         // （用户后来改了 themes 目录）。不在 → None（空 placeholder），用户重新选即可。
         let cur = SharedString::from(model.read(cx).config.theme.clone());
-        let selected =
-            <SearchableVec<SharedString> as SelectDelegate>::position(&items, &cur);
+        let selected = <SearchableVec<SharedString> as SelectDelegate>::position(&items, &cur);
 
-        let theme_state = cx.new(|cx| {
-            SelectState::new(items, selected, window, cx).searchable(true)
-        });
+        let theme_state =
+            cx.new(|cx| SelectState::new(items, selected, window, cx).searchable(true));
 
         // 订阅 SelectEvent::Confirm —— 用户在弹层里敲回车 / 点 item 时触发。
         // 4 参数版 `cx.subscribe`：handler 是 `Fn(&mut Self, &E, &Ev, &mut Context<Self>)`。
@@ -264,32 +265,33 @@ impl SettingsPage {
     /// 立即落盘。无需「立即保存」按钮。
     ///
     /// 所有 page / group / item 标题、description、dropdown option 标签都走
-    /// `i18n::tr(key` —— `app_lang` 从 model 读，每次 render 重读，
+    /// `i18n::tr(key` —— `language` 从 model 读，每次 render 重读，
     /// `set_locale` + `refresh_windows` 后切语言即时生效。
     fn build_pages(&self) -> Vec<SettingPage> {
-        // app_lang 的读取放在下面的 `render` 里（用于构造 Settings id 触发重建），
+        // language 的读取放在下面的 `render` 里（用于构造 Settings id 触发重建），
         // 不再在 build_pages 单独读 —— `t!` 走全局 locale，无需依赖本变量。
         // 主题下拉的选项在 render 闭包里现取（themes::list_theme_names），
         // 走可搜索 Select（36 个变体下默认下拉框不够长，需 search 才能快速定位）。
 
-        // 3 种**书源**语言 → (value_str, label)，用 `LangType::as_str()` 的格式
-        // （"zh_CN" / "zh_TW" / "zh_Hant"）跟 TOML 持久化层保持一致 —— 之前用
-        // "zh-cn" / "zh-tw" / "zh-hant" 这种小写连字符格式，导致 dropdown 的
-        // getter 返回值跟 options 不匹配，重启后下拉框看不到当前选项。
-        // label 走 i18n：界面语言切到 English 时显示 "Simplified Chinese" 等。
-        let lang_options: Vec<(SharedString, SharedString)> = vec![
-            (LangType::ZhCn.as_str().into(), ts("Settings.option.booklang.zh_cn"),),
-            (LangType::ZhTw.as_str().into(), ts("Settings.option.booklang.zh_tw"),),
-            (LangType::ZhHant.as_str().into(), ts("Settings.option.booklang.zh_hant"),),
-        ];
-
-        // 3 种**应用 UI** 语言 → (value_str, label)，存到 TOML `[global].app-lang`，
-        // 由 `AppLang::as_str()` 给出（"zh-CN" / "zh-TW" / "en"）。
+        // 3 种**应用**语言 → (value_str, label)，存到 TOML `[global].language`，
+        // 由 `Language::as_str()` 给出（"zh-CN" / "zh-TW" / "en"）。
         // label 走 i18n：切到 English 时显示 "Simplified Chinese" / "Traditional Chinese" / "English"。
-        let app_lang_options: Vec<(SharedString, SharedString)> = vec![
-            (AppLang::ZhCn.as_str().into(), ts("Settings.option.applang.zh_cn"),),
-            (AppLang::ZhTw.as_str().into(), ts("Settings.option.applang.zh_tw"),),
-            (AppLang::En.as_str().into(), ts("Settings.option.applang.en"),),
+        //
+        // 这个 Language 现在**也是下载目标语言**（合并了之前的"书源语言"设置）：
+        // 简体界面 → 简体下载；繁体界面 → 繁体下载；English / 其它 → 简体。
+        let language_options: Vec<(SharedString, SharedString)> = vec![
+            (
+                Language::SimplifiedChinese.as_str().into(),
+                ts("Settings.option.language.zh_cn"),
+            ),
+            (
+                Language::TraditionalChinese.as_str().into(),
+                ts("Settings.option.language.zh_tw"),
+            ),
+            (
+                Language::English.as_str().into(),
+                ts("Settings.option.language.en"),
+            ),
         ];
 
         // 4 种输出格式 → (value_str, label)
@@ -350,26 +352,26 @@ impl SettingsPage {
                             }),
                         )
                         .description(ts("Settings.desc.theme"),),
-                        // -- 界面语言（AppLang：应用 UI 语言）--
+                        // -- 界面语言（Language：应用 UI 语言；同时也是下载目标语言）--
                         SettingItem::new(
-                            ts("Settings.item.app_lang"),
+                            ts("Settings.item.language"),
                             SettingField::dropdown(
-                                app_lang_options,
+                                language_options,
                                 {
                                     let m = m.clone();
                                     move |cx: &App| {
-                                        let cur = m.read(cx).config.app_lang;
+                                        let cur = m.read(cx).config.language;
                                         SharedString::from(cur.as_str())
                                     }
                                 },
                                 {
                                     let m = m.clone();
                                     move |val: SharedString, cx: &mut App| {
-                                        let Some(lang) = AppLang::parse(&val) else {
+                                        let Some(lang) = Language::parse(&val) else {
                                             return;
                                         };
                                         m.update(cx, |model, _| {
-                                            model.config.app_lang = lang;
+                                            model.config.language = lang;
                                             model.persist_settings();
                                         });
                                         // 立即更新 gpui-component 内部 i18n locale
@@ -381,7 +383,7 @@ impl SettingsPage {
                                 },
                             ),
                         )
-                        .description(ts("Settings.desc.app_lang"),),
+                        .description(ts("Settings.desc.language"),),
                     ]),
                     // 网络
                     SettingGroup::new().title(ts("Settings.group.network")).items(vec![
@@ -593,35 +595,6 @@ impl SettingsPage {
                 .groups(vec![
                     // 书源
                     SettingGroup::new().title(ts("Settings.group.source")).items(vec![
-                        // -- 书源语言（LangType：书源筛选的 locale hint）--
-                        SettingItem::new(
-                            ts("Settings.item.book_lang"),
-                            SettingField::dropdown(
-                                lang_options,
-                                {
-                                    let m = m.clone();
-                                    move |cx: &App| {
-                                        let cur = m.read(cx).config.language;
-                                        SharedString::from(cur.as_str())
-                                    }
-                                },
-                                {
-                                    let m = m.clone();
-                                    move |val: SharedString, cx: &mut App| {
-                                        let Some(lang) = LangType::parse(&val) else {
-                                            return;
-                                        };
-                                        m.update(cx, |model, _| {
-                                            model.config.language = lang;
-                                            model.persist_settings();
-                                        });
-                                        // 不调 set_locale —— 这是**书源**语言，
-                                        // 不影响 gpui-component 内部 i18n。
-                                    }
-                                },
-                            ),
-                        )
-                        .description(ts("Settings.desc.book_lang"),),
                         // -- 搜索条数上限（Option<i32>, -1 = 不限）--
                         SettingItem::new(
                             ts("Settings.item.search_limit"),
@@ -1053,9 +1026,9 @@ impl Render for SettingsPage {
         self.sync_download_path(window, cx);
 
         let pages = self.build_pages();
-        let app_lang = self.model.read(cx).config.app_lang;
+        let language = self.model.read(cx).config.language;
 
-        // **关键**：把 app_lang 塞进 `Settings::new(id)` 的 id 里。
+        // **关键**：把 language 塞进 `Settings::new(id)` 的 id 里。
         //
         // gpui-component 的 `Settings` 内部用 `window.use_keyed_state(self.id, ...)` 缓存
         // `SettingsState { search_input: Entity<InputState>, ... }`。**而 InputState 的
@@ -1076,7 +1049,7 @@ impl Render for SettingsPage {
         // `Settings::new` 接 `impl Into<ElementId>`，实际能用的是 `SharedString` /
         // `&'static str`（前者 `Arc<str>`，后者 static）。我们用 `SharedString`：每次
         // render 都 new 一个（内部 refcount +1，引用同样的字符串内容），lang 一变 id 就变。
-        let id: SharedString = format!("settings-page-{}", app_lang.as_str()).into();
+        let id: SharedString = format!("settings-page-{}", language.as_str()).into();
 
         // Settings 组件自带 sidebar（页切换）+ 主区布局。直接放满父容器即可。
         // `with_group_variant(Outline)` 给所有 group 加 1px 边框（`cx.theme().border`），

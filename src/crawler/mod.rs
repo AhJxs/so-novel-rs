@@ -23,25 +23,26 @@ mod retry;
 pub mod search;
 
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use rand::RngExt;
 use thiserror::Error;
-use tokio::sync::{mpsc, Semaphore};
+use tokio::sync::{Semaphore, mpsc};
 
 use crate::config::AppConfig;
 use crate::export::{
-    build_book_dir_name, exporter_for, write_chapter_files, ExportError, RenderTarget,
-    RenderedChapter,
+    ExportError, RenderTarget, RenderedChapter, build_book_dir_name, exporter_for,
+    write_chapter_files,
 };
-use crate::http::client::{build_async_client, ClientOptions};
+use crate::http::client::{ClientOptions, build_async_client};
 use crate::models::{Book, Chapter};
 use crate::parser::{
-    parse_book_detail, parse_chapter, parse_toc, BookError, ChapterError, SelectError, TocError,
+    BookError, ChapterError, SelectError, TocError, parse_book_detail, parse_chapter, parse_toc,
 };
 use crate::rules::Source;
+use crate::util::zhconv::convert_book_meta;
 use retry::retry_with_backoff;
 
 /// 调度层用户可见的进度事件。
@@ -210,7 +211,9 @@ pub async fn resolve_book(
             let cancel = cancel.clone();
             async move {
                 if cancel.is_cancelled() {
-                    return Err(TocError::Selector(SelectError::JsFailed("cancelled".to_string())));
+                    return Err(TocError::Selector(SelectError::JsFailed(
+                        "cancelled".to_string(),
+                    )));
                 }
                 parse_toc(&client, &rule, &url, cf.as_deref()).await
             }
@@ -225,6 +228,16 @@ pub async fn resolve_book(
     )
     .await
     .map_err(CrawlerError::Toc)?;
+
+    // 书名/作者/简介 简繁转换：与章节正文 (`render_chapter`) 用同一 source/target 语义。
+    // 在这里集中做一次，UI（任务页 / 书库）、缓存目录名 (`build_book_dir_name`)、
+    // 导出器（EPUB metadata + 文件名 + TXT 首页 + HTML zip 名）全部共享转换结果，
+    // 避免每个 exporter 各自重写一份 + 减少 drift 风险。
+    //
+    // 目标语言从界面语言 (`Language`) 推 —— 合并 UI/书源语言设置后用户只设一个
+    // Language，下载时的简繁转换目标即由此决定（English → ZhCn 兜底）。
+    let target_lang = cfg.language.to_book_target_lang();
+    let book = convert_book_meta(&book, &source.rule.language, &target_lang);
 
     Ok((book, toc))
 }
@@ -299,8 +312,9 @@ pub async fn download_chapters(
         let enable_retry = cfg.enable_retry;
         // 简繁转换需要源/目标语言。`source` / `cfg` 是借用，闭包 'static 要求 owned
         // 值；clone Rule（Arc 浅拷贝，开销小）和 target LangType（Copy）。
+        // 目标语言从界面语言 (`Language`) 推导 —— 合并设置后用户只设 Language。
         let rule_lang = source.rule.language.clone();
-        let target_lang = cfg.language;
+        let target_lang = cfg.language.to_book_target_lang();
 
         handles.push(tokio::spawn(async move {
             // 限并发
@@ -520,10 +534,7 @@ fn cleanup_chapters_dir_if_empty(dir: &std::path::Path) {
     // 否则 Windows 上偶发 "目录正在使用" 错误。
     drop(entries);
     if let Err(e) = std::fs::remove_dir(dir) {
-        tracing::warn!(
-            "清理空章节目录失败（已忽略）: {} — {e}",
-            dir.display()
-        );
+        tracing::warn!("清理空章节目录失败（已忽略）: {} — {e}", dir.display());
     } else {
         tracing::debug!("已清理空章节目录: {}", dir.display());
     }

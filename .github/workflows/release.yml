@@ -80,8 +80,6 @@ jobs:
             libwayland-dev libgl1-mesa-dev libegl1-mesa-dev \
             libglib2.0-dev libssl-dev \
             mesa-vulkan-drivers
-          # vulkan-validationlayers-dev 在 ubuntu-latest 已不可用（被 vulkan-utility-libraries-dev 替代），
-          # 链接 vulkan 只需要 headers —— vulkan-utility-libraries-dev 提供。
           sudo apt-get install -y vulkan-utility-libraries-dev || true
 
       - name: Build (release)

@@ -141,13 +141,18 @@ impl DownloadTask {
     pub fn is_cancelled(&self) -> bool {
         matches!(
             self.finished.as_ref(),
-            Some(Err(FinishedReason::UserCancelled | FinishedReason::AppRestarted))
+            Some(Err(
+                FinishedReason::UserCancelled | FinishedReason::AppRestarted
+            ))
         )
     }
 
     /// 已结束且不是取消 → 失败。
     pub fn is_failed(&self) -> bool {
-        matches!(self.finished.as_ref(), Some(Err(FinishedReason::Failed { .. })))
+        matches!(
+            self.finished.as_ref(),
+            Some(Err(FinishedReason::Failed { .. }))
+        )
     }
 
     pub fn book_name(&self) -> &str {
@@ -212,7 +217,11 @@ impl DownloadTask {
             failed: rec.failed,
             last_chapter_title: rec.last_chapter_title,
             finished: rec.finished,
-            failures: rec.failures.into_iter().map(|f| (f.index, f.title, f.reason)).collect(),
+            failures: rec
+                .failures
+                .into_iter()
+                .map(|f| (f.index, f.title, f.reason))
+                .collect(),
         }
     }
 }

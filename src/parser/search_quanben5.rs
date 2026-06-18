@@ -13,14 +13,14 @@
 //! 同一套 `parse_search_results` 逻辑。
 
 use anyhow::Result;
-use reqwest::header::{ACCEPT, COOKIE, REFERER, USER_AGENT};
 use reqwest::Client;
+use reqwest::header::{ACCEPT, COOKIE, REFERER, USER_AGENT};
 
 use crate::http::ua::random_ua;
 use crate::http::{decode_response_bytes, has_cloudflare};
 use crate::js::eval_function_returning_string;
 use crate::models::{Rule, SearchResult};
-use crate::parser::search::{parse_search_results, SearchError};
+use crate::parser::search::{SearchError, parse_search_results};
 
 /// 嵌入的 quanben5.js（Java 端从 classpath:quanben5.js 加载）。
 const QUANBEN5_JS: &str = include_str!("../../bundle/web/js/quanben5.js");
@@ -128,7 +128,7 @@ fn parse_jsonp_and_extract(
             return Err(SearchError::Parse(format!(
                 "quanben5 响应未找到 JSON 对象（前 200 字节: {}）",
                 truncate_for_log(&processed, 200)
-            )))
+            )));
         }
     };
 
@@ -138,7 +138,7 @@ fn parse_jsonp_and_extract(
         None => {
             return Err(SearchError::Parse(
                 "quanben5 响应缺少 content 字段".to_string(),
-            ))
+            ));
         }
     };
     // 去除两端引号（Java `StrUtil.strip(content, "\"")`）。我们在前面把 \" 替换成了 '，

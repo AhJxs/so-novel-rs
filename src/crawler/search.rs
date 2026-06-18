@@ -13,9 +13,9 @@ use reqwest::Client;
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 
-use crate::http::client::{build_async_client, ClientOptions};
+use crate::http::client::{ClientOptions, build_async_client};
 use crate::models::SearchResult;
-use crate::parser::{search_one, SearchError};
+use crate::parser::{SearchError, search_one};
 use crate::rules::Source;
 
 /// 单源搜索的输出条目（绑定到原 Source，便于 UI 出错提示）。

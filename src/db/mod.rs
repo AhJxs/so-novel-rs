@@ -93,11 +93,9 @@ fn init_schema(conn: &Connection) -> rusqlite::Result<()> {
     )?;
 
     let has: bool = conn
-        .query_row(
-            "SELECT EXISTS(SELECT 1 FROM schema_version)",
-            [],
-            |row| row.get(0),
-        )
+        .query_row("SELECT EXISTS(SELECT 1 FROM schema_version)", [], |row| {
+            row.get(0)
+        })
         .unwrap_or(false);
     if !has {
         conn.execute(

@@ -20,23 +20,24 @@ use std::path::PathBuf;
 
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    div, px, App, AppContext, ClickEvent, Context, Entity, IntoElement, ParentElement, Render,
-    SharedString, Styled, Window,
+    App, AppContext, ClickEvent, Context, Entity, IntoElement, ParentElement, Render, SharedString,
+    Styled, Window, div, px,
 };
 use gpui_component::StyledExt;
 use gpui_component::{
+    ActiveTheme as _, Icon, IconName, IndexPath, Selectable, Sizable, WindowExt,
     button::{Button, ButtonVariant, ButtonVariants as _},
     dialog::{Dialog, DialogButtonProps},
     h_flex,
     input::{Input, InputEvent, InputState},
     list::{List, ListDelegate, ListItem, ListState},
     tag::Tag,
-    v_flex, ActiveTheme as _, Icon, IconName, IndexPath, Selectable, Sizable, WindowExt,
+    v_flex,
 };
 
 use crate::app::{AppModel, LibraryEntry};
 use crate::gpui_app::components::{
-    compute_page_window, format_size, truncate, EmptyState, PageHeader, Pagination,
+    EmptyState, PageHeader, Pagination, compute_page_window, format_size, truncate,
 };
 use crate::gpui_app::i18n::{ts, ts_fmt};
 use crate::util::system::{open_path, reveal_in_folder};
@@ -156,8 +157,8 @@ impl LibraryPage {
         let model_for_watcher = model.clone();
 
         cx.spawn(async move |_weak, async_cx| {
-            use std::sync::atomic::{AtomicU64, Ordering};
             use std::sync::Arc;
+            use std::sync::atomic::{AtomicU64, Ordering};
             use std::time::Duration;
 
             use notify::{RecommendedWatcher, RecursiveMode, Watcher};
@@ -842,8 +843,8 @@ fn render_row(
 
 /// 简单 unix 秒 → "YYYY-MM-DD HH:MM"。本地时区。
 fn format_unix_secs(secs: u64) -> String {
-    use time::format_description::well_known::Rfc3339;
     use time::OffsetDateTime;
+    use time::format_description::well_known::Rfc3339;
     if secs == 0 {
         return ts("Library.time.unknown").to_string();
     }

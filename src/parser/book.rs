@@ -19,9 +19,9 @@ use reqwest::Client;
 use scraper::Html;
 use thiserror::Error;
 
-use crate::http::{fetch, fetch_via_cf_bypass, has_cloudflare, FetchRequest, HttpMethod};
+use crate::http::{FetchRequest, HttpMethod, fetch, fetch_via_cf_bypass, has_cloudflare};
 use crate::models::{Book, ContentType, Rule};
-use crate::parser::dom::{select_and_invoke_js, SelectError};
+use crate::parser::dom::{SelectError, select_and_invoke_js};
 
 #[derive(Debug, Error)]
 pub enum BookError {
@@ -29,7 +29,9 @@ pub enum BookError {
     BookRuleMissing,
     #[error("HTTP 错误: {0}")]
     Http(String),
-    #[error("命中 Cloudflare 验证页，未配置 cf-bypass 旁路（请在 config.toml [global] cf-bypass 填地址）: {0}")]
+    #[error(
+        "命中 Cloudflare 验证页，未配置 cf-bypass 旁路（请在 config.toml [global] cf-bypass 填地址）: {0}"
+    )]
     Cloudflare(String),
     #[error("详情页书名或作者为空")]
     MissingTitleOrAuthor,
@@ -298,7 +300,7 @@ mod tests {
     #[ignore = "live network: depends on 22biqu availability"]
     async fn live_22biqu_book_detail_parses() {
         use crate::config::AppConfig;
-        use crate::http::client::{build_async_client, ClientOptions};
+        use crate::http::client::{ClientOptions, build_async_client};
         use crate::parser::search::search_one;
 
         let cfg = AppConfig::default();

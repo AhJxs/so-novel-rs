@@ -23,9 +23,9 @@ mod update_state;
 
 pub(crate) mod ops;
 
-pub use cover::{hash_short, CoverEntry};
+pub use cover::{CoverEntry, hash_short};
 pub use download_task::DownloadTask;
-pub use library_state::{scan_library_dir, LibraryEntry, LibraryState};
+pub use library_state::{LibraryEntry, LibraryState, scan_library_dir};
 pub use now::now_unix_secs;
 pub use runtime::build_shared_runtime;
 pub use search_state::{
@@ -35,13 +35,13 @@ pub use search_state::{
 pub use sources_state::SourcesState;
 pub use tasks_db::load_tasks_from_db;
 pub use update_state::{
-    check_github_latest_release, UpdateCheckResult, UpdateOutcome, UpdateState,
+    UpdateCheckResult, UpdateOutcome, UpdateState, check_github_latest_release,
 };
 
 use gpui::App;
 use tokio::runtime::Runtime;
 
-use crate::config::{load_config, AppConfig, ConfigPaths};
+use crate::config::{AppConfig, ConfigPaths, load_config};
 use crate::db::Db;
 use crate::gpui_app::i18n::{ts, ts_fmt};
 use crate::models::Rule;
@@ -124,9 +124,8 @@ impl AppModel {
             Ok(db) => db,
             Err(e) => {
                 tracing::warn!("sonovel.db 打开失败: {e:#}");
-                Db::open_in_memory().unwrap_or_else(|e| {
-                    panic!("既开不了磁盘 DB 也开不了内存 DB：{e}")
-                })
+                Db::open_in_memory()
+                    .unwrap_or_else(|e| panic!("既开不了磁盘 DB 也开不了内存 DB：{e}"))
             }
         };
 
@@ -173,10 +172,7 @@ impl AppModel {
     /// 实际 `window.push_notification` 由 [`crate::gpui_app::RootView::render`] 排空
     /// `pending_notifications` 后调 —— [`crate::app::events::drain`] 跑在
     /// `AsyncApp::update_entity` 闭包里，**拿不到 `&mut Window`**。
-    pub fn push_notification(
-        &mut self,
-        notification: gpui_component::notification::Notification,
-    ) {
+    pub fn push_notification(&mut self, notification: gpui_component::notification::Notification) {
         self.pending_notifications.push(notification);
     }
 
@@ -216,12 +212,8 @@ impl AppModel {
 
     /// 派一个 TOC 预取任务（获取元数据 + 章节列表，不开始下载）。
     pub fn spawn_resolve_toc(&mut self, target: &crate::models::SearchResult) {
-        let rx = crate::app::ops::spawn_resolve_toc(
-            &self.rules,
-            &self.config,
-            self.runtime,
-            target,
-        );
+        let rx =
+            crate::app::ops::spawn_resolve_toc(&self.rules, &self.config, self.runtime, target);
         self.search.toc_rx = Some(rx);
     }
 
@@ -249,12 +241,7 @@ impl AppModel {
 
     /// 派聚合搜索任务。
     pub fn spawn_search(&mut self) -> bool {
-        crate::app::ops::spawn_search(
-            &self.rules,
-            &self.config,
-            self.runtime,
-            &mut self.search,
-        )
+        crate::app::ops::spawn_search(&self.rules, &self.config, self.runtime, &mut self.search)
     }
 
     /// 选中某条搜索结果。
@@ -307,8 +294,7 @@ impl AppModel {
                 }
             }
             Err(msg) => {
-                if msg.starts_with("文件内容为空")
-                    || msg.starts_with("文件中未找到有效")
+                if msg.starts_with("文件内容为空") || msg.starts_with("文件中未找到有效")
                 {
                     self.push_warning_notification(msg);
                 } else {
@@ -347,8 +333,7 @@ impl AppModel {
     /// cx.spawn(timer 500ms) 合并多次 persist_settings 调用 —— 单次写盘本来就很快
     /// （小 TOML 几 ms），目前不做 debounce。
     pub fn persist_settings(&mut self) {
-        if let Err(msg) = crate::app::ops::persist_settings(&self.config, &self.paths.config_file)
-        {
+        if let Err(msg) = crate::app::ops::persist_settings(&self.config, &self.paths.config_file) {
             tracing::warn!("自动保存 config.toml 失败: {msg}");
             self.push_error_notification(msg);
         } else {
@@ -488,4 +473,3 @@ impl AppModel {
         crate::app::ops::save_task_to_db(&self.db, task);
     }
 }
-

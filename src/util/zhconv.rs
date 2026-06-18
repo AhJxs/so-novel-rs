@@ -6,6 +6,7 @@
 use zhconv::{Variant, zhconv};
 
 use crate::config::LangType;
+use crate::models::Book;
 
 /// 把 `LangType` 映射到 `zhconv` 的目标变体。
 ///
@@ -23,6 +24,33 @@ pub fn lang_to_variant(target: &LangType) -> Variant {
 /// 直接对纯文本调用 zhconv。TXT body 用这个。
 pub fn convert_text(text: &str, target: &LangType) -> String {
     zhconv(text, lang_to_variant(target))
+}
+
+/// 转换书籍元信息（书名 / 作者 / 简介）到目标语言。
+///
+/// 与 `maybe_convert_chinese` 同语义：source 解析失败 或 source == target 时
+/// 直接 clone 原 book 返回（保守、不误转）。其余情况下：
+/// - `book_name` / `author` 走 `convert_text`（纯文本，规则里按 TEXT 模式抽）；
+/// - `intro` 走 `convert_html_body`（保留 `<script>`/`<style>` 块，对纯文本也安全——
+///   zhconv 不改 ASCII，无 script/style 时整串即整串转）；
+/// - 其它字段（category / cover_url / latest_chapter / last_update_time / status）含
+///   非中文内容（URL、状态枚举、时间戳）多，原样保留。
+///
+/// 返回新 `Book`（克隆 + 转换字段），不修改入参。
+pub fn convert_book_meta(book: &Book, source_lang_raw: &str, target: &LangType) -> Book {
+    let Some(source) = LangType::parse(source_lang_raw) else {
+        return book.clone();
+    };
+    if source == *target {
+        return book.clone();
+    }
+    let mut out = book.clone();
+    out.book_name = convert_text(&book.book_name, target);
+    out.author = convert_text(&book.author, target);
+    if let Some(intro) = book.intro.as_deref() {
+        out.intro = Some(convert_html_body(intro, target));
+    }
+    out
 }
 
 /// 对 HTML body 转换中文，**跳过 `<script>` 和 `<style>` 块**（代码块里中文不该被转）。
@@ -70,9 +98,7 @@ pub fn convert_html_body(body: &str, target: &LangType) -> String {
         // 闭标签 </script 含 '>'，位置 = rel_close + end_tag.len() + 1
         let block_end_incl = pos + rel_close + end_tag.len() + 1;
         // 找到开标签的 '>' 结束
-        let open_gt_rel = rest[pos..]
-            .find('>')
-            .expect("script/style 开标签必有 '>'");
+        let open_gt_rel = rest[pos..].find('>').expect("script/style 开标签必有 '>'");
         let open_gt = pos + open_gt_rel + 1;
         // 开标签原样（zhconv 不改 ASCII 字符，但保险起见原样保留）
         out.push_str(&rest[pos..open_gt]);
@@ -116,7 +142,10 @@ mod tests {
         // 标签外文本转繁体
         assert!(out.contains("簡體中文"), "got: {out}");
         // script 块原样
-        assert!(out.contains(r#"var x = "不转这里";"#), "script mutated: {out}");
+        assert!(
+            out.contains(r#"var x = "不转这里";"#),
+            "script mutated: {out}"
+        );
         assert!(out.contains("</script>"), "got: {out}");
         // 末段也转
         assert!(out.contains("末段"), "got: {out}");
@@ -133,6 +162,94 @@ mod tests {
     fn lang_to_variant_mapping() {
         assert!(matches!(lang_to_variant(&LangType::ZhCn), Variant::ZhHans));
         assert!(matches!(lang_to_variant(&LangType::ZhTw), Variant::ZhTW));
-        assert!(matches!(lang_to_variant(&LangType::ZhHant), Variant::ZhHant));
+        assert!(matches!(
+            lang_to_variant(&LangType::ZhHant),
+            Variant::ZhHant
+        ));
+    }
+
+    // ---------- convert_book_meta ----------
+
+    fn sample_book_cn() -> Book {
+        Book {
+            url: "https://x".into(),
+            book_name: "软件工程师的发量".into(),
+            author: "苹果".into(),
+            intro: Some("<p>头发的颜色是黄色</p><script>var s=\"不转\";</script>".into()),
+            ..Book::default()
+        }
+    }
+
+    /// 源 zh_CN + 目标 zh_TW：书名 / 作者 / 简介 全部转换，简介的 script 块原样保留。
+    ///
+    /// 注：zhconv 是字符级映射，"发" → "發"（不是"髮"）；后者是上下文感知结果，
+    /// OpenCC 词表里有但 zhconv 默认不启用。本测试只断言字符级转换结果。
+    #[test]
+    fn convert_book_meta_simplified_to_traditional_tw() {
+        let book = sample_book_cn();
+        let out = convert_book_meta(&book, "zh_CN", &LangType::ZhTw);
+        // 书名：简体"软件"→ 台湾繁体"軟體"（用词差异 + 字形）；"发" → "發"
+        assert_eq!(out.book_name, "軟體工程師的發量");
+        // 作者纯字面转
+        assert_eq!(out.author, "蘋果");
+        // 简介：script 块不动，其它转繁体
+        let intro = out.intro.as_deref().unwrap();
+        assert!(intro.contains("頭髮的顏色是黃色"), "intro: {intro}");
+        assert!(
+            intro.contains(r#"var s="不转";"#),
+            "script mutated: {intro}"
+        );
+        // 其它字段原样保留
+        assert_eq!(out.url, book.url);
+        assert_eq!(out.category, book.category);
+    }
+
+    /// 源 zh_TW + 目标 zh_CN：繁体转简体（含"軟體"→"软体"）。
+    #[test]
+    fn convert_book_meta_traditional_to_simplified() {
+        let book = Book {
+            book_name: "軟體工程師".into(),
+            author: "蘋果".into(),
+            intro: Some("<p>頭髮的顏色</p>".into()),
+            ..sample_book_cn()
+        };
+        let out = convert_book_meta(&book, "zh_TW", &LangType::ZhCn);
+        assert_eq!(out.book_name, "软体工程师");
+        assert_eq!(out.author, "苹果");
+        assert_eq!(out.intro.as_deref().unwrap(), "<p>头发的颜色</p>");
+    }
+
+    /// source == target：跳过转换、返回 clone（与 `maybe_convert_chinese` 同语义）。
+    #[test]
+    fn convert_book_meta_skips_when_source_equals_target() {
+        let book = sample_book_cn();
+        let out = convert_book_meta(&book, "zh_CN", &LangType::ZhCn);
+        assert_eq!(out.book_name, book.book_name);
+        assert_eq!(out.author, book.author);
+        assert_eq!(out.intro, book.intro);
+    }
+
+    /// source 解析失败：保守、跳过转换。
+    #[test]
+    fn convert_book_meta_skips_when_source_unparseable() {
+        let book = sample_book_cn();
+        let out = convert_book_meta(&book, "garbage_lang", &LangType::ZhCn);
+        assert_eq!(out.book_name, book.book_name);
+        assert_eq!(out.author, book.author);
+        assert_eq!(out.intro, book.intro);
+    }
+
+    /// intro 为 None 时不动（不能 panic on None）。
+    #[test]
+    fn convert_book_meta_handles_none_intro() {
+        let book = Book {
+            book_name: "软件".into(),
+            author: "苹果".into(),
+            intro: None,
+            ..sample_book_cn()
+        };
+        let out = convert_book_meta(&book, "zh_CN", &LangType::ZhTw);
+        assert_eq!(out.book_name, "軟體");
+        assert!(out.intro.is_none());
     }
 }

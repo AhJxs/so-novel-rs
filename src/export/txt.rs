@@ -18,7 +18,7 @@ use encoding_rs::{Encoding, UTF_8};
 use once_cell::sync::Lazy;
 use regex::Regex;
 
-use crate::export::exporter::{sort_chapter_files, ExportError, Exporter};
+use crate::export::exporter::{ExportError, Exporter, sort_chapter_files};
 use crate::models::Book;
 use crate::util::fs::sanitize_filename;
 
@@ -123,7 +123,7 @@ fn strip_html_tags(s: &str) -> String {
 mod tests {
     use super::*;
     use crate::config::ExportFormat;
-    use crate::export::exporter::{write_chapter_files, RenderedChapter};
+    use crate::export::exporter::{RenderedChapter, write_chapter_files};
 
     fn sample_book() -> Book {
         Book {

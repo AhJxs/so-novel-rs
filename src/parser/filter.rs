@@ -5,10 +5,13 @@
 //! 2. **HTML 实体**：删除 `&xxx;` 字符引用（`&nbsp;`、`&amp;` 等都被清掉，
 //!    与 Java 端 `&[^;]+;` 一致；这是为兼容 iBooks 等阅读器，故意不做转义）。
 //! 3. **filterTxt 广告正则**：用规则中的正则替换为空串。
-//!    - Java 用 `String.replaceAll(regex, "")`，规则里时常含 backreference（书海阁
-//!      `\(([^)]+)\)\1`），Rust `regex` crate 不支持 backreference。
-//!    - 我们的策略：**编译失败时降级为不替换 + tracing::warn**，不阻塞整章下载。
-//!      这是去广告功能，不是关键路径；为这一处拉 `fancy-regex` 大依赖收益过低。
+//!    - Java 用 `String.replaceAll(regex, "")`，规则里偶尔会出现 Rust `regex`
+//!      不支持的语法（backreference `\1`、lookahead `(?=...)`、possessive `*+` 等）。
+//!      我们已修复 `bundle/rules/main.json` 里书海阁的 `\(([^)]+)\)\1`
+//!      → `\([^)]+\)`（捕获组 1 vs 2 内容本就不同，`\1` 是无效语法噪声）。
+//!    - 兜底策略：**编译失败时降级为不替换 + tracing::warn**，不阻塞整章下载。
+//!      这是去广告功能，不是关键路径；为剩下的边角 case 拉 `fancy-regex` 大依赖
+//!      收益过低（warn 日志也方便日后 grep 出仍需手工改的规则）。
 //! 4. **filterTag 节点删除**：复用 `parser::dom::remove_tags`。
 //! 5. **重复标题去除**：在正文开头如果出现章节名（可能被若干 HTML 标签或空白包住），
 //!    把章节名擦掉，保留前面的 tag/whitespace（与 Java `replaceFirst("^(\\s|<[^>]+>)*(title)", "$1")` 等价）。
@@ -190,6 +193,29 @@ mod tests {
         // 不崩；广告片段保留（降级行为）
         let out = filter_chapter(&c, &r);
         assert!(out.content.contains("喜欢"));
+    }
+
+    #[test]
+    fn shuhaige_filter_txt_strips_ad_after_backreference_fix() {
+        // bundle/rules/main.json 书海阁 filterTxt 的修复版本：
+        //   原: 喜欢(.+?)请大家收藏：\(([^)]+)\)\1书海阁小说网更新速度全网最快。
+        //   新: 喜欢.+?请大家收藏：\([^)]+\)书海阁小说网更新速度全网最快。
+        // （去掉反向引用 `\1` —— Rust regex 不支持 backreference，
+        //  且原写法捕获组 1 vs 2 内容本就不同，`\1` 等价于无用语法噪声。
+        //  注意末尾是字面 `。` 锚定，不会跨段落吃正文 —— 见下方"不吞段落"断言。）
+        let r = rule_with(
+            r#"本小章还未完.+|小主.+|这章没有结束.+|喜欢.+?请大家收藏：\([^)]+\)书海阁小说网更新速度全网最快。|\(本章完\)"#,
+            "",
+        );
+        let c = ch(
+            "第1章",
+            "<p>正文一</p><p>喜欢本站请大家收藏：(本站123)书海阁小说网更新速度全网最快。</p><p>正文二</p>",
+        );
+        let out = filter_chapter(&c, &r);
+        assert!(out.content.contains("正文一"));
+        assert!(out.content.contains("正文二"), "got {:?}", out.content);
+        assert!(!out.content.contains("书海阁"), "got {:?}", out.content);
+        assert!(!out.content.contains("请大家收藏"), "got {:?}", out.content);
     }
 
     #[test]

@@ -25,9 +25,9 @@ use reqwest::Client;
 use scraper::{Html, Selector};
 use thiserror::Error;
 
-use crate::http::{abs_url, fetch, fetch_via_cf_bypass, has_cloudflare, FetchRequest, HttpMethod};
+use crate::http::{FetchRequest, HttpMethod, abs_url, fetch, fetch_via_cf_bypass, has_cloudflare};
 use crate::models::{Chapter, ContentType, Rule};
-use crate::parser::dom::{select_and_invoke_js, SelectError};
+use crate::parser::dom::{SelectError, select_and_invoke_js};
 
 #[derive(Debug, Error)]
 pub enum ChapterError {
@@ -35,7 +35,9 @@ pub enum ChapterError {
     ChapterRuleMissing,
     #[error("HTTP 错误: {0}")]
     Http(String),
-    #[error("命中 Cloudflare 验证页，未配置 cf-bypass 旁路或旁路失败（请在 config.toml [global] cf-bypass 填地址）: {0}")]
+    #[error(
+        "命中 Cloudflare 验证页，未配置 cf-bypass 旁路或旁路失败（请在 config.toml [global] cf-bypass 填地址）: {0}"
+    )]
     Cloudflare(String),
     #[error("正文为空: {0}")]
     EmptyContent(String),

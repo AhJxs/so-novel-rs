@@ -5,7 +5,7 @@
 
 use std::path::PathBuf;
 
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 
 use crate::models::{Book, SearchResult};
@@ -77,7 +77,11 @@ pub struct FailureRecord {
 
 impl From<(u32, String, String)> for FailureRecord {
     fn from((index, title, reason): (u32, String, String)) -> Self {
-        Self { index, title, reason }
+        Self {
+            index,
+            title,
+            reason,
+        }
     }
 }
 
@@ -159,18 +163,13 @@ pub fn get(conn: &Connection, id: u64) -> rusqlite::Result<Option<DownloadTaskRe
         )
         .optional()?;
     match data {
-        Some(s) => Ok(Some(
-            serde_json::from_str(&s).map_err(|e| {
-                rusqlite::Error::FromSqlConversionFailure(
-                    0,
-                    rusqlite::types::Type::Text,
-                    Box::new(std::io::Error::new(
-                        std::io::ErrorKind::InvalidData,
-                        e,
-                    )),
-                )
-            })?,
-        )),
+        Some(s) => Ok(Some(serde_json::from_str(&s).map_err(|e| {
+            rusqlite::Error::FromSqlConversionFailure(
+                0,
+                rusqlite::types::Type::Text,
+                Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, e)),
+            )
+        })?)),
         None => Ok(None),
     }
 }

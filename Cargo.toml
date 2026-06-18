@@ -1,10 +1,10 @@
 [package]
 name = "so-novel-rs"
-version = "0.2.3"
+version = "0.2.4"
 edition = "2024"
 rust-version = "1.85"
 description = "So Novel — Rust desktop client (gpui + gpui-component)."
-license = "Apache-2.0"
+license = "AGPL-3.0-only"
 publish = false
 
 [[bin]]
@@ -138,6 +138,7 @@ rusqlite = { version = "0.40", features = ["bundled"] }
 # 各自调 OS API（GetTimeZoneInformation / localtime_r / ...），跨平台用一个 API 拿偏移秒数。
 time = { version = "0.3", default-features = false, features = ["local-offset"] }
 zhconv = "0.4.1"
+pdf_oxide = { version = "0.3.37", features = ["rendering"] }
 
 # Windows DWM 圆角 / 暗色标题栏暂未在 GPUI 路径启用（Stage 12 决定）。
 # 当前只保留 CLI 模式需要的 console attach 那一部分 feature。

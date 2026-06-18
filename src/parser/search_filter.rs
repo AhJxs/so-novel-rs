@@ -178,7 +178,7 @@ mod tests {
         assert!(!out.is_empty());
         assert_eq!(out[0].book_name, "诡秘之主"); // 完全匹配优先
         assert_eq!(out[1].book_name, "诡秘之主续集"); // 部分匹配次之
-                                                      // "天龙八部"相似度 0，应被过滤
+        // "天龙八部"相似度 0，应被过滤
         assert!(out.iter().all(|r| r.book_name != "天龙八部"));
     }
 

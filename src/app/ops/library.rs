@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use super::super::library_state::{scan_library_dir, LibraryState};
+use super::super::library_state::{LibraryState, scan_library_dir};
 
 /// 扫描 `download_path` 下所有已生成的电子书文件。
 pub fn refresh_library(library: &mut LibraryState, download_path: &str) {
@@ -65,11 +65,10 @@ pub fn delete_library_entry(
             } else {
                 crate::gpui_app::components::truncate(&file_name, 50).to_string()
             };
-            Ok(crate::gpui_app::i18n::ts_fmt(
-                "Toasts.library_delete_ok",
-                &[("file", &display)],
+            Ok(
+                crate::gpui_app::i18n::ts_fmt("Toasts.library_delete_ok", &[("file", &display)])
+                    .to_string(),
             )
-            .to_string())
         }
         Err(e) => {
             let msg = crate::gpui_app::i18n::ts_fmt(

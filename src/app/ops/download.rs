@@ -19,10 +19,7 @@ pub fn spawn_resolve_toc(
 ) -> mpsc::UnboundedReceiver<TocEvent> {
     let (tx, rx) = mpsc::unbounded_channel::<TocEvent>();
 
-    let rule = rules
-        .iter()
-        .find(|r| r.id == target.source_id)
-        .cloned();
+    let rule = rules.iter().find(|r| r.id == target.source_id).cloned();
     let cfg = config.clone();
     let book_url = target.url.clone();
     let source_id = target.source_id;
@@ -36,9 +33,7 @@ pub fn spawn_resolve_toc(
                 Ok((book, chapters)) => {
                     crate::app::search_state::TocState::Loaded(Box::new(book), chapters)
                 }
-                Err(e) => {
-                    crate::app::search_state::TocState::Failed(format!("{e:#}"))
-                }
+                Err(e) => crate::app::search_state::TocState::Failed(format!("{e:#}")),
             }
         } else {
             crate::app::search_state::TocState::Failed("书源未找到".to_string())
@@ -69,10 +64,7 @@ pub fn spawn_download_range(
     let (tx, rx) = mpsc::unbounded_channel::<Progress>();
     let cancel = CancelToken::new();
 
-    let rule = rules
-        .iter()
-        .find(|r| r.id == target.source_id)
-        .cloned();
+    let rule = rules.iter().find(|r| r.id == target.source_id).cloned();
     let cfg = config.clone();
     let book_url = target.url.clone();
     let cancel_for_task = cancel.clone();
@@ -98,8 +90,7 @@ pub fn spawn_download_range(
             cancel: cancel_for_task,
         };
         if let Err(e) =
-            crate::crawler::download_chapters(&cfg, &source, &book_url, &book, chapters, opts)
-                .await
+            crate::crawler::download_chapters(&cfg, &source, &book_url, &book, chapters, opts).await
         {
             // 用户取消已由 crawler 内部发 Progress::Cancelled；真正的失败发
             // Progress::Failed，让 UI 区分"取消"与"失败"并保留原因。
@@ -146,10 +137,7 @@ pub fn spawn_download(
     let (tx, rx) = mpsc::unbounded_channel::<Progress>();
     let cancel = CancelToken::new();
 
-    let rule = rules
-        .iter()
-        .find(|r| r.id == target.source_id)
-        .cloned();
+    let rule = rules.iter().find(|r| r.id == target.source_id).cloned();
     let cfg = config.clone();
     let book_url = target.url.clone();
     let cancel_for_task = cancel.clone();
@@ -201,10 +189,7 @@ pub fn spawn_download(
 }
 
 /// 清掉所有已结束的任务（完成 / 失败 / 取消）。运行中的任务保留。
-pub fn clear_finished_tasks(
-    tasks: &mut Vec<DownloadTask>,
-    db: &crate::db::Db,
-) {
+pub fn clear_finished_tasks(tasks: &mut Vec<DownloadTask>, db: &crate::db::Db) {
     let before = tasks.len();
     tasks.retain(|t| t.is_running());
     let removed = before - tasks.len();

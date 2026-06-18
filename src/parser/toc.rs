@@ -21,9 +21,9 @@ use reqwest::Client;
 use scraper::{Html, Selector};
 use thiserror::Error;
 
-use crate::http::{abs_url, fetch, fetch_via_cf_bypass, has_cloudflare, FetchRequest, HttpMethod};
+use crate::http::{FetchRequest, HttpMethod, abs_url, fetch, fetch_via_cf_bypass, has_cloudflare};
 use crate::models::{Chapter, ContentType, Rule};
-use crate::parser::dom::{select_and_invoke_js, SelectError};
+use crate::parser::dom::{SelectError, select_and_invoke_js};
 
 #[derive(Debug, Error)]
 pub enum TocError {
@@ -31,7 +31,9 @@ pub enum TocError {
     TocRuleMissing,
     #[error("HTTP 错误: {0}")]
     Http(String),
-    #[error("命中 Cloudflare 验证页，未配置 cf-bypass 旁路或旁路失败（请在 config.toml [global] cf-bypass 填地址）: {0}")]
+    #[error(
+        "命中 Cloudflare 验证页，未配置 cf-bypass 旁路或旁路失败（请在 config.toml [global] cf-bypass 填地址）: {0}"
+    )]
     Cloudflare(String),
     #[error("HTML 解析失败: {0}")]
     Parse(String),
@@ -117,8 +119,8 @@ pub async fn parse_toc(
             });
         }
         while let Some(joined) = set.join_next().await {
-            let (idx, html) = joined
-                .map_err(|e| TocError::Parse(format!("分页抓取任务 join 失败: {e}")))??;
+            let (idx, html) =
+                joined.map_err(|e| TocError::Parse(format!("分页抓取任务 join 失败: {e}")))??;
             htmls[idx] = html;
         }
     }
@@ -270,8 +272,7 @@ async fn collect_pagination_urls(
             break;
         };
         out.push(next_url.clone());
-        current_html =
-            fetch_with_cf_fallback(client, &next_url, timeout, cf_bypass_base).await?;
+        current_html = fetch_with_cf_fallback(client, &next_url, timeout, cf_bypass_base).await?;
         current_url = next_url;
     }
 

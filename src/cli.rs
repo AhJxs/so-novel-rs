@@ -11,11 +11,11 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 
-use crate::config::{load_config, AppConfig, ConfigPaths, ExportFormat};
+use crate::config::{AppConfig, ConfigPaths, ExportFormat, load_config};
 use crate::crawler::{self, CancelToken, Progress};
 use crate::db::Db;
 use crate::models::{Rule, SearchResult};
-use crate::rules::{load_rules_from_db, Source};
+use crate::rules::{Source, load_rules_from_db};
 use crate::util::system::open_path;
 
 /// so-novel-rs — 小说下载器（CLI）。
@@ -206,10 +206,7 @@ fn run_search(
             r.url
         );
     }
-    print!(
-        "\n共 {} 条结果（关键词：{keyword}）",
-        flat.len()
-    );
+    print!("\n共 {} 条结果（关键词：{keyword}）", flat.len());
     if failed.is_empty() {
         println!();
     } else {
@@ -445,8 +442,7 @@ mod tests {
 
     #[test]
     fn cli_parses_search_json_flag() {
-        let cli =
-            Cli::try_parse_from(["so-novel-rs", "search", "凡人修仙传", "--json"]).unwrap();
+        let cli = Cli::try_parse_from(["so-novel-rs", "search", "凡人修仙传", "--json"]).unwrap();
         match cli.command {
             Cmd::Search { json, .. } => assert!(json),
             _ => panic!("expected Search"),

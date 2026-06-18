@@ -13,21 +13,19 @@
 //!   - `Escape` 由 `gpui-component::Root` 自动处理关闭顶层 dialog / sheet / notification。
 //! - 顶层 `Root::render_dialog_layer / sheet_layer / notification_layer` 渲染覆盖层。
 
-use gpui::{
-    actions, div, px, AnyElement, App, AppContext, ClickEvent, Context, Entity, InteractiveElement,
-    IntoElement, KeyBinding, ParentElement, Render, SharedString, Styled, Window,
-};
 use gpui::prelude::FluentBuilder;
+use gpui::{
+    AnyElement, App, AppContext, ClickEvent, Context, Entity, InteractiveElement, IntoElement,
+    KeyBinding, ParentElement, Render, SharedString, Styled, Window, actions, div, px,
+};
 use gpui_component::{
-    sidebar::{Sidebar, SidebarMenu, SidebarMenuItem, SidebarToggleButton},
     ActiveTheme as _, Icon, IconName, Root, TitleBar, WindowExt as _,
+    sidebar::{Sidebar, SidebarMenu, SidebarMenuItem, SidebarToggleButton},
 };
 
 use crate::app::AppModel;
-use crate::gpui_app::pages::{
-    LibraryPage, SearchPage, SettingsPage, SourcesPage, TasksPage,
-};
 use crate::gpui_app::i18n::ts;
+use crate::gpui_app::pages::{LibraryPage, SearchPage, SettingsPage, SourcesPage, TasksPage};
 
 actions!(
     gpui_app,
@@ -260,18 +258,12 @@ impl RootView {
         // gpui-component 内部 `when_some(self.header.take(), ...)` 会跳过整个 header 容器，
         // 不占任何垂直空间。文本走 `i18n::tr`（项目名 3 种语言都是 "So Novel"，但 key
         // 还是走 i18n 表以保持一致性）。
-        let header = div()
-            .w_full()
-            .flex()
-            .items_center()
-            .justify_center()
-            .child(
-                div()
-                    .font_weight(gpui::FontWeight::SEMIBOLD)
-                    .text_base()
-                    .child(ts("App.title"),
-                ),
-            );
+        let header = div().w_full().flex().items_center().justify_center().child(
+            div()
+                .font_weight(gpui::FontWeight::SEMIBOLD)
+                .text_base()
+                .child(ts("App.title")),
+        );
 
         Sidebar::left()
             .w(px(220.0))
@@ -405,9 +397,11 @@ impl Render for RootView {
         // 用 `mem::take` 拿走整个 Vec 而不是逐个 pop：避免 1) drain 期间 model
         // 被其他路径新增 notification 时迭代器失效；2) 多次 push 同一帧时把
         // 全部都消费完。
-        let pending = std::mem::take(&mut self.model.update(cx, |m, _| {
-            std::mem::take(&mut m.pending_notifications)
-        }));
+        let pending = std::mem::take(
+            &mut self
+                .model
+                .update(cx, |m, _| std::mem::take(&mut m.pending_notifications)),
+        );
         for note in pending {
             window.push_notification(note, cx);
         }

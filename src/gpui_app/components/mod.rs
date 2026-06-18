@@ -17,5 +17,5 @@ pub mod status_badge;
 pub use empty_state::EmptyState;
 pub use formatting::{format_size, truncate};
 pub use page_header::PageHeader;
-pub use pagination::{compute_page_window, PageSlice, Pagination, PAGE_SIZE};
+pub use pagination::{PAGE_SIZE, PageSlice, Pagination, compute_page_window};
 pub use status_badge::{StatusBadge, StatusKind};

@@ -11,7 +11,7 @@
 use std::path::Path;
 use std::process::Command;
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 
 /// 用系统默认程序打开文件或目录。
 pub fn open_path(path: &Path) -> Result<()> {
