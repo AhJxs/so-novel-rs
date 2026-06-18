@@ -15,7 +15,7 @@ future 内部 await 的 timer / channel 必须用 smol 系：
 - `tokio::time::sleep` — 没有 tokio reactor。
 - `tokio::sync::mpsc::channel` — 同上，且 `tokio::sync::mpsc::Sender::try_send` 的语义跟 smol 不同。
 
-**为什么不用在项目里另起一个 tokio runtime**：项目顶层只有 gpui 一个 runtime；加 tokio runtime 会导致两套 executor 并存，背景任务跨线程调度难以追踪。代价：`tokio = "1"` 已经在 `Cargo.toml` 里（早期为 rfd 的 tokio feature 拉的），现在仅供 rfd 内部用 + 测试代码用。
+**当前 runtime 现状（已与早期 lessons 更新）**：GUI 模式下两套 executor 并存——gpui 的 smol executor 跑 `cx.spawn`（UI 侧），一个 leaked tokio runtime（`src/app/runtime.rs` 的 `build_shared_runtime`，`Box::leak` 永不 drop）跑网络任务（搜索/下载/封面/健康检查）。tokio↔smol 边界靠 `try_recv()`（runtime 无关）桥接：tokio 侧 spawn 后向 mpsc 发事件，smol 侧的 drain 循环 `try_recv` 排空。**关键约束不变**：`cx.spawn` 内部（smol 侧）绝不能用 `tokio::time::sleep` / `tokio::sync::mpsc::recv().await`，会 panic。CLI 模式各自建临时 tokio runtime（`src/cli.rs`），进程退出即销毁。
 
 **正确 pattern（参考）**：
 - `src/app/events.rs:97-119` —— `spawn_drain_loop` 用 `async_cx.background_executor().timer(...)` 做 100 ms 心跳。

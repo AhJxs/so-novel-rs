@@ -34,16 +34,14 @@ use gpui_component::{
 
 use crate::app::{AppModel, SourcesFilterStatus};
 use crate::crawler::health::SourceHealth;
-use crate::gpui_app::components::{truncate, EmptyState, PageHeader, Pagination, StatusBadge};
+use crate::gpui_app::components::{
+    compute_page_window, truncate, EmptyState, PageHeader, Pagination, StatusBadge,
+};
 use crate::gpui_app::i18n::{ts, ts_fmt};
 use crate::models::Rule;
 
-/// 每页条数 —— 跟 library.rs 保持一致（同一个 `Pagination` 组件）。
-const PAGE_SIZE: usize = 30;
-
 /// Sources 页面 entity。
 pub struct SourcesPage {
-    #[allow(dead_code)]
     model: Entity<AppModel>,
 
     /// 名字 / URL 关键字过滤 Input。struct 字段持有避免 click / focus 丢失
@@ -251,19 +249,14 @@ impl Render for SourcesPage {
         // 过滤后取当前页切片 —— 跟 library.rs 同模式（global 序号 + 切片 + 推给 delegate）。
         let filtered = self.model.read(cx).sources_state.filtered_rules(&all_rules);
         let total = filtered.len();
-        let page_count = total.div_ceil(PAGE_SIZE);
-        if page_count > 0 && self.current_page >= page_count {
-            self.current_page = page_count - 1;
-        }
-        let start = self.current_page * PAGE_SIZE;
-        let end = (start + PAGE_SIZE).min(total);
+        let w = compute_page_window(total, &mut self.current_page);
         let page_items: Vec<(usize, Rule)> = if total == 0 {
             Vec::new()
         } else {
-            filtered[start..end]
+            filtered[w.start..w.end]
                 .iter()
                 .enumerate()
-                .map(|(local_ix, r)| (start + local_ix, r.clone()))
+                .map(|(local_ix, r)| (w.start + local_ix, r.clone()))
                 .collect()
         };
 
@@ -448,7 +441,7 @@ impl Render for SourcesPage {
             .when(total > 0, |this| {
                 this.child(Pagination::new(
                     self.current_page,
-                    page_count,
+                    w.page_count,
                     cx.listener(|this, &new_page, _window, _cx| {
                         this.current_page = new_page;
                         _cx.notify();

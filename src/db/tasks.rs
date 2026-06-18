@@ -42,20 +42,6 @@ impl FinishedReason {
             FinishedReason::UserCancelled | FinishedReason::AppRestarted
         )
     }
-
-    /// db 兼容：把旧 `String` 错误（`"用户已取消"` / `"应用重启时中断"` /
-    /// `"后台任务异常退出（通道已断开）"` 等）映射成 enum。
-    /// 新代码不应再调它 —— 派发方直接 `FinishedReason::UserCancelled` 等。
-    pub fn from_legacy_reason(s: &str) -> Self {
-        if s == "用户已取消" {
-            FinishedReason::UserCancelled
-        } else if s == "应用重启时中断" {
-            FinishedReason::AppRestarted
-        } else {
-            // 旧版本的"后台异常退出"及其他任意失败消息都归类为 Failed。
-            FinishedReason::Failed { message: s.to_string() }
-        }
-    }
 }
 
 /// 任务表持久化形态。所有字段对应 `DownloadTask` 里需要落盘的部分；

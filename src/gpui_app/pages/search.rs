@@ -44,12 +44,11 @@ use gpui_component::{
 use gpui::StyledImage as _;
 
 use crate::app::{AppModel, CoverEntry, DetailState, SourceStatus, TocState};
-use crate::gpui_app::components::{truncate, EmptyState, PageHeader, Pagination};
+use crate::gpui_app::components::{
+    compute_page_window, truncate, EmptyState, PageHeader, Pagination,
+};
 use crate::gpui_app::i18n::{ts, ts_fmt};
 use crate::models::SearchResult;
-
-/// 分页大小。跟 library.rs / sources.rs 保持一致。
-const PAGE_SIZE: usize = 30;
 
 /// 选书源下拉的自定义 item —— `value`（内部 id）跟 `title`（给用户看）分开。
 ///
@@ -554,18 +553,13 @@ impl Render for SearchPage {
 
         // ---- 1. 分页切片 + 兜底（清空 results 后 current_page 越界 → 回卷）----
         let total = results.len();
-        let page_count = total.div_ceil(PAGE_SIZE);
-        if page_count > 0 && self.current_page >= page_count {
-            self.current_page = page_count - 1;
-        }
-        let start = self.current_page * PAGE_SIZE;
-        let end = (start + PAGE_SIZE).min(total);
-        let page_items: Vec<(usize, SearchResult)> = if start < end {
-            results[start..end]
+        let w = compute_page_window(total, &mut self.current_page);
+        let page_items: Vec<(usize, SearchResult)> = if !w.is_empty() {
+            results[w.start..w.end]
                 .iter()
                 .cloned()
                 .enumerate()
-                .map(|(i, r)| (start + i, r))
+                .map(|(i, r)| (w.start + i, r))
                 .collect()
         } else {
             Vec::new()
@@ -694,7 +688,7 @@ impl Render for SearchPage {
             .when(total > 0, |this| {
                 this.child(Pagination::new(
                     self.current_page,
-                    page_count,
+                    w.page_count,
                     cx.listener(|this, &new_page, _window, _cx| {
                         this.current_page = new_page;
                         _cx.notify();
@@ -724,8 +718,7 @@ struct SearchDelegate {
     /// 当前选中项。`None` = 未选中。`set_selected_index` 写入，
     /// `render_item` 读出来给 `ListItem::selected(...)` 用。
     selected_index: Option<IndexPath>,
-    /// 拿 SearchPage handle 用于按钮 on_click → 转发回 page（预留扩展）。
-    #[allow(dead_code)]
+    /// 拿 SearchPage handle 用于按钮 on_click → 转发回 page。
     page: Entity<SearchPage>,
 }
 

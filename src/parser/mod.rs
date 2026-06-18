@@ -1,5 +1,5 @@
-//! HTML 解析层。当前阶段 2a 只暴露 dom 子模块（CSS 选择器 + @js: 后处理）。
-//! 阶段 2b/2c 会在此目录下加 search/book/toc/chapter 等具体 parser。
+//! HTML 解析层。dom 子模块提供 CSS 选择器 + @js: 后处理；search/book/toc/chapter
+//! 等子模块各自对应一类页面解析，filter/formatter/search_filter 是结果后处理。
 
 pub mod book;
 pub mod chapter;

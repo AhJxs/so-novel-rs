@@ -1,7 +1,8 @@
 //! 聚合搜索。对应 Java `action.AggregatedSearchAction`。
 //!
 //! 在多个书源上并发执行 `search_one`，把结果合并成一个列表。
-//! 不做相似度过滤 / 排序 — 那属于阶段 5（参考 Java `SearchResultsHandler`）。
+//! 本层只负责聚合；相似度过滤 / 排序由调用方在结果聚合后调
+//! `crate::parser::filter_sort`（对应 Java `SearchResultsHandler`）。
 //!
 //! parser 是 async 的（基于 `reqwest::Client`），这里直接 spawn async task，
 //! 不再走 spawn_blocking。

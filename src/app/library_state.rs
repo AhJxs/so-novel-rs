@@ -14,6 +14,9 @@ pub struct LibraryEntry {
     pub ext: String,
 }
 
+/// 后台扫描完成事件。Ok 直接装 entries；Err 装 i18n 渲染后的错误文案。
+pub type LibraryScanEvent = Result<Vec<LibraryEntry>, String>;
+
 #[derive(Default)]
 pub struct LibraryState {
     /// 当前扫描结果（已按修改时间倒序）。
@@ -28,6 +31,11 @@ pub struct LibraryState {
     pub pending_delete: Option<PathBuf>,
     /// 上次扫描 / 操作失败提示。
     pub last_error: Option<String>,
+    /// 后台扫描进行中（避免重复触发；drain 期间清零）。
+    pub scan_in_flight: bool,
+    /// 后台扫描任务的 smol channel 接收端 —— 阻塞的 `read_dir` / `metadata` 跑在
+    /// `background_executor`，结果通过这里回到主线程。
+    pub scan_rx: Option<smol::channel::Receiver<LibraryScanEvent>>,
 }
 
 /// 扫描下载目录得到 LibraryEntry 列表。
@@ -74,4 +82,40 @@ pub fn scan_library_dir(dir: &Path) -> std::io::Result<Vec<LibraryEntry>> {
         });
     }
     Ok(out)
+}
+
+impl LibraryState {
+    /// 排空后台扫描完成事件。每次 `events::drain` 调一次。返回是否有进展。
+    pub fn drain_scan(&mut self) -> bool {
+        let mut any = false;
+        // 只取一次；若调用方需要再排空，得自己循环（smol channel 一次性把全部
+        // 已到的事件都收完）。
+        let Some(rx) = self.scan_rx.as_mut() else {
+            return false;
+        };
+        loop {
+            match rx.try_recv() {
+                Ok(event) => {
+                    any = true;
+                    match event {
+                        Ok(mut entries) => {
+                            entries.sort_by_key(|b| std::cmp::Reverse(b.modified_unix_secs));
+                            self.entries = entries;
+                            self.last_error = None;
+                        }
+                        Err(msg) => {
+                            self.last_error = Some(msg);
+                        }
+                    }
+                }
+                Err(smol::channel::TryRecvError::Empty) => break,
+                Err(smol::channel::TryRecvError::Closed) => {
+                    self.scan_rx = None;
+                    self.scan_in_flight = false;
+                    break;
+                }
+            }
+        }
+        any
+    }
 }

@@ -80,6 +80,13 @@ pub fn spawn_search(
         // 把搜索放在独立的 tokio task 里，与下面的桥接循环并发运行。
         // async move 会把 cfg 移入内部，&cfg 引用的是 task 自己拥有的值，
         // 满足 'static 要求。
+        // 在 target_sources move 进 search_streaming 前，建好 id→name 映射，
+        // 用于桥接循环结束后给"未出结果的源"补失败事件。
+        let source_names: std::collections::HashMap<i32, String> = target_sources
+            .iter()
+            .map(|s| (s.rule.id, s.rule.name.clone()))
+            .collect();
+
         let search_handle = tokio::spawn(async move {
             crate::crawler::search::search_streaming(
                 &cfg,
@@ -93,10 +100,12 @@ pub fn spawn_search(
         });
 
         // 桥接循环：每收到一源结果就立即转发给 UI，与搜索并发。
+        let mut seen_ids: std::collections::HashSet<i32> = std::collections::HashSet::new();
         while let Some(o) = inner_rx.recv().await {
+            seen_ids.insert(o.source_id);
             let send_result = match o.result {
                 Ok(list) => Ok(list),
-                Err(e) => Err(format!("{e}")),
+                Err(e) => Err(format!("{e:#}")),
             };
             if tx
                 .send(SourceSearchEvent {
@@ -110,7 +119,24 @@ pub fn spawn_search(
             }
         }
 
-        let _ = search_handle.await;
+        // 通道关闭后，仍有源未出结果（task panic / 提前退出）→ 给它们补一条失败事件，
+        // 否则该源在 UI 永远停在 Pending，且 received 永远到不了 expected（搜索卡死）。
+        // source_names 在 target_sources move 进 search_streaming 前已建好，这里直接用它。
+        if !tx.is_closed() {
+            for (id, name) in &source_names {
+                if !seen_ids.contains(id) {
+                    let _ = tx.send(SourceSearchEvent {
+                        source_id: *id,
+                        source_name: name.clone(),
+                        result: Err("后台任务异常退出".to_string()),
+                    });
+                }
+            }
+        }
+
+        if let Err(e) = search_handle.await {
+            tracing::warn!("search task panicked: {e}");
+        }
     });
 
     true
@@ -180,7 +206,7 @@ pub fn select_search_result(
                 .map_err(|e| format!("client: {e:#}"))?;
             crate::parser::parse_book_detail(&client, &rule, &url, cf.as_deref())
                 .await
-                .map_err(|e| format!("{e}"))
+                .map_err(|e| format!("{e:#}"))
         }
         .await;
 

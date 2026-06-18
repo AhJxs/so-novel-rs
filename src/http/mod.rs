@@ -1,9 +1,10 @@
 //! HTTP 抓取层。对应 Java `core.OkHttpClientFactory` + `util.CrawlUtils`
 //! + `util.RandomUA` + `util.HttpClientContext`。
 //!
-//! 阶段 2a 仅暴露**同步、阻塞**的 reqwest::blocking::Client 包装。
-//! 这是为了让 parser 层不被 async 渗透到测试中（解析的逻辑是同步的）。
-//! 阶段 3 接下载调度时，会再加 reqwest::Client（async）的 client_async 工厂。
+//! 同时提供两种 client：
+//! - `build_blocking_client`：同步 reqwest::blocking，供 parser 层 / 测试用，
+//!   让解析逻辑不被 async 渗透；
+//! - `build_async_client`：异步 reqwest::Client，供 crawler 层（tokio runtime）用。
 
 pub mod cf;
 pub mod client;

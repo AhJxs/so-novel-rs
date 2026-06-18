@@ -9,8 +9,6 @@
 //! 操作 op 是个返回 future 的 async 闭包；调用方在 `download_book`
 //! 里直接喂 `parse_chapter(...)` future（async parser，不再走 spawn_blocking）。
 
-use std::time::Duration;
-
 /// 跑一次操作；失败后按 `max_attempts` 重试。
 ///
 /// `sleep_fn` 在每次重试**之前**调用，参数 `attempt` 是即将开始的重试次数（从 1 起）。
@@ -41,15 +39,6 @@ where
     }
     // 上面循环至少跑一次，last_err 一定被赋值。
     Err(last_err.expect("retry loop ran at least once"))
-}
-
-/// 配合 `retry_with_backoff` 的标准 sleep：递增间隔。
-/// `attempt` 是第几次重试（1-based），返回的 Duration 是这次要等的时间。
-///
-/// 与 Java `randomInterval(config, true) * attempt` 行为一致：
-/// 第 1 次重试等 base，第 2 次等 2×base，等等。
-pub fn linear_backoff(base_ms: u64, attempt: u32) -> Duration {
-    Duration::from_millis(base_ms.saturating_mul(attempt as u64))
 }
 
 #[cfg(test)]
@@ -154,16 +143,4 @@ mod tests {
         assert_eq!(*count.borrow(), 1, "max_attempts=0 means try once");
     }
 
-    #[test]
-    fn linear_backoff_grows() {
-        assert_eq!(linear_backoff(2000, 1), Duration::from_millis(2000));
-        assert_eq!(linear_backoff(2000, 2), Duration::from_millis(4000));
-        assert_eq!(linear_backoff(2000, 3), Duration::from_millis(6000));
-    }
-
-    #[test]
-    fn linear_backoff_saturates_on_overflow() {
-        // 不应 panic
-        let _ = linear_backoff(u64::MAX, 100);
-    }
 }

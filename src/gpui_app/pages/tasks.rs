@@ -28,15 +28,12 @@ use gpui_component::{
 
 use crate::app::AppModel;
 use crate::gpui_app::components::{
-    EmptyState, PageHeader, Pagination, StatusBadge, StatusKind, truncate,
+    compute_page_window, EmptyState, PageHeader, Pagination, StatusBadge, StatusKind, truncate,
 };
 use crate::gpui_app::i18n::{ts, ts_fmt};
 use crate::models::{Book, SearchResult};
 use crate::util::system::{open_path, reveal_in_folder};
 use std::path::PathBuf;
-
-/// 分页大小。跟 library.rs / sources.rs / search.rs 保持一致。
-const PAGE_SIZE: usize = 30;
 
 /// `DownloadTask` 含 `mpsc::Receiver` / `CancelToken` 不可 Clone。
 /// UI 渲染时复制必要字段为 `TaskSummary`，避开 Clone 限制。
@@ -318,14 +315,9 @@ impl Render for TasksPage {
         let total = summaries.len();
 
         // ---- 4. 分页切片 + 兜底（过滤后 current_page 越界 → 回卷）----
-        let page_count = total.div_ceil(PAGE_SIZE);
-        if page_count > 0 && self.current_page >= page_count {
-            self.current_page = page_count - 1;
-        }
-        let start = self.current_page * PAGE_SIZE;
-        let end = (start + PAGE_SIZE).min(total);
-        let page_items: Vec<TaskSummary> = if start < end {
-            summaries[start..end].to_vec()
+        let w = compute_page_window(total, &mut self.current_page);
+        let page_items: Vec<TaskSummary> = if !w.is_empty() {
+            summaries[w.start..w.end].to_vec()
         } else {
             Vec::new()
         };
@@ -385,7 +377,7 @@ impl Render for TasksPage {
             .when(total > 0, |this| {
                 this.child(Pagination::new(
                     self.current_page,
-                    page_count,
+                    w.page_count,
                     cx.listener(|this, &new_page, _window, _cx| {
                         this.current_page = new_page;
                         _cx.notify();

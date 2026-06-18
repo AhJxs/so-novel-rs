@@ -109,6 +109,10 @@ impl DownloadTask {
                             self.finished = Some(Err(FinishedReason::UserCancelled));
                             self.cancelling = false;
                         }
+                        Progress::Failed { reason } => {
+                            self.finished = Some(Err(FinishedReason::Failed { message: reason }));
+                            self.cancelling = false;
+                        }
                     }
                 }
                 Err(mpsc::error::TryRecvError::Empty) => break,

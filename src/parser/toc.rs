@@ -16,7 +16,6 @@
 //! - `chapter.url` 段含 `@js:` 后处理（极少见）。
 
 use anyhow::Result;
-use once_cell::sync::Lazy;
 use regex::Regex;
 use reqwest::Client;
 use scraper::{Html, Selector};
@@ -32,7 +31,7 @@ pub enum TocError {
     TocRuleMissing,
     #[error("HTTP 错误: {0}")]
     Http(String),
-    #[error("Cloudflare 真人验证页（暂未实现旁路或旁路失败）: {0}")]
+    #[error("命中 Cloudflare 验证页，未配置 cf-bypass 旁路或旁路失败（请在 config.toml [global] cf-bypass 填地址）: {0}")]
     Cloudflare(String),
     #[error("HTML 解析失败: {0}")]
     Parse(String),
@@ -88,18 +87,48 @@ pub async fn parse_toc(
         }
     }
 
-    // 5. 串行抓 + 解析每一页（与 Java 端同；并行优化属阶段 3）。
+    // 5. 并行抓所有分页（page_urls 已含全部页面 URL —— 模式1 option 下拉一次性
+    //    收集、模式2 递归在 collect_pagination_urls 内部已走完），再按原顺序解析。
+    //    第一页 HTML 已抓过，不重复发请求。任一页抓取失败 → 整本目录失败（保留
+    //    原串行实现的语义）。并发用 JoinSet + Semaphore 限到 8，避免一次打 200 个请求。
+    let n = page_urls.len();
+    let mut htmls: Vec<String> = Vec::with_capacity(n);
+    htmls.resize(n, String::new());
+
+    if n == 1 {
+        htmls[0] = first_html;
+    } else {
+        let sem = std::sync::Arc::new(tokio::sync::Semaphore::new(8));
+        let mut set = tokio::task::JoinSet::new();
+        for (idx, page_url) in page_urls.iter().enumerate() {
+            if idx == 0 {
+                htmls[0] = first_html.clone();
+                continue;
+            }
+            let client = client.clone();
+            let url = page_url.clone();
+            let timeout = toc_rule.timeout;
+            let cf = cf_bypass_base.map(|s| s.to_string());
+            let sem = sem.clone();
+            set.spawn(async move {
+                let _permit = sem.acquire_owned().await.expect("semaphore not closed");
+                let html = fetch_with_cf_fallback(&client, &url, timeout, cf.as_deref()).await?;
+                Ok::<(usize, String), TocError>((idx, html))
+            });
+        }
+        while let Some(joined) = set.join_next().await {
+            let (idx, html) = joined
+                .map_err(|e| TocError::Parse(format!("分页抓取任务 join 失败: {e}")))??;
+            htmls[idx] = html;
+        }
+    }
+
+    // 按原 page_urls 顺序解析，保证章节顺序与串行实现一致。
     let mut all_items: Vec<Chapter> = Vec::new();
     let mut order: u32 = 1;
     for (idx, page_url) in page_urls.iter().enumerate() {
-        let html = if idx == 0 {
-            // 第一页 HTML 已经抓过，不重复发请求
-            first_html.clone()
-        } else {
-            fetch_with_cf_fallback(client, page_url, toc_rule.timeout, cf_bypass_base).await?
-        };
         let mut items = parse_one_toc_page(
-            &html,
+            &htmls[idx],
             &resolve_base_for_join(&toc_base_uri, page_url),
             rule,
             &mut order,
@@ -351,9 +380,6 @@ fn resolve_base_for_join(toc_base_uri: &str, current_page_url: &str) -> String {
         current_page_url.to_string()
     }
 }
-
-// 让 once_cell 不被静态分析判作未使用（保留以备阶段 3 缓存编译过的正则）。
-static _BOOK_ID_RE_PLACEHOLDER: Lazy<()> = Lazy::new(|| ());
 
 #[cfg(test)]
 mod tests {

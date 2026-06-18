@@ -37,7 +37,7 @@ pub fn spawn_resolve_toc(
                     crate::app::search_state::TocState::Loaded(Box::new(book), chapters)
                 }
                 Err(e) => {
-                    crate::app::search_state::TocState::Failed(format!("{e}"))
+                    crate::app::search_state::TocState::Failed(format!("{e:#}"))
                 }
             }
         } else {
@@ -91,6 +91,8 @@ pub fn spawn_download_range(
             return;
         };
         let source = crate::rules::Source::from(rule, &cfg);
+        // 留一个 sender 副本用于失败时发 Progress::Failed（tx_for_task 会 move 进 opts）。
+        let tx_for_failure = tx_for_task.clone();
         let opts = crate::crawler::DownloadOptions {
             progress: tx_for_task,
             cancel: cancel_for_task,
@@ -99,7 +101,14 @@ pub fn spawn_download_range(
             crate::crawler::download_chapters(&cfg, &source, &book_url, &book, chapters, opts)
                 .await
         {
-            tracing::warn!("download_chapters failed: {e}");
+            // 用户取消已由 crawler 内部发 Progress::Cancelled；真正的失败发
+            // Progress::Failed，让 UI 区分"取消"与"失败"并保留原因。
+            if !matches!(e, crate::crawler::CrawlerError::Cancelled) {
+                tracing::warn!("download_chapters failed: {e:#}");
+                let _ = tx_for_failure.send(Progress::Failed {
+                    reason: format!("{e:#}"),
+                });
+            }
         }
     });
 
@@ -152,12 +161,21 @@ pub fn spawn_download(
             return;
         };
         let source = crate::rules::Source::from(rule, &cfg);
+        // 留一个 sender 副本用于失败时发 Progress::Failed（tx_for_task 会 move 进 opts）。
+        let tx_for_failure = tx_for_task.clone();
         let opts = crate::crawler::DownloadOptions {
             progress: tx_for_task,
             cancel: cancel_for_task,
         };
         if let Err(e) = crate::crawler::download_book(&cfg, &source, &book_url, opts).await {
-            tracing::warn!("download_book failed: {e}");
+            // 用户取消已由 crawler 内部发 Progress::Cancelled；真正的失败发
+            // Progress::Failed，让 UI 区分"取消"与"失败"并保留原因。
+            if !matches!(e, crate::crawler::CrawlerError::Cancelled) {
+                tracing::warn!("download_book failed: {e:#}");
+                let _ = tx_for_failure.send(Progress::Failed {
+                    reason: format!("{e:#}"),
+                });
+            }
         }
     });
 

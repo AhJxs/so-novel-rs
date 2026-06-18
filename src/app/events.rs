@@ -44,6 +44,9 @@ pub fn drain(model: &mut AppModel) -> bool {
             .spawn_cover_download(sid, &url, &model.config, model.runtime);
     }
 
+    // 2b. 本地书库后台扫描结果（refresh_library_async 通过 smol channel 回送）。
+    any |= model.library.drain_scan();
+
     // 3. 下载任务进度。每个 task.drain 内部排空自己的 mpsc。
     //    循环里借了 `&mut model.tasks`，不能再借 `&mut model` 调 push_notification，
     //    所以先把要推的通知收进 `finished_notes`，循环结束后统一 flush。

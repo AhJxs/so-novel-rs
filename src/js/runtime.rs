@@ -10,7 +10,7 @@
 //! 如果将来发现 JS 是热点，再做 ThreadLocal pool。
 
 use anyhow::{Context as _, Result};
-use boa_engine::{js_string, Context, Source};
+use boa_engine::{Context, Source};
 
 /// 给 boa Context 注入一个 no-op `console`，让规则 / 测试资源里的
 /// `console.log` 不会把整段脚本中断（boa 默认没有 `console` 全局对象）。
@@ -106,12 +106,6 @@ fn json_quote_for_js(s: &str) -> String {
     }
     out.push('"');
     out
-}
-
-// 引用一次 js_string! 防止 unused import 误报（boa 的导出宏命名机制）。
-#[allow(dead_code)]
-fn _silence_unused_macro_import() -> boa_engine::JsString {
-    js_string!("")
 }
 
 #[cfg(test)]

@@ -309,6 +309,10 @@ fn run_download(
                 eprintln!("\n⚠ 已取消");
                 break;
             }
+            Progress::Failed { reason } => {
+                eprintln!("\n❌ 下载失败: {reason}");
+                break;
+            }
         }
     }
 

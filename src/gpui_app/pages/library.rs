@@ -35,12 +35,11 @@ use gpui_component::{
 };
 
 use crate::app::{AppModel, LibraryEntry};
-use crate::gpui_app::components::{format_size, truncate, EmptyState, PageHeader, Pagination};
+use crate::gpui_app::components::{
+    compute_page_window, format_size, truncate, EmptyState, PageHeader, Pagination,
+};
 use crate::gpui_app::i18n::{ts, ts_fmt};
 use crate::util::system::{open_path, reveal_in_folder};
-
-/// 分页大小。`LibraryPage` 渲染时把 `filtered_entries` 按这个常量切片后喂给 delegate。
-const PAGE_SIZE: usize = 30;
 
 /// Watcher 任务命令：让任务内部 drop 旧 watcher 并 arm 到新路径上。
 ///
@@ -55,10 +54,6 @@ enum WatcherCmd {
 
 /// Library 页面 entity。
 pub struct LibraryPage {
-    // model 在 new() 时持有；后续 stage 通过 cx.listener 用到。
-    // 当前 render 只读 model.library 与 model.config，所以暂时 dead_code。
-    // 删 dead_code 后会让 entity 创建不通过所有权校验。保留 + 标注。
-    #[allow(dead_code)]
     model: Entity<AppModel>,
 
     /// 文件名过滤 Input。沿用旧代码模式（struct 字段持有避免 click / focus 丢失）。
@@ -209,8 +204,11 @@ impl LibraryPage {
                             _watcher = None;
                             _watcher = arm(new_path.clone(), counter.clone());
                             // 切路径后立即 rescan（用户在 Settings 切完路径想马上看到新目录内容）。
+                            // 改用 async 版本：read_dir / metadata 阻塞 IO 不再卡 UI 帧。
                             let _ = page_weak.update(async_cx, |_p, cx| {
-                                model_for_watcher.update(cx, |m, _cx| m.refresh_library());
+                                model_for_watcher.update(cx, |m, cx| {
+                                    m.refresh_library_async(cx);
+                                });
                                 cx.notify();
                             });
                         }
@@ -227,7 +225,9 @@ impl LibraryPage {
                 if now != last_seen {
                     last_seen = now;
                     let _ = page_weak.update(async_cx, |_p, cx| {
-                        model_for_watcher.update(cx, |m, _cx| m.refresh_library());
+                        model_for_watcher.update(cx, |m, cx| {
+                            m.refresh_library_async(cx);
+                        });
                         cx.notify();
                     });
                 }
@@ -270,7 +270,7 @@ impl LibraryPage {
             Some(p) => p != &download_path,
         };
         if need_scan {
-            self.model.update(cx, |m, _cx| m.refresh_library());
+            self.model.update(cx, |m, cx| m.refresh_library_async(cx));
             // 路径变了 → 让 watcher 任务重建监听目标。`try_send` 不阻塞，cap=8 不会满；
             // 失败（任务已退出）忽略。
             let _ = self
@@ -278,13 +278,6 @@ impl LibraryPage {
                 .try_send(WatcherCmd::SetPath(download_path));
             self.current_page = 0;
         }
-    }
-
-    /// 手动触发一次 rescan（虽然 watcher 已经覆盖，但保留以备调试 / 「立即重读」按钮扩展用）。
-    #[allow(dead_code)]
-    fn refresh(&mut self, cx: &mut Context<Self>) {
-        self.model.update(cx, |m, _cx| m.refresh_library());
-        cx.notify();
     }
 
     /// 点"删除"按钮 → 弹 Dialog 二次确认。
@@ -393,12 +386,7 @@ impl Render for LibraryPage {
         let _ = model;
 
         // 分页切片 + 兜底（如果外部清了 entries 导致 current_page 越界 → 回卷）。
-        let page_count = total.div_ceil(PAGE_SIZE);
-        if page_count > 0 && self.current_page >= page_count {
-            self.current_page = page_count - 1;
-        }
-        let start = self.current_page * PAGE_SIZE;
-        let end = (start + PAGE_SIZE).min(total);
+        let w = compute_page_window(total, &mut self.current_page);
         // 每条带一个"全局序号" = 在完整 filtered 列表里的位置（0-based）。
         // 跨分页连续：page 0 → 0..29，page 1 → 30..59，等等。显示时 +1 变 1-based。
         // 存 (global_ix, entry) 而不是单存 entry，是为了让 delegate 不依赖
@@ -406,10 +394,10 @@ impl Render for LibraryPage {
         let page_items: Vec<(usize, LibraryEntry)> = if total == 0 {
             Vec::new()
         } else {
-            entries[start..end]
+            entries[w.start..w.end]
                 .iter()
                 .enumerate()
-                .map(|(local_ix, e)| (start + local_ix, e.clone()))
+                .map(|(local_ix, e)| (w.start + local_ix, e.clone()))
                 .collect()
         };
 
@@ -564,7 +552,7 @@ impl Render for LibraryPage {
             .when(total > 0, |this| {
                 this.child(Pagination::new(
                     self.current_page,
-                    page_count,
+                    w.page_count,
                     cx.listener(|this, &new_page, _window, _cx| {
                         this.current_page = new_page;
                         _cx.notify();

@@ -72,6 +72,11 @@ pub async fn fetch_via_cf_bypass(
     if !status.is_success() {
         anyhow::bail!("cf-bypass returned HTTP {status}: {text}");
     }
+    // 二次校验：旁路服务若自身返回 CF 挑战页（服务挂了 / 被二次挑战 / 配错），
+    // 直接当正文喂给 parser 会报出令人困惑的 EmptyContent，不如显式失败。
+    if has_cloudflare(&text) {
+        anyhow::bail!("cf-bypass 仍返回 Cloudflare 验证页: {url}");
+    }
     Ok(text)
 }
 

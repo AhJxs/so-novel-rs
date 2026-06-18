@@ -6,7 +6,7 @@
 //! 流程：
 //! 1. `parse_book_detail` 拿到详情；
 //! 2. `parse_toc` 拿到完整章节列表；
-//! 3. 用 tokio Semaphore 限并发；每章 `spawn_blocking` 调
+//! 3. 用 tokio Semaphore 限并发；每章 spawn async task 调
 //!    `parse_chapter` + `render_chapter`，失败按 `EffectiveCrawl::max_retries` 重试；
 //! 4. 章节字符串写入 `<download_path>/<bookDirName>/`；
 //! 5. EPUB 时下载封面（soft-skip），其它格式不下载；
@@ -16,7 +16,7 @@
 //! 进度：通过 `mpsc::UnboundedSender<Progress>` 推送事件给 UI；`events::drain` 排空。
 //!
 //! 取消：`Arc<AtomicBool>`；在每章入口检查；正在跑的章节会跑完才退出
-//! （彻底中断 HTTP 请求需要 hyper 层级取消，复杂度过高，暂不做）。
+//! （非 hyper 连接级中断；当前用 JoinHandle::abort + CancelToken 轮询实现任务级取消）。
 
 pub mod health;
 mod retry;
@@ -39,11 +39,10 @@ use crate::export::{
 use crate::http::client::{build_async_client, ClientOptions};
 use crate::models::{Book, Chapter};
 use crate::parser::{
-    parse_book_detail, parse_chapter, parse_toc, BookError, ChapterError, TocError,
+    parse_book_detail, parse_chapter, parse_toc, BookError, ChapterError, SelectError, TocError,
 };
 use crate::rules::Source;
-
-pub use retry::linear_backoff;
+use retry::retry_with_backoff;
 
 /// 调度层用户可见的进度事件。
 #[derive(Debug, Clone)]
@@ -62,6 +61,8 @@ pub enum Progress {
     Finished { output_path: PathBuf },
     /// 用户取消（在某章完成 / 失败之后的下一次检查点观测到）。
     Cancelled,
+    /// 下载失败（详情/目录/写盘/导出等终态错误）。让 UI 能区分"取消"与"失败"。
+    Failed { reason: String },
 }
 
 #[derive(Debug, Error)]
@@ -162,20 +163,68 @@ pub async fn resolve_book(
     let rule = source.rule.clone();
     let book_url_owned = book_url.to_string();
     let cf_bypass_owned = cf_bypass.map(String::from);
+    let eff = source.effective_crawl.clone();
+    let max_attempts = if cfg.enable_retry { eff.max_retries } else { 0 };
+    // 两次 retry 各需一份 eff（sleep_fn 是 move 闭包）。
+    let eff_for_book = eff.clone();
+    let eff_for_toc = eff;
 
-    // 详情
-    let book = parse_book_detail(&client, &rule, &book_url_owned, cf_bypass_owned.as_deref())
-        .await
-        .map_err(CrawlerError::Book)?;
+    // 详情：包重试（与章节抓取同款 enable_retry 门控）。详情页一次瞬态 HTTP 抖动
+    // 不应让整本下载失败。
+    let book = retry_with_backoff(
+        |_attempt| {
+            let client = client.clone();
+            let rule = rule.clone();
+            let url = book_url_owned.clone();
+            let cf = cf_bypass_owned.clone();
+            let cancel = cancel.clone();
+            async move {
+                if cancel.is_cancelled() {
+                    return Err(BookError::Http("cancelled".to_string()));
+                }
+                parse_book_detail(&client, &rule, &url, cf.as_deref()).await
+            }
+        },
+        max_attempts,
+        move |_attempt| {
+            let dur = Duration::from_millis(crate::http::random_retry_interval_ms(&eff_for_book));
+            async move {
+                tokio::time::sleep(dur).await;
+            }
+        },
+    )
+    .await
+    .map_err(CrawlerError::Book)?;
 
     if cancel.is_cancelled() {
         return Err(CrawlerError::Cancelled);
     }
 
-    // 目录
-    let toc: Vec<Chapter> = parse_toc(&client, &rule, &book_url_owned, cf_bypass_owned.as_deref())
-        .await
-        .map_err(CrawlerError::Toc)?;
+    // 目录：同样包重试。
+    let toc: Vec<Chapter> = retry_with_backoff(
+        |_attempt| {
+            let client = client.clone();
+            let rule = rule.clone();
+            let url = book_url_owned.clone();
+            let cf = cf_bypass_owned.clone();
+            let cancel = cancel.clone();
+            async move {
+                if cancel.is_cancelled() {
+                    return Err(TocError::Selector(SelectError::JsFailed("cancelled".to_string())));
+                }
+                parse_toc(&client, &rule, &url, cf.as_deref()).await
+            }
+        },
+        max_attempts,
+        move |_attempt| {
+            let dur = Duration::from_millis(crate::http::random_retry_interval_ms(&eff_for_toc));
+            async move {
+                tokio::time::sleep(dur).await;
+            }
+        },
+    )
+    .await
+    .map_err(CrawlerError::Toc)?;
 
     Ok((book, toc))
 }
@@ -211,7 +260,7 @@ pub async fn download_chapters(
         Some(cfg.cf_bypass.as_str())
     };
 
-    let rule = source.rule.clone();
+    let rule = Arc::new(source.rule.clone());
     let cf_bypass_owned = cf_bypass.map(String::from);
 
     // 准备 chapters 目录
@@ -222,10 +271,11 @@ pub async fn download_chapters(
     // 并发抓章节
     let max_concurrent = compute_concurrency(source, chapters.len());
     let render_target: RenderTarget = cfg.ext_name.into();
-    let rule_chapter = rule
-        .chapter
-        .clone()
-        .ok_or(CrawlerError::Toc(TocError::TocRuleMissing))?;
+    let rule_chapter = Arc::new(
+        rule.chapter
+            .clone()
+            .ok_or(CrawlerError::Toc(TocError::TocRuleMissing))?,
+    );
 
     let semaphore = Arc::new(Semaphore::new(max_concurrent));
     let eff = source.effective_crawl.clone();
@@ -240,8 +290,8 @@ pub async fn download_chapters(
         }
         let permit = Arc::clone(&semaphore);
         let client = client.clone();
-        let rule = rule.clone();
-        let rule_chapter = rule_chapter.clone();
+        let rule = Arc::clone(&rule);
+        let rule_chapter = Arc::clone(&rule_chapter);
         let cf = cf_bypass_owned.clone();
         let progress = progress.clone();
         let cancel = cancel.clone();
@@ -262,17 +312,16 @@ pub async fn download_chapters(
             };
             tokio::select! {
                 biased;
-                _ = wait_cancelled(&cancel) => return ChapterOutcome::Cancelled(chapter),
+                _ = wait_cancelled(&cancel) => return ChapterOutcome::Cancelled,
                 _ = tokio::time::sleep(Duration::from_millis(interval)) => {}
             }
 
             if cancel.is_cancelled() {
-                return ChapterOutcome::Cancelled(chapter);
+                return ChapterOutcome::Cancelled;
             }
 
             // 抓 + 重试
             let max_attempts = if enable_retry { eff.max_retries } else { 0 };
-            let retry_min = eff.retry_min_interval_ms.max(1);
             let order = chapter.order;
             let title = chapter.title.clone();
 
@@ -290,20 +339,25 @@ pub async fn download_chapters(
                             return Err(ChapterError::Http("cancelled".to_string()));
                         }
                         parse_chapter(&client, &rule, &chapter, cf.as_deref()).await
+                        //       ^^^^^^^ Arc<Rule> 自动 deref coercion 到 &Rule
                     }
                 },
                 max_attempts,
-                |attempt| async move {
-                    let base = retry_min as u64;
-                    let dur = retry::linear_backoff(base, attempt);
-                    tokio::time::sleep(dur).await;
+                // 重试间隔用 random_retry_interval_ms（同时受 retry-min / retry-max 约束，
+                // 与 Java 端 randomInterval(config, true) 一致）。原 linear_backoff 不读
+                // retry-max，会让 retry-max-interval 配置形同虚设。
+                move |_attempt| {
+                    let dur = Duration::from_millis(crate::http::random_retry_interval_ms(&eff));
+                    async move {
+                        tokio::time::sleep(dur).await;
+                    }
                 },
             );
 
             let result = tokio::select! {
                 biased;
                 _ = wait_cancelled(&cancel) => {
-                    return ChapterOutcome::Cancelled(chapter);
+                    return ChapterOutcome::Cancelled;
                 }
                 r = fetch_future => r,
             };
@@ -323,17 +377,13 @@ pub async fn download_chapters(
                     })
                 }
                 Err(e) => {
-                    let reason = format!("{e}");
+                    let reason = format!("{e:#}");
                     let _ = progress.send(Progress::ChapterFailed {
                         index: order,
                         title: title.clone(),
-                        reason: reason.clone(),
-                    });
-                    ChapterOutcome::Failed {
-                        order,
-                        title,
                         reason,
-                    }
+                    });
+                    ChapterOutcome::Failed
                 }
             }
         }));
@@ -347,8 +397,8 @@ pub async fn download_chapters(
         for h in &mut handles {
             match h.await {
                 Ok(ChapterOutcome::Done(r)) => rendered.push(r),
-                Ok(ChapterOutcome::Failed { .. }) => {}
-                Ok(ChapterOutcome::Cancelled(_)) => {}
+                Ok(ChapterOutcome::Failed) => {}
+                Ok(ChapterOutcome::Cancelled) => {}
                 Err(join_err) => {
                     tracing::warn!("章节任务 join 失败: {join_err}");
                 }
@@ -420,15 +470,10 @@ pub async fn download_chapters(
 
 enum ChapterOutcome {
     Done(RenderedChapter),
-    Failed {
-        #[allow(dead_code)]
-        order: u32,
-        #[allow(dead_code)]
-        title: String,
-        #[allow(dead_code)]
-        reason: String,
-    },
-    Cancelled(#[allow(dead_code)] Chapter),
+    /// 失败原因已通过 `Progress::ChapterFailed` 推给 UI，这里无需再带载荷。
+    Failed,
+    /// 取消时章节对象不再使用，用 unit 变体。
+    Cancelled,
 }
 
 /// 与 Java `Crawler` 中并发数计算一致：
@@ -499,30 +544,6 @@ async fn download_cover(client: &reqwest::Client, cover_url: Option<&str>) -> Op
             tracing::warn!("封面下载失败（已忽略，将不带封面导出）: {e}");
             None
         }
-    }
-}
-
-/// 把 future race "用户取消"。cancel 命中时返回 `Err(CrawlerError::Cancelled)`，
-/// 同时主动发一次 `Progress::Cancelled`（保证 UI 立刻能看到）。
-///
-/// 用法是 `race_with_cancel(parse_*(...), &cancel, &progress).await?` —
-/// 返回 `Result<R, CrawlerError>`，业务结果再用 `.map_err(...)` 转换。
-#[allow(dead_code)]
-async fn race_with_cancel<R, F>(
-    fut: F,
-    cancel: &CancelToken,
-    progress: &mpsc::UnboundedSender<Progress>,
-) -> Result<R, CrawlerError>
-where
-    F: std::future::Future<Output = R>,
-{
-    tokio::select! {
-        biased;
-        _ = wait_cancelled(cancel) => {
-            let _ = progress.send(Progress::Cancelled);
-            Err(CrawlerError::Cancelled)
-        }
-        r = fut => Ok(r),
     }
 }
 

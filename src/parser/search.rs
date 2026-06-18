@@ -38,7 +38,7 @@ pub enum SearchError {
     SourceDisabled,
     #[error("HTTP 错误: {0}")]
     Http(String),
-    #[error("Cloudflare 真人验证页（暂未实现旁路）: {0}")]
+    #[error("命中 Cloudflare 验证页，未配置 cf-bypass 旁路（请在 config.toml [global] cf-bypass 填地址）: {0}")]
     Cloudflare(String),
     #[error("HTML 解析失败: {0}")]
     Parse(String),

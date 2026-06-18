@@ -11,7 +11,7 @@ use reqwest::header::{ACCEPT, USER_AGENT};
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 
-use crate::http::client::{build_blocking_client, ClientOptions};
+use crate::http::client::{build_async_client, ClientOptions};
 use crate::http::ua::random_ua;
 use crate::models::Rule;
 
@@ -42,15 +42,10 @@ pub async fn check_sources_health(
         let cfg = Arc::clone(&cfg);
         let tx = tx.clone();
         set.spawn(async move {
-            let result = tokio::task::spawn_blocking(move || probe_one(&cfg, &rule))
-                .await
-                .unwrap_or_else(|join_err| SourceHealth {
-                    source_id: -1,
-                    source_name: format!("(join failed: {join_err})"),
-                    http_status: None,
-                    delay_ms: 0,
-                    error: Some(format!("spawn_blocking: {join_err}")),
-                });
+            // 直接在 tokio task 里 async 探测。不用 spawn_blocking + blocking client ——
+            // 后者会在工作线程 drop Client，触发 reqwest::blocking 已知 panic
+            // （见 http/client.rs 的反模式警告 + search_state.rs 的 ignore 回归测试）。
+            let result = probe_one(&cfg, &rule).await;
             let _ = tx.send(result);
         });
     }
@@ -59,12 +54,12 @@ pub async fn check_sources_health(
     // tx drop（与 set 同生命周期），UI 端通道收尾。
 }
 
-fn probe_one(cfg: &crate::config::AppConfig, rule: &Rule) -> SourceHealth {
+async fn probe_one(cfg: &crate::config::AppConfig, rule: &Rule) -> SourceHealth {
     let started = Instant::now();
     let opts = ClientOptions {
         unsafe_ssl: rule.ignore_ssl,
     };
-    let client = match build_blocking_client(cfg, &opts) {
+    let client = match build_async_client(cfg, &opts) {
         Ok(c) => c,
         Err(e) => {
             return SourceHealth {
@@ -85,7 +80,8 @@ fn probe_one(cfg: &crate::config::AppConfig, rule: &Rule) -> SourceHealth {
             ACCEPT,
             "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         )
-        .send();
+        .send()
+        .await;
 
     let delay_ms = started.elapsed().as_millis() as u64;
     match result {

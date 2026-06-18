@@ -39,6 +39,49 @@ use gpui_component::{
     ActiveTheme as _, Disableable, IconName, Selectable, Sizable,
 };
 
+/// 统一的列表分页大小。4 个 page（library / sources / tasks / search）共用。
+pub const PAGE_SIZE: usize = 30;
+
+/// 一次分页的切片窗口：`start..end`（end 排他）。`current_page` 已被
+/// [`compute_page_window`] 兜底回卷，永远 `start < end <= total`。
+#[derive(Debug, Clone, Copy)]
+pub struct PageSlice {
+    pub start: usize,
+    pub end: usize,
+    pub total: usize,
+    pub page_count: usize,
+}
+
+impl PageSlice {
+    pub fn is_empty(&self) -> bool {
+        self.start >= self.end
+    }
+}
+
+/// 算一页 `[start, end)` 区间。**就地回卷** `current_page` 到合法范围
+/// （清空 results 后越界 → 回到最后一页），并返回切片信息。
+///
+/// 调用方一般这样用：
+/// ```ignore
+/// let w = compute_page_window(total, &mut self.current_page);
+/// let items: Vec<_> = results[w.start..w.end].iter().cloned().enumerate()
+///     .map(|(i, r)| (w.start + i, r)).collect();
+/// ```
+pub fn compute_page_window(total: usize, current_page: &mut usize) -> PageSlice {
+    let page_count = total.div_ceil(PAGE_SIZE);
+    if page_count > 0 && *current_page >= page_count {
+        *current_page = page_count - 1;
+    }
+    let start = *current_page * PAGE_SIZE;
+    let end = (start + PAGE_SIZE).min(total);
+    PageSlice {
+        start,
+        end,
+        total,
+        page_count,
+    }
+}
+
 /// 分页组件 on_change 回调的 trait alias：调用方传 `Rc<dyn Fn(...)>` —— `Rc<dyn Fn>`
 /// 自身 `Clone`（Rc 总是 Clone），调用方捕获的 listener 即使不是 `Clone + 'static`
 /// 也能塞进来（wrap 一层 Rc 即可）。
