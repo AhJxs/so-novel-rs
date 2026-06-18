@@ -47,7 +47,7 @@ jobs:
             target: x86_64-unknown-linux-gnu
             archive: tar.gz
           # Linux aarch64 走 GitHub 原生 arm64 runner（ubuntu-24.04-arm），无需 cross/qemu。
-          - os: ubuntu-latest
+          - os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
             archive: tar.gz
           # macOS Apple Silicon 原生。
