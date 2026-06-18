@@ -1,10 +1,10 @@
 //! CLI 子命令（5c）。复用现有 parser/crawler，跑在 `#[tokio::main]` runtime。
 //!
 //! 用法：
-//! - `so-novel-rs search <关键词> [--source ID]` — 聚合或单源搜索
+//! - `so-novel-rs search <关键词> [--source ID] [--json]` — 聚合或单源搜索
 //! - `so-novel-rs download <详情页 URL> [--output DIR] [--format epub|txt|...]`
-//! - `so-novel-rs sources` — 列出当前激活书源
-//! - `so-novel-rs version` — 版本
+//! - `so-novel-rs sources [--json]` — 列出当前激活书源
+//! - `so-novel-rs --version` / `-V` — 版本（clap 自动注入）
 //!
 //! 不带子命令 → 启动 GPUI GUI（见 `main.rs` 的分发逻辑）。
 
@@ -14,6 +14,7 @@ use clap::{Parser, Subcommand};
 use crate::config::{load_config, AppConfig, ConfigPaths, ExportFormat};
 use crate::crawler::{self, CancelToken, Progress};
 use crate::db::Db;
+use crate::models::{Rule, SearchResult};
 use crate::rules::{load_rules_from_db, Source};
 use crate::util::system::open_path;
 
@@ -39,9 +40,12 @@ enum Cmd {
         /// 指定书源 ID；省略则聚合所有启用书源
         #[arg(long)]
         source: Option<i32>,
-        /// 每源最多返回条数
+        /// 每源最多返回条数（覆盖 config.toml 的 search-limit）
         #[arg(long)]
         limit: Option<usize>,
+        /// 输出 JSON 到 stdout（机器可读，禁用人类可读格式）
+        #[arg(long)]
+        json: bool,
     },
     /// 通过详情页 URL 下载整本书
     Download {
@@ -58,9 +62,11 @@ enum Cmd {
         format: Option<String>,
     },
     /// 列出当前激活书源
-    Sources,
-    /// 打印版本号后退出
-    Version,
+    Sources {
+        /// 输出 JSON 到 stdout（机器可读，禁用人类可读格式）
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 /// CLI 入口。被 `main.rs` 在检测到子命令时调用。
@@ -84,18 +90,15 @@ pub fn run() -> Result<()> {
             keyword,
             source,
             limit,
-        } => run_search(&cfg, &paths, keyword, source, limit),
+            json,
+        } => run_search(&cfg, &paths, keyword, source, limit, json),
         Cmd::Download {
             url,
             source,
             output,
             format,
         } => run_download(&cfg, &paths, url, source, output, format),
-        Cmd::Sources => run_sources(&cfg, &paths),
-        Cmd::Version => {
-            println!("so-novel-rs {}", env!("CARGO_PKG_VERSION"));
-            Ok(())
-        }
+        Cmd::Sources { json } => run_sources(&cfg, &paths, json),
     }
 }
 
@@ -127,6 +130,7 @@ fn run_search(
     keyword: String,
     source: Option<i32>,
     limit: Option<usize>,
+    json: bool,
 ) -> Result<()> {
     let sources = load_active_sources(cfg, paths)?;
     let target_sources: Vec<Source> = if let Some(id) = source {
@@ -144,6 +148,13 @@ fn run_search(
         Some(cfg.cf_bypass.clone())
     };
 
+    // 与 GUI（app/ops/search.rs:71-74）一致：--limit 优先；否则用 config.search_limit。
+    let limit = limit.or_else(|| {
+        cfg.search_limit
+            .map(|v| v.max(0) as usize)
+            .filter(|v| *v > 0)
+    });
+
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .thread_name("so-novel-cli")
@@ -157,35 +168,62 @@ fn run_search(
         cf_bypass,
     ));
 
-    let mut total = 0usize;
-    for o in &outcomes {
-        match &o.result {
-            Ok(list) => {
-                if !list.is_empty() {
-                    println!(
-                        "\n=== {}#{} ({} 条) ===",
-                        o.source_name,
-                        o.source_id,
-                        list.len()
-                    );
-                    for r in list {
-                        println!(
-                            "  • {}  作者:{}  最新:{}  URL:{}",
-                            r.book_name,
-                            r.author.as_deref().unwrap_or("-"),
-                            r.latest_chapter.as_deref().unwrap_or("-"),
-                            r.url
-                        );
-                    }
-                    total += list.len();
-                }
-            }
-            Err(e) => {
-                eprintln!("✗ {}#{} 失败: {}", o.source_name, o.source_id, e);
-            }
+    // 拍平成单一列表 + 收集失败源（保留每条的 source_id/source_name）。
+    let mut flat: Vec<SearchResult> = Vec::new();
+    let mut failed: Vec<(i32, String, String)> = Vec::new();
+    for o in outcomes {
+        match o.result {
+            Ok(list) => flat.extend(list),
+            Err(e) => failed.push((o.source_id, o.source_name, e.to_string())),
         }
     }
-    println!("\n共 {total} 条结果（关键词：{keyword}）");
+
+    // 与 GUI 一致：config.search_filter 为真时按相似度过滤 + 去重 + 排序。
+    if cfg.search_filter {
+        flat = crate::parser::filter_sort(&flat, &keyword);
+    }
+
+    if json {
+        // 机器可读：仅 JSON 到 stdout，人类可读信息（失败源）走 stderr。
+        println!("{}", serde_json::to_string(&flat)?);
+        for (id, name, err) in &failed {
+            eprintln!("✗ {name}#{id} 失败: {err}");
+        }
+        drop(rt);
+        return Ok(());
+    }
+
+    // 人类可读：单一列表 + 全局序号。
+    for (i, r) in flat.iter().enumerate() {
+        println!(
+            "{}. {}  作者:{}  最新:{}  [{}#{}]  {}",
+            i + 1,
+            r.book_name,
+            r.author.as_deref().unwrap_or("-"),
+            r.latest_chapter.as_deref().unwrap_or("-"),
+            r.source_name,
+            r.source_id,
+            r.url
+        );
+    }
+    print!(
+        "\n共 {} 条结果（关键词：{keyword}）",
+        flat.len()
+    );
+    if failed.is_empty() {
+        println!();
+    } else {
+        let summary = failed
+            .iter()
+            .map(|(id, name, _)| format!("{name}#{id}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        println!("  失败源: {summary}");
+    }
+    // 失败源详情走 stderr，不污染 stdout 纯结果区。
+    for (id, name, err) in &failed {
+        eprintln!("✗ {name}#{id} 失败: {err}");
+    }
     drop(rt);
     Ok(())
 }
@@ -283,11 +321,18 @@ fn run_download(
     Ok(())
 }
 
-fn run_sources(cfg: &AppConfig, paths: &ConfigPaths) -> Result<()> {
+fn run_sources(cfg: &AppConfig, paths: &ConfigPaths, json: bool) -> Result<()> {
     let _ = cfg; // 当前未用到 cfg 字段，保留参数为未来扩展（按 lang 过滤等）
     let db = Db::open(&paths.db_file)
         .with_context(|| format!("打开 sonovel.db 失败: {}", paths.db_file.display()))?;
-    let rules = load_rules_from_db(db.conn()).context("加载规则失败")?;
+    let rules: Vec<Rule> = load_rules_from_db(db.conn()).context("加载规则失败")?;
+
+    if json {
+        // 机器可读：Rule 已 derive(Serialize)。
+        println!("{}", serde_json::to_string(&rules)?);
+        return Ok(());
+    }
+
     let enabled = rules.iter().filter(|r| !r.disabled).count();
     let disabled = rules.iter().filter(|r| r.disabled).count();
     println!(
@@ -324,15 +369,27 @@ mod tests {
     use clap::Parser;
 
     #[test]
-    fn cli_parses_version_subcommand() {
-        let cli = Cli::try_parse_from(["so-novel-rs", "version"]).unwrap();
-        assert!(matches!(cli.command, Cmd::Version));
+    fn cli_rejects_version_subcommand() {
+        // version 子命令已移除，改用 clap 自动注入的 -V / --version。
+        let result = Cli::try_parse_from(["so-novel-rs", "version"]);
+        assert!(result.is_err(), "version 应不再是子命令");
+    }
+
+    #[test]
+    fn cli_accepts_version_flag() {
+        // clap 自动注入的 --version flag：解析应在拿到 flag 时返回 Err
+        // （DisplayVersion），而非正常子命令。
+        let result = Cli::try_parse_from(["so-novel-rs", "--version"]);
+        assert!(result.is_err(), "--version flag 应触发 DisplayVersion");
     }
 
     #[test]
     fn cli_parses_sources_subcommand() {
         let cli = Cli::try_parse_from(["so-novel-rs", "sources"]).unwrap();
-        assert!(matches!(cli.command, Cmd::Sources));
+        match cli.command {
+            Cmd::Sources { json } => assert!(!json),
+            _ => panic!("expected Sources"),
+        }
     }
 
     #[test]
@@ -343,10 +400,12 @@ mod tests {
                 keyword,
                 source,
                 limit,
+                json,
             } => {
                 assert_eq!(keyword, "凡人修仙传");
                 assert_eq!(source, None);
                 assert_eq!(limit, None);
+                assert!(!json);
             }
             _ => panic!("expected Search"),
         }
@@ -369,12 +428,33 @@ mod tests {
                 keyword,
                 source,
                 limit,
+                json,
             } => {
                 assert_eq!(keyword, "斗破苍穹");
                 assert_eq!(source, Some(3));
                 assert_eq!(limit, Some(10));
+                assert!(!json);
             }
             _ => panic!("expected Search"),
+        }
+    }
+
+    #[test]
+    fn cli_parses_search_json_flag() {
+        let cli =
+            Cli::try_parse_from(["so-novel-rs", "search", "凡人修仙传", "--json"]).unwrap();
+        match cli.command {
+            Cmd::Search { json, .. } => assert!(json),
+            _ => panic!("expected Search"),
+        }
+    }
+
+    #[test]
+    fn cli_parses_sources_json_flag() {
+        let cli = Cli::try_parse_from(["so-novel-rs", "sources", "--json"]).unwrap();
+        match cli.command {
+            Cmd::Sources { json } => assert!(json),
+            _ => panic!("expected Sources"),
         }
     }
 

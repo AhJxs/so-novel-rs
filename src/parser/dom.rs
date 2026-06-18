@@ -7,10 +7,11 @@
 //! Rust 端：
 //! - CSS 选择器用 `scraper`（HTML5 解析 + html5ever 选择器实现，
 //!   覆盖现有规则的 99%）；
-//! - XPath：现有规则共有 1 处真实 XPath
-//!   （`bundle/rules/cloudflare.json` 里 `//*[@id="readbg"]/script[4]`），
-//!   阶段 2a 暂不引入 XPath 引擎，直接返回错误，让阶段 2b/2c 决定是否
-//!   按 audit §6.3 的策略改写为 CSS。
+//! - XPath：现有规则里有两类 XPath，都走极小改写而非引入完整引擎：
+//!   1. `//*[@id="readbg"]/script[4]`（`bundle/rules/cloudflare.json` 96 读书）；
+//!   2. 纯绝对路径 `/html`、`/html/body`…（`bundle/rules/main.json` wxsy.net 的
+//!      `toc.list = "/html@js:..."`，选中 `<html>` 根元素后 @js 后处理）。
+//!   `xpath_to_css` 覆盖以上两种精确模式；其它 XPath 返回 `XPathNotSupported`。
 //! - `@js:` 后处理：交给 `crate::js::post_process`。
 
 use std::fmt;
@@ -160,12 +161,18 @@ fn is_xpath(s: &str) -> bool {
     s.starts_with('/') || s.starts_with("//") || s.starts_with("(/")
 }
 
-/// 极小 XPath → CSS 改写。仅覆盖现有规则中**唯一**一条 XPath：
-/// `//*[@id="readbg"]/script[4]` → `#readbg > script:nth-of-type(4)`
+/// 极小 XPath → CSS 改写。覆盖现有规则中出现过的两类 XPath：
 ///
-/// 引入完整 XPath 引擎（libxml/sxd-xpath）的成本远高于改写这一条规则，
-/// 因此当且仅当模式精确匹配 `//*[@id="..."]/<tag>[N]` 时返回 CSS 等价；
-/// 其它 XPath 一律返回 `None`，交给上层报 typed error。
+/// 1. `//*[@id="readbg"]/script[4]` → `#readbg > script:nth-of-type(4)`
+///    （cloudflare.json 96 读书唯一一条 id 索引 XPath）。
+/// 2. 纯绝对路径标签序列 `/html`、`/html/body`、`/html/body/div` …
+///    → `html`、`html > body`、`html > body > div`
+///    （main.json wxsy.net 的 `toc.list = "/html@js:..."`：选中 `<html>` 根
+///    元素，把整个文档 inner_html 喂给 @js 后处理）。每一段必须是纯标签名，
+///    不带 `*` / 属性 / 谓词 —— 出现任性片段就放弃，交给上层报 typed error。
+///
+/// 引入完整 XPath 引擎（libxml/sxd-xpath）的成本远高于改写这几条规则，
+/// 因此只覆盖以上两种精确模式；其它 XPath 一律返回 `None`。
 fn xpath_to_css(s: &str) -> Option<String> {
     use once_cell::sync::Lazy;
     use regex::Regex;
@@ -177,21 +184,47 @@ fn xpath_to_css(s: &str) -> Option<String> {
         )
         .expect("xpath rewrite re")
     });
-    let cap = RE.captures(s.trim())?;
-    let id = cap.get(1).unwrap().as_str();
-    let tag = cap.get(2).unwrap().as_str();
-    let nth = cap.get(3).map(|m| m.as_str());
+    let s = s.trim();
 
-    let css = match nth {
-        Some(n) => format!("#{id} > {tag}:nth-of-type({n})"),
-        None => format!("#{id} > {tag}"),
-    };
-    Some(css)
+    if let Some(cap) = RE.captures(s) {
+        let id = cap.get(1).unwrap().as_str();
+        let tag = cap.get(2).unwrap().as_str();
+        let nth = cap.get(3).map(|m| m.as_str());
+        return Some(match nth {
+            Some(n) => format!("#{id} > {tag}:nth-of-type({n})"),
+            None => format!("#{id} > {tag}"),
+        });
+    }
+
+    // 纯绝对路径：`/tag/tag/...`，每段是合法标签名（无 `*`/属性/谓词）。
+    if s.starts_with('/') && !s.starts_with("//") {
+        let segments: Vec<&str> = s.split('/').filter(|seg| !seg.is_empty()).collect();
+        if !segments.is_empty()
+            && segments
+                .iter()
+                .all(|seg| is_plain_tag_name(seg))
+        {
+            return Some(segments.join(" > "));
+        }
+    }
+
+    None
+}
+
+/// 是否是纯标签名（如 `html` / `body` / `div-1`）。带 `*`、属性、谓词 `[N]`
+/// 的不算 —— 那些需要更完整的 XPath 改写，超出极小覆盖范围。
+fn is_plain_tag_name(seg: &str) -> bool {
+    !seg.is_empty()
+        && seg
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+        && seg.as_bytes()[0].is_ascii_alphabetic()
 }
 
 /// 把 selector_part 标准化为 CSS 选择器：
 /// - 已经是 CSS：原样返回；
-/// - 是已知极小 XPath 模式：改写为 CSS；
+/// - 是已知极小 XPath 模式（`//*[@id=...]` 或纯绝对路径 `/html`、`/html/body`…）：
+///   改写为 CSS；
 /// - 其它 XPath：返回 `Err` 让上层报 `XPathNotSupported`。
 fn normalize_selector(selector_part: &str) -> Result<String, SelectError> {
     if !is_xpath(selector_part) {
@@ -388,6 +421,36 @@ mod tests {
         let q = r#"//*[@id="x"]/span"#;
         let s = select_and_invoke_js(&h, q, ContentType::Text).unwrap();
         assert_eq!(s, "one");
+    }
+
+    #[test]
+    fn xpath_absolute_html_root_rewrites_to_css() {
+        // main.json wxsy.net 的 toc.list = "/html@js:..."：选中 <html> 根元素，
+        // 取 inner_html（ ContentType::Html ）后交给 @js 后处理。
+        // 这里端到端验证：/html 改写成 css `html`，能取到文档 HTML。
+        let h = doc(r#"<html><body><ul class="section-list ycxsid"><li>a</li><li>b</li></ul></body></html>"#);
+        let q = "/html";
+        let s = select_and_invoke_js(&h, q, ContentType::Html).unwrap();
+        assert!(s.contains("section-list"), "got: {s}");
+        assert!(s.contains("<li>a</li>"), "got: {s}");
+    }
+
+    #[test]
+    fn xpath_absolute_html_root_with_js_postprocess() {
+        // 端到端：/html 选根 + @js 后处理（模拟 wxsy.net 真实 list 规则的精简版）。
+        let h = doc(r#"<html><body><ul class="section-list ycxsid"><li>a</li><li>b</li></ul></body></html>"#);
+        let q = "/html@js:r=r.replace(/<li>b<\\/li>/,'')";
+        let s = select_and_invoke_js(&h, q, ContentType::Html).unwrap();
+        assert!(s.contains("<li>a</li>"), "got: {s}");
+        assert!(!s.contains("<li>b</li>"), "js should strip li b: {s}");
+    }
+
+    #[test]
+    fn xpath_absolute_multi_segment_rewrites() {
+        let h = doc(r#"<html><body><div><p>text</p></div></body></html>"#);
+        let q = "/html/body/div";
+        let s = select_and_invoke_js(&h, q, ContentType::Text).unwrap();
+        assert_eq!(s, "text");
     }
 
     // ---------- 嵌套选择（搜索结果场景） ----------

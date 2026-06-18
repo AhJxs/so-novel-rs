@@ -13,8 +13,9 @@
 #
 # 产物命名：so-novel-rs-<version>-<os>-<arch>.<ext>，发 Release 时按名上传。
 #
-# GPUI 0.2.2 Linux 编译依赖（apt dev 包）：xkbcommon / fontconfig / xcb / wayland / gl / egl
-# + Vulkan headers（blade-graphics）。macOS / Windows 用系统 framework，无需额外包。
+# GPUI 0.2.2 Linux 编译依赖（apt dev 包）：xkbcommon / xkbcommon-x11 / fontconfig /
+# xcb / wayland / gl / egl + Vulkan headers（blade-graphics）。
+# macOS / Windows 用系统 framework，无需额外包。
 
 name: release
 
@@ -46,7 +47,7 @@ jobs:
             target: x86_64-unknown-linux-gnu
             archive: tar.gz
           # Linux aarch64 走 GitHub 原生 arm64 runner（ubuntu-24.04-arm），无需 cross/qemu。
-          - os: ubuntu-24.04-arm
+          - os: ubuntu-latest
             target: aarch64-unknown-linux-gnu
             archive: tar.gz
           # macOS Apple Silicon 原生。
@@ -62,7 +63,7 @@ jobs:
       # 且 Intel Mac 用户少。如需加回来改用 `macos-13` runner 原生编译。
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -74,7 +75,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            libxkbcommon-dev libfontconfig1-dev \
+            libxkbcommon-dev libxkbcommon-x11-dev libfontconfig1-dev \
             libxcb1-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
             libwayland-dev libgl1-mesa-dev libegl1-mesa-dev \
             libglib2.0-dev libssl-dev \
@@ -95,7 +96,9 @@ jobs:
           echo "version=$v" >> "$GITHUB_OUTPUT"
 
       # ---- 打包 ----
-      # Linux 复用 scripts/package-linux.sh（已含字体 + README + tar.gz）。
+      # 规则 / HTML 模板 / quanben5.js / logo 都通过 include_*! 嵌入二进制，
+      # 不需要随包带任何 bundle/ 资源 —— 各平台只打可执行文件。
+      # Linux 复用 scripts/package-linux.sh（含 README + tar.gz）。
       - name: Stage artifacts (Linux)
         if: runner.os == 'Linux'
         shell: bash
@@ -108,10 +111,9 @@ jobs:
           STAGE: so-novel-rs-${{ steps.ver.outputs.version }}-macos-${{ matrix.target == 'aarch64-apple-darwin' && 'aarch64' || 'x86_64' }}
         run: |
           BIN="target/${{ matrix.target }}/release/so-novel-rs"
-          mkdir -p "dist/$STAGE/bundle"
+          mkdir -p "dist/$STAGE"
           cp "$BIN" "dist/$STAGE/"
           chmod +x "dist/$STAGE/so-novel-rs"
-          [ -d bundle/fonts ] && cp -r bundle/fonts "dist/$STAGE/bundle/" || true
           ( cd dist && tar -czf "$STAGE.tar.gz" "$STAGE" )
 
       - name: Stage artifacts (Windows)
@@ -121,9 +123,8 @@ jobs:
           STAGE: so-novel-rs-${{ steps.ver.outputs.version }}-windows-x86_64
         run: |
           BIN="target/${{ matrix.target }}/release/so-novel-rs.exe"
-          mkdir -p "dist/$STAGE/bundle"
+          mkdir -p "dist/$STAGE"
           cp "$BIN" "dist/$STAGE/"
-          [ -d bundle/fonts ] && cp -r bundle/fonts "dist/$STAGE/bundle/" || true
           ( cd dist && 7z a -tzip "$STAGE.zip" "$STAGE" )
 
       - name: Upload artifacts
@@ -145,7 +146,7 @@ jobs:
       contents: write
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
