@@ -13,15 +13,50 @@
 //!   - `Escape` 由 `gpui-component::Root` 自动处理关闭顶层 dialog / sheet / notification。
 //! - 顶层 `Root::render_dialog_layer / sheet_layer / notification_layer` 渲染覆盖层。
 
+use std::io::Cursor;
+use std::sync::Arc;
+
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    AnyElement, App, AppContext, ClickEvent, Context, Entity, InteractiveElement, IntoElement,
-    KeyBinding, ParentElement, Render, SharedString, Styled, Window, actions, div, px,
+    AnyElement, App, AppContext, ClickEvent, Context, Entity, FontWeight, ImageSource,
+    InteractiveElement, IntoElement, KeyBinding, ObjectFit, ParentElement, Render, RenderImage,
+    SharedString, Styled, StyledImage as _, Window, actions, div, img, px,
 };
 use gpui_component::{
     ActiveTheme as _, Icon, IconName, Root, TitleBar, WindowExt as _,
     sidebar::{Sidebar, SidebarMenu, SidebarMenuItem, SidebarToggleButton},
 };
+
+use once_cell::sync::Lazy;
+
+/// Sidebar header 用的小 logo（assets/logo.png 编译期嵌入）。
+///
+/// 用 `.png`（位图）而非 `.svg`：gpui 的 `img()` 不直接吃 SVG 字节——SVG 需要装到
+/// asset loader（`with_assets`）走 `AssetSource` + 内置 SVG 光栅化。本项目 assets loader
+/// 是 `gpui_component_assets::Assets`，不包含我们的 logo。最简、零运行时依赖的路径就是
+/// 嵌 PNG 字节、用 `image` crate 解码成 `RenderImage`（跟 `search.rs` 的封面解码同流程）。
+const LOGO_PNG: &[u8] = include_bytes!("../../assets/logo.png");
+
+/// 解码好的 logo（RGBA→BGRA swap 后的 `RenderImage`）。`Lazy` 启动首帧用一次，之后复用，
+/// 避免每帧重新解码 PNG。
+static LOGO_IMAGE: Lazy<Option<Arc<RenderImage>>> = Lazy::new(|| decode_logo_image(LOGO_PNG));
+
+/// 解码 PNG 字节 → `RenderImage`。流程跟 `search.rs::decode_cover_image` 一致
+/// （`image::ImageReader` → `into_rgba8()` → RGBA↔BGRA swap → `Frame` → `RenderImage`），
+/// 只是 logo 是静态资源，用 `Lazy` 缓存而非 per-entry。
+fn decode_logo_image(bytes: &[u8]) -> Option<Arc<RenderImage>> {
+    let reader = image::ImageReader::new(Cursor::new(bytes))
+        .with_guessed_format()
+        .ok()?;
+    let dynamic = reader.decode().ok()?;
+    let mut rgba = dynamic.into_rgba8();
+    // RGBA → BGRA：GPUI 纹理期望 BGRA 字节序（见 gpui img.rs L671-674 swap(0,2)）。
+    for pixel in rgba.chunks_exact_mut(4) {
+        pixel.swap(0, 2);
+    }
+    let frame = image::Frame::new(rgba);
+    Some(Arc::new(RenderImage::new(vec![frame])))
+}
 
 use crate::app::AppModel;
 use crate::gpui_app::i18n::ts;
@@ -218,6 +253,22 @@ impl RootView {
     }
 
     /// 设置 modal：半透明 backdrop + 居中可拖动 panel。
+    /// 渲染 logo 图片元素，固定 `size`×`size`（正方形，object-fit contain）。
+    ///
+    /// 解码失败（LOGO_PNG 损坏 / `image` crate 解码失败）时 `LOGO_IMAGE` 为 `None`，
+    /// 返回空 div 占位——不 panic、不让 UI 崩，sidebar header 仍占位（只是没图）。
+    /// `size` 走 `px()` 显式像素而非 rem：logo 是图标资源，不跟字号缩放，固定视觉大小。
+    fn render_logo(size: gpui::Pixels) -> AnyElement {
+        match LOGO_IMAGE.as_ref() {
+            Some(rendered) => img(ImageSource::Render(rendered.clone()))
+                .object_fit(ObjectFit::Contain)
+                .size(size)
+                .flex_shrink_0()
+                .into_any_element(),
+            None => div().size(size).flex_shrink_0().into_any_element(),
+        }
+    }
+
     /// 构建左侧 Sidebar。支持折叠（`sidebar_collapsed`）：
     ///
     /// - 展开态（默认）：宽 220px，header 显示 "So Novel" 文字（居中）；
@@ -254,27 +305,41 @@ impl RootView {
         })
         .collect();
 
-        // Header — 仅展开态显示 "So Novel" 文字居中。折叠态不调用 `.header(...)`，
-        // gpui-component 内部 `when_some(self.header.take(), ...)` 会跳过整个 header 容器，
-        // 不占任何垂直空间。文本走 `i18n::tr`（项目名 3 种语言都是 "So Novel"，但 key
-        // 还是走 i18n 表以保持一致性）。
-        let header = div().w_full().flex().items_center().justify_center().child(
-            div()
-                .font_weight(gpui::FontWeight::SEMIBOLD)
-                .text_base()
-                .child(ts("App.title")),
-        );
+        // Header —— logo + 全大写细体 app 名，水平居中。
+        //
+        // - 展开态：[logo] "SO NOVEL"，logo + 文字一行居中。
+        // - 折叠态：仅 logo 居中（文字隐藏）——折叠后 sidebar 宽 48px 放不下整串文字，
+        //   保留 logo 让用户仍能识别应用。`when(!collapsed, ...)` 控制文字显隐。
+        //
+        // 项目名 i18n 三语都是 "So Novel"；这里 `to_uppercase()` 转全大写。字号 text_sm
+        // + LIGHT(300) 字重 → 细体观感（gpui 无 letter_spacing API，靠大写 + 细体 + 小字
+        // 营造 logo 字感，不强行加字间距）。
+        let title_text = ts("App.title").to_uppercase();
+        let header = div()
+            .w_full()
+            .flex()
+            .items_center()
+            .justify_center()
+            .gap_2()
+            .child(Self::render_logo(px(20.0)))
+            .when(!collapsed, |h| {
+                h.child(
+                    div()
+                        .text_sm()
+                        .font_weight(FontWeight::LIGHT)
+                        .child(title_text),
+                )
+            });
 
         Sidebar::left()
             .w(px(220.0))
             // true → SidebarCollapsible::Icon：折叠到图标宽度（48px），带 200ms 缓动。
             .collapsible(true)
             .collapsed(collapsed)
-            .bg(cx.theme().sidebar)
             .border_color(cx.theme().border)
-            // 仅展开态注入 header。`header` 被闭包 move 捕获，未调用时直接 drop，
-            // gpui-component 内部 `when_some(self.header.take(), ...)` 跳过整个 header 容器。
-            .when(!collapsed, |sb| sb.header(header))
+            // header 始终注入（折叠态也保留 logo）。`when(!collapsed, ...)` 在 header
+            // 内部控制文字显隐，header 容器本身（gpui-component `when_some`）一直渲染。
+            .header(header)
             // 无 footer —— 不调 `.footer(...)`，gpui-component 内部 `when_some` 跳过整个
             // footer 容器，sidebar 底部自然空白。
             .child(SidebarMenu::new().children(items))
@@ -315,6 +380,7 @@ impl RootView {
     /// 右侧内容区。按 current_page 渲染对应 page entity。
     fn render_content(&self, cx: &mut Context<Self>) -> impl IntoElement {
         div()
+            .track_focus(&self._focus)
             .flex_1()
             .size_full()
             .overflow_hidden()
@@ -409,18 +475,16 @@ impl Render for RootView {
         self.bind_nav_actions(div().key_context(KEY_CONTEXT), cx)
             .size_full()
             .flex()
-            .flex_col()
-            .child(self.render_title_bar(cx))
-            // 主体：sidebar + 内容。`track_focus` 放在 body 内部，让 KEY_CONTEXT 上下文链稳定。
+            .flex_row()
+            .child(self.render_sidebar(cx))
             .child(
                 div()
-                    .track_focus(&self._focus)
                     .flex_1()
                     .size_full()
                     .flex()
-                    .flex_row()
+                    .flex_col()
                     .overflow_hidden()
-                    .child(self.render_sidebar(cx))
+                    .child(self.render_title_bar(cx))
                     .child(self.render_content(cx)),
             )
             // Root 的覆盖层：dialog / sheet / notification。
