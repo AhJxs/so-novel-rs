@@ -12,7 +12,7 @@ use gpui_component::{
     setting::{SettingField, SettingGroup, SettingItem, SettingPage},
 };
 
-use crate::gpui_app::i18n::{ts, ts_fmt};
+use crate::i18n::{ts, ts_fmt};
 
 use super::ctx::PageCtx;
 

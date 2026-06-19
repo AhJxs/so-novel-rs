@@ -389,6 +389,11 @@ Settings:
       en: "Source code / issue tracker / latest release are all on GitHub."
       zh-CN: 项目源码 / 问题反馈 / 最新版本都在 GitHub。
       zh-HK: 項目源碼 / 問題回饋 / 最新版本都在 GitHub。
+  placeholder:
+    qidian_cookie:
+      en: "w_tsfp=..."
+      zh-CN: "w_tsfp=..."
+      zh-HK: "w_tsfp=..."
   # 按钮 label（SettingsField::render 渲染的 button 上的 label）
   check_update_button:
     en: "Check GitHub for updates"

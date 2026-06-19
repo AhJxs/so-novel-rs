@@ -30,11 +30,8 @@ pub fn refresh_library(library: &mut LibraryState, download_path: &str) {
         }
         Err(e) => {
             library.last_error = Some(
-                crate::gpui_app::i18n::ts_fmt(
-                    "Toasts.library_scan_failed",
-                    &[("err", &e.to_string())],
-                )
-                .to_string(),
+                crate::i18n::ts_fmt("Toasts.library_scan_failed", &[("err", &e.to_string())])
+                    .to_string(),
             );
         }
     }
@@ -61,21 +58,16 @@ pub fn delete_library_entry(
                 .unwrap_or("")
                 .to_string();
             let display = if file_name.is_empty() {
-                crate::gpui_app::i18n::ts("Toasts.library_delete_unknown").to_string()
+                crate::i18n::ts("Toasts.library_delete_unknown").to_string()
             } else {
-                crate::gpui_app::components::truncate(&file_name, 50).to_string()
+                crate::util::formatting::truncate(&file_name, 50).to_string()
             };
-            Ok(
-                crate::gpui_app::i18n::ts_fmt("Toasts.library_delete_ok", &[("file", &display)])
-                    .to_string(),
-            )
+            Ok(crate::i18n::ts_fmt("Toasts.library_delete_ok", &[("file", &display)]).to_string())
         }
         Err(e) => {
-            let msg = crate::gpui_app::i18n::ts_fmt(
-                "Toasts.library_delete_failed",
-                &[("err", &e.to_string())],
-            )
-            .to_string();
+            let msg =
+                crate::i18n::ts_fmt("Toasts.library_delete_failed", &[("err", &e.to_string())])
+                    .to_string();
             library.last_error = Some(msg.clone());
             Err(msg)
         }

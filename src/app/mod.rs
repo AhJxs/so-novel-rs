@@ -19,6 +19,7 @@ mod search_state;
 mod sources_state;
 pub use sources_state::SourcesFilterStatus;
 mod tasks_db;
+mod ui_event;
 mod update_state;
 
 pub(crate) mod ops;
@@ -34,17 +35,18 @@ pub use search_state::{
 };
 pub use sources_state::SourcesState;
 pub use tasks_db::load_tasks_from_db;
+pub use ui_event::UIEvent;
 pub use update_state::{
     UpdateCheckResult, UpdateOutcome, UpdateState, check_github_latest_release,
 };
 
-use gpui::App;
 use tokio::runtime::Runtime;
 
 use crate::config::{AppConfig, ConfigPaths, load_config};
 use crate::db::Db;
-use crate::gpui_app::i18n::{ts, ts_fmt};
-use crate::models::Rule;
+use crate::i18n::{ts, ts_fmt};
+use crate::models::{Book, Chapter, Rule, SearchResult};
+use crate::rules::SourceOverrides;
 
 /// 应用整体状态。UI 中立结构 —— 不依赖任何 GUI 框架，由 `gpui_app` 层渲染。
 pub struct AppModel {
@@ -56,7 +58,7 @@ pub struct AppModel {
 
     /// 用户对书源的禁用 / 启用覆写。toggle 后立即写 `sonovel.db`
     /// 的 `source_overrides` 表；UI 这里持有的副本仅用于显示状态。
-    pub source_overrides: crate::rules::SourceOverrides,
+    pub source_overrides: SourceOverrides,
 
     /// 持久化层（SQLite）。下载任务记录全走这里。
     pub db: Db,
@@ -86,9 +88,13 @@ pub struct AppModel {
     ///
     /// `events::drain` 跑在 `AsyncApp::update_entity` 闭包里，**拿不到 `&mut Window`**；
     /// 而 `WindowExt::push_notification` 必须 `&mut Window` + `&mut App`。
-    /// 解法：drain 把构造好的 [`gpui_component::notification::Notification`] 推到这个 Vec，
-    /// 由 `RootView::render`（拿得到 `&mut Window`）排空 + 调 `push_notification`。
-    pub pending_notifications: Vec<gpui_component::notification::Notification>,
+    /// 解法：drain 把构造好的 [`UIEvent`] 推到这个 Vec，由 `RootView::render`（拿得到
+    /// `&mut Window`）排空 + 翻译成 `gpui_component::notification::Notification` 再
+    /// 真正 push 到 UI。
+    ///
+    /// 为什么用 plain enum：`app/` 想保持 UI 框架解耦（CLAUDE.md 明确要求）；`UIEvent`
+    /// 是业务层 → UI 层的事件桥，零 `gpui` / `gpui_component` 依赖。
+    pub pending_notifications: Vec<UIEvent>,
 }
 
 impl Default for AppModel {
@@ -136,7 +142,7 @@ impl AppModel {
                 (Vec::new(), Some(format!("{e:#}")))
             }
         };
-        let source_overrides = crate::rules::SourceOverrides::load_from_db(db.conn());
+        let source_overrides = SourceOverrides::load_from_db(db.conn());
 
         let (tasks, next_task_id) = load_tasks_from_db(&db);
         tracing::info!("从 DB 加载 {} 个历史下载任务", tasks.len());
@@ -162,42 +168,42 @@ impl AppModel {
         }
     }
 
-    /// 推一条通用 [`gpui_component::notification::Notification`] 到 UI 通知队列。
+    /// 推一条 info 级通知。语义见 [`Self::pending_notifications`]。
+    pub fn push_info(&mut self, msg: impl Into<String>) {
+        self.pending_notifications.push(UIEvent::Info(msg.into()));
+    }
+
+    /// 推一条 success 级通知。语义见 [`Self::pending_notifications`]。
+    pub fn push_success(&mut self, msg: impl Into<String>) {
+        self.pending_notifications
+            .push(UIEvent::Success(msg.into()));
+    }
+
+    /// 推一条 warning 级通知。语义见 [`Self::pending_notifications`]。
+    pub fn push_warning(&mut self, msg: impl Into<String>) {
+        self.pending_notifications
+            .push(UIEvent::Warning(msg.into()));
+    }
+
+    /// 推一条 error 级通知。语义见 [`Self::pending_notifications`]。
+    pub fn push_error(&mut self, msg: impl Into<String>) {
+        self.pending_notifications.push(UIEvent::Error(msg.into()));
+    }
+
+    /// 推一条**可点击**通知 —— 用户点 toast 时调 `cx.open_url(url)`（浏览器开链接）。
     ///
-    /// 适用于需要 `.on_click(...)` / `.title(...)` 等 builder 方法的复杂场景；
-    /// 简单纯文本通知优先用 [`Self::push_info_notification`] /
-    /// [`Self::push_success_notification`] / [`Self::push_warning_notification`] /
-    /// [`Self::push_error_notification`]。
-    ///
-    /// 实际 `window.push_notification` 由 [`crate::gpui_app::RootView::render`] 排空
-    /// `pending_notifications` 后调 —— [`crate::app::events::drain`] 跑在
-    /// `AsyncApp::update_entity` 闭包里，**拿不到 `&mut Window`**。
-    pub fn push_notification(&mut self, notification: gpui_component::notification::Notification) {
-        self.pending_notifications.push(notification);
-    }
-
-    /// 推一条 info 级通知。语义见 [`Self::push_notification`]。
-    pub fn push_info_notification(&mut self, msg: impl Into<gpui::SharedString>) {
-        self.push_notification(gpui_component::notification::Notification::info(msg));
-    }
-
-    /// 推一条 success 级通知。语义见 [`Self::push_notification`]。
-    pub fn push_success_notification(&mut self, msg: impl Into<gpui::SharedString>) {
-        self.push_notification(gpui_component::notification::Notification::success(msg));
-    }
-
-    /// 推一条 warning 级通知。语义见 [`Self::push_notification`]。
-    pub fn push_warning_notification(&mut self, msg: impl Into<gpui::SharedString>) {
-        self.push_notification(gpui_component::notification::Notification::warning(msg));
-    }
-
-    /// 推一条 error 级通知。语义见 [`Self::push_notification`]。
-    pub fn push_error_notification(&mut self, msg: impl Into<gpui::SharedString>) {
-        self.push_notification(gpui_component::notification::Notification::error(msg));
+    /// 例：版本检查"有新版本"toast，message 显示 "有新版本 v0.3.0"，点击 → 跳
+    /// `https://github.com/AhJxs/so-novel-rs/releases/latest`。`on_click` 在
+    /// `gpui_app::root::ui_event_to_notification` 翻译层挂上。
+    pub fn push_open_link(&mut self, msg: impl Into<String>, url: impl Into<String>) {
+        self.pending_notifications.push(UIEvent::OpenLink {
+            message: msg.into(),
+            url: url.into(),
+        });
     }
 
     /// 派一个新的下载任务。返回新任务 id。
-    pub fn spawn_download(&mut self, target: crate::models::SearchResult) -> u64 {
+    pub fn spawn_download(&mut self, target: SearchResult) -> u64 {
         let (id, task) = crate::app::ops::spawn_download(
             &self.rules,
             &self.config,
@@ -211,7 +217,7 @@ impl AppModel {
     }
 
     /// 派一个 TOC 预取任务（获取元数据 + 章节列表，不开始下载）。
-    pub fn spawn_resolve_toc(&mut self, target: &crate::models::SearchResult) {
+    pub fn spawn_resolve_toc(&mut self, target: &SearchResult) {
         let rx =
             crate::app::ops::spawn_resolve_toc(&self.rules, &self.config, self.runtime, target);
         self.search.toc_rx = Some(rx);
@@ -221,9 +227,9 @@ impl AppModel {
     /// 返回新任务 id。
     pub fn spawn_download_range(
         &mut self,
-        target: crate::models::SearchResult,
-        book: crate::models::Book,
-        chapters: Vec<crate::models::Chapter>,
+        target: SearchResult,
+        book: Book,
+        chapters: Vec<Chapter>,
     ) -> u64 {
         let (id, task) = crate::app::ops::spawn_download_range(
             &self.rules,
@@ -279,7 +285,7 @@ impl AppModel {
             Ok(result) => {
                 // i18n 模板：`"Imported {inserted}, skipped {skipped} duplicates"`
                 // 全部重复（inserted=0）降级为 warning，否则 success。
-                let msg = crate::gpui_app::i18n::ts_fmt(
+                let msg = crate::i18n::ts_fmt(
                     "Sources.import.result",
                     &[
                         ("inserted", &result.inserted.to_string()),
@@ -288,17 +294,17 @@ impl AppModel {
                 )
                 .to_string();
                 if result.inserted == 0 && result.skipped > 0 {
-                    self.push_warning_notification(msg);
+                    self.push_warning(msg);
                 } else {
-                    self.push_success_notification(msg);
+                    self.push_success(msg);
                 }
             }
             Err(msg) => {
                 if msg.starts_with("文件内容为空") || msg.starts_with("文件中未找到有效")
                 {
-                    self.push_warning_notification(msg);
+                    self.push_warning(msg);
                 } else {
-                    self.push_error_notification(msg);
+                    self.push_error(msg);
                 }
             }
         }
@@ -313,12 +319,12 @@ impl AppModel {
             &mut self.sources_state,
             source_id,
         ) {
-            Ok(true) => self.push_success_notification(ts_fmt(
+            Ok(true) => self.push_success(ts_fmt(
                 "Toasts.delete_source_ok",
                 &[("id", &source_id.to_string())],
             )),
-            Ok(false) => self.push_warning_notification(ts("Toasts.delete_source_missing")),
-            Err(msg) => self.push_error_notification(msg),
+            Ok(false) => self.push_warning(ts("Toasts.delete_source_missing")),
+            Err(msg) => self.push_error(msg),
         }
     }
 
@@ -335,7 +341,7 @@ impl AppModel {
     pub fn persist_settings(&mut self) {
         if let Err(msg) = crate::app::ops::persist_settings(&self.config, &self.paths.config_file) {
             tracing::warn!("自动保存 config.toml 失败: {msg}");
-            self.push_error_notification(msg);
+            self.push_error(msg);
         } else {
             tracing::debug!("config.toml 自动保存成功");
         }
@@ -344,7 +350,7 @@ impl AppModel {
     /// 派一个连通性检测任务。
     pub fn spawn_health_check(&mut self) {
         if self.rules.is_empty() {
-            self.push_warning_notification(ts("Toasts.no_sources_detected"));
+            self.push_warning(ts("Toasts.no_sources_detected"));
             return;
         }
         crate::app::ops::spawn_health_check(
@@ -370,7 +376,7 @@ impl AppModel {
     /// 阻塞的 `read_dir` / `metadata` 跑在 `tokio::task::spawn_blocking`（共享 tokio
     /// runtime），结果通过 smol channel 回到主线程，由 `events::drain` 排空。
     /// 重复触发会被 `scan_in_flight` 拦截。`scanned_dir` 路径解析在主线程做（轻量）。
-    pub fn refresh_library_async(&mut self, _cx: &App) {
+    pub fn refresh_library_async(&mut self) {
         if self.library.scan_in_flight {
             return;
         }
@@ -408,7 +414,7 @@ impl AppModel {
             .await;
             let event = match result {
                 Ok(Ok(entries)) => Ok(entries),
-                Ok(Err(io_err)) => Err(crate::gpui_app::i18n::ts_fmt(
+                Ok(Err(io_err)) => Err(crate::i18n::ts_fmt(
                     "Toasts.library_scan_failed",
                     &[("err", &io_err.to_string())],
                 )
@@ -428,9 +434,9 @@ impl AppModel {
             &self.config.download_path,
             path,
         ) {
-            Ok(msg) if !msg.is_empty() => self.push_success_notification(msg),
+            Ok(msg) if !msg.is_empty() => self.push_success(msg),
             Ok(_) => {}
-            Err(msg) => self.push_error_notification(msg),
+            Err(msg) => self.push_error(msg),
         }
     }
 
@@ -440,7 +446,7 @@ impl AppModel {
         crate::app::ops::clear_finished_tasks(&mut self.tasks, &self.db);
         let removed = before - self.tasks.len();
         if removed > 0 {
-            self.push_success_notification(ts_fmt(
+            self.push_success(ts_fmt(
                 "Toasts.clear_tasks_ok",
                 &[("n", &removed.to_string())],
             ));

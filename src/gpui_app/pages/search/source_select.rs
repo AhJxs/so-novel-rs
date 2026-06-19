@@ -30,8 +30,4 @@ impl SelectItem for SourceSelectItem {
     fn value(&self) -> &Self::Value {
         &self.value
     }
-    // 默认 `matches` 按 title 匹配 —— 下拉里搜"起点"或"ZH"能筛到 rule。
-    // 默认 `render` 显示 title —— 弹层列表项正确。
-    // 默认 `display_title` 返回 `None`，折叠态显示 `title()` —— Select 关闭时
-    // 显示书源名称（不带语言后缀），行为对。
 }

@@ -1,5 +1,6 @@
 //! 工具函数
 
+pub mod formatting;
 pub mod fs;
 pub mod lang;
 pub mod system;

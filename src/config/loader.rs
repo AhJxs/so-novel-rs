@@ -397,10 +397,6 @@ pub fn load_config(path: &Path) -> Result<AppConfig> {
         if let Some(parsed) = Language::parse(&v) {
             cfg.language = parsed;
         }
-    } else if let Some(v) = t_str(&doc, "global", "app-lang") {
-        if let Some(parsed) = Language::parse(&v) {
-            cfg.language = parsed;
-        }
     }
     if let Some(v) = t_str(&doc, "global", "gh-proxy") {
         cfg.gh_proxy = v;
@@ -433,9 +429,6 @@ pub fn load_config(path: &Path) -> Result<AppConfig> {
     }
 
     // [source]
-    // 注：`[source].language` 在合并 UI / 书源语言设置后被删除（用户只设 Language，
-    // 下载目标语言从 `Language::to_book_target_lang()` 推导）。TOML 里残留的旧键
-    // 会被 toml_edit 自然忽略 —— 老配置文件不需要手动改。
     cfg.source_id = t_int(&doc, "source", "source-id").map(sat_i32);
     cfg.search_limit = t_int(&doc, "source", "search-limit").map(sat_i32);
     if let Some(v) = t_bool(&doc, "source", "search-filter") {
@@ -464,7 +457,7 @@ pub fn load_config(path: &Path) -> Result<AppConfig> {
     }
 
     // [cookie]
-    if let Some(v) = t_str(&doc, "cookie", "qidian") {
+    if let Some(v) = t_str(&doc, "cookie", "qidian-cookie") {
         cfg.qidian_cookie = v;
     }
 
@@ -524,10 +517,7 @@ pub fn save_config(path: &Path, cfg: &AppConfig) -> Result<()> {
             t.remove(key);
         }
     }
-
-    // [global] —— 主题偏好（新键）。旧 `theme` 键不再写出；加载端仍兼容读取。
-    // 主动移除老 `theme` 键，避免迁移后新旧并存造成混淆（仅当存在时）。
-    unset(&mut doc, "global", "theme");
+    // set
     set_str(
         &mut doc,
         "global",
@@ -577,8 +567,6 @@ pub fn save_config(path: &Path, cfg: &AppConfig) -> Result<()> {
     );
 
     // [source]
-    // 旧的 `[source].language` 不再写：新用户配置文件不会再有这个键；
-    // 老用户配置文件里的孤儿键会被忽略（toml_edit 不会主动清理）。
     match cfg.source_id {
         Some(v) => set_int(&mut doc, "source", "source-id", v as i64),
         None => unset(&mut doc, "source", "source-id"),
@@ -612,7 +600,7 @@ pub fn save_config(path: &Path, cfg: &AppConfig) -> Result<()> {
     );
 
     // [cookie]
-    set_str(&mut doc, "cookie", "qidian", &cfg.qidian_cookie);
+    set_str(&mut doc, "cookie", "qidian_cookie", &cfg.qidian_cookie);
 
     // [proxy]
     set_bool(&mut doc, "proxy", "enabled", cfg.proxy_enabled);
@@ -653,60 +641,60 @@ fn default_download_path() -> String {
 /// 字段顺序与默认值与 Java 端 `bundle/config.ini` 对齐，方便老用户对照。
 fn default_template_doc() -> DocumentMut {
     let template = r#"# So Novel 配置文件
-# 字段语义与旧版 config.ini 一致；规则与下载任务记录已迁到根目录的 sonovel.db。
+                        # 字段语义与旧版 config.ini 一致；规则与下载任务记录已迁到根目录的 sonovel.db。
 
-[global]
-# 主题偏好：
-#   theme-kind = "dynamic"（默认）或 "static"
-#     - dynamic：theme-light / theme-dark 各选一个主题，按 theme-dyn-mode（system/light/dark）切换
-#     - static  ：固定用 theme-name 这一个主题，不随明暗变化
-#   主题名与 `src/gpui_app/themes/*.json` 里变体的 name 一致（如 "Catppuccin Latte"），
-#   留空 = 用 gpui-component 内置默认主题。
-theme-kind = "dynamic"
-theme-name = ""
-theme-dyn-mode = "system"
-theme-light = ""
-theme-dark = ""
-# language = 应用语言（Sidebar placeholder / Select / Dialog 等所有 gpui-component
-# 内部 `t!("...")` 文案的语言，同时决定下载章节正文的目标语言 —— 见
-# `Language::to_book_target_lang`）。三选一：zh-CN / zh-TW / en。
-language = "zh-CN"
-gh-proxy = ""
-cf-bypass = ""
-# 左侧 Sidebar 是否折叠。重启后保持上次状态。
-sidebar-collapsed = false
-# UI 字号（px），范围 12–24，默认 16。整个 app 按 rem 等比缩放。
-font-size = 16
+                        [global]
+                        # 主题偏好：
+                        #   theme-kind = "dynamic"（默认）或 "static"
+                        #     - dynamic：theme-light / theme-dark 各选一个主题，按 theme-dyn-mode（system/light/dark）切换
+                        #     - static  ：固定用 theme-name 这一个主题，不随明暗变化
+                        #   主题名与 `src/gpui_app/themes/*.json` 里变体的 name 一致（如 "Catppuccin Latte"），
+                        #   留空 = 用 gpui-component 内置默认主题。
+                        theme-kind = "dynamic"
+                        theme-name = ""
+                        theme-dyn-mode = "system"
+                        theme-light = ""
+                        theme-dark = ""
+                        # language = 应用语言（Sidebar placeholder / Select / Dialog 等所有 gpui-component
+                        # 内部 `t!("...")` 文案的语言，同时决定下载章节正文的目标语言 —— 见
+                        # `Language::to_book_target_lang`）。三选一：zh-CN / zh-TW / en。
+                        language = "zh-CN"
+                        gh-proxy = ""
+                        cf-bypass = ""
+                        # 左侧 Sidebar 是否折叠。重启后保持上次状态。
+                        sidebar-collapsed = false
+                        # UI 字号（px），范围 12–24，默认 16。整个 app 按 rem 等比缩放。
+                        font-size = 16
 
-[download]
-# download-path 默认为系统 Documents/Novel/（由 AppConfig::default() 注入）。
-# 占位写空串，save_config 会按当前 cfg.download_path 覆盖此处的值。
-download-path = ""
-extname = "epub"
-txt-encoding = "UTF-8"
-preserve-chapter-cache = false
-enable-progressbar = true
+                        [download]
+                        # download-path 默认为系统 Documents/Novel/（由 AppConfig::default() 注入）。
+                        # 占位写空串，save_config 会按当前 cfg.download_path 覆盖此处的值。
+                        download-path = ""
+                        extname = "epub"
+                        txt-encoding = "UTF-8"
+                        preserve-chapter-cache = false
+                        enable-progressbar = true
 
-[source]
-search-limit = 30
-search-filter = true
+                        [source]
+                        search-limit = 30
+                        search-filter = true
 
-[crawl]
-min-interval = 200
-max-interval = 400
-enable-retry = true
-max-retries = 5
-retry-min-interval = 2000
-retry-max-interval = 4000
+                        [crawl]
+                        min-interval = 200
+                        max-interval = 400
+                        enable-retry = true
+                        max-retries = 5
+                        retry-min-interval = 2000
+                        retry-max-interval = 4000
 
-[cookie]
-qidian = ""
+                        [cookie]
+                        qidian-cookie = ""
 
-[proxy]
-enabled = false
-host = "127.0.0.1"
-port = 7890
-"#;
+                        [proxy]
+                        enabled = false
+                        host = "127.0.0.1"
+                        port = 7890
+                    "#;
     template.parse().expect("default template must parse")
 }
 
@@ -789,7 +777,7 @@ mod tests {
             proxy_enabled: true,
             proxy_host: "10.0.0.1".to_string(),
             proxy_port: 1080,
-            qidian_cookie: "w_tsfp=demo".to_string(),
+            qidian_cookie: "".to_string(),
             language: Language::English,
             theme_pref: ThemePref {
                 kind: ThemeKind::Dynamic,
@@ -823,45 +811,16 @@ mod tests {
     }
 
     #[test]
-    fn legacy_single_theme_key_migrates_to_static() {
-        // 老用户配置里只有 `[global].theme = "X"`，新键都没写 —— 应迁移成静态模式。
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("config.toml");
-        std::fs::write(
-            &path,
-            r#"[global]
-theme = "Catppuccin Mocha"
-"#,
-        )
-        .unwrap();
-
-        let cfg = load_config(&path).unwrap();
-        assert_eq!(cfg.theme_pref.kind, ThemeKind::Static);
-        assert_eq!(cfg.theme_pref.static_name, "Catppuccin Mocha");
-        // 动态字段保持默认空（切换到动态模式时复用）。
-        assert_eq!(cfg.theme_pref.dyn_mode, ThemeDynMode::System);
-        assert_eq!(cfg.theme_pref.dyn_light, "");
-        assert_eq!(cfg.theme_pref.dyn_dark, "");
-
-        // save 后老 theme 键被移除、新键写入。
-        save_config(&path, &cfg).unwrap();
-        let written = std::fs::read_to_string(&path).unwrap();
-        assert!(!written.contains("\ntheme ="));
-        assert!(written.contains("theme-kind = \"static\""));
-        assert!(written.contains("theme-name = \"Catppuccin Mocha\""));
-    }
-
-    #[test]
     fn save_preserves_user_comments_in_existing_file() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("config.toml");
         std::fs::write(
             &path,
             r#"# 我的自定义注释
-[global]
-auto-update = false
-gh-proxy = "https://my-proxy.example/"
-"#,
+                [global]
+                auto-update = false
+                gh-proxy = "https://my-proxy.example/"
+            "#,
         )
         .unwrap();
 
@@ -888,8 +847,8 @@ gh-proxy = "https://my-proxy.example/"
         std::fs::write(
             &path,
             r#"[source]
-search-filter = true
-"#,
+                search-filter = true
+            "#,
         )
         .unwrap();
 
@@ -923,46 +882,12 @@ search-filter = true
         std::fs::write(
             &path,
             r#"[source]
-language = "zh_TW"
-search-filter = true
-"#,
+                search-filter = true
+            "#,
         )
         .unwrap();
 
         let cfg = load_config(&path).unwrap();
-        // 字段被忽略，AppConfig 不再持有 language —— 但加载本身不应失败。
-        // Language 仍是 default（SimplifiedChinese），因为该字段没在文件里。
-        assert_eq!(cfg.language, Language::SimplifiedChinese);
         assert!(cfg.search_filter);
-    }
-
-    #[test]
-    fn load_falls_back_to_legacy_app_lang_key() {
-        // 老用户配置里可能是 `[global].app-lang = "..."`，新键 `language` 未设置时
-        // 必须能正常加载（向后兼容）。
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("config.toml");
-        std::fs::write(
-            &path,
-            r#"[global]
-app-lang = "zh-TW"
-"#,
-        )
-        .unwrap();
-
-        let cfg = load_config(&path).unwrap();
-        assert_eq!(cfg.language, Language::TraditionalChinese);
-
-        // 新键优先：language 设置后忽略 app-lang。
-        std::fs::write(
-            &path,
-            r#"[global]
-language = "zh-CN"
-app-lang = "zh-TW"
-"#,
-        )
-        .unwrap();
-        let cfg = load_config(&path).unwrap();
-        assert_eq!(cfg.language, Language::SimplifiedChinese);
     }
 }

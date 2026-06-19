@@ -189,20 +189,15 @@ fn lookup_theme(name: &str, cx: &App) -> Option<Rc<ThemeConfig>> {
 /// 应用主题偏好到全局 `Theme`，并刷新所有窗口。
 ///
 /// 两种模式（见 [`ThemePref`]）：
-/// - **Static**：把 `static_name` 同时装进浅/深两槽，`Theme.mode` 设成该主题自身的 mode
-///   （主题 JSON 里 light 变体 → Light，dark 变体 → Dark），再 `apply_config`。即整 app
-///   固定用这一个主题，不随系统明暗变化。
-/// - **Dynamic**：`dyn_light` → 浅槽、`dyn_dark` → 深槽（找不到/空 → registry 默认浅/深），
-///   再按 `dyn_mode`（system/light/dark）调 `Theme::change` 决定当前激活哪个。
-///   `system` 模式额外调 `Theme::sync_system_appearance` 让它跟 OS 明暗。
+/// - **Static**：`static_name` 同时塞进浅/深两槽 → `apply_config`，整 app 不随系统明暗切换。
+/// - **Dynamic**：`dyn_light` / `dyn_dark` 分别装进两槽（找不到/空 → registry 默认），
+///   再按 `dyn_mode` 调 `Theme::change` 选激活槽；`system` 走 `sync_system_appearance` 跟 OS。
 ///
-/// **关键：必须双槽都装 + Theme::change，不能只 apply_config 一个槽。**
-/// 只 apply_config 单个主题会只改当前激活槽的样式，但 `Theme.mode` 和另一槽的引用仍是旧的；
-/// 用户切系统明暗 / 切 dyn_mode 时 `Theme::change` 读的是槽引用，没装就 fallback 默认主题。
+/// **关键：双槽都装 + Theme::change**，不能只 apply_config 单槽 —— 否则 `Theme::change`
+/// 读的是槽引用，没装就 fallback 默认主题，且残留另一槽引用。
 ///
-/// `window`：`Theme::change` 的 `sync_system_appearance` 需要读 `window.appearance()`，
-/// 启动 on_load 回调里拿不到 window（传 `None`，用 `cx.window_appearance()` 兜底）；
-/// 设置页实时改时传 `Some(window)` 拿到精确的当前窗口 appearance。
+/// `window`：启动 on_load 拿不到 → 传 `None`（`cx.window_appearance()` 兜底）；
+/// 设置页实时改时传 `Some(window)` 拿到精确 appearance。
 ///
 /// 找不到的主题名静默 fallback 到 registry 默认主题，不 panic。
 pub fn apply_theme_pref(pref: &ThemePref, window: Option<&mut Window>, cx: &mut App) {
@@ -225,16 +220,14 @@ pub fn apply_theme_pref(pref: &ThemePref, window: Option<&mut Window>, cx: &mut 
                 }
             });
 
-            let mode = cfg.mode;
+            // 双槽同塞：Static 不区分明暗 —— 切到 Static 后不会被残留槽影响（之前 Dynamic
+            // 选过的另一 mode 主题残留不会再回来）。
             let theme = Theme::global_mut(cx);
-            // 把这一个主题同时塞进浅/深两槽 —— Static 模式不区分明暗，无论 Theme.mode 是
-            // 什么，apply_config 都用同一个主题。这样即使用户先前在 Dynamic 模式选过别的
-            // 深色主题，切到 Static 后也不会被残留槽影响。
             theme.light_theme = cfg.clone();
             theme.dark_theme = cfg.clone();
             theme.apply_config(&cfg);
             // apply_config 已把 mode 设成主题自身 mode；显式同步一次保证 Theme.mode 一致。
-            Theme::change(mode, None, cx);
+            Theme::change(cfg.mode, None, cx);
         }
         ThemeKind::Dynamic => {
             let registry = ThemeRegistry::global(cx);
@@ -274,7 +267,7 @@ pub fn apply_theme_pref(pref: &ThemePref, window: Option<&mut Window>, cx: &mut 
                     default_dark
                 });
 
-            // 双槽装好，再按 dyn_mode 切换激活槽。Theme::change 内部 apply_config 对应槽。
+            // 双槽装好 → Theme::change 内部 apply_config 对应槽。
             {
                 let theme = Theme::global_mut(cx);
                 theme.light_theme = light_cfg;
@@ -282,18 +275,15 @@ pub fn apply_theme_pref(pref: &ThemePref, window: Option<&mut Window>, cx: &mut 
             }
 
             match pref.dyn_mode {
-                ThemeDynMode::System => {
-                    // 跟随系统：用 sync_system_appearance 读 window/cx appearance 再 change。
-                    Theme::sync_system_appearance(window, cx);
-                }
+                ThemeDynMode::System => Theme::sync_system_appearance(window, cx),
                 ThemeDynMode::Light => Theme::change(ThemeMode::Light, None, cx),
                 ThemeDynMode::Dark => Theme::change(ThemeMode::Dark, None, cx),
             }
         }
     }
 
-    // Theme::change / apply_config 都会刷新窗口（registry observer + change 内部），
-    // 但 global_mut 改槽引用不触发 observer，显式 refresh 兜底。
+    // Theme::change / apply_config 都触发窗口刷新，但 global_mut 改槽引用不触发 observer，
+    // 显式 refresh 兜底。
     cx.refresh_windows();
 }
 

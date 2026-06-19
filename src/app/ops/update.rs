@@ -1,10 +1,11 @@
 //! 版本更新检查业务方法。
 
 use super::super::update_state::UpdateState;
+use crate::config::AppConfig;
 
 /// 手动检查 GitHub release 是否有新版本。
 pub fn spawn_update_check(
-    config: &crate::config::AppConfig,
+    config: &AppConfig,
     runtime: &tokio::runtime::Runtime,
     update_state: &mut UpdateState,
 ) {
@@ -19,8 +20,10 @@ pub fn spawn_update_check(
     update_state.rx = Some(rx);
 
     let gh_proxy = config.gh_proxy.clone();
+    let config = config.clone();
     runtime.spawn(async move {
-        let result = super::super::update_state::check_github_latest_release(&gh_proxy).await;
+        let result =
+            super::super::update_state::check_github_latest_release(&config, &gh_proxy).await;
         let _ = tx.send(result);
     });
 }

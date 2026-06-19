@@ -23,8 +23,10 @@ use gpui_component::{
 use tracing;
 
 use crate::app::AppModel;
+use crate::config::ExportFormat;
 use crate::config::{Language, ThemeDynMode, ThemeKind};
-use crate::gpui_app::{i18n::ts, themes};
+use crate::gpui_app::themes;
+use crate::i18n::ts;
 
 use super::ctx::PageCtx;
 use super::fields::{
@@ -68,22 +70,10 @@ pub(super) fn build(ctx: &PageCtx<'_>, cx: &App) -> SettingPage {
 
     // 4 种输出格式 → (value_str, label)
     let ext_options: Vec<(SharedString, SharedString)> = vec![
-        (
-            ext_value(crate::config::ExportFormat::Epub).into(),
-            "epub".into(),
-        ),
-        (
-            ext_value(crate::config::ExportFormat::Txt).into(),
-            "txt".into(),
-        ),
-        (
-            ext_value(crate::config::ExportFormat::Html).into(),
-            "html".into(),
-        ),
-        (
-            ext_value(crate::config::ExportFormat::Pdf).into(),
-            "pdf".into(),
-        ),
+        (ext_value(ExportFormat::Epub).into(), "epub".into()),
+        (ext_value(ExportFormat::Txt).into(), "txt".into()),
+        (ext_value(ExportFormat::Html).into(), "html".into()),
+        (ext_value(ExportFormat::Pdf).into(), "pdf".into()),
     ];
 
     // 7 种常见 TXT 编码 → (value_str, label)

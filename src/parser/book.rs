@@ -19,6 +19,7 @@ use reqwest::Client;
 use scraper::Html;
 use thiserror::Error;
 
+use crate::crawler::cover_updater;
 use crate::http::{FetchRequest, HttpMethod, fetch, fetch_via_cf_bypass, has_cloudflare};
 use crate::models::{Book, ContentType, Rule};
 use crate::parser::dom::{SelectError, select_and_invoke_js};
@@ -44,12 +45,20 @@ pub enum BookError {
 /// 抓取 + 解析详情页。
 ///
 /// `cf_bypass_base` 同 `search_one`：CF 命中时若非空则自动重试 bypass 服务。
+/// `qidian_cookie` 是全局 `AppConfig.qidian_cookie` —— **仅供 CoverUpdater 使用**，
+/// 详情页 fetch 本身**不附** Cookie 头（与 Java 端语义一致；cookie 只在 CoverUpdater
+/// 跑起点站搜索时才用得上）。
+///
+/// 末尾 `!rule.need_proxy` 时调 3 站 CoverUpdater 拿更高清封面（与 Java
+/// `BookParser.parse()` line 71 行为对齐）。
 pub async fn parse_book_detail(
     client: &Client,
     rule: &Rule,
     url: &str,
     cf_bypass_base: Option<&str>,
+    qidian_cookie: Option<&str>,
 ) -> Result<Book, BookError> {
+    let started = std::time::Instant::now();
     let book_rule = rule.book.as_ref().ok_or(BookError::BookRuleMissing)?;
 
     let response = fetch(
@@ -64,18 +73,55 @@ pub async fn parse_book_detail(
     .await
     .map_err(|e| BookError::Http(format!("{e:#}")))?;
 
-    let html_after_cf = if has_cloudflare(&response.html) {
+    let cf_hit = has_cloudflare(&response.html);
+    let html_after_cf = if cf_hit {
         match cf_bypass_base.filter(|s| !s.trim().is_empty()) {
-            Some(base) => fetch_via_cf_bypass(client, base, url)
-                .await
-                .map_err(|e| BookError::Http(format!("cf-bypass: {e:#}")))?,
-            None => return Err(BookError::Cloudflare(response.final_url.clone())),
+            Some(base) => {
+                tracing::info!(source_id = rule.id, book_url = %url, "详情页命中 Cloudflare，尝试 cf-bypass");
+                fetch_via_cf_bypass(client, base, url)
+                    .await
+                    .map_err(|e| BookError::Http(format!("cf-bypass: {e:#}")))?
+            }
+            None => {
+                tracing::warn!(source_id = rule.id, book_url = %url, "详情页命中 Cloudflare 但未配置 cf-bypass");
+                return Err(BookError::Cloudflare(response.final_url.clone()));
+            }
         }
     } else {
         response.html
     };
 
-    parse_book_html(&html_after_cf, &response.final_url, rule)
+    let mut book = parse_book_html(&html_after_cf, &response.final_url, rule)?;
+
+    // 3 站 CoverUpdater：仅 `!rule.need_proxy` 时跑（与 Java `BookParser.parse()`
+    // line 71 一致 —— 代理 IP 会被起点等网站屏蔽，故代理时不使用源站封面）。
+    // 失败/无可用候选时 `cover_updater::fetch_cover` 内部已经返回原 fallback，
+    // 这里无脑赋值即可。
+    if !rule.need_proxy {
+        tracing::debug!(source_id = rule.id, book = %book.book_name, has_qidian_cookie = qidian_cookie.map(|s| !s.trim().is_empty()).unwrap_or(false), "触发 CoverUpdater（3 站 fan-out）");
+        let new_cover = cover_updater::fetch_cover(
+            client,
+            &book,
+            book.cover_url.as_deref(),
+            qidian_cookie.unwrap_or(""),
+        )
+        .await;
+        if !new_cover.is_empty() && book.cover_url.as_deref() != Some(new_cover.as_str()) {
+            tracing::info!(source_id = rule.id, book = %book.book_name, "CoverUpdater 替换封面");
+            book.cover_url = Some(new_cover);
+        }
+    }
+
+    tracing::info!(
+        source_id = rule.id,
+        book = %book.book_name,
+        author = %book.author,
+        cf_hit = cf_hit,
+        cover_url = ?book.cover_url,
+        elapsed_ms = started.elapsed().as_millis() as u64,
+        "parse_book_detail: 完成",
+    );
+    Ok(book)
 }
 
 /// 仅做 HTML → Book 的解析，不抓网络。便于离线测试。
@@ -343,7 +389,7 @@ mod tests {
             return;
         };
 
-        let book = match parse_book_detail(&client, &search_rule, &first.url, None).await {
+        let book = match parse_book_detail(&client, &search_rule, &first.url, None, None).await {
             Ok(b) => b,
             Err(e) => {
                 eprintln!("live book detail soft-skip: {e}");

@@ -18,6 +18,7 @@
 //! 取消：`Arc<AtomicBool>`；在每章入口检查；正在跑的章节会跑完才退出
 //! （非 hyper 连接级中断；当前用 JoinHandle::abort + CancelToken 轮询实现任务级取消）。
 
+pub mod cover_updater;
 pub mod health;
 mod retry;
 pub mod search;
@@ -119,9 +120,22 @@ pub async fn download_book(
     let cancel = opts.cancel.clone();
     let progress = opts.progress.clone();
 
+    let started = std::time::Instant::now();
+    tracing::info!(
+        source_id = source.rule.id,
+        source = %source.rule.name,
+        book_url = %book_url,
+        "download_book: 开始",
+    );
+
     let (book, toc) = resolve_book(cfg, source, book_url, &cancel).await?;
 
     if toc.is_empty() {
+        tracing::warn!(
+            source_id = source.rule.id,
+            book_url = %book_url,
+            "download_book: 章节列表为空",
+        );
         return Err(CrawlerError::EmptyToc);
     }
 
@@ -135,7 +149,24 @@ pub async fn download_book(
         return Err(CrawlerError::Cancelled);
     }
 
-    download_chapters(cfg, source, book_url, &book, toc, opts).await
+    let out = download_chapters(cfg, source, book_url, &book, toc, opts).await;
+    match &out {
+        Ok(path) => tracing::info!(
+            source_id = source.rule.id,
+            book = %book.book_name,
+            output = %path.display(),
+            elapsed_ms = started.elapsed().as_millis() as u64,
+            "download_book: 完成",
+        ),
+        Err(e) => tracing::warn!(
+            source_id = source.rule.id,
+            book = %book.book_name,
+            elapsed_ms = started.elapsed().as_millis() as u64,
+            error = %format!("{e:#}"),
+            "download_book: 失败",
+        ),
+    }
+    out
 }
 
 /// 阶段一：获取书籍元信息 + 章节列表（不开始下载）。
@@ -148,6 +179,9 @@ pub async fn resolve_book(
     book_url: &str,
     cancel: &CancelToken,
 ) -> Result<(Book, Vec<Chapter>), CrawlerError> {
+    let started = std::time::Instant::now();
+    tracing::info!(source_id = source.rule.id, source = %source.rule.name, book_url = %book_url, "resolve_book: 抓取详情 + 章节列表");
+
     // HTTP 客户端
     let client_options = ClientOptions {
         unsafe_ssl: source.rule.ignore_ssl,
@@ -161,9 +195,18 @@ pub async fn resolve_book(
         Some(cfg.cf_bypass.as_str())
     };
 
+    // 全局起点 cookie（整段粘贴），仅供详情页末尾的 CoverUpdater 用：
+    // 详情页 fetch 本身不附 Cookie，与 Java 端语义一致。
+    let qidian_cookie = if cfg.qidian_cookie.trim().is_empty() {
+        None
+    } else {
+        Some(cfg.qidian_cookie.as_str())
+    };
+
     let rule = source.rule.clone();
     let book_url_owned = book_url.to_string();
     let cf_bypass_owned = cf_bypass.map(String::from);
+    let qidian_cookie_owned = qidian_cookie.map(String::from);
     let eff = source.effective_crawl.clone();
     let max_attempts = if cfg.enable_retry { eff.max_retries } else { 0 };
     // 两次 retry 各需一份 eff（sleep_fn 是 move 闭包）。
@@ -178,12 +221,13 @@ pub async fn resolve_book(
             let rule = rule.clone();
             let url = book_url_owned.clone();
             let cf = cf_bypass_owned.clone();
+            let qc = qidian_cookie_owned.clone();
             let cancel = cancel.clone();
             async move {
                 if cancel.is_cancelled() {
                     return Err(BookError::Http("cancelled".to_string()));
                 }
-                parse_book_detail(&client, &rule, &url, cf.as_deref()).await
+                parse_book_detail(&client, &rule, &url, cf.as_deref(), qc.as_deref()).await
             }
         },
         max_attempts,
@@ -239,6 +283,8 @@ pub async fn resolve_book(
     let target_lang = cfg.language.to_book_target_lang();
     let book = convert_book_meta(&book, &source.rule.language, &target_lang);
 
+    tracing::info!(source_id = source.rule.id, book = %book.book_name, chapters = toc.len(), elapsed_ms = started.elapsed().as_millis() as u64, "resolve_book: 完成");
+
     Ok((book, toc))
 }
 
@@ -255,6 +301,9 @@ pub async fn download_chapters(
     opts: DownloadOptions,
 ) -> Result<PathBuf, CrawlerError> {
     let DownloadOptions { progress, cancel } = opts;
+
+    let started = std::time::Instant::now();
+    tracing::info!(source_id = source.rule.id, book = %book.book_name, chapters = chapters.len(), max_concurrent = compute_concurrency(source, chapters.len()), "download_chapters: 开始");
 
     if chapters.is_empty() {
         return Err(CrawlerError::EmptyToc);
@@ -293,6 +342,7 @@ pub async fn download_chapters(
     let semaphore = Arc::new(Semaphore::new(max_concurrent));
     let eff = source.effective_crawl.clone();
     let mut handles = Vec::with_capacity(chapters.len());
+    let chapter_count = chapters.len();
 
     for chapter in chapters {
         if cancel.is_cancelled() {
@@ -401,6 +451,7 @@ pub async fn download_chapters(
                 }
                 Err(e) => {
                     let reason = format!("{e:#}");
+                    tracing::warn!(order = order, title = %title, error = %reason, "章节解析失败");
                     let _ = progress.send(Progress::ChapterFailed {
                         index: order,
                         title: title.clone(),
@@ -488,6 +539,18 @@ pub async fn download_chapters(
     let _ = progress.send(Progress::Finished {
         output_path: final_path.clone(),
     });
+
+    let rendered_count = rendered.len();
+    tracing::info!(
+        source_id = source.rule.id,
+        book = %book.book_name,
+        rendered = rendered_count,
+        requested = chapter_count,
+        output = %final_path.display(),
+        elapsed_ms = started.elapsed().as_millis() as u64,
+        "download_chapters: 完成",
+    );
+
     Ok(final_path)
 }
 

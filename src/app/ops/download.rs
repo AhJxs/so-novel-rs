@@ -2,8 +2,15 @@
 
 use tokio::sync::mpsc;
 
-use crate::crawler::{CancelToken, Progress};
-use crate::models::{Book, Chapter, SearchResult};
+use crate::app::search_state::TocState;
+use crate::config::AppConfig;
+use crate::crawler::{
+    CancelToken, CrawlerError, DownloadOptions, Progress, download_book, download_chapters,
+    resolve_book,
+};
+use crate::db::Db;
+use crate::models::{Book, Chapter, Rule, SearchResult};
+use crate::rules::Source;
 
 use super::super::download_task::DownloadTask;
 use super::super::now::now_unix_secs;
@@ -12,8 +19,8 @@ use super::super::search_state::TocEvent;
 /// 派一个 TOC 预取任务（获取元数据 + 章节列表，不开始下载）。
 /// 返回接收端，调用方存入 `search.toc_rx`。
 pub fn spawn_resolve_toc(
-    rules: &[crate::models::Rule],
-    config: &crate::config::AppConfig,
+    rules: &[Rule],
+    config: &AppConfig,
     runtime: &tokio::runtime::Runtime,
     target: &SearchResult,
 ) -> mpsc::UnboundedReceiver<TocEvent> {
@@ -25,18 +32,26 @@ pub fn spawn_resolve_toc(
     let source_id = target.source_id;
     let url_for_event = target.url.clone();
 
+    tracing::info!(source_id = source_id, book_url = %book_url, "TOC 预取派发");
+
     runtime.spawn(async move {
+        let started = std::time::Instant::now();
         let state = if let Some(rule) = rule {
-            let source = crate::rules::Source::from(rule, &cfg);
+            let source = Source::from(rule, &cfg);
             let cancel = CancelToken::new();
-            match crate::crawler::resolve_book(&cfg, &source, &book_url, &cancel).await {
+            match resolve_book(&cfg, &source, &book_url, &cancel).await {
                 Ok((book, chapters)) => {
-                    crate::app::search_state::TocState::Loaded(Box::new(book), chapters)
+                    tracing::info!(source_id = source_id, book = %book.book_name, chapters = chapters.len(), elapsed_ms = started.elapsed().as_millis() as u64, "TOC 预取成功");
+                    TocState::Loaded(Box::new(book), chapters)
                 }
-                Err(e) => crate::app::search_state::TocState::Failed(format!("{e:#}")),
+                Err(e) => {
+                    tracing::warn!(source_id = source_id, book_url = %book_url, elapsed_ms = started.elapsed().as_millis() as u64, error = %format!("{e:#}"), "TOC 预取失败");
+                    TocState::Failed(format!("{e:#}"))
+                }
             }
         } else {
-            crate::app::search_state::TocState::Failed("书源未找到".to_string())
+            tracing::warn!(source_id = source_id, "TOC 预取失败: 书源未找到（可能已被删除）");
+            TocState::Failed("书源未找到".to_string())
         };
         let _ = tx.send(TocEvent {
             source_id,
@@ -51,8 +66,8 @@ pub fn spawn_resolve_toc(
 /// 派一个指定章节范围的下载任务。跳过 resolve 阶段，直接进入下载。
 /// `chapters` 已由调用方按用户选择过滤过范围。
 pub fn spawn_download_range(
-    rules: &[crate::models::Rule],
-    config: &crate::config::AppConfig,
+    rules: &[Rule],
+    config: &AppConfig,
     runtime: &tokio::runtime::Runtime,
     next_task_id: &mut u64,
     target: SearchResult,
@@ -77,24 +92,24 @@ pub fn spawn_download_range(
         total_chapters: total,
     });
 
+    tracing::info!(task_id = id, source_id = target.source_id, book = %book.book_name, total_chapters = total, book_url = %book_url, "下载任务派发（指定范围）");
+
     runtime.spawn(async move {
         let Some(rule) = rule else {
             let _ = tx_for_task.send(Progress::Cancelled);
             return;
         };
-        let source = crate::rules::Source::from(rule, &cfg);
+        let source = Source::from(rule, &cfg);
         // 留一个 sender 副本用于失败时发 Progress::Failed（tx_for_task 会 move 进 opts）。
         let tx_for_failure = tx_for_task.clone();
-        let opts = crate::crawler::DownloadOptions {
+        let opts = DownloadOptions {
             progress: tx_for_task,
             cancel: cancel_for_task,
         };
-        if let Err(e) =
-            crate::crawler::download_chapters(&cfg, &source, &book_url, &book, chapters, opts).await
-        {
+        if let Err(e) = download_chapters(&cfg, &source, &book_url, &book, chapters, opts).await {
             // 用户取消已由 crawler 内部发 Progress::Cancelled；真正的失败发
             // Progress::Failed，让 UI 区分"取消"与"失败"并保留原因。
-            if !matches!(e, crate::crawler::CrawlerError::Cancelled) {
+            if !matches!(e, CrawlerError::Cancelled) {
                 tracing::warn!("download_chapters failed: {e:#}");
                 let _ = tx_for_failure.send(Progress::Failed {
                     reason: format!("{e:#}"),
@@ -126,8 +141,8 @@ pub fn spawn_download_range(
 
 /// 派一个新的下载任务到后台。返回新任务的 id。
 pub fn spawn_download(
-    rules: &[crate::models::Rule],
-    config: &crate::config::AppConfig,
+    rules: &[Rule],
+    config: &AppConfig,
     runtime: &tokio::runtime::Runtime,
     next_task_id: &mut u64,
     target: SearchResult,
@@ -143,23 +158,26 @@ pub fn spawn_download(
     let cancel_for_task = cancel.clone();
     let tx_for_task = tx.clone();
 
+    tracing::info!(task_id = id, source_id = target.source_id, book_name = %target.book_name, book_url = %book_url, "下载任务派发");
+
     runtime.spawn(async move {
         let Some(rule) = rule else {
+            tracing::warn!(task_id = id, "下载任务取消: 书源未找到（可能已被删除）");
             let _ = tx_for_task.send(Progress::Cancelled);
             return;
         };
-        let source = crate::rules::Source::from(rule, &cfg);
+        let source = Source::from(rule, &cfg);
         // 留一个 sender 副本用于失败时发 Progress::Failed（tx_for_task 会 move 进 opts）。
         let tx_for_failure = tx_for_task.clone();
-        let opts = crate::crawler::DownloadOptions {
+        let opts = DownloadOptions {
             progress: tx_for_task,
             cancel: cancel_for_task,
         };
-        if let Err(e) = crate::crawler::download_book(&cfg, &source, &book_url, opts).await {
+        if let Err(e) = download_book(&cfg, &source, &book_url, opts).await {
             // 用户取消已由 crawler 内部发 Progress::Cancelled；真正的失败发
             // Progress::Failed，让 UI 区分"取消"与"失败"并保留原因。
-            if !matches!(e, crate::crawler::CrawlerError::Cancelled) {
-                tracing::warn!("download_book failed: {e:#}");
+            if !matches!(e, CrawlerError::Cancelled) {
+                tracing::warn!(task_id = id, "download_book failed: {e:#}");
                 let _ = tx_for_failure.send(Progress::Failed {
                     reason: format!("{e:#}"),
                 });
@@ -189,7 +207,7 @@ pub fn spawn_download(
 }
 
 /// 清掉所有已结束的任务（完成 / 失败 / 取消）。运行中的任务保留。
-pub fn clear_finished_tasks(tasks: &mut Vec<DownloadTask>, db: &crate::db::Db) {
+pub fn clear_finished_tasks(tasks: &mut Vec<DownloadTask>, db: &Db) {
     let before = tasks.len();
     tasks.retain(|t| t.is_running());
     let removed = before - tasks.len();
@@ -201,7 +219,7 @@ pub fn clear_finished_tasks(tasks: &mut Vec<DownloadTask>, db: &crate::db::Db) {
 }
 
 /// 把单条任务 upsert 到 DB。
-pub fn save_task_to_db(db: &crate::db::Db, task: &DownloadTask) {
+pub fn save_task_to_db(db: &Db, task: &DownloadTask) {
     let rec = task.to_record();
     if let Err(e) = crate::db::tasks::upsert(db.conn(), &rec) {
         tracing::warn!("save_task_to_db failed for id={}: {e}", task.id);

@@ -1,6 +1,6 @@
 [package]
 name = "so-novel-rs"
-version = "0.2.5"
+version = "0.2.6"
 edition = "2024"
 rust-version = "1.85"
 description = "So Novel — Rust desktop client (gpui + gpui-component)."
@@ -75,6 +75,7 @@ reqwest = { version = "0.13.4", default-features = false, features = [
     "stream",
     "blocking",
     "form",
+    "query",
 ] }
 
 # HTML / 选择器 / 正则

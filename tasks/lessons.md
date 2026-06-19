@@ -104,3 +104,30 @@ InputEvent::Change => {
 
 **通用教训**：DRY 不等于"把所有逻辑都搬到 domain"。能搬到 domain 的只有**业务语义**；**UI 表现**（颜色、动画、布局）永远留在 UI 层。两层用"小 enum"沟通，不让 domain 直接吐 UI 类型。
 
+## gpui_component 类型：use 一次性全收，不要写全限定路径
+
+**症状**：字段类型写 `Entity<gpui_component::input::InputState>`、订阅事件 match 写 `gpui_component::select::SelectEvent::Confirm(...)`、关联函数调 `gpui_component::select::SelectDelegate::position(...)` —— 每个出现处都拖一长串 `gpui_component::xxx::` 前缀。
+
+**反模式**：文件用到的每个子模块类型**散落写在多个 use 里**，比如：
+```rust
+use gpui_component::input::InputState;
+use gpui_component::input::InputEvent;
+use gpui_component::select::SelectEvent;
+```
+导致有些地方漏掉（比如想用 `SelectDelegate` 关联函数）就退化成全限定路径。或者干脆就不 `use`，每次写完整前缀。
+
+**正模式**：单个 `use gpui_component::{...}` block 把**该文件用到的所有子模块类型**一次性收齐（包括 trait + 关联函数 target）：
+```rust
+use gpui_component::{
+    input::{InputEvent, InputState, NumberInputEvent, StepAction},
+    select::{SearchableVec, SelectDelegate, SelectEvent, SelectState},
+    setting::{SettingPage, Settings},
+    ...
+};
+```
+然后字段类型写 `Entity<InputState>`、match 写 `SelectEvent::Confirm(...)`、关联函数 `<T as SelectDelegate>::position(...)` 全用短名。
+
+**额外好处**：group `select::{...}` 表明这几个来自同一子模块，相邻类型在屏幕上一眼能扫到，比散开写更可读。
+
+**检查清单**：每改完一个文件跑 `grep -E 'gpui_component::(input|select|setting|slider|notification|dialog|list|button|group_box)::[A-Z]\w+' src/` —— 应该 0 行 inline 引用（仅剩 use 块本身和文档注释里的描述）。
+

@@ -15,6 +15,7 @@ use gpui::{App, Entity, SharedString};
 use gpui_component::setting::{NumberFieldOptions, SettingField};
 
 use crate::app::AppModel;
+use crate::config::ExportFormat;
 
 /// String 字段（Input）—— getter 返回 `SharedString`，setter 拿到新 `String`。
 ///
@@ -212,21 +213,21 @@ where
 /// `ExportFormat` ↔ `&'static str` 转换 —— 用于 ext_name dropdown。
 ///
 /// 4 个值用 match 而不是 `as_ref()`，避免依赖 `Display` 顺序。
-pub(super) fn ext_value(e: crate::config::ExportFormat) -> &'static str {
+pub(super) fn ext_value(e: ExportFormat) -> &'static str {
     match e {
-        crate::config::ExportFormat::Epub => "epub",
-        crate::config::ExportFormat::Txt => "txt",
-        crate::config::ExportFormat::Html => "html",
-        crate::config::ExportFormat::Pdf => "pdf",
+        ExportFormat::Epub => "epub",
+        ExportFormat::Txt => "txt",
+        ExportFormat::Html => "html",
+        ExportFormat::Pdf => "pdf",
     }
 }
 
-pub(super) fn ext_from_str(s: &str) -> Option<crate::config::ExportFormat> {
+pub(super) fn ext_from_str(s: &str) -> Option<ExportFormat> {
     match s {
-        "epub" => Some(crate::config::ExportFormat::Epub),
-        "txt" => Some(crate::config::ExportFormat::Txt),
-        "html" => Some(crate::config::ExportFormat::Html),
-        "pdf" => Some(crate::config::ExportFormat::Pdf),
+        "epub" => Some(ExportFormat::Epub),
+        "txt" => Some(ExportFormat::Txt),
+        "html" => Some(ExportFormat::Html),
+        "pdf" => Some(ExportFormat::Pdf),
         _ => None,
     }
 }

@@ -3,15 +3,17 @@
 use std::path::Path;
 use std::sync::Arc;
 
+use crate::config::AppConfig;
 use crate::db::Db;
 use crate::models::Rule;
+use crate::rules::SourceOverrides;
 
 use super::super::sources_state::SourcesState;
 
 /// 切换书源的禁用状态；立即持久化到 `sonovel.db` 的 `source_overrides` 表。
 pub fn toggle_source_disabled(
     db: &Db,
-    source_overrides: &mut crate::rules::SourceOverrides,
+    source_overrides: &mut SourceOverrides,
     rules: &mut [Rule],
     source_id: i32,
 ) {
@@ -132,7 +134,7 @@ pub struct ImportResult {
 pub fn delete_source(
     db: &mut Db,
     rules: &mut Vec<Rule>,
-    source_overrides: &mut crate::rules::SourceOverrides,
+    source_overrides: &mut SourceOverrides,
     sources_state: &mut SourcesState,
     source_id: i32,
 ) -> Result<bool, String> {
@@ -152,7 +154,7 @@ pub fn delete_source(
 /// 派一个连通性检测任务到后台。
 pub fn spawn_health_check(
     rules: &[Rule],
-    config: &crate::config::AppConfig,
+    config: &AppConfig,
     runtime: &tokio::runtime::Runtime,
     sources_state: &mut SourcesState,
 ) {

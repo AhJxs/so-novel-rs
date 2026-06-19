@@ -11,19 +11,16 @@ use crate::models::{Book, SearchResult};
 
 /// `DownloadTask` 的轻量 Clone 视图 —— 给 List delegate 用。
 #[derive(Clone)]
-#[allow(dead_code)]
 pub struct TaskSummary {
     pub id: u64,
     /// 全局序号（跨分页连续，0-based，显示时 +1）。render 切片时填入。
     pub index: usize,
     pub origin: SearchResult,
     pub started_at_unix: i64,
-    pub finished_at_unix: Option<i64>,
     pub book_meta: Option<Book>,
     pub total_chapters: usize,
     pub completed: u32,
     pub failed: u32,
-    pub last_chapter_title: String,
     /// 跟 `DownloadTask::finished` 同型 —— 成功 = Ok(path)；结束原因见 `FinishedReason`。
     pub finished: Option<Result<PathBuf, crate::db::tasks::FinishedReason>>,
     pub failures: Vec<(u32, String, String)>,
@@ -173,12 +170,10 @@ pub fn build_summaries(model: &AppModel, indices: &[usize]) -> Vec<TaskSummary> 
                 index,
                 origin: t.origin.clone(),
                 started_at_unix: t.started_at_unix,
-                finished_at_unix: t.finished_at_unix,
                 book_meta: t.book_meta.clone(),
                 total_chapters: t.total_chapters,
                 completed: t.completed,
                 failed: t.failed,
-                last_chapter_title: t.last_chapter_title.clone(),
                 finished: t.finished.clone(),
                 failures: t.failures.clone(),
                 cancelling: t.cancelling,

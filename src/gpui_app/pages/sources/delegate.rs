@@ -13,22 +13,10 @@ use super::SourcesPage;
 use super::row;
 
 /// `gpui-component::List` 的 delegate —— 把当前过滤下的 (index, Rule) 列表渲染成行。
-///
-/// 完全对齐 `library::LibraryDelegate` / `tasks::TasksDelegate` 模式：
-/// - `page_items` 由 `SourcesPage::render` 在每帧 render 前写入；`render_item` 直接取。
-/// - `health: HashMap<i32, SourceHealth>` 也在 render 推过来 —— row 渲染时按 `rule.id` 查找。
-/// - 持有 `Entity<SourcesPage>` handle 以便动作按钮 → 转发回 page。
-/// - 选中态交给 `ListItem::selected(...)` + `set_selected_index` 配对管理。
 pub(super) struct SourcesDelegate {
-    /// 当前页要展示的条目，每条带"全局序号"（在完整 filtered 列表里的 0-based 位置）。
-    /// 跨分页连续：page 0 → 0..29，page 1 → 30..59，等等。显示时 +1 变 1-based 给人看。
     pub(super) page_items: Vec<(usize, Rule)>,
-    /// source_id → 探测结果（AppModel.sources_state.health 的快照）。
-    /// 每次 render 推过来 —— row 渲染时按 `rule.id` 查找。
     pub(super) health: HashMap<i32, SourceHealth>,
-    /// 当前选中项（List 内置 hover / selected 样式管理）。
     pub(super) selected_index: Option<IndexPath>,
-    /// 拿 SourcesPage handle 用于删除按钮 → `prompt_delete` 转发。
     pub(super) page_handle: Entity<SourcesPage>,
 }
 

@@ -2,21 +2,15 @@
 //!
 //! 行为：
 //! - 进入页面时若 `library.scanned_dir` 为空 / 不匹配 `config.download_path` → 自动扫一次。
-//! - 工具栏：文件名过滤输入 + 文件类型下拉（gpui-component `Select` + `SearchableVec`）。
-//! - 列表：用 gpui-component `List`（虚拟滚动），通过 `LibraryDelegate` 把当前页（30 条）
-//!   的 `LibraryEntry` 切片渲染成 `ListItem` 行（5 列：文件名 / 格式 / 大小 / 修改时间 / 3 动作）。
-//! - 每页 30 条；分页页脚自写（gpui-component 0.5.1 没有 Pagination 组件）—— prev / 数字按钮
-//!   + 省略号 / next，≤1 页时整段隐藏。
+//! - 工具栏：文件名过滤输入 + 文件类型按钮组（不在 State 里实现 —— 切语言即时更新）。
+//! - 列表：gpui-component `List`（虚拟滚动）+ `LibraryDelegate`，每页 30 条（5 列：文件名 /
+//!   格式 / 大小 / 修改时间 / 3 动作）。
+//! - 分页页脚自写（gpui-component 0.5.1 没 Pagination 组件），≤1 页时整段隐藏。
 //! - 文件系统 watcher：long-lived `cx.spawn` 任务持有 `notify::RecommendedWatcher`，监听
-//!   `config.download_path` 增量（`Create`/`Modify`/`Remove`），300 ms debounce 后触发
-//!   `model.refresh_library()` + `cx.notify()`。`SetPath` 命令让任务内部 drop 旧 watcher
-//!   并 arm 到新路径上。取消靠 `watcher_cmd_tx: Sender` 在 `LibraryPage` 析构时释放，
-//!   任务的 `recv()` 收到 `None` → 循环退出。
-//! - 删除走 `WindowExt::open_dialog` 二次确认（点删除按钮 → 打开 dialog → on_ok 调
-//!   `model.delete_library_entry`，删完再触发一次 refresh）。
-//! - 空态用 `EmptyState`（图标 + "本地书库为空" + 副标题）。
+//!   `config.download_path` 非递归增量，300 ms debounce 后触发 refresh。
+//!   `SetPath` 命令让任务内部 drop 旧 watcher 并 arm 到新路径上（详见 `watcher`）。
+//! - 删除走 `WindowExt::open_dialog` 二次确认 → `model.delete_library_entry` → 再 refresh。
 
-mod ctx;
 mod delegate;
 mod row;
 mod toolbar;
@@ -30,48 +24,49 @@ use gpui::{
     Window, div, px,
 };
 use gpui_component::{
-    ActiveTheme as _, IconName, WindowExt, button::ButtonVariant, dialog::Dialog,
-    dialog::DialogButtonProps, list::List, list::ListState, v_flex,
+    ActiveTheme as _, IconName, WindowExt,
+    button::ButtonVariant,
+    dialog::Dialog,
+    dialog::DialogButtonProps,
+    input::{InputEvent, InputState},
+    list::List,
+    list::ListState,
+    v_flex,
 };
 
 use crate::app::{AppModel, LibraryEntry};
 use crate::gpui_app::components::{EmptyState, PageHeader, Pagination, compute_page_window};
 use crate::i18n::{ts, ts_fmt};
 
-use self::ctx::{WatcherCmd, WatcherCmdTx};
 use self::delegate::LibraryDelegate;
+use self::watcher::{WatcherCmd, WatcherCmdTx};
 
 /// Library 页面 entity。
 pub struct LibraryPage {
     model: Entity<AppModel>,
 
-    /// 文件名过滤 Input。沿用旧代码模式（struct 字段持有避免 click / focus 丢失）。
-    filter_input: Entity<gpui_component::input::InputState>,
-
-    /// gpui-component 虚拟列表。同理必须在 `new()` 里缓存。
+    /// struct 字段持有（InputState / ListState）—— owner 持有避免 click / focus 丢失。
+    filter_input: Entity<InputState>,
     list_state: Entity<ListState<LibraryDelegate>>,
 
-    /// 当前 0-based 页码。UI-only，每次路径或过滤变化时重置为 0。
+    /// UI-only，每次路径或过滤变化时重置为 0。
     current_page: usize,
 
-    /// 驱动的 watcher 任务命令通道。`LibraryPage` 析构 → sender drop → 任务 `try_recv()`
-    /// 收到 `Err(Closed)` → 退出。
+    /// `LibraryPage` 析构 → sender drop → 任务 `try_recv()` 收 `Err(Closed)` → 退出。
     ///
     /// 用 `smol::channel` 而非 `tokio::sync::mpsc` —— `cx.spawn` 跑在 smol executor 上，
-    /// 那边没有 tokio reactor。smol 的 `Sender`/`Receiver` 都基于 `async-channel`，
-    /// 跟 `tokio::sync::mpsc` 接口很像，但底层调度走 smol。
+    /// 那边没有 tokio reactor。smol 的 `Sender`/`Receiver` 基于 `async-channel`，接口
+    /// 像 `tokio::sync::mpsc`，但底层调度走 smol。
     watcher_cmd_tx: WatcherCmdTx,
 }
 
 impl LibraryPage {
     pub fn new(model: Entity<AppModel>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        // 1. 文件名过滤 Input（沿用旧逻辑）。
         let filter_input = cx.new(|cx| {
-            gpui_component::input::InputState::new(window, cx)
-                .placeholder(crate::i18n::ts("Library.filter_placeholder"))
+            InputState::new(window, cx).placeholder(crate::i18n::ts("Library.filter_placeholder"))
         });
         cx.subscribe_in(&filter_input, window, |this, _state, event, _window, cx| {
-            if matches!(event, gpui_component::input::InputEvent::Change) {
+            if matches!(event, InputEvent::Change) {
                 let v = this.filter_input.read(cx).value();
                 this.model.update(cx, |m, _cx| {
                     m.library.filter_text = v.to_string();
@@ -83,35 +78,16 @@ impl LibraryPage {
         })
         .detach();
 
-        // 2. 文件类型下拉 —— **不在 State 里实现**，改在 render 里用 button group
-        // （见 `Render for LibraryPage` 里 toolbar 段的注释）。这里只持有过滤输入
-        // 的 InputState（名字过滤），placeholder 在 state 上设初值。
-        //
-        // 第一个选项 "全部" 走 `ts()` 翻译，扩展名（epub / txt / zip / html / pdf）
-        // **不译**——是技术名词，译成"电子出版物"反而看不懂。
+        // 文件类型过滤在 render 里用 button group 实现（不持 State —— 切语言即时更新）。
+        // 扩展名（epub / txt / zip / html / pdf）不译，是技术名词。
 
-        // 3. List + Delegate。
-        //
-        // delegate 必须能在 `ListDelegate::render_item` 里调 `LibraryPage::prompt_delete`
-        // （拿 `&mut Window` + `Context<LibraryPage>` 打开 dialog），所以持有
-        // `Entity<LibraryPage>` handle 而不是 WeakEntity —— Entity 永驻（`RootView` 持有），
-        // 不会失效。
+        // delegate 持有 `Entity<LibraryPage>`（不是 WeakEntity）—— Entity 永驻
+        // (`RootView` 持有)，`render_item` 需要调 `prompt_delete` 拿 `Context<LibraryPage>`。
         let page_handle = cx.entity().clone();
         let delegate = LibraryDelegate::new(page_handle);
         let list_state = cx.new(|cx| ListState::new(delegate, window, cx));
 
-        // 4. Watcher 任务。
-        //
-        // 用 `notify::recommended_watcher` 监听 `config.download_path`（非递归）——
-        // 只关心下载目录第一层的 epub/txt/zip/html/pdf 文件变动。回调只做一件事：
-        // `AtomicU64::fetch_add(1)`，回调所在线程（notify 自己的 OS 事件线程）开销
-        // 接近 0。
-        //
-        // 主任务用 300 ms `background_executor().timer()` 轮询：
-        // 每次醒来 → 1) 先 `try_recv()` drain 掉所有 cmd → 2) 看一眼 counter
-        // 变化 → 有变就 `refresh_library` + `cx.notify()`。
-        //
-        // 具体实现见 `watcher::spawn`。详见 watcher.rs 顶部注释。
+        // Watcher 主循环见 `watcher::run`（debounce + SetPath 重 arm 详情在 watcher.rs 顶部）。
         let (watcher_cmd_tx, watcher_cmd_rx) = smol::channel::bounded::<WatcherCmd>(8);
         let initial_path = std::path::PathBuf::from(model.read(cx).config.download_path.clone());
         let page_weak = cx.entity().downgrade();
@@ -149,8 +125,7 @@ impl LibraryPage {
     }
 
     /// 首次进入 / 下载目录变化时自动扫一次 + 通知 watcher 切目标。
-    ///
-    /// `set_ext_filter` / `refresh` 不走这里 —— 它们不改变路径。
+    /// 过滤变化（filter_text / filter_ext）不走这里 —— 不改变路径。
     fn maybe_auto_scan(&mut self, cx: &mut Context<Self>) {
         let download_path =
             std::path::PathBuf::from(self.model.read(cx).config.download_path.clone());
@@ -161,7 +136,7 @@ impl LibraryPage {
         };
         if need_scan {
             self.model.update(cx, |m, _cx| m.refresh_library_async());
-            // 路径变了 → 让 watcher 任务重建监听目标。`try_send` 不阻塞，cap=8 不会满；
+            // 让 watcher 重建监听目标。`try_send` 不阻塞，cap=8 不会满；
             // 失败（任务已退出）忽略。
             let _ = self
                 .watcher_cmd_tx
@@ -174,7 +149,7 @@ impl LibraryPage {
     pub(super) fn prompt_delete(&self, path: PathBuf, window: &mut Window, cx: &mut App) {
         let model = self.model.clone();
         let model_id = model.entity_id();
-        // 先取原始文件名（可能为空），空时下面用 i18n fallback 替。
+        // 文件名兜底：空时用 i18n fallback 替。
         let raw_name = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
         let file_name: String = if raw_name.is_empty() {
             ts("Library.fallback_unknown_filename").to_string()
@@ -183,16 +158,16 @@ impl LibraryPage {
         };
 
         window.open_dialog(cx, move |dialog: Dialog, _window, _cx| {
-            // 外层 dialog builder 是 Fn — 每次被 open_dialog 复用，闭包要能多次调用。
-            // 因此 inner on_ok 也要能 Fn；model / path 都通过引用捕获，避开 FnOnce。
+            // dialog builder 是 Fn（被 open_dialog 复用，每次点击都重调）；
+            // on_ok 也必须 Fn —— 全部 clone 捕获，避开 FnOnce。
             let model_for_ok = model.clone();
             let path_for_ok = path.clone();
             let model_id_for_ok = model_id;
 
             dialog
                 .title(ts("Library.delete_dialog.title"))
-                // {file_name} 占位符由 ts_fmt 替换 —— 不能直接 `format!("...")` 拼字符串，
-                // 否则切语言后占位符翻译也跟着拼，顺序会乱。
+                // 占位符必须走 ts_fmt —— 直接 format! 拼字符串会在切语言时让
+                // 占位符翻译也跟着拼，顺序错乱。
                 .child(div().child(ts_fmt(
                     "Library.delete_dialog.message",
                     &[("file_name", &file_name)],
@@ -209,7 +184,7 @@ impl LibraryPage {
                         m.delete_library_entry(&path_for_ok);
                     });
                     cx.notify(model_id_for_ok);
-                    true // 关闭 dialog
+                    true
                 })
         });
     }
@@ -244,9 +219,8 @@ impl Render for LibraryPage {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.maybe_auto_scan(cx);
 
-        // placeholder 在 `new()` 里建 InputState 时一次性设好（`Library.filter_placeholder`）。
-        // 语言切换走重启生效（见 settings language setter），新进程重建 InputState 时
-        // 拿到新 locale 的 placeholder，无需 render 里差量刷新。
+        // placeholder 在 `new()` 一次性设好；language setter 切语言走"重启进程"
+        // 路径，新进程重建 InputState 时自然拿到新 locale，无需 render 差量刷新。
 
         let model = self.model.read(cx);
         let entries = Self::filtered_entries(model);
@@ -254,17 +228,14 @@ impl Render for LibraryPage {
         let scan_err = model.library.last_error.clone();
         let download_path = model.config.download_path.clone();
         let current_ext = model.library.filter_ext.clone();
-        // 提前释放 `model` 的不可变借用，避免后面 `self.list_state.update(cx, ...)` 和
-        // `render_pagination(... cx)` 的 borrow checker 打架（`update` 要 `&mut App`）。
-        // 用 `let _ = model` 而不是 `drop(&model)` —— 后者对引用是 no-op。
+        // 提前释放 `model` 的不可变借用：后面 `list_state.update` / `cx.listener`
+        // 要 `&mut App`，borrow checker 会把 `model` 留到 EOF 才 drop，引发冲突。
+        // `let _ = model` 是惯用显式 drop 锚点（`drop(&model)` 对引用是 no-op）。
         let _ = model;
 
-        // 分页切片 + 兜底（如果外部清了 entries 导致 current_page 越界 → 回卷）。
         let w = compute_page_window(total, &mut self.current_page);
-        // 每条带一个"全局序号" = 在完整 filtered 列表里的位置（0-based）。
-        // 跨分页连续：page 0 → 0..29，page 1 → 30..59，等等。显示时 +1 变 1-based。
-        // 存 (global_ix, entry) 而不是单存 entry，是为了让 delegate 不依赖
-        // current_page / PAGE_SIZE —— 它只看到"这一行在完整列表里是第 N 个"。
+        // 每条带"全局序号" = 在完整 filtered 列表里的位置（0-based，跨分页连续）。
+        // delegate 只看 `(global_ix, entry)`，不依赖 current_page / PAGE_SIZE。
         let page_items: Vec<(usize, LibraryEntry)> = if total == 0 {
             Vec::new()
         } else {
@@ -275,7 +246,6 @@ impl Render for LibraryPage {
                 .collect()
         };
 
-        // 把当前页切片推给 delegate，List 渲染时会读到。
         self.list_state.update(cx, |state, _cx| {
             state.delegate_mut().page_items = page_items;
         });
@@ -284,18 +254,16 @@ impl Render for LibraryPage {
             .size_full()
             .p_6()
             .gap_3()
-            // ---- 顶部 PageHeader：标题 + 下载目录副标题 ----
-            // 右侧不带 action 按钮（用户偏好）—— watcher 已经实时刷新，不需要手动"刷新"按钮。
-            // 副标题展示下载目录绝对路径，给用户"当前在看哪个文件夹"的视觉锚点，
-            // 也是上面那个空旷区域的有用信息填充。
             .child(PageHeader::new(ts("Library.page_title")).subtitle(format!(
                 "{}: {}",
                 ts("Library.download_path_label"),
                 std::path::Path::new(&download_path).display()
             )))
-            // ---- toolbar: 文件名过滤 + 类型下拉 ----
-            .child(toolbar::render(&self.filter_input, current_ext.as_deref(), cx))
-            // ---- 错误提示 ----
+            .child(toolbar::render(
+                &self.filter_input,
+                current_ext.as_deref(),
+                cx,
+            ))
             .when_some(scan_err, |this, err| {
                 this.child(
                     div()
@@ -306,7 +274,6 @@ impl Render for LibraryPage {
                         .child(format!("{}: {err}", ts("Library.scan_failed"))),
                 )
             })
-            // ---- list / 空态 ----
             .child(if total == 0 {
                 div()
                     .flex_1()
@@ -319,6 +286,9 @@ impl Render for LibraryPage {
                     )
                     .into_any_element()
             } else {
+                // 水平 12px 留出 ListItem 右侧选中边框不被滚动条遮住的位置；
+                // 垂直 4px 给行间呼吸空间但不让间距喧宾夺主。
+                // 参考 crates/story/src/stories/list_story.rs:594-602。
                 div()
                     .flex_1()
                     .w_full()
@@ -326,20 +296,11 @@ impl Render for LibraryPage {
                     .border_1()
                     .border_color(cx.theme().border)
                     .rounded_md()
-                    // List 整体 padding：`px(12.)` 水平。
-                    // - 水平 12px：让 ListItem 行的右边不贴到滚动条，否则最右侧一行
-                    //   选中时 ListItem 内部的 `list_active_border`（绝对定位 1px
-                    //   边框）会被滚动条遮住一截，看起来选中框"缺了右侧"。
-                    // - 垂直 4px：每行之间留点呼吸空间，但不要太大（避免行间距
-                    //   喧宾夺主，文件列表本身紧凑更好读）。
-                    // 参考 `crates/story/src/stories/list_story.rs:594-602`。
                     .child(List::new(&self.list_state).p(px(12.)).size_full())
                     .into_any_element()
             })
-            // ---- 分页页脚（仅在列表非空时渲染 —— 空态不显示，避免无意义的"第 1 页 / 共 0 条"）----
-            // 通用组件 `components::Pagination`，on_change 回调把 `current_page`
-            // 写回 LibraryPage 字段 + cx.notify() 触发重渲染。
             .when(total > 0, |this| {
+                // 空态不挂分页（避免"第 1 页 / 共 0 条"无意义提示）。
                 this.child(Pagination::new(
                     self.current_page,
                     w.page_count,

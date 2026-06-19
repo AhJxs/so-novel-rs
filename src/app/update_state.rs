@@ -2,6 +2,9 @@
 
 use tokio::sync::mpsc;
 
+use crate::config::AppConfig;
+use crate::http::client::{ClientOptions, build_async_client};
+
 #[derive(Default)]
 pub struct UpdateState {
     /// 是否正在检查。
@@ -86,40 +89,67 @@ fn classify(result: &UpdateCheckResult) -> UpdateOutcome {
 }
 
 /// 向 GitHub API 查询最新 release 版本号。
-pub async fn check_github_latest_release(gh_proxy: &str) -> UpdateCheckResult {
+///
+/// **代理策略**（优先级从高到低）：
+/// 1. `gh_proxy` 非空 → 走 GH 镜像前向代理（**优先级最高**，无视全局代理开关）。
+///    用户主动填了 `gh_proxy` 就是明确要它管 GitHub 流量；全局代理是兜底。
+/// 2. 否则 `cfg.proxy_enabled=true` → 走 `build_async_client` 工厂，HTTP CONNECT
+///    代理自动生效（Charles / mitmproxy / 公司代理抓包场景）。
+/// 3. 两者都空 → 走工厂无代理直连。
+///
+/// 把 `&AppConfig` 透传进这里就是为了让"检查更新"按钮兼容全局代理抓包；
+/// 之前是 raw client 完全绕开工厂。
+pub async fn check_github_latest_release(cfg: &AppConfig, gh_proxy: &str) -> UpdateCheckResult {
     let url = "https://api.github.com/repos/AhJxs/so-novel-rs/releases/latest";
-    let client = reqwest::Client::builder().user_agent("so-novel-rs").build();
-    let client = match client {
-        Ok(c) => c,
-        Err(e) => {
-            return UpdateCheckResult {
-                latest_version: None,
-                error: Some(format!("构建 HTTP 客户端失败: {e}")),
-            };
-        }
-    };
 
-    let result = if gh_proxy.is_empty() {
+    // 两分支：(gh_proxy 镜像) / (工厂 —— 工厂内部按 cfg.proxy_enabled 决定
+    // 是否挂全局代理，所以"开了走代理、没开走直连"都在这一支里搞定) —— gh_proxy 优先。
+    let result = if !gh_proxy.is_empty() {
+        // gh_proxy 镜像分支：raw builder + gh_proxy 作 forward HTTP proxy。
+        // 即便用户开了全局代理，这里也忽略（用户填 gh_proxy 是更明确的
+        // 「GitHub 流量用这个镜像」意图）。`reqwest::ClientBuilder::proxy()`
+        // 一次只能挂一个代理，没法同时挂 gh_proxy + 全局 CONNECT 代理。
+        let proxy = match reqwest::Proxy::all(gh_proxy) {
+            Ok(p) => p,
+            Err(e) => {
+                return UpdateCheckResult {
+                    latest_version: None,
+                    error: Some(format!("gh_proxy URL 无效: {e}")),
+                };
+            }
+        };
+        let client = match reqwest::Client::builder()
+            .user_agent("so-novel-rs")
+            .proxy(proxy)
+            .build()
+        {
+            Ok(c) => c,
+            Err(e) => {
+                return UpdateCheckResult {
+                    latest_version: None,
+                    error: Some(format!("构建 gh_proxy 客户端失败: {e}")),
+                };
+            }
+        };
         client.get(url).send().await
     } else {
-        let proxy = reqwest::Proxy::all(gh_proxy).ok();
-        if let Some(proxy) = proxy {
-            match reqwest::Client::builder()
-                .user_agent("so-novel-rs")
-                .proxy(proxy)
-                .build()
-            {
-                Ok(proxied) => proxied.get(url).send().await,
-                Err(e) => {
-                    return UpdateCheckResult {
-                        latest_version: None,
-                        error: Some(format!("构建代理客户端失败: {e}")),
-                    };
-                }
+        // 工厂分支 —— `build_async_client` 内部自己看 `cfg.proxy_enabled`：
+        // 开了就挂 HTTP CONNECT 代理，没开就直连。`unsafe_ssl` / 默认 headers
+        // 也一并接上，与搜索/详情/封面路径保持一致。
+        let client = match build_async_client(cfg, &ClientOptions::default()) {
+            Ok(c) => c,
+            Err(e) => {
+                return UpdateCheckResult {
+                    latest_version: None,
+                    error: Some(format!("构建 HTTP 客户端失败: {e}")),
+                };
             }
-        } else {
-            client.get(url).send().await
-        }
+        };
+        client
+            .get(url)
+            .header(reqwest::header::USER_AGENT, "so-novel-rs")
+            .send()
+            .await
     };
 
     match result {

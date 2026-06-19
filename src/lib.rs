@@ -24,6 +24,7 @@ pub mod db;
 pub mod export;
 pub mod gpui_app;
 pub mod http;
+pub mod i18n;
 pub mod js;
 pub mod models;
 pub mod parser;

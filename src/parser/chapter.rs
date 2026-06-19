@@ -26,7 +26,7 @@ use scraper::{Html, Selector};
 use thiserror::Error;
 
 use crate::http::{FetchRequest, HttpMethod, abs_url, fetch, fetch_via_cf_bypass, has_cloudflare};
-use crate::models::{Chapter, ContentType, Rule};
+use crate::models::{Chapter, ContentType, Rule, RuleChapter};
 use crate::parser::dom::{SelectError, select_and_invoke_js};
 
 #[derive(Debug, Error)]
@@ -64,11 +64,17 @@ pub async fn parse_chapter(
         .as_ref()
         .ok_or(ChapterError::ChapterRuleMissing)?;
 
-    let content = if chapter_rule.pagination {
+    let started = std::time::Instant::now();
+    let pagination = chapter_rule.pagination;
+    tracing::debug!(order = chapter.order, title = %chapter.title, url = %chapter.url, pagination = pagination, "parse_chapter: 开始");
+
+    let content = if pagination {
         fetch_paginated_content(client, rule, &chapter.url, cf_bypass_base).await?
     } else {
         fetch_single_page_content(client, rule, &chapter.url, cf_bypass_base).await?
     };
+
+    tracing::debug!(order = chapter.order, title = %chapter.title, len = content.len(), elapsed_ms = started.elapsed().as_millis() as u64, "parse_chapter: 完成");
 
     Ok(Chapter {
         url: chapter.url.clone(),
@@ -123,6 +129,7 @@ async fn fetch_paginated_content(
 
     let mut buf = String::new();
     let mut current_url = start_url.to_string();
+    let mut pages = 0usize;
 
     // 防御性上限：单章超过 50 页基本是反爬死循环
     for _ in 0..50 {
@@ -169,9 +176,13 @@ async fn fetch_paginated_content(
         };
 
         buf.push_str(&content);
+        pages += 1;
 
         match next_step {
-            NextStep::Stop => break,
+            NextStep::Stop => {
+                tracing::debug!(pages = pages, bytes = buf.len(), "分页正文抓取完成（终止）");
+                break;
+            }
             NextStep::Goto(next_url) => current_url = next_url,
         }
     }
@@ -189,7 +200,7 @@ enum NextStep {
 fn resolve_next_url(
     document: &Html,
     next_els: &[scraper::ElementRef<'_>],
-    chapter_rule: &crate::models::RuleChapter,
+    chapter_rule: &RuleChapter,
     current_url: &str,
 ) -> Result<Option<String>, ChapterError> {
     if !chapter_rule.next_page_in_js.is_empty() {
@@ -212,7 +223,7 @@ fn resolve_next_url(
 fn is_last_page(
     candidate: &Option<String>,
     next_els: &[scraper::ElementRef<'_>],
-    chapter_rule: &crate::models::RuleChapter,
+    chapter_rule: &RuleChapter,
 ) -> bool {
     let Some(next_url) = candidate else {
         return true;
@@ -249,6 +260,7 @@ async fn fetch_with_cf_fallback(
     timeout: Option<u32>,
     cf_bypass_base: Option<&str>,
 ) -> Result<String, ChapterError> {
+    let started = std::time::Instant::now();
     let resp = fetch(
         client,
         &FetchRequest {
@@ -259,14 +271,30 @@ async fn fetch_with_cf_fallback(
         },
     )
     .await
-    .map_err(|e| ChapterError::Http(format!("{e:#}")))?;
+    .map_err(|e| {
+        tracing::warn!(url = %url, elapsed_ms = started.elapsed().as_millis() as u64, error = %format!("{e:#}"), "fetch_with_cf_fallback: HTTP 失败");
+        ChapterError::Http(format!("{e:#}"))
+    })?;
 
     if has_cloudflare(&resp.html) {
         match cf_bypass_base.filter(|s| !s.trim().is_empty()) {
-            Some(base) => fetch_via_cf_bypass(client, base, url)
-                .await
-                .map_err(|e| ChapterError::Http(format!("cf-bypass: {e:#}"))),
-            None => Err(ChapterError::Cloudflare(resp.final_url)),
+            Some(base) => {
+                tracing::info!(url = %url, "章节页命中 Cloudflare，尝试 cf-bypass");
+                let bypass = fetch_via_cf_bypass(client, base, url).await;
+                match &bypass {
+                    Ok(_) => {
+                        tracing::info!(url = %url, elapsed_ms = started.elapsed().as_millis() as u64, "fetch_with_cf_fallback: cf-bypass 成功")
+                    }
+                    Err(e) => {
+                        tracing::warn!(url = %url, elapsed_ms = started.elapsed().as_millis() as u64, error = %format!("{e:#}"), "fetch_with_cf_fallback: cf-bypass 失败")
+                    }
+                }
+                bypass.map_err(|e| ChapterError::Http(format!("cf-bypass: {e:#}")))
+            }
+            None => {
+                tracing::warn!(url = %url, "章节页命中 Cloudflare 但未配置 cf-bypass");
+                Err(ChapterError::Cloudflare(resp.final_url))
+            }
         }
     } else {
         Ok(resp.html)

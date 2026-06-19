@@ -3,8 +3,8 @@
 //! 架构：
 //! - `RootView` 是顶层窗口视图，含 TitleBar + 可折叠 Sidebar + 内容区 + 覆盖层（dialog / sheet / notification）。
 //! - 5 个一级页面（Library / Sources / Tasks / Settings / Search）在 `pages/`，各自持有 `Entity<AppModel>`。
-//! - 共享组件（EmptyState / PageHeader / StatusBadge / Pagination / 格式化工具）在 `components/`。
-//! - 后台通道 → UI 重绘由 `app::events::spawn_drain_loop` 每 100ms 排空 + `cx.notify()` 驱动。
+//! - 共享组件（EmptyState / PageHeader / StatusBadge / Pagination）在 `components/`。
+//! - 后台通道 → UI 重绘由 `drain_loop::spawn_drain_loop` 每 100ms 排空 + `cx.notify()` 驱动。
 //!
 //! 本模块仅依赖 GPUI + gpui-component + 业务模块（`crate::app`）。
 
@@ -14,11 +14,11 @@ use gpui::{
 };
 use gpui_component::{Root, TitleBar};
 
-use crate::app::{AppModel, events};
+use crate::app::AppModel;
 use crate::config::Language;
 
 pub mod components;
-pub mod i18n;
+mod drain_loop;
 mod pages;
 mod root;
 pub mod themes;
@@ -88,7 +88,7 @@ pub fn run() -> Result<()> {
         root::register_key_bindings(cx);
 
         // 3. 启动 drain 循环（内部 detach）。
-        events::spawn_drain_loop(model.clone(), cx);
+        drain_loop::spawn_drain_loop(model.clone(), cx);
 
         // 4. 加载 themes/*.json 到 ThemeRegistry（on_load 里 apply + refresh）。
         //    themes 目录 = `~/.sonovel/themes/`（首次启动写入 21 个 embed，

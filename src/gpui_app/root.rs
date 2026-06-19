@@ -1,17 +1,13 @@
 //! 顶层 `RootView`：TitleBar + 可折叠 Sidebar + 内容区 + 覆盖层。
 //!
-//! - 左侧 `Sidebar`：`SidebarMenuItem` × 5（Search / Tasks / Library / Sources / Settings）。
-//!   - 可折叠：`SidebarCollapsible::Icon` — 折叠到 48px 图标宽度，展开/收起 200ms 缓动。
-//!   - `SidebarToggleButton` 放在 TitleBar 最左侧；`Cmd+B` 快捷键也可切换。
-//!   - **无 footer** — sidebar 只渲染 menu + header，干净。
-//! - 右侧内容区：按 `current_page` 渲染对应 page（`SettingsPage` 也用 gpui-component
-//!   的 `Settings` 组件搭）。
-//! - GPUI actions + keybindings：
-//!   - `ShowSearch/Tasks/Library/Sources/Settings` + `cmd-1` ~ `cmd-5` 直接跳。
-//!   - `NextPage` / `PrevPage` + `f6` / `shift-f6` 循环翻页。
-//!   - `ToggleSidebar` + `cmd-b` 折叠/展开侧边栏。
-//!   - `Escape` 由 `gpui-component::Root` 自动处理关闭顶层 dialog / sheet / notification。
-//! - 顶层 `Root::render_dialog_layer / sheet_layer / notification_layer` 渲染覆盖层。
+//! - 左侧 `Sidebar`：`SidebarMenuItem` × 5（Search / Tasks / Library / Sources / Settings），
+//!   可折叠到 48px 图标宽度（`SidebarCollapsible::Icon`，200ms 缓动）；折叠按钮在 TitleBar
+//!   最左侧，`Cmd+B` 快捷键也可切换。**无 footer** — sidebar 只渲染 menu + header。
+//! - 右侧内容区：按 `current_page` 渲染对应 page（`SettingsPage` 用 gpui-component
+//!   `Settings` 组件搭）。
+//! - GPUI actions + keybindings：`cmd-1`~`cmd-5` 直接跳，`F6`/`Shift+F6` 循环翻页，
+//!   `cmd-b` 折叠 sidebar；`Escape` 由 `gpui-component::Root` 自动处理顶层覆盖层关闭。
+//! - 顶层覆盖层走 `Root::render_dialog_layer / sheet_layer / notification_layer`。
 
 use std::io::Cursor;
 use std::sync::Arc;
@@ -24,6 +20,7 @@ use gpui::{
 };
 use gpui_component::{
     ActiveTheme as _, Icon, IconName, Root, TitleBar, WindowExt as _,
+    notification::Notification,
     sidebar::{Sidebar, SidebarMenu, SidebarMenuItem, SidebarToggleButton},
 };
 
@@ -32,18 +29,15 @@ use once_cell::sync::Lazy;
 /// Sidebar header 用的小 logo（assets/logo.png 编译期嵌入）。
 ///
 /// 用 `.png`（位图）而非 `.svg`：gpui 的 `img()` 不直接吃 SVG 字节——SVG 需要装到
-/// asset loader（`with_assets`）走 `AssetSource` + 内置 SVG 光栅化。本项目 assets loader
-/// 是 `gpui_component_assets::Assets`，不包含我们的 logo。最简、零运行时依赖的路径就是
-/// 嵌 PNG 字节、用 `image` crate 解码成 `RenderImage`（跟 `search.rs` 的封面解码同流程）。
+/// asset loader 走 `AssetSource` + 内置 SVG 光栅化。本项目 assets loader 是
+/// `gpui_component_assets::Assets`，不包含我们的 logo。最简、零运行时依赖路径就是
+/// 嵌 PNG 字节 + `image` crate 解码成 `RenderImage`（流程同 `decode_cover_image`）。
 const LOGO_PNG: &[u8] = include_bytes!("../../assets/logo.png");
 
-/// 解码好的 logo（RGBA→BGRA swap 后的 `RenderImage`）。`Lazy` 启动首帧用一次，之后复用，
-/// 避免每帧重新解码 PNG。
+/// 解码好的 logo（RGBA→BGRA swap 后的 `RenderImage`）。`Lazy` 启动首帧用一次，之后复用。
 static LOGO_IMAGE: Lazy<Option<Arc<RenderImage>>> = Lazy::new(|| decode_logo_image(LOGO_PNG));
 
-/// 解码 PNG 字节 → `RenderImage`。流程跟 `search.rs::decode_cover_image` 一致
-/// （`image::ImageReader` → `into_rgba8()` → RGBA↔BGRA swap → `Frame` → `RenderImage`），
-/// 只是 logo 是静态资源，用 `Lazy` 缓存而非 per-entry。
+/// 解码 PNG 字节 → `RenderImage`。流程同 `decode_cover_image`，但 logo 是静态资源 → `Lazy` 缓存。
 fn decode_logo_image(bytes: &[u8]) -> Option<Arc<RenderImage>> {
     let reader = image::ImageReader::new(Cursor::new(bytes))
         .with_guessed_format()
@@ -58,9 +52,9 @@ fn decode_logo_image(bytes: &[u8]) -> Option<Arc<RenderImage>> {
     Some(Arc::new(RenderImage::new(vec![frame])))
 }
 
-use crate::app::AppModel;
-use crate::gpui_app::i18n::ts;
+use crate::app::{AppModel, UIEvent};
 use crate::gpui_app::pages::{LibraryPage, SearchPage, SettingsPage, SourcesPage, TasksPage};
+use crate::i18n::ts;
 
 actions!(
     gpui_app,
@@ -142,47 +136,34 @@ impl NavPage {
 
 /// 全局 key bindings 注册。`gpui_app::run` 启动时调一次。
 ///
-/// `F6` / `Shift+F6` 翻页：
-/// - `F6` → 下一页（搜索 → 任务 → 书库 → 书源 → 搜索 ...）
-/// - `Shift+F6` → 上一页
+/// `cmd-1..5` 跳 5 个 page，`F6`/`Shift+F6` 循环翻页，`cmd-b` 折叠 sidebar。
 ///
-/// `cmd-1..4` 跳 page，`cmd-5` 打开设置窗口，`cmd-b` 折叠 sidebar。
-///
-/// 为什么不用 `Ctrl+Tab` / `Ctrl+Shift+Tab`：
-/// `gpui-component::InputState` 把 `tab` / `shift-tab` 绑到了自己的 `IndentInline` / `OutdentInline`
-/// 动作（用于多行输入的 tab 字符插入）。当焦点在 Input 上时，**Tab 整个事件被 Input 消费**，
-/// 即使是 `ctrl-tab` 在某些平台上也会被 Input 的 keydown handler 先处理（事件冒泡被 stop）
-/// → 应用级翻页 action 拿不到事件。改用 `F6` 避开 Input 的 Tab 绑定。
+/// 翻页不用 `Ctrl+Tab`：gpui-component `InputState` 把 `tab` / `shift-tab` 绑到自己的
+/// `IndentInline` / `OutdentInline` 动作（多行输入 tab 插入），焦点在 Input 时 Tab 事件
+/// 被 Input 消费（某些平台连 `ctrl-tab` 也被 keydown handler stop 冒泡），应用级翻页
+/// action 拿不到。改用 `F6` 避开。
 pub fn register_key_bindings(cx: &mut App) {
     cx.bind_keys([
-        // 直接跳（5 个 page）
         KeyBinding::new("cmd-1", ShowSearch, Some(KEY_CONTEXT)),
         KeyBinding::new("cmd-2", ShowTasks, Some(KEY_CONTEXT)),
         KeyBinding::new("cmd-3", ShowLibrary, Some(KEY_CONTEXT)),
         KeyBinding::new("cmd-4", ShowSources, Some(KEY_CONTEXT)),
         KeyBinding::new("cmd-5", ShowSettings, Some(KEY_CONTEXT)),
-        // 翻页 — F6 避开 Input 的 Tab 绑定
         KeyBinding::new("f6", NextPage, Some(KEY_CONTEXT)),
         KeyBinding::new("shift-f6", PrevPage, Some(KEY_CONTEXT)),
-        // 折叠/展开 sidebar（VSCode 风格 cmd-b）
         KeyBinding::new("cmd-b", ToggleSidebar, Some(KEY_CONTEXT)),
     ]);
 }
 
 /// Root view：sidebar shell + 当前页面占位。
 pub struct RootView {
-    // 持有 model 用于：1) `new()` 里 clone 给子 page；2) `toggle_sidebar` 读 / 写
-    // `config.sidebar_collapsed` 并触发持久化。
+    /// 1) `new()` 里 clone 给子 page；2) `toggle_sidebar` 读 / 写 `config.sidebar_collapsed` 并持久化。
     model: Entity<AppModel>,
     current_page: NavPage,
-    /// Sidebar 是否折叠（true = 仅图标宽度）。由 `toggle_sidebar` / `Cmd+B` 翻转。
-    ///
-    /// 初始值来自 `AppConfig.sidebar_collapsed`，每次翻转后写回 config 并自动
-    /// 落盘（`persist_settings`），所以重启后保持上次状态。
+    /// 初始值来自 `AppConfig.sidebar_collapsed`，翻转后写回 config + 落盘，重启保持。
     sidebar_collapsed: bool,
-    /// 焦点 handle — 在 new() 里 window.focus(&_focus) 让 RootView 拥有初始焦点，
-    /// 这样 `F6` / `Cmd+1..5` 等 KEY_CONTEXT 绑定的快捷键能稳定 fire
-    /// （不依赖 focus 落到哪个具体子元素上）。
+    /// new() 里 `window.focus(&_focus)` 让 RootView 拥有初始焦点 —— `KEY_CONTEXT`
+    /// 绑定的快捷键（`F6` / `Cmd+1..5`）稳定 fire，不依赖 focus 落到哪个子元素。
     _focus: gpui::FocusHandle,
 
     // 5 个 page entity 一次性创建，跨切换保持内部状态（输入框 / 滚动位置）。
@@ -227,10 +208,8 @@ impl RootView {
         }
     }
 
-    /// 切换 sidebar 折叠状态。由 `ToggleSidebar` action / `Cmd+B` / `SidebarToggleButton` 三处入口调用。
-    ///
-    /// 同时把新值写回 `AppConfig.sidebar_collapsed` 并 `persist_settings()` 落盘 —
-    /// 重启后保留。Cmd+B 频率很低，每次写盘完全可接受（config.toml 小，几 ms）。
+    /// 切换 sidebar 折叠（`ToggleSidebar` action / `Cmd+B` / `SidebarToggleButton` 三处入口）。
+    /// 新值写回 `AppConfig.sidebar_collapsed` 并落盘，重启保留；Cmd+B 频率低，每次写盘可接受。
     fn toggle_sidebar(&mut self, cx: &mut Context<Self>) {
         self.sidebar_collapsed = !self.sidebar_collapsed;
         let new_value = self.sidebar_collapsed;
@@ -252,12 +231,10 @@ impl RootView {
         }
     }
 
-    /// 设置 modal：半透明 backdrop + 居中可拖动 panel。
-    /// 渲染 logo 图片元素，固定 `size`×`size`（正方形，object-fit contain）。
+    /// 渲染 logo 图片元素（正方形，object-fit contain）。
     ///
-    /// 解码失败（LOGO_PNG 损坏 / `image` crate 解码失败）时 `LOGO_IMAGE` 为 `None`，
-    /// 返回空 div 占位——不 panic、不让 UI 崩，sidebar header 仍占位（只是没图）。
-    /// `size` 走 `px()` 显式像素而非 rem：logo 是图标资源，不跟字号缩放，固定视觉大小。
+    /// 解码失败 → 返回空 div 占位，不让 UI 崩。`size` 走 `px()` 显式像素而非 rem：
+    /// logo 是图标资源，不跟字号缩放。
     fn render_logo(size: gpui::Pixels) -> AnyElement {
         match LOGO_IMAGE.as_ref() {
             Some(rendered) => img(ImageSource::Render(rendered.clone()))
@@ -270,18 +247,14 @@ impl RootView {
     }
 
     /// 构建左侧 Sidebar。支持折叠（`sidebar_collapsed`）：
+    /// - 展开：宽 220px，header 显示 "SO NOVEL" + 5 个 `SidebarMenuItem`（Search / Tasks /
+    ///   Library / Sources / Settings）。
+    /// - 折叠：宽 48px（gpui-component `COLLAPSED_WIDTH`），菜单项自动收成 icon-only
+    ///   （`Collapsible` trait 隐藏文字）；header 仍渲染（保留 logo），文字由 `when(!collapsed)` 隐藏。
+    /// - **无 footer** — 不调 `.footer(...)`，gpui-component 内部 `when_some` 跳过。
     ///
-    /// - 展开态（默认）：宽 220px，header 显示 "So Novel" 文字（居中）；
-    ///   5 个 `SidebarMenuItem`（Search / Tasks / Library / Sources / Settings）。
-    /// - 折叠态：宽 48px（gpui-component `COLLAPSED_WIDTH`），**header 不渲染**；
-    ///   5 个菜单项自动收成 icon-only。`SidebarMenuItem` 通过 `Collapsible` trait
-    ///   自动隐藏文字。
-    /// - **无 footer** — sidebar 只渲染 menu + header，干净。
-    ///
-    /// 折叠按钮在 TitleBar 最左侧（`render_title_bar`）；header 只作标题区，折叠后隐藏。
-    ///
-    /// 200ms `ease_in_out_cubic` 缓动由 `gpui-component::Sidebar` 内部 `Transition` 提供，
-    /// 折叠/展开丝滑过渡。
+    /// 200ms `ease_in_out_cubic` 缓动由 `gpui-component::Sidebar` 内部 `Transition` 提供。
+    /// 折叠按钮在 TitleBar 最左侧（见 `render_title_bar`）。
     fn render_sidebar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let collapsed = self.sidebar_collapsed;
 
@@ -305,15 +278,10 @@ impl RootView {
         })
         .collect();
 
-        // Header —— logo + 全大写细体 app 名，水平居中。
-        //
-        // - 展开态：[logo] "SO NOVEL"，logo + 文字一行居中。
-        // - 折叠态：仅 logo 居中（文字隐藏）——折叠后 sidebar 宽 48px 放不下整串文字，
-        //   保留 logo 让用户仍能识别应用。`when(!collapsed, ...)` 控制文字显隐。
-        //
-        // 项目名 i18n 三语都是 "So Novel"；这里 `to_uppercase()` 转全大写。字号 text_sm
-        // + LIGHT(300) 字重 → 细体观感（gpui 无 letter_spacing API，靠大写 + 细体 + 小字
-        // 营造 logo 字感，不强行加字间距）。
+        // Header：logo + 全大写细体 app 名，水平居中。
+        // 折叠态保留 logo，文字由 `when(!collapsed)` 隐藏 —— 48px 装不下整串文字。
+        // 项目名 i18n 三语都是 "So Novel"，`to_uppercase()` 转大写；gpui 无 letter_spacing
+        // API，靠大写 + 细体 + 小字营造 logo 字感。
         let title_text = ts("App.title").to_uppercase();
         let header = div()
             .w_full()
@@ -333,38 +301,23 @@ impl RootView {
 
         Sidebar::left()
             .w(px(220.0))
-            // true → SidebarCollapsible::Icon：折叠到图标宽度（48px），带 200ms 缓动。
             .collapsible(true)
             .collapsed(collapsed)
             .border_color(cx.theme().border)
-            // header 始终注入（折叠态也保留 logo）。`when(!collapsed, ...)` 在 header
-            // 内部控制文字显隐，header 容器本身（gpui-component `when_some`）一直渲染。
             .header(header)
-            // 无 footer —— 不调 `.footer(...)`，gpui-component 内部 `when_some` 跳过整个
-            // footer 容器，sidebar 底部自然空白。
             .child(SidebarMenu::new().children(items))
     }
 
     /// 渲染 gpui-component `TitleBar`。
     ///
-    /// **最左侧放 `SidebarToggleButton`**（用默认 small ghost 样式，24×24），
-    /// 右侧自动渲染 `WindowControls`。TitleBar 自身按平台处理
-    /// （`WindowDecorations::Client` 在 `mod.rs` 设置）：
-    ///
-    /// | 平台 | 左 padding | 按钮 | 双击 | 特殊 |
-    /// |------|-----------|------|------|------|
-    /// | macOS | 80px（让位 traffic lights） | 原生 traffic light | `titlebar_double_click` | 自动 appear transparent |
-    /// | Windows | 12px | 自定义 34px 按钮（hover/active 状态）| OS 默认最大化 | 走系统集成 |
-    /// | Linux | — | 自定义按钮（需手动 click）| `zoom_window` | 右键 = show_window_menu |
-    ///
-    /// 通用：
-    /// - 背景色 + 底边：`cx.theme().title_bar` / `title_bar_border` — 自动主题适配
-    /// - 整个左半区域 = drag area（鼠标拖动 → `start_window_move()`）通过 `WindowControlArea::Drag`
-    ///   — 但 toggle button 自己消费 mousedown，不会触发拖动
-    /// - Linux 可选 `on_close_window` 回调（已 ready，未挂 — 默认行为：关闭窗口）
+    /// 最左侧 `SidebarToggleButton`（默认 small ghost 样式），右侧自动 `WindowControls`。
+    /// TitleBar 按平台处理（`WindowDecorations::Client` 在 `mod.rs` 设置）：
+    /// macOS traffic lights 自动 / Windows 自定义 34px 按钮 / Linux 自定义。
+    /// 背景色 / 底边走 `cx.theme().title_bar[_border]`，自动主题适配；整个左半区域是
+    /// drag area（toggle button 自己消费 mousedown，不会触发拖动）。
     fn render_title_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        // 闭包签名：`SidebarToggleButton::on_click` 收 `Fn(&ClickEvent, &mut Window, &mut App)`，
-        // 不能直接用 cx.listener，所以走 entity.update 桥接到 `toggle_sidebar`。
+        // `SidebarToggleButton::on_click` 收 `Fn(&ClickEvent, &mut Window, &mut App)`，
+        // 没法直接用 cx.listener，走 entity.update 桥接到 `toggle_sidebar`。
         let root_entity = cx.entity();
         TitleBar::new().child(
             SidebarToggleButton::left()
@@ -458,18 +411,21 @@ impl RootView {
 impl Render for RootView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // 排空 `AppModel::pending_notifications` —— `events::drain` 没 `&mut Window`，
-        // 把构造好的 `Notification` 推到 model 队列；这里拿到 window 后真正 push。
+        // 把构造好的 `UIEvent` 推到 model 队列；这里拿到 window 后真正 push。
         //
         // 用 `mem::take` 拿走整个 Vec 而不是逐个 pop：避免 1) drain 期间 model
-        // 被其他路径新增 notification 时迭代器失效；2) 多次 push 同一帧时把
+        // 被其他路径新增 UIEvent 时迭代器失效；2) 多次 push 同一帧时把
         // 全部都消费完。
+        //
+        // 翻译层 `ui_event_to_notification` 在这里完成 `UIEvent → Notification` 的转换，
+        // 包括 `OpenLink` 变体的 `on_click(cx.open_url)` 挂载。
         let pending = std::mem::take(
             &mut self
                 .model
                 .update(cx, |m, _| std::mem::take(&mut m.pending_notifications)),
         );
-        for note in pending {
-            window.push_notification(note, cx);
+        for ev in pending {
+            window.push_notification(ui_event_to_notification(ev), cx);
         }
 
         self.bind_nav_actions(div().key_context(KEY_CONTEXT), cx)
@@ -491,5 +447,28 @@ impl Render for RootView {
             .children(Root::render_dialog_layer(window, cx))
             .children(Root::render_sheet_layer(window, cx))
             .children(Root::render_notification_layer(window, cx))
+    }
+}
+
+/// `UIEvent` → `gpui_component::Notification` 翻译层。
+///
+/// `app/` 是 UI 框架解耦的，把意图（要弹什么 toast）以 plain enum 推到
+/// `AppModel::pending_notifications`；UI 层 `RootView::render` 拿到 `&mut Window` 后
+/// 把每个 `UIEvent` 翻译成 `Notification` 再 `window.push_notification(...)`。
+///
+/// 翻译层放 `gpui_app/`：`Notification::on_click` / `cx.open_url` 是 UI 框架 API，
+/// 跨过去就破坏"app/ 零 GUI 依赖"。`OpenLink` 变体的 `on_click` 在这里挂。
+fn ui_event_to_notification(ev: UIEvent) -> Notification {
+    match ev {
+        UIEvent::Info(s) => Notification::info(s),
+        UIEvent::Success(s) => Notification::success(s),
+        UIEvent::Warning(s) => Notification::warning(s),
+        UIEvent::Error(s) => Notification::error(s),
+        UIEvent::OpenLink { message, url } => Notification::new()
+            .message(message)
+            .on_click(move |_ev, _window, cx| {
+                cx.open_url(&url);
+            })
+            .autohide(true),
     }
 }

@@ -14,11 +14,9 @@
 //! - `toolbar` — 5-Button 状态过滤组
 //! - `delegate` — `TasksDelegate` + `ListDelegate` impl
 //! - `row` — 单条任务行渲染（卡片式）
-//! - `ctx` — 借用视图 `TasksCtx<'a>`（当前未用，留着避免后续 refactor 再造）
 //!
 //! i18n 文本 + 按钮组过滤 + List 虚拟滚动。
 
-mod ctx;
 mod delegate;
 mod row;
 mod summary;

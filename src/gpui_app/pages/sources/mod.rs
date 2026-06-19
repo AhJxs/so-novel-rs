@@ -1,23 +1,5 @@
 //! Sources 页面：书源管理（导入 / 启用禁用 / 健康检查 / 删除）。
-//!
-//! 布局完全对齐 `library/`（参考 task 27 ~ task 21 沉淀的模式）：
-//! - PageHeader：标题 + 副标题 + 右侧 actions（添加 / 测速）
-//! - Toolbar：`toolbar::render` —— filter Input + status 过滤组
-//! - 统计行 + 探测进度（保留 —— 信息密度高，独立一行比塞进 subtitle 好）
-//! - 错误提示横幅
-//! - gpui-component `List` + `SourcesDelegate` 虚拟滚动
-//! - `Pagination` 页脚（每页 30 条）
-//!
-//! 删除走 `WindowExt::open_dialog` 二次确认。添加后 `model.add_sources_from_file` 内部已
-//! 刷新内存 rules，下次 render 拿到新数据。
-//!
-//! 子模块：
-//! - `ctx` — 借用视图 `SourcesCtx<'a>`（当前未广泛使用，留着避免后续 refactor 再造）
-//! - `toolbar` — 名字 Input + 3-Button status 过滤组
-//! - `delegate` — `SourcesDelegate` + `ListDelegate` impl
-//! - `row` — 单条书源行渲染
 
-mod ctx;
 mod delegate;
 mod row;
 mod toolbar;
@@ -54,14 +36,6 @@ pub struct SourcesPage {
     model: Entity<AppModel>,
 
     /// 名字 / URL 关键字过滤 Input。struct 字段持有避免 click / focus 丢失
-    /// （同 library filter_input / theme_state 模式）。
-    ///
-    /// **placeholder 必须在 InputState 上** —— gpui-component 0.5.1 的 `Input` element
-    /// **没有** `.placeholder(...)` 方法，placeholder 只能从 `InputState.placeholder` 读
-    /// （`element.rs:952-958` paint 时 `let placeholder = self.placeholder.clone()` 字段）。
-    /// 所以 placeholder **一定**在 State 上 —— 这是 gpui-component 的 API 限制，
-    /// 不能完全"避免 State 持有翻译"。但用 `last_seen_placeholder` sentinel 在 render
-    /// 里**实时刷新**，切语言后下一帧自动更新。
     filter_input: Entity<InputState>,
 
     /// gpui-component 虚拟列表。
@@ -142,16 +116,7 @@ impl SourcesPage {
         });
     }
 
-    /// 调 `rfd` 文件选择器选 JSON 文件，调 `add_sources_from_file`。
-    ///
-    /// 用 `rfd::AsyncFileDialog` —— 内部走 `tokio::task::spawn_blocking`，
-    /// dialog 在 tokio 专门的 blocking thread pool 上跑，正确初始化 COM
-    /// apartment + message pump。
-    ///
-    /// **别用同步 `rfd::FileDialog::pick_file()` 丢 `cx.background_executor().spawn`
-    /// 上** —— Windows 下 `IFileOpenDialog::Show()` 需要 STA + message pump，
-    /// tokio worker thread 都没有，`Show()` 静默失败立即返回 None 且 dialog
-    /// 不显示。
+    /// 调 `rfd` 文件选择器选 JSON 文件，调 `add_sources_from_file`。。
     fn pick_and_add(&mut self, cx: &mut Context<Self>) {
         let model = self.model.clone();
         let page_handle = cx.entity().downgrade();
@@ -254,11 +219,7 @@ impl Render for SourcesPage {
         let _ = model;
 
         // 过滤后取当前页切片 —— 跟 library.rs 同模式（global 序号 + 切片 + 推给 delegate）。
-        let filtered = self
-            .model
-            .read(cx)
-            .sources_state
-            .filtered_rules(&all_rules);
+        let filtered = self.model.read(cx).sources_state.filtered_rules(&all_rules);
         let total = filtered.len();
         let w = compute_page_window(total, &mut self.current_page);
         let page_items: Vec<(usize, Rule)> = if total == 0 {

@@ -1,6 +1,6 @@
 //! 搜索结果详情 Dialog body 渲染：左侧封面 + 右侧字段列表。
 //!
-//! 布局 `h_flex`：左封面固定 `COVER_W × COVER_H`，右字段 `flex_1`。Dialog 自身 body 是
+//! 布局 `h_flex`：左封面固定 `COVER_W × COVER_H`，右字段 `flex_1`。Dialog body 自带
 //! `overflow_y_scrollbar`（见 gpui-component Dialog::render），字段多 / 简介长可滚动查看。
 //!
 //! 封面是反应式的：`render_detail_cover` 每帧重读 live `cover_cache`，封面到达后自动刷新
@@ -56,7 +56,6 @@ pub(super) fn content(
     };
 
     // 合并：detail-only 字段优先 Book，Book 为空时回退 SearchResult。
-    // book_name / author（Book 里是 String）非空才取，否则用 r。
     let book_name = b
         .map(|x| x.book_name.clone())
         .filter(|s| !s.trim().is_empty())
@@ -95,23 +94,20 @@ pub(super) fn content(
                 .child(ts("Search.detail.field.url")),
         )
         .child(
-            // Link 自带 cursor_pointer + 点击 open_url；长 URL 装进会换行的容器里，
-            // overflow_x_hidden + min_w_0 防止撑爆行宽。
+            // gpui 0.2.2 无 break_all —— URL 无空格不会自动换行，overflow_x_hidden 截断
+            // 超长部分（用户点开链接即可看完整 URL）。
             div()
                 .flex_1()
                 .min_w_0()
                 .overflow_x_hidden()
                 .text_sm()
                 .child(
-                    // gpui 0.2.2 无 break_all —— URL 无空格不会自动换行，用 overflow_x_hidden
-                    // 截断超长部分（用户点开链接即可看完整 URL）。
                     Link::new("detail-url")
                         .href(r.url.clone())
                         .child(url_display),
                 ),
         );
 
-    // 右侧字段列表：所有「label + value」行竖排。
     let fields = v_flex()
         .gap_2()
         .child(detail_row(
@@ -165,7 +161,6 @@ pub(super) fn content(
         ))
         .child(url_link);
 
-    // 左封面 + 右字段。封面 flex_shrink_0 固定，字段 flex_1 撑满。顶部对齐。
     h_flex()
         .gap_4()
         .items_start()
@@ -174,9 +169,6 @@ pub(super) fn content(
 }
 
 /// `Option<&str>` → 显示值；`None` / 纯空白 → `Search.detail.unknown` fallback。
-///
-/// 接 `Option<&str>`（而非 `&Option<String>`）方便合并：detail(Book) + SearchResult
-/// 两边 `as_deref()` 后 `.or()` 合出 `Option<&str>` 直接喂进来。
 fn detail_opt(v: Option<&str>) -> SharedString {
     match v {
         Some(s) if !s.trim().is_empty() => SharedString::from(s.to_string()),
@@ -186,8 +178,8 @@ fn detail_opt(v: Option<&str>) -> SharedString {
 
 /// 详情 Dialog 的「label + value」行：label 固定 84px、muted、xs；value flex_1、可换行。
 ///
-/// `max_h`（可选）：长内容字段（如简介）传 `Some(px)` 给 value 区设最大高度 + 内部滚动条，
-/// 避免单个字段把整个 Dialog 撑得超高。短字段传 `None`（默认），自然撑开。
+/// `max_h`：长内容字段（如简介）传 `Some(px)` 给 value 区设最大高度 + 内部滚动条，
+/// 避免单个字段把整个 Dialog 撑得超高。
 fn detail_row(
     label: SharedString,
     value: SharedString,
@@ -227,10 +219,6 @@ fn detail_row(
         .child(value_el)
 }
 
-// ============================================================================
-// 封面解码 + 渲染
-// ============================================================================
-
 /// 解码封面原始字节 → `Arc<RenderImage>`。
 ///
 /// `CoverEntry` 是 UI 中立的（只存原图字节，见 `app/cover.rs`），解码必须放 UI 层。
@@ -245,7 +233,13 @@ fn decode_cover_image(bytes: &[u8]) -> Option<Arc<RenderImage>> {
         .ok()?;
     // 二次保险：解码前再校验是有效图片 —— CoverEntry::Ready 已在下载时 probe 过一次，
     // 但缓存可能跨进程/异常，这里 probe 一次更稳，且只是几 µs 的开销。
-    let dynamic = reader.decode().ok()?;
+    let dynamic = match reader.decode() {
+        Ok(d) => d,
+        Err(e) => {
+            tracing::warn!(size = bytes.len(), error = %format!("{e}"), "UI 封面解码失败");
+            return None;
+        }
+    };
     let mut rgba = dynamic.into_rgba8();
 
     // RGBA → BGRA：GPUI 纹理期望 BGRA 字节序（见 gpui img.rs L671-674 swap(0,2)）。
@@ -262,7 +256,7 @@ fn decode_cover_image(bytes: &[u8]) -> Option<Arc<RenderImage>> {
 
 /// 渲染详情 Dialog 的封面区。
 ///
-/// 封面要两级查找（封面不在 `SearchResult` 里，得先拉详情拿 `cover_url` 再下载字节）：
+/// 封面两级查找（封面不在 `SearchResult` 里，得先拉详情拿 `cover_url` 再下载字节）：
 /// 1. `detail_cache[(source_id, url)]` → `DetailState::Loaded(book)` → `book.cover_url`
 /// 2. `cover_cache[(source_id, cover_url)]` → `CoverEntry::Ready { bytes, uri }` → 解码
 ///
@@ -280,8 +274,6 @@ fn render_detail_cover(
     url: &str,
     cx: &mut App,
 ) -> impl IntoElement {
-    // 封面/详情状态机：返回 (要渲染的内容, 固定容器的额外样式)。
-    // 默认 loading 占位；下面分支按 detail→cover 两级覆盖。
     enum CoverView {
         Loading,
         Failed,
@@ -290,7 +282,6 @@ fn render_detail_cover(
     }
 
     let view = page.update(cx, |p, cx| {
-        // ---- 第一级：detail_cache 拿 cover_url ----
         let detail = p
             .model
             .read(cx)
@@ -310,7 +301,6 @@ fn render_detail_cover(
                     return CoverView::None;
                 };
 
-                // ---- 第二级：cover_cache 拿字节 ----
                 let cover = p
                     .model
                     .read(cx)
@@ -359,8 +349,7 @@ fn render_detail_cover(
 
     match view {
         CoverView::Image(rendered) => container.child(
-            // `img` 是 gpui 的自由函数（`gpui::img(source)`），不是上面的变量 ——
-            // 变量改名 `rendered` 避免遮蔽。
+            // 变量改名 `rendered` —— `img` 是 gpui 自由函数（`gpui::img(source)`），避免遮蔽。
             img(ImageSource::Render(rendered))
                 .rounded(cx.theme().radius)
                 .object_fit(ObjectFit::Fill)

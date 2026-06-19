@@ -11,7 +11,7 @@
 use gpui::App;
 use gpui_component::setting::{NumberFieldOptions, SettingGroup, SettingItem, SettingPage};
 
-use crate::gpui_app::i18n::ts;
+use crate::i18n::ts;
 
 use super::ctx::PageCtx;
 use super::fields::{bool_field, number_field_option_i32, number_field_u32_clamped};

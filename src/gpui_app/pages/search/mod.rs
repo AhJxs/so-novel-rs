@@ -1,23 +1,14 @@
-//! Search 页面：关键词搜索 + 书源过滤 + 结果列表。
+//! Search 页面：关键词搜索 + 书源过滤 + 结果列表 + 选章下载 Dialog。
 //!
-//! 拆分架构（跟 `library/` / `sources.rs` / `tasks/` 同模式，settings 拆完后的统一骨架）：
-//! - `mod.rs`（本文件）：owner struct + impl 主体（new / run_search / open_range_dialog
-//!   / confirm_range_dialog / impl Render）。
-//! - `ctx.rs`：子模块共享的 `SearchCtx<'a>` 借用视图。
-//! - `source_select.rs`：选书源下拉的自定义 `SelectItem`。
-//! - `toolbar.rs`：工具栏（关键词 Input + 书源 Select + 搜索 Button + 源状态 Tag）。
-//! - `result_row.rs`：结果行（6 列：序号 / 书名 / 作者 / 源 / 详情 / 选章 / 全本）。
-//! - `detail_dialog.rs`：详情 Dialog body + 封面解码 / 渲染。
-//! - `range_dialog.rs`：选章 Dialog body + 起止输入框 clamp helper。
-//! - `delegate.rs`：`SearchDelegate` + `ListDelegate` impl（虚拟滚动 delegate，跟
-//!   library / tasks / sources 同款结构）。
+//! 子模块（跟 library / sources / tasks 同款骨架）：
+//! - `source_select` — 选书源下拉的 `SelectItem`。
+//! - `toolbar` — Input + Select + Button + 源状态行。
+//! - `result_row` — 结果行（6 列：序号 / 书名 / 作者 / 源 / 详情 / 选章 / 全本）。
+//! - `detail_dialog` — 详情 Dialog body + 封面解码 / 渲染。
+//! - `range_dialog` — 选章 Dialog body + 起止输入框 clamp helper。
+//! - `delegate` — `SearchDelegate` + `ListDelegate` impl（虚拟滚动）。
 //!
-//! 布局：
-//! - PageHeader：title + subtitle（**无** 右侧 action —— 搜索按钮已下移到工具栏）
-//! - Toolbar：Input（关键词） + "书源" label + Select（书源下拉） + Button（搜索）
-//! - SourceStatusBar：每个源的 status badge（搜索运行时显示）
-//! - ResultList：`gpui-component::List` + `SearchDelegate`（虚拟滚动）
-//! - 分页页脚：30 条/页（用通用 `Pagination` 组件，始终渲染）
+//! 布局：PageHeader（无 action）→ Toolbar → SourceStatusBar → ResultList → Pagination。
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -32,7 +23,7 @@ use gpui_component::{
     input::{InputEvent, InputState, NumberInputEvent, StepAction},
     list::{List, ListState},
     notification::{Notification, NotificationType},
-    select::{SearchableVec, SelectEvent, SelectState},
+    select::{SearchableVec, SelectDelegate, SelectEvent, SelectState},
     v_flex,
 };
 
@@ -47,7 +38,6 @@ use self::delegate::SearchDelegate;
 use range_dialog::clamp_range_value;
 use source_select::SourceSelectItem;
 
-mod ctx;
 mod delegate;
 mod detail_dialog;
 mod range_dialog;
@@ -59,55 +49,49 @@ mod toolbar;
 pub struct SearchPage {
     model: Entity<AppModel>,
 
-    /// 关键词 Input。placeholder 在 `new()` 建 InputState 时一次性设好
-    /// （`Search.filter.placeholder`）。语言切换走重启生效，新进程重建时拿新 locale。
+    /// struct 字段持有（InputState / SelectState / ListState）—— owner 持有避免
+    /// click / focus 丢失。placeholder 在 `new()` 一次性设好，language setter 走
+    /// "重启进程"路径，新进程重建时自然拿新 locale。
     keyword: Entity<InputState>,
-
-    /// 选书源下拉 SelectState（可搜索）。
-    ///
-    /// items 是 `SearchableVec<SourceSelectItem>`（自定义 struct 让 `value` 跟
-    /// `title` 分开），第一项 value = `"all"`（"聚合搜索" = None），其余
-    /// `format!("rule:{id}")` 编码 source id。rule.name 是数据（不译），语种后缀
-    /// `LANG` 也是数据，所以 SelectState 缓存 items 不会破坏 i18n。首项 title
-    /// "聚合搜索" 来自 `ts("Search.source.aggregate")`，**不在** State 字段里
-    /// 缓存 —— 切语言后下次展开下拉时 SelectState 重建 item 列表自动更新。
     source_state: Entity<SelectState<SearchableVec<SourceSelectItem>>>,
-
-    /// gpui-component 虚拟列表 + 自定义 Delegate。必须在 `new()` 里建一次并缓存。
     list_state: Entity<ListState<SearchDelegate>>,
 
-    /// 当前 0-based 页码。UI-only，每次关键词或过滤变化时重置为 0。
+    /// UI-only，每次关键词或过滤变化时重置为 0。
     current_page: usize,
+
+    /// 书源下拉 items 的上一次快照（值为 "all" / "rule:{id}"），用来 render 差量
+    /// 检测。SourcesPage 改禁用 / 删除 / 重命名书源后 `model.rules` 变化但 SelectState
+    /// 不会自动重读 —— render 检测到快照不一致就重建 items 并 set_items / 调整选中。
+    /// 与 `SettingsPage::sync_theme_items` 同套路（observer 拿不到 Window，差量
+    /// 更新走 render）。
+    last_source_items: Vec<SharedString>,
 
     /// 封面解码缓存：`cover://` URI → 解码后的 `RenderImage`。
     ///
-    /// `CoverEntry` 刻意保持 UI 中立（只存原始字节，见 `app/cover.rs`），解码放 UI 层。
-    /// 这里按 CoverEntry 的 `uri`（稳定去重 key）缓存 `Arc<RenderImage>`，避免 Dialog
-    /// 每帧重渲染时重复解码 + 重复上传纹理（`RenderImage::new` 每次生成新 id，不缓存会
-    /// 让 gpui 每帧重传纹理）。`None` = 解码失败的封面，缓存负面结果避免反复重试。
+    /// `CoverEntry` 只存原始字节（UI 中立，见 `app/cover.rs`），解码放 UI 层。
+    /// 按 `uri`（稳定去重 key）缓存 `Arc<RenderImage>` —— Dialog 每帧重渲时
+    /// 避免重复解码 + 重传纹理（`RenderImage::new` 每次新 id，不缓存让 gpui 每帧
+    /// 重传）。`None` = 解码失败，缓存负面结果避免反复重试。
     cover_images: HashMap<String, Option<Arc<RenderImage>>>,
 
-    // ---- 选章下载 Dialog ----
-    //
-    // 流程：点"选章" → `spawn_resolve_toc` 拉章节列表（回写 toc_cache）→ 弹 confirm Dialog。
-    // Dialog 反应式读 toc_cache：TOC 回来后初始化起止输入框（1 / N）+ 显示章节名预览。
-    // 用户改输入框 / 按 +/- → 本页订阅 `InputEvent::Change` + `NumberInputEvent::Step`，
-    // clamp 到 [1, N] 后 `set_value` 写回，并刷新预览。
-    /// 起始章节输入（NumberInput 绑定的 InputState）。
+    /// 选章下载 Dialog 的状态（起止输入框 + 当前 target + 初始化标志）。
+    ///
+    /// 流程：点"选章" → `spawn_resolve_toc` 拉章节列表（写 toc_cache）→ 弹 confirm
+    /// Dialog 反应式读 toc_cache，TOC 回来后初始化起止输入框（1 / N）+ 显示预览。
+    /// 用户改输入框 / 按 +/- → 本页订阅 `InputEvent::Change` + `NumberInputEvent::Step`，
+    /// clamp 到 [1, N] 后 set_value 写回。
     range_start_input: Entity<InputState>,
-    /// 结束章节输入（NumberInput 绑定的 InputState）。
     range_end_input: Entity<InputState>,
-    /// 当前选章 Dialog 正在为哪条搜索结果服务。`None` = 没开 Dialog。
-    /// 点击不同结果的"选章"按钮时更新；TOC 用 `(source_id, url)` 在 toc_cache 里查。
+    /// Dialog 当前为哪条搜索结果服务（None = 没开）。点击不同结果时更新；
+    /// TOC 用 `(source_id, url)` 在 toc_cache 里查。
     range_target: Option<SearchResult>,
-    /// 选章 Dialog 是否已为当前 target 初始化过输入框（set_value 1 / N）。
-    /// 防止 TOC 每帧重渲染时反复 set_value 覆盖用户输入。
+    /// 是否已为当前 target 初始化过输入框（set_value 1 / N）。
+    /// 防 TOC 每帧重渲时反复 set_value 覆盖用户输入。
     range_initialized: bool,
 }
 
 impl SearchPage {
     pub fn new(model: Entity<AppModel>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        // (a) 关键词 InputState + 订阅 InputEvent::Change
         let keyword = cx.new(|cx| {
             InputState::new(window, cx).placeholder(ts("Search.filter.placeholder").to_string())
         });
@@ -124,48 +108,14 @@ impl SearchPage {
         })
         .detach();
 
-        // (b) 选书源 SelectState
-        //
-        // 第一个 item 是"聚合搜索"（value="all" = None = 跨书源搜索），
-        // 后面每个 rule 一项，title 是 "name (LANG)"。
-        let aggregate_title = ts("Search.source.aggregate");
-        let mut items: Vec<SourceSelectItem> = vec![SourceSelectItem {
-            value: SharedString::from("all"),
-            title: aggregate_title,
-        }];
-        items.extend(model.read(cx).rules.iter().map(|r| {
-            // 名字兜底：空时显 "(no name)"，否则 truncate 到 30 字符避免长名字
-            // 撑爆下拉。不带语言后缀 —— 用户只要看清是哪个书源即可。
-            let name_disp = if r.name.is_empty() {
-                SharedString::from("(no name)")
-            } else {
-                SharedString::from(truncate(&r.name, 30))
-            };
-            SourceSelectItem {
-                value: SharedString::from(format!("rule:{}", r.id)),
-                title: name_disp,
-            }
-        }));
-        let items: SearchableVec<SourceSelectItem> = items.into();
-
-        // 初始选中：model.search.source_id → 找对应 row；None 落到 "all"。
-        let cur_value = model
-            .read(cx)
-            .search
-            .source_id
-            .map(|id| format!("rule:{id}"))
-            .unwrap_or_else(|| "all".to_string());
-        let cur_value = SharedString::from(cur_value);
-        let selected_pos =
-            <SearchableVec<SourceSelectItem> as gpui_component::select::SelectDelegate>::position(
-                &items, &cur_value,
-            );
-        let source_state =
-            cx.new(|cx| SelectState::new(items, selected_pos, window, cx).searchable(true));
+        // 选书源 SelectState。items 首次为空：render 第一次跑时 `sync_source_items`
+        // 会从 `model.rules` 重建并 set_items。这条路径处理 SourcesPage 改禁用 / 删除
+        // / 重命名后下拉不刷新的问题 —— observer 拿不到 Window，差量更新走 render，
+        // 与 `SettingsPage::sync_theme_items` 同套路。
+        let items: SearchableVec<SourceSelectItem> = Vec::<SourceSelectItem>::new().into();
+        let source_state = cx.new(|cx| SelectState::new(items, None, window, cx).searchable(true));
         cx.subscribe_in(&source_state, window, |this, _state, ev, _w, cx| {
             if let SelectEvent::Confirm(Some(value)) = ev {
-                // `value` 是 `SourceSelectItem::Value = SharedString` —— 内部 id。
-                // 首项 value 显式 `"all"`（不用空字符串）→ 区分 "全部" vs "rule:N"。
                 let v = value.to_string();
                 let new_source_id = if v == "all" {
                     None
@@ -180,55 +130,66 @@ impl SearchPage {
         })
         .detach();
 
-        // (c) ListState + Delegate
         let page_handle = cx.entity().clone();
         let delegate = SearchDelegate::new(page_handle);
         let list_state = cx.new(|cx| ListState::new(delegate, window, cx));
 
-        // (d) 选章 Dialog 的起止输入框。
-        //
-        // 两个 InputState 各绑一个 NumberInput。订阅两类事件：
-        // - `InputEvent::Change`：用户直接键入数字 → clamp 后 set_value 写回 + 刷新预览。
-        // - `NumberInputEvent::Step(Decrement/Increment)`：用户按 +/- → 取当前值 ±1，clamp
-        //   后 set_value。NumberInput 的 +/- 只发 Step 事件、不改值（见 gpui-component
-        //   number_input.rs L106-112），所以必须自己处理。
-        //
-        // clamp 范围 [1, N]：N 取当前 toc_cache 里 Loaded 的章节数；TOC 没回来时按
-        // `[1, u32::MAX]`（任意正整数都行，预览会等 TOC 回来再显示）。
+        // 选章 Dialog 的起止输入框。两个 InputState 各绑一个 NumberInput。
+        // 订阅两类事件：
+        // - `InputEvent::Change`：用户键入数字 → clamp 后 set_value 写回 + 刷新预览。
+        // - `NumberInputEvent::Step`：用户按 +/- → ±1 后 set_value。
+        //   NumberInput 的 +/- 只发 Step 事件、不改值（见 gpui-component number_input.rs
+        //   L106-112），必须自己处理。
+        // clamp 范围 [1, N]：N 取 toc_cache Loaded 章节数；TOC 没回来按 [1, u32::MAX]。
         let range_start_input =
             cx.new(|cx| InputState::new(window, cx).placeholder("1".to_string()));
         let range_end_input = cx.new(|cx| InputState::new(window, cx).placeholder("1".to_string()));
 
-        // 起始输入：Change + Step 都 clamp 写回。
-        // set_value 要 `&mut Window`（0.5.1 三参签名），用回调自带的 window 传入 ——
-        // update 只借 cx（Context<SearchPage>），window 是独立的可变借用，不冲突。
-        // clamp 用自由函数 `clamp_range_value`（不是闭包），避免订阅闭包要 'static 时
-        // 反复借用 / clone 闭包。
+        // Change 订阅：只在值不同时 set_value —— 无条件写回触发 Change→set_value→
+        // Change 死循环，几轮把 Windows 句柄配额耗尽崩溃（0x80070718）。set_value 写回
+        // 的值已是规整值，二次 Change want==cur 直接跳过，循环终止。
+        // set_value 要 `&mut Window`（0.5.1 三参签名），用回调自带的 window —— update
+        // 只借 cx，window 是独立可变借用，不冲突。
         cx.subscribe_in(
             &range_start_input,
             window,
-            |this, _state, ev, window, cx| {
-                match ev {
-                    InputEvent::Change => {
-                        let cur = this.range_start_input.read(cx).value().to_string();
-                        let v = clamp_range_value(this, cur.clone().into(), cx);
-                        let want = v.to_string();
-                        // **只在值不同时才 set_value**：set_value 内部会 emit Change，若每次都
-                        // 无条件写回会触发 Change→set_value→Change 死循环，几轮就把 Windows
-                        // 句柄配额耗尽崩溃（0x80070718）。set_value 写回的值已是规整后的，二次
-                        // Change 进来时 want==cur 直接跳过，循环立即终止。
-                        if want != cur {
-                            this.range_start_input
-                                .update(cx, |s, cx| s.set_value(want, window, cx));
-                            cx.notify();
-                        }
+            |this, _state, ev, window, cx| match ev {
+                InputEvent::Change => {
+                    let cur = this.range_start_input.read(cx).value().to_string();
+                    let v = clamp_range_value(this, cur.clone().into(), cx);
+                    let want = v.to_string();
+                    if want != cur {
+                        this.range_start_input
+                            .update(cx, |s, cx| s.set_value(want, window, cx));
+                        cx.notify();
                     }
-                    InputEvent::PressEnter { .. } => {}
-                    _ => {}
                 }
+                InputEvent::PressEnter { .. } => {}
+                _ => {}
             },
         )
         .detach();
+        cx.subscribe_in(
+            &range_end_input,
+            window,
+            |this, _state, ev, window, cx| match ev {
+                InputEvent::Change => {
+                    let cur = this.range_end_input.read(cx).value().to_string();
+                    let v = clamp_range_value(this, cur.clone().into(), cx);
+                    let want = v.to_string();
+                    if want != cur {
+                        this.range_end_input
+                            .update(cx, |s, cx| s.set_value(want, window, cx));
+                        cx.notify();
+                    }
+                }
+                InputEvent::PressEnter { .. } => {}
+                _ => {}
+            },
+        )
+        .detach();
+
+        // Step 订阅（+/-）。
         cx.subscribe_in(
             &range_start_input,
             window,
@@ -246,27 +207,6 @@ impl SearchPage {
                 this.range_start_input
                     .update(cx, |s, cx| s.set_value(v.min(n).to_string(), window, cx));
                 cx.notify();
-            },
-        )
-        .detach();
-
-        // 结束输入：同上（同 start，必须只在值不同时 set_value 防 Change 死循环）。
-        cx.subscribe_in(
-            &range_end_input,
-            window,
-            |this, _state, ev, window, cx| match ev {
-                InputEvent::Change => {
-                    let cur = this.range_end_input.read(cx).value().to_string();
-                    let v = clamp_range_value(this, cur.clone().into(), cx);
-                    let want = v.to_string();
-                    if want != cur {
-                        this.range_end_input
-                            .update(cx, |s, cx| s.set_value(want, window, cx));
-                        cx.notify();
-                    }
-                }
-                InputEvent::PressEnter { .. } => {}
-                _ => {}
             },
         )
         .detach();
@@ -297,6 +237,7 @@ impl SearchPage {
             source_state,
             list_state,
             current_page: 0,
+            last_source_items: Vec::new(),
             cover_images: HashMap::new(),
             range_start_input,
             range_end_input,
@@ -332,6 +273,74 @@ impl SearchPage {
             Some(TocState::Loaded(_, chs)) => Some(chs.len() as u32),
             _ => None,
         }
+    }
+
+    /// 书源下拉 items 差量同步。
+    ///
+    /// 每次 render 拍一次快照（仅保留 `value` 字符串 = "all" / "rule:{id}"），与
+    /// `last_source_items` 对比；无变化 → 0 开销返回；变化 → 重建 items、
+    /// 按当前 `model.search.source_id` 重新计算选中位置、`set_items` + `set_selected_index`
+    /// 推到 SelectState。
+    ///
+    /// 覆盖的触发场景：
+    /// - SourcesPage 切换某条规则的 `disabled`
+    /// - SourcesPage 删除 / 导入一条规则
+    /// - 规则重命名（item.title 变了）
+    ///
+    /// 复用 `Rule::is_search_enabled()` 谓词，与 `spawn_search` 派发时的 target_sources
+    /// 列表保持一致 —— 下拉里看到的 = 实际会发请求的。
+    ///
+    /// 选中位置在选中的源被禁用 / 删除后会回到 `None`（`position()` 找不到），让
+    /// SelectState 落到默认项；`spawn_search` 那边 `source_id` 仍是 stale 值，但会
+    /// 因为 id 不匹配任一规则而派发空列表——用户改下拉时 Confirm 处理器会写回 None。
+    fn sync_source_items(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let aggregate_title = ts("Search.source.aggregate");
+        let mut items: Vec<SourceSelectItem> = vec![SourceSelectItem {
+            value: SharedString::from("all"),
+            title: aggregate_title,
+        }];
+        for r in self
+            .model
+            .read(cx)
+            .rules
+            .iter()
+            .filter(|r| r.is_search_enabled())
+        {
+            // 名字兜底：空时显 "(no name)"，否则 truncate 到 30 字符避免长名字撑爆下拉。
+            let name_disp = if r.name.is_empty() {
+                SharedString::from("(no name)")
+            } else {
+                SharedString::from(truncate(&r.name, 30))
+            };
+            items.push(SourceSelectItem {
+                value: SharedString::from(format!("rule:{}", r.id)),
+                title: name_disp,
+            });
+        }
+        // 用规则 id 升序排，确保顺序稳定。
+        items.sort_by(|a, b| a.value.cmp(&b.value));
+        let snapshot: Vec<SharedString> = items.iter().map(|it| it.value.clone()).collect();
+
+        if snapshot == self.last_source_items {
+            return;
+        }
+        self.last_source_items = snapshot;
+
+        let items_sv: SearchableVec<SourceSelectItem> = items.into();
+        let cur_value = self
+            .model
+            .read(cx)
+            .search
+            .source_id
+            .map(|id| format!("rule:{id}"))
+            .unwrap_or_else(|| "all".to_string());
+        let cur_value = SharedString::from(cur_value);
+        let sel =
+            <SearchableVec<SourceSelectItem> as SelectDelegate>::position(&items_sv, &cur_value);
+        self.source_state.update(cx, |s, cx| {
+            s.set_items(items_sv, window, cx);
+            s.set_selected_index(sel, window, cx);
+        });
     }
 
     /// 点"选章"按钮 → 拉 TOC + 弹 confirm Dialog。
@@ -480,20 +489,19 @@ enum RangeOutcome {
 }
 
 impl Render for SearchPage {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        // keyword placeholder 在 `new()` 建 InputState 时一次性设好。语言切换走重启生效，
-        // 无需 render 里差量刷新。
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // 差量同步书源下拉：先于其他读 model 的代码，因为这里要 &mut Window。
+        self.sync_source_items(window, cx);
+
         let model = self.model.read(cx);
         let results = model.search.results.clone();
         let running = model.search.running;
         let expected = model.search.expected;
         let received = model.search.received;
         let source_status = model.search.source_status.clone();
-        // 提前 drop model 的不可变借用，避免下面 self.list_state.update + render
-        // 函数体里 borrow checker 打架。
+        // 提前 drop model 的不可变借用 —— list_state.update / Pagination 闭包要 `&mut App`。
         let _ = model;
 
-        // ---- 1. 分页切片 + 兜底（清空 results 后 current_page 越界 → 回卷）----
         let total = results.len();
         let w = compute_page_window(total, &mut self.current_page);
         let page_items: Vec<(usize, SearchResult)> = if !w.is_empty() {
@@ -506,21 +514,17 @@ impl Render for SearchPage {
         } else {
             Vec::new()
         };
-        // 推给 delegate，List 渲染时读到。
         self.list_state.update(cx, |state, _cx| {
             state.delegate_mut().page_items = page_items;
         });
 
-        // ---- 2. 搜索按钮是否禁用 ----
         let keyword_empty = self.keyword.read(cx).value().is_empty();
 
         v_flex()
             .size_full()
             .p_6()
             .gap_4()
-            // ---- 3. PageHeader (无 action) ----
             .child(PageHeader::new(ts("Search.page_title")).subtitle(ts("Search.page_subtitle")))
-            // ---- 4. 工具栏: 关键词 Input + 书源 Select + 搜索 Button ----
             .child(toolbar::toolbar_row(
                 &self.keyword,
                 &self.source_state,
@@ -528,7 +532,6 @@ impl Render for SearchPage {
                 keyword_empty,
                 cx,
             ))
-            // ---- 5. 源状态行（保留：搜索运行时显示每个源的 status）----
             .when(!source_status.is_empty(), |this| {
                 this.child(toolbar::source_status_row(
                     &self.model,
@@ -539,9 +542,7 @@ impl Render for SearchPage {
                     cx,
                 ))
             })
-            // ---- 6. 结果列表 / 空态 ----
             .child(if total == 0 {
-                // 空态：跟 library / sources 一致的 EmptyState（图标 + title + subtitle）。
                 div()
                     .flex_1()
                     .flex()
@@ -553,8 +554,8 @@ impl Render for SearchPage {
                     )
                     .into_any_element()
             } else {
-                // 列表容器：边框 + List 整体 padding(12px)，让选中边框不被滚动条遮挡。
-                // 参考 library.rs / sources.rs 的 List 容器样式。
+                // List 容器边框 + 12px padding：让选中边框不被滚动条遮挡
+                // （跟 library / sources 同款，详见 list_story.rs:594-602）。
                 div()
                     .flex_1()
                     .w_full()
@@ -565,8 +566,8 @@ impl Render for SearchPage {
                     .child(List::new(&self.list_state).p(px(12.)).size_full())
                     .into_any_element()
             })
-            // ---- 7. 分页页脚（仅在列表非空时渲染 —— 空态不显示，避免无意义的"第 1 页 / 共 0 条"）----
             .when(total > 0, |this| {
+                // 空态不挂分页（避免"第 1 页 / 共 0 条"无意义提示）。
                 this.child(Pagination::new(
                     self.current_page,
                     w.page_count,

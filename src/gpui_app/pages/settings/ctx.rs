@@ -37,5 +37,10 @@ pub(super) struct PageCtx<'a> {
     pub theme_state_dyn_dark: &'a Entity<SelectState<SearchableVec<SharedString>>>,
     pub font_size_state: &'a Entity<SliderState>,
     pub download_path_input: &'a Entity<InputState>,
+    /// 起点 cookie 输入框 — `SettingField::render` 闭包每帧重建会丢
+    /// focus / 光标 / 多行 wrap，所以建一次缓存。`multi_line(true).rows(3)`
+    /// 配合 `Input::h(px(80.))` 给一块固定高度的 textarea 给用户粘贴整段
+    /// `Cookie:` 头。`placeholder("w_tsfp=...")` 提示 cookie 头格式起点。
+    pub qidian_cookie_input: &'a Entity<InputState>,
     pub pick_folder_listener: &'a PickFolderListener,
 }

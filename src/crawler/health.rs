@@ -11,6 +11,7 @@ use reqwest::header::{ACCEPT, USER_AGENT};
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 
+use crate::config::AppConfig;
 use crate::http::client::{ClientOptions, build_async_client};
 use crate::http::ua::random_ua;
 use crate::models::Rule;
@@ -96,7 +97,7 @@ impl SourceHealth {
 ///
 /// 完成后通道关闭（tx drop），UI 端 try_recv 看到 Disconnected 即知道全部跑完。
 pub async fn check_sources_health(
-    cfg: Arc<crate::config::AppConfig>,
+    cfg: Arc<AppConfig>,
     rules: Vec<Rule>,
     tx: mpsc::UnboundedSender<SourceHealth>,
 ) {
@@ -118,7 +119,7 @@ pub async fn check_sources_health(
     // tx drop（与 set 同生命周期），UI 端通道收尾。
 }
 
-async fn probe_one(cfg: &crate::config::AppConfig, rule: &Rule) -> SourceHealth {
+async fn probe_one(cfg: &AppConfig, rule: &Rule) -> SourceHealth {
     let started = Instant::now();
     let opts = ClientOptions {
         unsafe_ssl: rule.ignore_ssl,

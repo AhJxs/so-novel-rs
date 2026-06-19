@@ -29,7 +29,16 @@ use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 
 use crate::app::AppModel;
 
-use super::ctx::WatcherCmd;
+/// Watcher 任务命令：让任务内部 drop 旧 watcher 并 arm 到新路径上。
+///
+/// 当前只有 `SetPath` 一个调用方（`maybe_auto_scan` 检测到 `download_path` 变了 → 发）。
+#[derive(Debug, Clone)]
+pub(super) enum WatcherCmd {
+    SetPath(PathBuf),
+}
+
+/// Sender 别名（owner 持有 → 析构时 drop → 任务 `try_recv()` 收 Closed → 退出）。
+pub(super) type WatcherCmdTx = smol::channel::Sender<WatcherCmd>;
 
 /// 在调用方的 `cx.spawn` future 内部运行 watcher 主循环。
 ///
@@ -95,9 +104,6 @@ pub(super) async fn run(
                         });
                         cx.notify();
                     });
-                }
-                Ok(WatcherCmd::Stop) => {
-                    _watcher = None;
                 }
                 Err(smol::channel::TryRecvError::Empty) => break, // 队列空，跳出内层循环
                 Err(smol::channel::TryRecvError::Closed) => return, // sender drop → 整个任务退出

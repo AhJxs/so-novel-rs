@@ -3,7 +3,8 @@
 use tokio::sync::mpsc;
 
 use crate::config::AppConfig;
-use crate::models::Rule;
+use crate::models::{Book, Rule};
+use crate::rules::Source;
 
 use super::super::search_state::{DetailEvent, DetailState, SourceSearchEvent, SourceStatus};
 
@@ -30,24 +31,29 @@ pub fn spawn_search(
     search.received = 0;
     search.selected = None;
 
-    let target_sources: Vec<crate::rules::Source> = if let Some(id) = search.source_id {
+    let target_sources: Vec<Source> = if let Some(id) = search.source_id {
         rules
             .iter()
             .filter(|r| r.id == id)
             .cloned()
-            .map(|r| crate::rules::Source::from(r, config))
+            .map(|r| Source::from(r, config))
             .collect()
     } else {
         rules
             .iter()
-            .filter(|r| !r.disabled && r.search.as_ref().map(|s| !s.disabled).unwrap_or(false))
+            .filter(|r| r.is_search_enabled())
             .cloned()
-            .map(|r| crate::rules::Source::from(r, config))
+            .map(|r| Source::from(r, config))
             .collect()
     };
 
     if target_sources.is_empty() {
         search.last_error = Some("没有可用的书源（请在 [书源管理] 检查规则文件）".to_string());
+        if let Some(id) = search.source_id {
+            tracing::warn!(keyword = %keyword, source_id = id, "搜索派发失败：选中的书源被禁用或已删除");
+        } else {
+            tracing::warn!(keyword = %keyword, "搜索派发失败：无可用书源（全部被禁用或无规则）");
+        }
         return false;
     }
 
@@ -72,6 +78,18 @@ pub fn spawn_search(
         .search_limit
         .map(|v| v.max(0) as usize)
         .filter(|v| *v > 0);
+
+    let target_ids: Vec<i32> = target_sources.iter().map(|s| s.rule.id).collect();
+    tracing::info!(
+        source_ids = ?target_ids,
+        source_count = target_sources.len(),
+        source_id = ?search.source_id,
+        limit = ?limit,
+        cf_bypass = cf_bypass.is_some(),
+        "搜索派发: 关键词={:?}, 目标源 {} 个",
+        keyword,
+        target_sources.len(),
+    );
 
     runtime.spawn(async move {
         let (inner_tx, mut inner_rx) =
@@ -122,9 +140,11 @@ pub fn spawn_search(
         // 通道关闭后，仍有源未出结果（task panic / 提前退出）→ 给它们补一条失败事件，
         // 否则该源在 UI 永远停在 Pending，且 received 永远到不了 expected（搜索卡死）。
         // source_names 在 target_sources move 进 search_streaming 前已建好，这里直接用它。
+        let mut missing = 0usize;
         if !tx.is_closed() {
             for (id, name) in &source_names {
                 if !seen_ids.contains(id) {
+                    missing += 1;
                     let _ = tx.send(SourceSearchEvent {
                         source_id: *id,
                         source_name: name.clone(),
@@ -137,6 +157,12 @@ pub fn spawn_search(
         if let Err(e) = search_handle.await {
             tracing::warn!("search task panicked: {e}");
         }
+
+        tracing::debug!(
+            received = seen_ids.len(),
+            missing = missing,
+            "搜索桥接循环结束"
+        );
     });
 
     true
@@ -194,17 +220,23 @@ pub fn select_search_result(
     } else {
         Some(config.cf_bypass.clone())
     };
+    let qidian_cookie = if config.qidian_cookie.trim().is_empty() {
+        None
+    } else {
+        Some(config.qidian_cookie.clone())
+    };
 
     runtime.spawn(async move {
         let url_for_event = url.clone();
         let cf = cf_bypass.clone();
-        let result: Result<crate::models::Book, String> = async {
+        let qc = qidian_cookie.clone();
+        let result: Result<Book, String> = async {
             let opts = crate::http::client::ClientOptions {
                 unsafe_ssl: rule.ignore_ssl,
             };
             let client = crate::http::client::build_async_client(&cfg, &opts)
                 .map_err(|e| format!("client: {e:#}"))?;
-            crate::parser::parse_book_detail(&client, &rule, &url, cf.as_deref())
+            crate::parser::parse_book_detail(&client, &rule, &url, cf.as_deref(), qc.as_deref())
                 .await
                 .map_err(|e| format!("{e:#}"))
         }

@@ -83,6 +83,17 @@ pub struct Rule {
     pub crawl: Option<RuleCrawl>,
 }
 
+impl Rule {
+    /// 此书源能否加入聚合搜索。
+    ///
+    /// 判定与 `app::ops::search::spawn_search` 派发时完全一致：顶 `Rule.disabled` 为
+    /// false 且 `RuleSearch.disabled` 也为 false（`RuleSearch` 不存在视为 false）。
+    /// 搜索页书源下拉和派发共用此谓词，避免下拉里出现但实际不发请求的不一致。
+    pub fn is_search_enabled(&self) -> bool {
+        !self.disabled && self.search.as_ref().map(|s| !s.disabled).unwrap_or(false)
+    }
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RuleSearch {

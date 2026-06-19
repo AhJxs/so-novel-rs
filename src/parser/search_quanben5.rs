@@ -358,13 +358,14 @@ mod tests {
     #[test]
     fn end_to_end_parse_jsonp_mock() {
         use crate::config::LangType;
+        use crate::models::Rule;
         use crate::rules::apply_default_rule;
 
         // 仿 JSONP 响应（关键字段：content 是 quanben5 真实结构精简版，含 unicode + 实体）
         // 书 = 书，&amp; 会被还原
         let jsonp = r##"search({"status":1,"content":"<div class=\"pic_txt_list\"><h3><a href=\"/n/sanit/\">三&amp;体</a></h3><p class=\"info\"><span>作者甲</span></p></div><div class=\"pic_txt_list\"><h3><a href=\"/n/abc/\">体体体</a></h3><p class=\"info\"><span>作者乙</span></p></div>"})"##;
 
-        let mut rule: crate::models::Rule = serde_json::from_str(
+        let mut rule: Rule = serde_json::from_str(
             r##"{
                 "url": "https://quanben5.com/",
                 "name": "全本小说网",

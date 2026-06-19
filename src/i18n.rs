@@ -23,6 +23,12 @@
 //! `SettingsState` 等很多翻译是一次性求值缓存在各 entity 里的，切语言当帧 `refresh_windows`
 //! 不会重求这些缓存值（下拉框已选值 / 输入框 placeholder 不更新）。早先用「render 里 sentinel
 //! 差量比对 + set_placeholder」逐个刷新，代价大且覆盖不全，故改成重启生效，彻底删掉 sentinel 机制。
+//!
+//! ## 模块位置历史
+//!
+//! 早期在 `gpui_app::i18n`（UI 子模块下），但 `crate::app` 的业务层（`events::drain` /
+//! `ops::library`）也要调用 `ts()` 翻译错误信息，跨层依赖很别扭。挪到 crate root
+//! 后 `crate::i18n::ts()` 是中性 API，`app/` 和 `gpui_app/` 都可以自然使用。
 
 use gpui::SharedString;
 

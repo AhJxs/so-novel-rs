@@ -25,7 +25,10 @@ pub(crate) fn cover_entry_from_bytes(
     bytes: Option<Vec<u8>>,
 ) -> CoverEntry {
     match bytes {
-        None => CoverEntry::Failed("下载为空或失败".to_string()),
+        None => {
+            tracing::warn!(source_id = source_id, cover_url = %cover_url, "封面字节为空（下载失败或网络中断）");
+            CoverEntry::Failed("下载为空或失败".to_string())
+        }
         Some(b) => {
             // 提前用 image::ImageReader 验证字节是真的图片（避免 lazy 解码时 ui.add 失败）。
             let probe = image::ImageReader::new(std::io::Cursor::new(&b))
@@ -37,7 +40,10 @@ pub(crate) fn cover_entry_from_bytes(
                     let uri = format!("cover://{source_id}/{}", hash_short(cover_url));
                     CoverEntry::Ready { bytes: b, uri }
                 }
-                None => CoverEntry::Failed("图片解码失败（非有效图片或格式不支持）".to_string()),
+                None => {
+                    tracing::warn!(source_id = source_id, cover_url = %cover_url, size = b.len(), "封面字节解码失败（非有效图片或格式不支持）");
+                    CoverEntry::Failed("图片解码失败（非有效图片或格式不支持）".to_string())
+                }
             }
         }
     }

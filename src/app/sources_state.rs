@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use tokio::sync::mpsc;
 
 use crate::crawler::health::SourceHealth;
+use crate::models::Rule;
 
 /// 书源过滤状态（持久化在 SourcesState 里，跟 `LibraryState.filter_text` 同模式）。
 #[derive(Default, PartialEq, Eq, Clone, Copy, Debug)]
@@ -69,9 +70,9 @@ impl SourcesState {
     ///   - 不修改 self，不修改传入的 rules
     ///   - 返回 owned Vec 方便 caller 排序 / 分页
     ///   - 不过滤 status：直接读 self.filter_status
-    pub fn filtered_rules(&self, rules: &[crate::models::Rule]) -> Vec<crate::models::Rule> {
+    pub fn filtered_rules(&self, rules: &[Rule]) -> Vec<Rule> {
         let kw = self.filter_text.trim().to_lowercase();
-        let mut out: Vec<crate::models::Rule> = rules
+        let mut out: Vec<Rule> = rules
             .iter()
             .filter(|r| match self.filter_status {
                 SourcesFilterStatus::All => true,

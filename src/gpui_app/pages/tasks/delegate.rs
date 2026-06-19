@@ -9,11 +9,6 @@ use super::row;
 use super::summary::TaskSummary;
 
 /// `gpui-component::List` 的 delegate —— 把当前过滤下的 `TaskSummary` 列表渲染成行。
-///
-/// 完全对齐 `library::LibraryDelegate` / `sources::SourcesDelegate` 模式：
-/// - `page_items` 由 `TasksPage::render` 在每帧 render 前写入；`render_item` 直接取。
-/// - 持有 `Entity<TasksPage>` handle 以便动作按钮 → page 转发（cancel / retry / prompt_delete）。
-/// - 选中态交给 `ListItem::selected(...)` + `set_selected_index` 配对管理。
 pub(super) struct TasksDelegate {
     /// 当前过滤下要展示的任务。
     pub(super) page_items: Vec<TaskSummary>,

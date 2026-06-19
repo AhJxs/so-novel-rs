@@ -13,6 +13,7 @@ use reqwest::Client;
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 
+use crate::config::AppConfig;
 use crate::http::client::{ClientOptions, build_async_client};
 use crate::models::SearchResult;
 use crate::parser::{SearchError, search_one};
@@ -35,12 +36,14 @@ pub struct SourceSearchOutcome {
 /// 可能有不同的 `ignore_ssl` 设置（rate-limit.json 里 0xs 书源就是这样）。
 /// 客户端构造很轻（不发请求），代价可接受。
 pub async fn search_aggregated(
-    cfg: &crate::config::AppConfig,
+    cfg: &AppConfig,
     sources: Vec<Source>,
     keyword: String,
     limit: Option<usize>,
     cf_bypass_base: Option<String>,
 ) -> Vec<SourceSearchOutcome> {
+    tracing::info!(sources = sources.len(), keyword = %keyword, "search_aggregated: 启动 {} 个并发源", sources.len());
+
     let mut set: JoinSet<SourceSearchOutcome> = JoinSet::new();
 
     let cfg = Arc::new(cfg.clone());
@@ -57,6 +60,10 @@ pub async fn search_aggregated(
             let client_opts = ClientOptions {
                 unsafe_ssl: src.rule.ignore_ssl,
             };
+            let started = std::time::Instant::now();
+
+            tracing::debug!(source_id = source_id, source = %source_name, "search_aggregated: 单源搜索开始");
+
             let result = match build_async_client(&cfg, &client_opts) {
                 Ok(client) => {
                     let cf_borrow: Option<&str> = cf.as_ref().as_ref().map(|s| s.as_str());
@@ -64,6 +71,11 @@ pub async fn search_aggregated(
                 }
                 Err(e) => Err(SearchError::Http(format!("client: {e:#}"))),
             };
+            let elapsed_ms = started.elapsed().as_millis() as u64;
+            match &result {
+                Ok(list) => tracing::info!(source_id = source_id, source = %source_name, hits = list.len(), elapsed_ms = elapsed_ms, "search_aggregated: 单源搜索成功"),
+                Err(e) => tracing::warn!(source_id = source_id, source = %source_name, elapsed_ms = elapsed_ms, error = %e, "search_aggregated: 单源搜索失败"),
+            }
             SourceSearchOutcome {
                 source_id,
                 source_name,
@@ -81,6 +93,7 @@ pub async fn search_aggregated(
     }
     // 按 source_id 升序，UI 显示稳定
     out.sort_by_key(|o| o.source_id);
+    tracing::info!(total = out.len(), "search_aggregated: 全部完成",);
     out
 }
 
@@ -90,13 +103,15 @@ pub async fn search_aggregated(
 /// - `search_aggregated` 收集所有结果到 Vec，适合测试和一次性批量处理。
 /// - `search_streaming` 每完成一源就推送，适合 UI 逐源更新进度。
 pub async fn search_streaming(
-    cfg: &crate::config::AppConfig,
+    cfg: &AppConfig,
     sources: Vec<Source>,
     keyword: String,
     limit: Option<usize>,
     cf_bypass_base: Option<String>,
     tx: mpsc::UnboundedSender<SourceSearchOutcome>,
 ) {
+    tracing::info!(sources = sources.len(), keyword = %keyword, "search_streaming: 启动 {} 个并发源", sources.len());
+
     let mut set: JoinSet<SourceSearchOutcome> = JoinSet::new();
 
     let cfg = Arc::new(cfg.clone());
@@ -113,6 +128,10 @@ pub async fn search_streaming(
             let client_opts = ClientOptions {
                 unsafe_ssl: src.rule.ignore_ssl,
             };
+            let started = std::time::Instant::now();
+
+            tracing::debug!(source_id = source_id, source = %source_name, "search_streaming: 单源搜索开始");
+
             let result = match build_async_client(&cfg, &client_opts) {
                 Ok(client) => {
                     let cf_borrow: Option<&str> = cf.as_ref().as_ref().map(|s| s.as_str());
@@ -120,6 +139,11 @@ pub async fn search_streaming(
                 }
                 Err(e) => Err(SearchError::Http(format!("client: {e:#}"))),
             };
+            let elapsed_ms = started.elapsed().as_millis() as u64;
+            match &result {
+                Ok(list) => tracing::info!(source_id = source_id, source = %source_name, hits = list.len(), elapsed_ms = elapsed_ms, "search_streaming: 单源搜索成功"),
+                Err(e) => tracing::warn!(source_id = source_id, source = %source_name, elapsed_ms = elapsed_ms, error = %e, "search_streaming: 单源搜索失败"),
+            }
             SourceSearchOutcome {
                 source_id,
                 source_name,
