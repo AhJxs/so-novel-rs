@@ -89,13 +89,9 @@ impl SelectItem for SourceSelectItem {
 pub struct SearchPage {
     model: Entity<AppModel>,
 
-    /// 关键词 Input。placeholder **必须**在 State 上（gpui-component 0.5.1 的 `Input`
-    /// element 没有 `.placeholder()` 方法）—— 实时 i18n 走 `last_seen_placeholder` sentinel。
+    /// 关键词 Input。placeholder 在 `new()` 建 InputState 时一次性设好
+    /// （`Search.filter.placeholder`）。语言切换走重启生效，新进程重建时拿新 locale。
     keyword: Entity<InputState>,
-
-    /// 实时 i18n sentinel：上次同步到 `InputState.placeholder` 的翻译。
-    /// 切语言后 `ts()` 返回新值 → render 顶部检测不一致 → `set_placeholder` 刷新。
-    last_seen_placeholder: SharedString,
 
     /// 选书源下拉 SelectState（可搜索）。
     ///
@@ -142,9 +138,9 @@ pub struct SearchPage {
 impl SearchPage {
     pub fn new(model: Entity<AppModel>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         // (a) 关键词 InputState + 订阅 InputEvent::Change
-        let initial_placeholder = ts("Search.filter.placeholder");
-        let keyword =
-            cx.new(|cx| InputState::new(window, cx).placeholder(initial_placeholder.to_string()));
+        let keyword = cx.new(|cx| {
+            InputState::new(window, cx).placeholder(ts("Search.filter.placeholder").to_string())
+        });
         cx.subscribe_in(&keyword, window, |this, _state, ev, _w, cx| {
             match ev {
                 InputEvent::Change => {
@@ -326,7 +322,6 @@ impl SearchPage {
         Self {
             model,
             keyword,
-            last_seen_placeholder: initial_placeholder,
             source_state,
             list_state,
             current_page: 0,
@@ -526,22 +521,9 @@ fn clamp_range_value(this: &SearchPage, raw: SharedString, cx: &App) -> u32 {
 }
 
 impl Render for SearchPage {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        // ---- 0. 实时 i18n sentinel: 刷新 keyword placeholder ----
-        //
-        // `set_placeholder` 内部 `cx.notify()` 只通知 InputState 重新 render。
-        // 但 `Input` 元素是 SearchPage render 时构造的，SearchPage 不重 render，
-        // Input 元素就不重画。这里额外 `cx.notify()` 强制 SearchPage 重 render，
-        // 触发 Input 重构造 → 读取 InputState 的最新 placeholder 渲染。
-        let new_placeholder = ts("Search.filter.placeholder");
-        if self.last_seen_placeholder != new_placeholder {
-            self.last_seen_placeholder = new_placeholder.clone();
-            self.keyword.update(cx, |state, cx| {
-                state.set_placeholder(new_placeholder, window, cx);
-            });
-            cx.notify();
-        }
-
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // keyword placeholder 在 `new()` 建 InputState 时一次性设好。语言切换走重启生效，
+        // 无需 render 里差量刷新。
         let model = self.model.read(cx);
         let results = model.search.results.clone();
         let running = model.search.running;
@@ -1435,8 +1417,9 @@ fn render_range_dialog_content(
                                         .child(ts("Search.range.start")),
                                 )
                                 // 加宽到 160px（minus/plus 按钮各占 ~28px，留 ~100px 给数字）。
-                                // .text_center() 让内部 Input 的数字居中 —— GPUI text style 沿
-                                // DOM 树继承，NumberInput 外层设的 text_align 会被内部 Input 继承。
+                                // 注：gpui-component 0.5.1 的 Input/NumberInput 不支持文本水平
+                                // 居中——数字由自定义 element 固定左对齐绘制，无对齐 API，
+                                // 外层 styled 的 text_align 也不会被内部 Input 继承。接受左对齐。
                                 .child(
                                     NumberInput::new(&page.read(cx).range_start_input).w(px(160.0)),
                                 ),

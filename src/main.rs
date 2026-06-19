@@ -77,7 +77,12 @@ fn init_tracing(log_dir: &std::path::Path) {
             let (writer, guard) = tracing_appender::non_blocking(appender);
             // guard 进 leak 让文件 writer 后台线程存活到进程退出 —— tracing_appender 标准用法。
             Box::leak(Box::new(guard));
-            let file_layer = fmt::layer().with_writer(writer).with_target(true);
+            // 文件 layer 关掉 ANSI 颜色码（\x1b[2m / \x1b[32m …）—— 文件不是终端，
+            // 不解释转义码，带颜色码会显示成 [2m...[0m 乱码。stdout layer 保留 ANSI。
+            let file_layer = fmt::layer()
+                .with_writer(writer)
+                .with_target(true)
+                .with_ansi(false);
             registry.with(file_layer).init();
         }
         Err(e) => {

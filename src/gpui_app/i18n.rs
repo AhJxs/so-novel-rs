@@ -12,13 +12,17 @@
 //! （`rust_i18n::set_locale` 写到全局 `CURRENT_LOCALE`）。所以一次 `gpui_component::set_locale("en")`
 //! 同时影响双方：`t!("Nav.search")` → "Search"，`t!("Settings.search_placeholder")` → "Search..."
 //!
-//! ## 改语言时的流程
+//! ## 改语言时的流程（重启生效）
 //!
-//! 1. 用户在设置页选 en
-//! 2. `AppConfig.language = Language::English; persist_settings()`
-//! 3. `gpui_component::set_locale("en")` 写到全局 locale
-//! 4. `cx.refresh_windows()` 触发整 app 重 render
-//! 5. 所有 `ts!()` 调用的 `t!` 读新全局 locale 拿新翻译
+//! 1. 用户在设置页选 en → `AppConfig.language = English; persist_settings()`
+//! 2. 弹重启确认 Dialog：立即重启 → `cx.restart()`；取消 → 不动 locale
+//! 3. 重启后新进程启动时 `mod.rs::run` 调 `gpui_component::set_locale(locale_for(language))`
+//!    写全局 locale，再开窗 —— 首次 render 就用新 locale
+//!
+//! 为什么不实时切换（set_locale + refresh_windows）？gpui-component 的 `InputState.placeholder`、
+//! `SettingsState` 等很多翻译是一次性求值缓存在各 entity 里的，切语言当帧 `refresh_windows`
+//! 不会重求这些缓存值（下拉框已选值 / 输入框 placeholder 不更新）。早先用「render 里 sentinel
+//! 差量比对 + set_placeholder」逐个刷新，代价大且覆盖不全，故改成重启生效，彻底删掉 sentinel 机制。
 
 use gpui::SharedString;
 

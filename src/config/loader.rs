@@ -130,25 +130,102 @@ impl Language {
     }
 }
 
-/// 主题偏好：直接存 gpui-component 已注册的主题名（来自 `src/gpui_app/themes/*.json`）。
+/// 主题模式：静态（固定一个主题）或动态（浅/深色各选一个，按明暗模式切换）。
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize, Deserialize, Default)]
+pub enum ThemeKind {
+    /// 动态：分别指定浅色 / 深色主题，按 [`ThemeDynMode`] 切换。默认。
+    #[default]
+    Dynamic,
+    /// 静态：固定使用 `static_name` 这一个主题，不跟随系统明暗。
+    Static,
+}
+
+impl ThemeKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ThemeKind::Dynamic => "dynamic",
+            ThemeKind::Static => "static",
+        }
+    }
+
+    pub fn parse(s: &str) -> Self {
+        match s.trim() {
+            "static" => ThemeKind::Static,
+            _ => ThemeKind::Dynamic,
+        }
+    }
+}
+
+/// 动态主题的明暗切换方式（仅 [`ThemeKind::Dynamic`] 生效）。
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize, Deserialize, Default)]
+pub enum ThemeDynMode {
+    /// 跟随系统明暗。
+    #[default]
+    System,
+    /// 强制浅色。
+    Light,
+    /// 强制深色。
+    Dark,
+}
+
+impl ThemeDynMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ThemeDynMode::System => "system",
+            ThemeDynMode::Light => "light",
+            ThemeDynMode::Dark => "dark",
+        }
+    }
+
+    pub fn parse(s: &str) -> Self {
+        match s.trim() {
+            "light" => ThemeDynMode::Light,
+            "dark" => ThemeDynMode::Dark,
+            _ => ThemeDynMode::System,
+        }
+    }
+}
+
+/// 主题偏好。
 ///
-/// - 空串 = 使用 gpui-component 自带的默认主题（不主动覆盖）。
-/// - 非空 = 用 `Theme::global_mut(cx).apply_config(&cfg)` 应用同名主题。
-///   Light/Dark 模式本身交给 `gpui_component::Theme::sync_system_appearance` 跟 OS，
-///   所以这里只存一个名字，不分 light/dark 两种值。
-pub type ThemePref = String;
+/// 两种模式共用一个 struct（而非 enum）—— 切换 [`ThemeKind`] 时**保留**另一模式的
+/// 选项，用户在静态/动态间来回切不会丢失已选的浅/深主题名。
+///
+/// - [`ThemeKind::Static`] → 用 `static_name`（空串 = gpui-component 默认主题）。
+/// - [`ThemeKind::Dynamic`] → `dyn_light` / `dyn_dark` 各指定一个主题名（空串 = 用
+///   registry 默认浅/深主题），`dyn_mode` 决定按系统 / 强制浅 / 强制深切换。
+///
+/// 主题名来自 `src/gpui_app/themes/*.json`（每个文件含 light + dark 变体，变体名如
+/// `"Catppuccin Latte"` / `"Catppuccin Mocha"`）。设置页选浅/深主题时会按变体的
+/// `mode` 过滤，避免把深色主题选进浅色槽。
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ThemePref {
+    pub kind: ThemeKind,
+    /// 静态模式用的主题变体名。
+    pub static_name: String,
+    /// 动态模式的明暗切换方式。
+    pub dyn_mode: ThemeDynMode,
+    /// 动态模式 — 浅色主题变体名（空 = 默认浅色）。
+    pub dyn_light: String,
+    /// 动态模式 — 深色主题变体名（空 = 默认深色）。
+    pub dyn_dark: String,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
     pub version: String,
 
     // [global]
-    pub theme: ThemePref,
+    pub theme_pref: ThemePref,
     pub language: Language,
     pub gh_proxy: String,
     pub cf_bypass: String,
     /// 左侧 Sidebar 是否折叠。重启后保持上次状态。
     pub sidebar_collapsed: bool,
+    /// UI 字号（px）。gpui-component 默认 16；`Root::render` 每帧用它设 rem 基准，
+    /// 组件全用 `rems(...)` 缩放，改这一个字段 = 全局缩放。
+    /// 范围由 `themes::FONT_SIZE_MIN/MAX` 钳制（12–24），超出部分渲染时被夹住。
+    pub font_size: f32,
 
     // [download]
     pub download_path: String,
@@ -186,13 +263,14 @@ impl Default for AppConfig {
         Self {
             version: env!("CARGO_PKG_VERSION").to_string(),
 
-            theme: String::new(),
-            // 空串 = "未指定"，启动时 `apply_theme_by_name("")` no-op，
-            // gpui-component 用自带默认主题（light/dark 跟 OS 走）。
+            theme_pref: ThemePref::default(),
+            // 默认 = Dynamic + System + 空名（gpui-component 默认浅/深主题，跟 OS 走）。
             language: Language::SimplifiedChinese,
             gh_proxy: String::new(),
             cf_bypass: String::new(),
             sidebar_collapsed: false,
+            // 与 themes::FONT_SIZE_DEFAULT 一致（16px）。
+            font_size: 16.0,
 
             download_path: default_download_path(),
             ext_name: ExportFormat::Epub,
@@ -247,6 +325,17 @@ fn t_int(doc: &DocumentMut, table: &str, key: &str) -> Option<i64> {
         .and_then(|v| v.as_integer())
 }
 
+/// 读浮点（兼容 TOML 里写成整数 `16` 或浮点 `16.0` 两种形式）。
+fn t_float(doc: &DocumentMut, table: &str, key: &str) -> Option<f32> {
+    let v = doc
+        .get(table)
+        .and_then(|t| t.as_table())
+        .and_then(|t| t.get(key))?;
+    v.as_float()
+        .map(|f| f as f32)
+        .or_else(|| v.as_integer().map(|i| i as f32))
+}
+
 fn sat_i32(v: i64) -> i32 {
     v.clamp(i32::MIN as i64, i32::MAX as i64) as i32
 }
@@ -273,9 +362,35 @@ pub fn load_config(path: &Path) -> Result<AppConfig> {
 
     let mut cfg = AppConfig::default();
 
-    // [global]
-    if let Some(v) = t_str(&doc, "global", "theme") {
-        cfg.theme = v;
+    // [global] —— 主题偏好。
+    //
+    // 新键：theme-kind / theme-name / theme-dyn-mode / theme-light / theme-dark。
+    // 旧键 `[global].theme = "X"`（单一主题名）向后兼容：非空 → 静态模式 + 该名字；
+    // 空或缺省 → 默认（Dynamic + System）。
+    if let Some(v) = t_str(&doc, "global", "theme-kind") {
+        cfg.theme_pref.kind = ThemeKind::parse(&v);
+    }
+    if let Some(v) = t_str(&doc, "global", "theme-name") {
+        cfg.theme_pref.static_name = v;
+    }
+    if let Some(v) = t_str(&doc, "global", "theme-dyn-mode") {
+        cfg.theme_pref.dyn_mode = ThemeDynMode::parse(&v);
+    }
+    if let Some(v) = t_str(&doc, "global", "theme-light") {
+        cfg.theme_pref.dyn_light = v;
+    }
+    if let Some(v) = t_str(&doc, "global", "theme-dark") {
+        cfg.theme_pref.dyn_dark = v;
+    }
+    // 旧单主题键迁移：仅当新键 theme-kind 没写、且旧 theme 非空时，按静态模式接管。
+    if t_str(&doc, "global", "theme-kind").is_none() {
+        if let Some(v) = t_str(&doc, "global", "theme") {
+            cfg.theme_pref = ThemePref {
+                kind: ThemeKind::Static,
+                static_name: v,
+                ..ThemePref::default()
+            };
+        }
     }
     // 新 TOML 键 `[global].language`；旧键 `[global].app-lang` 兼容 —— 老用户配置无需手动迁移。
     if let Some(v) = t_str(&doc, "global", "language") {
@@ -295,6 +410,9 @@ pub fn load_config(path: &Path) -> Result<AppConfig> {
     }
     if let Some(v) = t_bool(&doc, "global", "sidebar-collapsed") {
         cfg.sidebar_collapsed = v;
+    }
+    if let Some(v) = t_float(&doc, "global", "font-size") {
+        cfg.font_size = v;
     }
 
     // [download]
@@ -395,14 +513,41 @@ pub fn save_config(path: &Path, cfg: &AppConfig) -> Result<()> {
             t[key] = value(v);
         }
     }
+    fn set_float(doc: &mut DocumentMut, table: &str, key: &str, v: f64) {
+        let t = doc.entry(table).or_insert(Item::Table(Default::default()));
+        if let Some(t) = t.as_table_mut() {
+            t[key] = value(v);
+        }
+    }
     fn unset(doc: &mut DocumentMut, table: &str, key: &str) {
         if let Some(t) = doc.get_mut(table).and_then(|t| t.as_table_mut()) {
             t.remove(key);
         }
     }
 
-    // [global]
-    set_str(&mut doc, "global", "theme", &cfg.theme);
+    // [global] —— 主题偏好（新键）。旧 `theme` 键不再写出；加载端仍兼容读取。
+    // 主动移除老 `theme` 键，避免迁移后新旧并存造成混淆（仅当存在时）。
+    unset(&mut doc, "global", "theme");
+    set_str(
+        &mut doc,
+        "global",
+        "theme-kind",
+        cfg.theme_pref.kind.as_str(),
+    );
+    set_str(
+        &mut doc,
+        "global",
+        "theme-name",
+        &cfg.theme_pref.static_name,
+    );
+    set_str(
+        &mut doc,
+        "global",
+        "theme-dyn-mode",
+        cfg.theme_pref.dyn_mode.as_str(),
+    );
+    set_str(&mut doc, "global", "theme-light", &cfg.theme_pref.dyn_light);
+    set_str(&mut doc, "global", "theme-dark", &cfg.theme_pref.dyn_dark);
     set_str(&mut doc, "global", "language", cfg.language.as_str());
     set_str(&mut doc, "global", "gh-proxy", &cfg.gh_proxy);
     set_str(&mut doc, "global", "cf-bypass", &cfg.cf_bypass);
@@ -412,6 +557,7 @@ pub fn save_config(path: &Path, cfg: &AppConfig) -> Result<()> {
         "sidebar-collapsed",
         cfg.sidebar_collapsed,
     );
+    set_float(&mut doc, "global", "font-size", cfg.font_size as f64);
 
     // [download]
     set_str(&mut doc, "download", "download-path", &cfg.download_path);
@@ -510,10 +656,17 @@ fn default_template_doc() -> DocumentMut {
 # 字段语义与旧版 config.ini 一致；规则与下载任务记录已迁到根目录的 sonovel.db。
 
 [global]
-# theme = 留空 = 用 gpui-component 自带默认主题（light/dark 跟 OS 走）。
-# 改成具体主题名（与 `src/gpui_app/themes/*.json` 里的 `name` 字段一致）
-# 即可启用对应主题，例如 `theme = "Catppuccin Mocha"`。
-theme = ""
+# 主题偏好：
+#   theme-kind = "dynamic"（默认）或 "static"
+#     - dynamic：theme-light / theme-dark 各选一个主题，按 theme-dyn-mode（system/light/dark）切换
+#     - static  ：固定用 theme-name 这一个主题，不随明暗变化
+#   主题名与 `src/gpui_app/themes/*.json` 里变体的 name 一致（如 "Catppuccin Latte"），
+#   留空 = 用 gpui-component 内置默认主题。
+theme-kind = "dynamic"
+theme-name = ""
+theme-dyn-mode = "system"
+theme-light = ""
+theme-dark = ""
 # language = 应用语言（Sidebar placeholder / Select / Dialog 等所有 gpui-component
 # 内部 `t!("...")` 文案的语言，同时决定下载章节正文的目标语言 —— 见
 # `Language::to_book_target_lang`）。三选一：zh-CN / zh-TW / en。
@@ -522,6 +675,8 @@ gh-proxy = ""
 cf-bypass = ""
 # 左侧 Sidebar 是否折叠。重启后保持上次状态。
 sidebar-collapsed = false
+# UI 字号（px），范围 12–24，默认 16。整个 app 按 rem 等比缩放。
+font-size = 16
 
 [download]
 # download-path 默认为系统 Documents/Novel/（由 AppConfig::default() 注入）。
@@ -608,6 +763,18 @@ mod tests {
     }
 
     #[test]
+    fn font_size_accepts_int_and_float_literal() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        // 整数形式（模板默认写法）
+        std::fs::write(&path, "[global]\nfont-size = 18\n").unwrap();
+        assert_eq!(load_config(&path).unwrap().font_size, 18.0);
+        // 浮点形式
+        std::fs::write(&path, "[global]\nfont-size = 20.5\n").unwrap();
+        assert_eq!(load_config(&path).unwrap().font_size, 20.5);
+    }
+
+    #[test]
     fn round_trip_through_save_and_load() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("config.toml");
@@ -624,8 +791,15 @@ mod tests {
             proxy_port: 1080,
             qidian_cookie: "w_tsfp=demo".to_string(),
             language: Language::English,
-            theme: "Catppuccin Mocha".to_string(),
+            theme_pref: ThemePref {
+                kind: ThemeKind::Dynamic,
+                dyn_mode: ThemeDynMode::Dark,
+                dyn_light: "Catppuccin Latte".to_string(),
+                dyn_dark: "Catppuccin Mocha".to_string(),
+                ..ThemePref::default()
+            },
             sidebar_collapsed: true,
+            font_size: 20.0,
             ..AppConfig::default()
         };
 
@@ -643,8 +817,38 @@ mod tests {
         assert_eq!(loaded.proxy_port, cfg.proxy_port);
         assert_eq!(loaded.qidian_cookie, cfg.qidian_cookie);
         assert_eq!(loaded.language, Language::English);
-        assert_eq!(loaded.theme, "Catppuccin Mocha");
+        assert_eq!(loaded.theme_pref, cfg.theme_pref);
         assert!(loaded.sidebar_collapsed);
+        assert_eq!(loaded.font_size, 20.0);
+    }
+
+    #[test]
+    fn legacy_single_theme_key_migrates_to_static() {
+        // 老用户配置里只有 `[global].theme = "X"`，新键都没写 —— 应迁移成静态模式。
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(
+            &path,
+            r#"[global]
+theme = "Catppuccin Mocha"
+"#,
+        )
+        .unwrap();
+
+        let cfg = load_config(&path).unwrap();
+        assert_eq!(cfg.theme_pref.kind, ThemeKind::Static);
+        assert_eq!(cfg.theme_pref.static_name, "Catppuccin Mocha");
+        // 动态字段保持默认空（切换到动态模式时复用）。
+        assert_eq!(cfg.theme_pref.dyn_mode, ThemeDynMode::System);
+        assert_eq!(cfg.theme_pref.dyn_light, "");
+        assert_eq!(cfg.theme_pref.dyn_dark, "");
+
+        // save 后老 theme 键被移除、新键写入。
+        save_config(&path, &cfg).unwrap();
+        let written = std::fs::read_to_string(&path).unwrap();
+        assert!(!written.contains("\ntheme ="));
+        assert!(written.contains("theme-kind = \"static\""));
+        assert!(written.contains("theme-name = \"Catppuccin Mocha\""));
     }
 
     #[test]

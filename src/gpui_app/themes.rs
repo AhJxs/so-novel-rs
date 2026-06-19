@@ -22,11 +22,17 @@
 //! - 不删用户已有的 themes（即使看着像 embed 默认）
 
 use std::path::Path;
+use std::rc::Rc;
 
-use gpui::{App, SharedString};
-use gpui_component::{Theme, ThemeRegistry};
+use gpui::{App, SharedString, Window, px};
+use gpui_component::{Theme, ThemeConfig, ThemeMode, ThemeRegistry};
 
-use crate::config::ConfigPaths;
+use crate::config::{ConfigPaths, ThemeDynMode, ThemeKind, ThemePref};
+
+/// 字号范围（px）。gpui-component 默认 16；设置页 slider 的 min/max 复用这两个常量。
+pub const FONT_SIZE_MIN: f32 = 12.0;
+pub const FONT_SIZE_MAX: f32 = 24.0;
+pub const FONT_SIZE_DEFAULT: f32 = 16.0;
 
 // ----- 21 个主题 JSON embed（编译期嵌入；`include_str!` 路径必须字面量）-----
 pub const THEME_ADVENTURE: &str = include_str!("themes/adventure.json");
@@ -91,8 +97,11 @@ fn embedded_themes() -> Vec<(&'static str, &'static str)> {
 /// `apply_theme_by_name` 在那里调用才对。
 ///
 /// - `saved_theme`：config.toml 里的主题名；空串 = 保持 gpui-component 默认
+/// - `font_size`：config.toml 里的字号（px）；在 `apply_theme_by_name` **之后**应用，
+///   因为 `Theme::apply_config` 会用主题 JSON 的 `font_size`（缺省 16）覆盖
+///   `Theme.font_size`，先调字号后装主题会被冲掉。
 /// - 主题名找不到时 `apply_theme_by_name` 内部静默 fallback
-pub fn init(cx: &mut App, paths: &ConfigPaths, saved_theme: &str) {
+pub fn init(cx: &mut App, paths: &ConfigPaths, theme_pref: &ThemePref, font_size: f32) {
     let themes_dir = paths.themes_dir.clone();
     if let Err(e) = ensure_user_themes_dir(&themes_dir) {
         tracing::warn!(
@@ -102,25 +111,39 @@ pub fn init(cx: &mut App, paths: &ConfigPaths, saved_theme: &str) {
         return;
     }
 
-    let saved = saved_theme.to_string();
+    let pref = theme_pref.clone();
     let themes_dir_for_log = themes_dir.clone();
     if let Err(e) = ThemeRegistry::watch_dir(themes_dir.clone(), cx, move |cx| {
         // on_load: reload 已完成，registry 现在有 21 个 embed 主题（变体展开后
-        // 30+ 项）。应用持久化主题（如果还匹配）。
-        // 不再手动 `cx.refresh_windows()` — `Theme::global_mut(cx).apply_config`
-        // 内部会触发 gpui-component 内置的 Theme 变化 observer，observer
-        // 自己会 refresh；手动再调一次就是重复。
+        // 30+ 项）。应用持久化主题偏好。
         tracing::info!(
             "themes loaded: {} entries from {:?}",
             list_theme_names(cx).len(),
             themes_dir
         );
-        apply_theme_by_name(&saved, cx);
+        apply_theme_pref(&pref, None, cx);
+        // 必须在装主题之后：apply_config 会把字号重置成主题默认值，这里再覆回用户值。
+        apply_font_size(font_size, cx);
     }) {
         tracing::warn!("watch themes dir {:?} failed: {e}", themes_dir_for_log);
     } else {
         tracing::info!("watching themes dir: {:?}", themes_dir_for_log);
     }
+}
+
+/// 把字号写进全局 `Theme.font_size` 并刷新所有窗口。
+///
+/// `Root::render` 每帧用 `window.set_rem_size(cx.theme().font_size)` 把主题字号设成
+/// rem 基准，组件全用 `rems(...)` 缩放，所以改这一个字段 = 全局等比缩放。
+///
+/// `Theme::global_mut` 返回的是 `&mut Theme` 原地改，**不会**触发 `observe_global::<Theme>`
+/// observer，所以必须显式 `cx.refresh_windows()` 让 `Root::render` 重跑拿到新 rem_size。
+///
+/// `size` 会被钳到 `[FONT_SIZE_MIN, FONT_SIZE_MAX]`，防止配置被手改成越界值后 UI 失控。
+pub fn apply_font_size(size: f32, cx: &mut App) {
+    let size = size.clamp(FONT_SIZE_MIN, FONT_SIZE_MAX);
+    Theme::global_mut(cx).font_size = px(size);
+    cx.refresh_windows();
 }
 
 /// 把 embed 主题同步到用户 themes 目录：
@@ -154,39 +177,145 @@ fn ensure_user_themes_dir(path: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-/// 按名称把主题装进 `Theme::global_mut`。
-///
-/// - 空串 → no-op（保持当前主题，符合 config.toml 留空的语义）
-/// - 找不到同名主题 → **静默 fallback 到 gpui-component 默认 light**
-///
-/// 装好之后 gpui-component 的 `cx.observe_global::<ThemeRegistry>` observer 会自动
-/// `cx.refresh_windows()`，所有窗口重绘（见 gpui-component `theme/registry.rs:47-73`）。
-pub fn apply_theme_by_name(name: &str, cx: &mut App) {
+/// 解析主题名 → `ThemeConfig`。空串 / 找不到时返回 `None`。
+fn lookup_theme(name: &str, cx: &App) -> Option<Rc<ThemeConfig>> {
     if name.is_empty() {
-        return;
+        return None;
     }
     let key = SharedString::from(name.to_string());
-    let cfg = match ThemeRegistry::global(cx).themes().get(&key).cloned() {
-        Some(c) => c,
-        None => {
-            tracing::info!(
-                "theme '{}' not in registry; falling back to default Light (available: {})",
-                name,
-                list_theme_names(cx).join(", ")
-            );
-            // fallback：清空 light_theme / dark_theme 引用，gpui-component 会用
-            // ThemeColor::default() 兜底（基本就是 Light）。
-            return;
-        }
-    };
-    Theme::global_mut(cx).apply_config(&cfg);
+    ThemeRegistry::global(cx).themes().get(&key).cloned()
 }
 
-/// 列出当前可用的所有主题名（按 name 字典序）。
+/// 应用主题偏好到全局 `Theme`，并刷新所有窗口。
+///
+/// 两种模式（见 [`ThemePref`]）：
+/// - **Static**：把 `static_name` 同时装进浅/深两槽，`Theme.mode` 设成该主题自身的 mode
+///   （主题 JSON 里 light 变体 → Light，dark 变体 → Dark），再 `apply_config`。即整 app
+///   固定用这一个主题，不随系统明暗变化。
+/// - **Dynamic**：`dyn_light` → 浅槽、`dyn_dark` → 深槽（找不到/空 → registry 默认浅/深），
+///   再按 `dyn_mode`（system/light/dark）调 `Theme::change` 决定当前激活哪个。
+///   `system` 模式额外调 `Theme::sync_system_appearance` 让它跟 OS 明暗。
+///
+/// **关键：必须双槽都装 + Theme::change，不能只 apply_config 一个槽。**
+/// 只 apply_config 单个主题会只改当前激活槽的样式，但 `Theme.mode` 和另一槽的引用仍是旧的；
+/// 用户切系统明暗 / 切 dyn_mode 时 `Theme::change` 读的是槽引用，没装就 fallback 默认主题。
+///
+/// `window`：`Theme::change` 的 `sync_system_appearance` 需要读 `window.appearance()`，
+/// 启动 on_load 回调里拿不到 window（传 `None`，用 `cx.window_appearance()` 兜底）；
+/// 设置页实时改时传 `Some(window)` 拿到精确的当前窗口 appearance。
+///
+/// 找不到的主题名静默 fallback 到 registry 默认主题，不 panic。
+pub fn apply_theme_pref(pref: &ThemePref, window: Option<&mut Window>, cx: &mut App) {
+    match pref.kind {
+        ThemeKind::Static => {
+            let registry = ThemeRegistry::global(cx);
+            let cfg = lookup_theme(&pref.static_name, cx).unwrap_or_else(|| {
+                if !pref.static_name.is_empty() {
+                    tracing::info!(
+                        "static theme '{}' not in registry; using default (available: {})",
+                        pref.static_name,
+                        list_theme_names(cx).join(", ")
+                    );
+                }
+                // 找不到 → 用 registry 当前激活 mode 的默认主题。
+                if Theme::global(cx).mode.is_dark() {
+                    registry.default_dark_theme().clone()
+                } else {
+                    registry.default_light_theme().clone()
+                }
+            });
+
+            let mode = cfg.mode;
+            let theme = Theme::global_mut(cx);
+            // 把这一个主题同时塞进浅/深两槽 —— Static 模式不区分明暗，无论 Theme.mode 是
+            // 什么，apply_config 都用同一个主题。这样即使用户先前在 Dynamic 模式选过别的
+            // 深色主题，切到 Static 后也不会被残留槽影响。
+            theme.light_theme = cfg.clone();
+            theme.dark_theme = cfg.clone();
+            theme.apply_config(&cfg);
+            // apply_config 已把 mode 设成主题自身 mode；显式同步一次保证 Theme.mode 一致。
+            Theme::change(mode, None, cx);
+        }
+        ThemeKind::Dynamic => {
+            let registry = ThemeRegistry::global(cx);
+            let default_light = registry.default_light_theme().clone();
+            let default_dark = registry.default_dark_theme().clone();
+
+            let light_cfg = lookup_theme(&pref.dyn_light, cx)
+                .filter(|c| !c.mode.is_dark())
+                .unwrap_or_else(|| {
+                    if !pref.dyn_light.is_empty()
+                        && lookup_theme(&pref.dyn_light, cx)
+                            .map(|c| c.mode.is_dark())
+                            .unwrap_or(false)
+                    {
+                        // 用户给浅槽选了个深色主题 → 过滤掉，回落默认浅色（设置页 UI 也会
+                        // 过滤，这里是防御性兜底）。
+                        tracing::info!(
+                            "dyn_light '{}' is a dark theme; using default light",
+                            pref.dyn_light
+                        );
+                    }
+                    default_light
+                });
+            let dark_cfg = lookup_theme(&pref.dyn_dark, cx)
+                .filter(|c| c.mode.is_dark())
+                .unwrap_or_else(|| {
+                    if !pref.dyn_dark.is_empty()
+                        && lookup_theme(&pref.dyn_dark, cx)
+                            .map(|c| !c.mode.is_dark())
+                            .unwrap_or(false)
+                    {
+                        tracing::info!(
+                            "dyn_dark '{}' is a light theme; using default dark",
+                            pref.dyn_dark
+                        );
+                    }
+                    default_dark
+                });
+
+            // 双槽装好，再按 dyn_mode 切换激活槽。Theme::change 内部 apply_config 对应槽。
+            {
+                let theme = Theme::global_mut(cx);
+                theme.light_theme = light_cfg;
+                theme.dark_theme = dark_cfg;
+            }
+
+            match pref.dyn_mode {
+                ThemeDynMode::System => {
+                    // 跟随系统：用 sync_system_appearance 读 window/cx appearance 再 change。
+                    Theme::sync_system_appearance(window, cx);
+                }
+                ThemeDynMode::Light => Theme::change(ThemeMode::Light, None, cx),
+                ThemeDynMode::Dark => Theme::change(ThemeMode::Dark, None, cx),
+            }
+        }
+    }
+
+    // Theme::change / apply_config 都会刷新窗口（registry observer + change 内部），
+    // 但 global_mut 改槽引用不触发 observer，显式 refresh 兜底。
+    cx.refresh_windows();
+}
+
+/// 列出当前可用的所有主题变体名（按 name 字典序）。
 ///
 /// `HashMap` 迭代顺序不稳定，必须显式排序才能给 Select 稳定选项顺序。
 pub fn list_theme_names(cx: &App) -> Vec<SharedString> {
     let mut names: Vec<SharedString> = ThemeRegistry::global(cx).themes().keys().cloned().collect();
+    names.sort_by_key(|a| a.to_lowercase());
+    names
+}
+
+/// 列出指定模式（light / dark）的主题变体名（按 name 字典序）。
+///
+/// 动态模式选浅/深主题时用：过滤掉与目标 mode 不符的变体，避免用户把深色主题选进浅色槽。
+pub fn list_theme_names_by_mode(cx: &App, dark: bool) -> Vec<SharedString> {
+    let mut names: Vec<SharedString> = ThemeRegistry::global(cx)
+        .themes()
+        .iter()
+        .filter(|(_, cfg)| cfg.mode.is_dark() == dark)
+        .map(|(n, _)| n.clone())
+        .collect();
     names.sort_by_key(|a| a.to_lowercase());
     names
 }

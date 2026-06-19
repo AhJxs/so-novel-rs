@@ -63,7 +63,7 @@ directories = "6"
 # macOS FSEvents / Linux inotify）。debounce 由 LibraryPage 的 watcher 任务
 # 内部用 tokio::time::sleep + AtomicU64 计数器自行实现，不再引入
 # notify-debouncer-mini 增加编译时间和依赖图复杂度。
-notify = "7"
+notify = "8.2"
 
 # HTTP client (rustls 避免 OpenSSL 依赖；cookies 用于规则中的 Cookie 头注入；
 # gzip/brotli 解压由 reqwest 透明处理)。
@@ -118,14 +118,12 @@ clap = { version = "4", features = ["derive"] }
 # Linux 走 xdg-portal 而非默认 GTK3，避免引入 gtk3 系统依赖；
 # Windows / macOS 走原生 IFileOpenDialog / NSOpenPanel。
 #
-# 用 `async-std` feature（不用 `tokio`）：
-# - 项目顶层 async runtime 是 smol（gpui 0.2.2 + 项目自己），与 async-std 接口兼容
-# - rfd 的 `tokio` feature 启 ashpd `tokio` feature；rfd 的 `async-std` feature
-#   启 ashpd `async-std` feature。gpui 0.2.2 默认已经启 ashpd `async-std`，
-#   如果再启 ashpd `tokio` 会触发 ashpd 0.11.1 源码的 compile_error
-#   ("You can't enable both async-std & tokio features at once")
-#   在 Linux build 报 7 个 E0061/E0252/E0277。
-rfd = { version = "0.15", default-features = false, features = ["xdg-portal", "async-std"] }
+# rfd 0.17 起移除了 ashpd / async-std / tokio runtime feature：`xdg-portal` 现在
+# 自带 pollster（轻量 blocking poll executor），不再依赖 ashpd，也就不再有「gpui
+# 默认启 ashpd async-std、rfd 再启 tokio 触发 ashpd compile_error」的旧冲突。
+# AsyncFileDialog API 不变，仍返回 impl Future，由调用方的 executor（gpui 的
+# background_executor）驱动。
+rfd = { version = "^0.17.2", default-features = false, features = ["xdg-portal"] }
 
 # 临时目录（测试用 — `ConfigPaths::discover` / `load_rules_from_db` 的单元测试
 # 通过 `tempfile::tempdir()` 把 `~/.sonovel` 重定向到临时目录避免污染用户主目录）。
@@ -138,7 +136,7 @@ rusqlite = { version = "0.40", features = ["bundled"] }
 # 各自调 OS API（GetTimeZoneInformation / localtime_r / ...），跨平台用一个 API 拿偏移秒数。
 time = { version = "0.3", default-features = false, features = ["local-offset"] }
 zhconv = "0.4.1"
-pdf_oxide = { version = "0.3.37", features = ["rendering"] }
+pdf_oxide = { version = "0.3.66", features = ["rendering"] }
 
 # Windows DWM 圆角 / 暗色标题栏暂未在 GPUI 路径启用（Stage 12 决定）。
 # 当前只保留 CLI 模式需要的 console attach 那一部分 feature。

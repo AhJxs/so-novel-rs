@@ -93,11 +93,15 @@ pub fn run() -> Result<()> {
         // 4. 加载 themes/*.json 到 ThemeRegistry（on_load 里 apply + refresh）。
         //    themes 目录 = `~/.sonovel/themes/`（首次启动写入 21 个 embed，
         //    之后用户可手动放自定义 *.json 进去热加载）。
-        let (app_paths, saved_theme) = {
+        let (app_paths, theme_pref, font_size) = {
             let s = model.read(cx);
-            (s.paths.clone(), s.config.theme.clone())
+            (
+                s.paths.clone(),
+                s.config.theme_pref.clone(),
+                s.config.font_size,
+            )
         };
-        themes::init(cx, &app_paths, &saved_theme);
+        themes::init(cx, &app_paths, &theme_pref, font_size);
 
         // 5. 把 `AppConfig.language`（应用语言）同步给 gpui-component —— 影响内部
         //    Sidebar 搜索 placeholder / Select placeholder / Dialog OK|Cancel 等所有

@@ -50,6 +50,7 @@ impl RenderOnce for StatusBadge {
         // gpui-component Badge 自带样式；这里只覆盖 .text_color 让"业务名 → 主题色"
         // 的映射集中在一处。
         div()
+            .text_sm()
             .text_color(self.kind.color(cx))
             .child(Badge::new().child(self.label))
     }

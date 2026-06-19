@@ -20,8 +20,8 @@ use std::path::PathBuf;
 
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    App, AppContext, ClickEvent, Context, Entity, IntoElement, ParentElement, Render, SharedString,
-    Styled, Window, div, px,
+    App, AppContext, ClickEvent, Context, Entity, IntoElement, ParentElement, Render, Styled,
+    Window, div, px,
 };
 use gpui_component::StyledExt;
 use gpui_component::{
@@ -78,16 +78,6 @@ pub struct LibraryPage {
     /// 那边没有 tokio reactor。smol 的 `Sender`/`Receiver` 都基于 `async-channel`，
     /// 跟 `tokio::sync::mpsc` 接口很像，但底层调度走 smol。
     watcher_cmd_tx: smol::channel::Sender<WatcherCmd>,
-
-    /// 实时 i18n sentinel：上次 render 时 `Library.filter.placeholder` 的翻译结果。
-    /// 切语言后 `ts()` 返回新值 → render 里检测到不一致 → 调 `set_placeholder` 刷新。
-    ///
-    /// **为什么非要用 State 字段**：gpui-component 0.5.1 的 `Input` element 没有
-    /// `.placeholder(...)` 方法（看 `gpui-component-0.5.1/src/input/input.rs:241+` 的
-    /// `RenderOnce for Input`），placeholder 只能从 `InputState.placeholder` 读
-    /// （`element.rs:952-958` paint 时 `let placeholder = self.placeholder.clone()` 字段）。
-    /// 这是 API 限制 —— 不能完全"避免 State 持有翻译"，只能"在 render 实时刷新"。
-    last_seen_placeholder: SharedString,
 }
 
 impl LibraryPage {
@@ -258,16 +248,12 @@ impl LibraryPage {
         })
         .detach();
 
-        // 实时 i18n sentinel：保存初值，第一次 render 时一定会"匹配"。
-        let last_seen_placeholder = ts("Library.filter_placeholder");
-
         Self {
             model,
             filter_input,
             list_state,
             current_page: 0,
             watcher_cmd_tx,
-            last_seen_placeholder,
         }
     }
 
@@ -377,25 +363,9 @@ impl Render for LibraryPage {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.maybe_auto_scan(cx);
 
-        // 实时 i18n：placeholder 在 InputState 上（gpui-component API 限制），
-        // 用 sentinel 检测切语言 → `set_placeholder` 刷新。ext_filter 改用 button
-        // group 避开 State 持有翻译字段。
-        //
-        // `set_placeholder` 内部 `cx.notify()` 只通知 InputState 重新 render。
-        // 但 `Input` 元素是在 LibraryPage render 时构造的，其 `child(self.state.clone())`
-        // 持有的是 Entity 句柄 —— LibraryPage 不重 render，Input 元素就不重画。
-        // 这里额外 `cx.notify()`（外层）强制 LibraryPage 重 render，触发 Input 重
-        // 构造 → 读取 InputState 的最新 placeholder 渲染。
-        let new_placeholder = ts("Library.filter_placeholder");
-        if self.last_seen_placeholder != new_placeholder {
-            self.last_seen_placeholder = new_placeholder.clone();
-            self.filter_input.update(cx, |state, cx| {
-                state.set_placeholder(new_placeholder, window, cx);
-            });
-            // 强制 LibraryPage 重 render，新 placeholder 立刻可见（不依赖
-            // InputState 的被动 re-render）。
-            cx.notify();
-        }
+        // placeholder 在 `new()` 里建 InputState 时一次性设好（`Library.filter_placeholder`）。
+        // 语言切换走重启生效（见 settings language setter），新进程重建 InputState 时
+        // 拿到新 locale 的 placeholder，无需 render 里差量刷新。
 
         let model = self.model.read(cx);
         let entries = Self::filtered_entries(model);
