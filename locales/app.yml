@@ -148,14 +148,34 @@ Settings:
       zh-CN: 信息
       zh-HK: 資訊
   item:
-    theme:
+    theme_kind:
+      en: "Theme mode"
+      zh-CN: 主题模式
+      zh-HK: 主題模式
+    theme_static:
       en: Theme
       zh-CN: 主题
       zh-HK: 主題
+    theme_dyn_mode:
+      en: "Light / dark"
+      zh-CN: 浅色/深色
+      zh-HK: 淺色/深色
+    theme_light:
+      en: "Light theme"
+      zh-CN: 浅色主题
+      zh-HK: 淺色主題
+    theme_dark:
+      en: "Dark theme"
+      zh-CN: 深色主题
+      zh-HK: 深色主題
     language:
       en: "Interface language"
       zh-CN: 界面语言
       zh-HK: 界面語言
+    font_size:
+      en: "Font size"
+      zh-CN: 字号
+      zh-HK: 字號
     gh_proxy:
       en: "GitHub proxy"
       zh-CN: "GitHub 代理"
@@ -249,14 +269,34 @@ Settings:
       zh-CN: 项目主页
       zh-HK: 項目主頁
   desc:
-    theme:
-      en: "Choose the UI theme; changes take effect immediately."
-      zh-CN: 选择界面主题；改动即时生效。
-      zh-HK: 選擇界面主題；改動即時生效。
+    theme_kind:
+      en: "Dynamic: pick light & dark themes, switch by system/appearance. Static: fix one theme, ignore light/dark."
+      zh-CN: 动态：分别选浅色/深色主题，按系统或强制明暗切换；静态：固定一个主题，不随明暗变化。改动即时生效。
+      zh-HK: 動態：分別選淺色/深色主題，按系統或強制明暗切換；靜態：固定一個主題，不隨明暗變化。改動即時生效。
+    theme_static:
+      en: "The fixed theme used in static mode."
+      zh-CN: 静态模式下使用的固定主题。
+      zh-HK: 靜態模式下使用的固定主題。
+    theme_dyn_mode:
+      en: "When to switch between the light and dark theme (dynamic mode only)."
+      zh-CN: 动态模式下浅色/深色主题的切换方式。
+      zh-HK: 動態模式下淺色/深色主題的切換方式。
+    theme_light:
+      en: "Light theme used in dynamic mode."
+      zh-CN: 动态模式下的浅色主题。
+      zh-HK: 動態模式下的淺色主題。
+    theme_dark:
+      en: "Dark theme used in dynamic mode."
+      zh-CN: 动态模式下的深色主题。
+      zh-HK: 動態模式下的深色主題。
     language:
-      en: "App UI language; also determines downloaded chapter text language (Simplified → Simplified, Traditional → Traditional, English → Simplified). Changes take effect immediately."
-      zh-CN: 应用 UI 显示语言；同时决定下载章节正文的语言（简→简，繁→繁，英文→简体）。影响 Sidebar 搜索框 / Select / Dialog 等所有 gpui-component 内部文案。改动即时生效。
-      zh-HK: 應用 UI 顯示語言；同時決定下載章節正文的語言（簡→簡，繁→繁，英文→簡體）。影響 Sidebar 搜尋框 / Select / Dialog 等所有 gpui-component 內部文案。改動即時生效。
+      en: "App UI and downloaded chapter text language. Takes effect after restart."
+      zh-CN: 应用 UI 与下载章节正文的语言。重启后生效。
+      zh-HK: 應用 UI 與下載章節正文的語言。重啟後生效。
+    font_size:
+      en: "UI font size (12–24px); the whole app scales proportionally. Changes take effect immediately."
+      zh-CN: 界面字号（12–24px），整个应用等比缩放。改动即时生效。
+      zh-HK: 界面字號（12–24px），整個應用等比縮放。改動即時生效。
     gh_proxy:
       en: "Used to speed up release / raw asset downloads; leave empty to use default."
       zh-CN: 用于加速 release / raw 资源下载；留空走默认。
@@ -371,17 +411,56 @@ Settings:
   option:
     language:
       zh_cn:
-        en: "Simplified Chinese"
+        en: "简体中文"
         zh-CN: 简体中文
-        zh-HK: 簡體中文
+        zh-HK: 简体中文
       zh_tw:
-        en: "Traditional Chinese"
+        en: "繁體中文"
         zh-CN: 繁體中文
         zh-HK: 繁體中文
       en:
         en: English
         zh-CN: English
         zh-HK: English
+    theme_kind:
+      dynamic:
+        en: "Dynamic (light & dark)"
+        zh-CN: "动态（浅色/深色）"
+        zh-HK: "動態（淺色/深色）"
+      static:
+        en: Static
+        zh-CN: 静态
+        zh-HK: 靜態
+    theme_dyn_mode:
+      system:
+        en: "Follow system"
+        zh-CN: 跟随系统
+        zh-HK: 跟隨系統
+      light:
+        en: Light
+        zh-CN: 浅色
+        zh-HK: 淺色
+      dark:
+        en: Dark
+        zh-CN: 深色
+        zh-HK: 深色
+  language_restart_dialog:
+    title:
+      en: "Restart to apply"
+      zh-CN: 重启以应用语言
+      zh-HK: 重啟以套用語言
+    message:
+      en: "Language change takes effect after restart. Restart now?"
+      zh-CN: 语言切换需重启后生效，是否立即重启？
+      zh-HK: 語言切換需重啟後生效，是否立即重啟？
+    restart_button:
+      en: "Restart now"
+      zh-CN: 立即重启
+      zh-HK: 立即重啟
+    later_button:
+      en: Later
+      zh-CN: 稍后
+      zh-HK: 稍後
 
 # 本地书库页面（`src/gpui_app/pages/library.rs`）所有面向用户的字符串。
 # 设计要点：
@@ -430,7 +509,7 @@ Tasks:
       zh-HK: 確認刪除
     # {book_name} 占位符
     message:
-      en: "Delete the download record for \"{book_name}\"? This action cannot be undone."
+      en: 'Delete the download record for "{book_name}"? This action cannot be undone.'
       zh-CN: "确定要删除《{book_name}》的下载记录吗？此操作无法撤销。"
       zh-HK: "確定要刪除《{book_name}》的下載記錄嗎？此操作無法撤銷。"
     confirm_button:
@@ -445,15 +524,15 @@ Tasks:
   # {book_name} 占位符。
   download_finished:
     completed:
-      en: "Download completed: \"{book_name}\""
+      en: 'Download completed: "{book_name}"'
       zh-CN: "下载完成：《{book_name}》"
       zh-HK: "下載完成：《{book_name}》"
     failed:
-      en: "Download failed: \"{book_name}\""
+      en: 'Download failed: "{book_name}"'
       zh-CN: "下载失败：《{book_name}》"
       zh-HK: "下載失敗：《{book_name}》"
     cancelled:
-      en: "Download cancelled: \"{book_name}\""
+      en: 'Download cancelled: "{book_name}"'
       zh-CN: "下载已取消：《{book_name}》"
       zh-HK: "下載已取消：《{book_name}》"
   # 空态：每个过滤各自的空态文案
@@ -648,9 +727,9 @@ Library:
       zh-HK: 確認刪除
     # {file_name} 占位符 —— 调用 `ts_fmt("Library.delete_dialog.message", &[(... )])` 替换。
     message:
-      en: "Are you sure you want to delete \"{file_name}\"? This action cannot be undone."
-      zh-CN: "确定要删除 \"{file_name}\" 吗？此操作无法撤销。"
-      zh-HK: "確定要刪除 \"{file_name}\" 嗎？此操作無法撤銷。"
+      en: 'Are you sure you want to delete "{file_name}"? This action cannot be undone.'
+      zh-CN: '确定要删除 "{file_name}" 吗？此操作无法撤销。'
+      zh-HK: '確定要刪除 "{file_name}" 嗎？此操作無法撤銷。'
     confirm_button:
       en: Delete
       zh-CN: 删除
@@ -743,11 +822,16 @@ Sources:
       en: Error
       zh-CN: 错误
       zh-HK: 錯誤
-    # {status} 占位符 —— StatusBadge 显示 "HTTP 200" / "HTTP 404" 等。
+    # 2xx 健康 —— 测速核心信号，只显示延迟（毫秒）。
+    latency:
+      en: "{ms}ms"
+      zh-CN: "{ms} ms"
+      zh-HK: "{ms} ms"
+    # 3xx/4xx/5xx —— 状态码 + 延迟并存，方便区分「慢但通」和「不通」。
     http_status:
-      en: "HTTP {status}"
-      zh-CN: "HTTP {status}"
-      zh-HK: "HTTP {status}"
+      en: "HTTP {status} · {ms}ms"
+      zh-CN: "HTTP {status} · {ms} ms"
+      zh-HK: "HTTP {status} · {ms} ms"
     # `format!("{:?}", err)` 退化分支：源错误但没 HTTP 响应（如 DNS 失败 / 超时）。
     # 调试输出太长不适合塞进 StatusBadge，用一句简短"网络错误"代替。
     network_error:
