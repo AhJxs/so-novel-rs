@@ -1,14 +1,16 @@
 //! Search 页面：关键词搜索 + 书源过滤 + 结果列表。
 //!
-//! 拆分架构（跟 `library.rs` / `sources.rs` 同模式，settings 拆完后的统一骨架）：
+//! 拆分架构（跟 `library/` / `sources.rs` / `tasks/` 同模式，settings 拆完后的统一骨架）：
 //! - `mod.rs`（本文件）：owner struct + impl 主体（new / run_search / open_range_dialog
-//!   / confirm_range_dialog / impl Render / impl ListDelegate）。
+//!   / confirm_range_dialog / impl Render）。
 //! - `ctx.rs`：子模块共享的 `SearchCtx<'a>` 借用视图。
 //! - `source_select.rs`：选书源下拉的自定义 `SelectItem`。
 //! - `toolbar.rs`：工具栏（关键词 Input + 书源 Select + 搜索 Button + 源状态 Tag）。
 //! - `result_row.rs`：结果行（6 列：序号 / 书名 / 作者 / 源 / 详情 / 选章 / 全本）。
 //! - `detail_dialog.rs`：详情 Dialog body + 封面解码 / 渲染。
 //! - `range_dialog.rs`：选章 Dialog body + 起止输入框 clamp helper。
+//! - `delegate.rs`：`SearchDelegate` + `ListDelegate` impl（虚拟滚动 delegate，跟
+//!   library / tasks / sources 同款结构）。
 //!
 //! 布局：
 //! - PageHeader：title + subtitle（**无** 右侧 action —— 搜索按钮已下移到工具栏）
@@ -25,10 +27,10 @@ use gpui::{
     SharedString, Styled, Window, div, prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
-    ActiveTheme as _, IconName, IndexPath, WindowExt,
+    ActiveTheme as _, IconName, WindowExt,
     dialog::{Dialog, DialogButtonProps},
     input::{InputEvent, InputState, NumberInputEvent, StepAction},
-    list::{List, ListDelegate, ListItem, ListState},
+    list::{List, ListState},
     notification::{Notification, NotificationType},
     select::{SearchableVec, SelectEvent, SelectState},
     v_flex,
@@ -41,10 +43,12 @@ use crate::gpui_app::components::{
 use crate::i18n::ts;
 use crate::models::SearchResult;
 
+use self::delegate::SearchDelegate;
 use range_dialog::clamp_range_value;
 use source_select::SourceSelectItem;
 
 mod ctx;
+mod delegate;
 mod detail_dialog;
 mod range_dialog;
 mod result_row;
@@ -572,62 +576,5 @@ impl Render for SearchPage {
                     }),
                 ))
             })
-    }
-}
-
-/// `ListDelegate` 持有当前页 items + 选中索引 + owner handle。
-pub(super) struct SearchDelegate {
-    /// 当前页要展示的条目，每条带"全局序号"（在完整 results 列表里的 0-based 位置）。
-    /// 跨分页连续：page 0 → 0..29，page 1 → 30..59，等等。显示时 +1 变 1-based。
-    page_items: Vec<(usize, SearchResult)>,
-    /// 当前选中项。`None` = 未选中。`set_selected_index` 写入，`render_item` 读出来
-    /// 给 `ListItem::selected(...)` 用。
-    selected_index: Option<IndexPath>,
-    /// 拿 SearchPage handle 用于按钮 on_click → 转发回 page。
-    page: Entity<SearchPage>,
-}
-
-impl SearchDelegate {
-    pub(super) fn new(page: Entity<SearchPage>) -> Self {
-        Self {
-            page_items: Vec::new(),
-            selected_index: None,
-            page,
-        }
-    }
-}
-
-impl ListDelegate for SearchDelegate {
-    type Item = ListItem;
-
-    fn items_count(&self, _section: usize, _cx: &App) -> usize {
-        self.page_items.len()
-    }
-
-    fn render_item(
-        &mut self,
-        ix: IndexPath,
-        _window: &mut Window,
-        cx: &mut Context<ListState<Self>>,
-    ) -> Option<Self::Item> {
-        let (global_index, result) = self.page_items.get(ix.row)?.clone();
-        let page = self.page.clone();
-        Some(
-            ListItem::new(ix)
-                .selected(Some(ix) == self.selected_index)
-                .rounded(cx.theme().radius)
-                .mb(px(4.))
-                .child(result_row::render(global_index, &result, page, &mut *cx)),
-        )
-    }
-
-    fn set_selected_index(
-        &mut self,
-        ix: Option<IndexPath>,
-        _window: &mut Window,
-        cx: &mut Context<ListState<Self>>,
-    ) {
-        self.selected_index = ix;
-        cx.notify();
     }
 }

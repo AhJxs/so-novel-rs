@@ -17,6 +17,7 @@
 //! - 空态用 `EmptyState`（图标 + "本地书库为空" + 副标题）。
 
 mod ctx;
+mod delegate;
 mod row;
 mod toolbar;
 mod watcher;
@@ -38,7 +39,7 @@ use crate::gpui_app::components::{EmptyState, PageHeader, Pagination, compute_pa
 use crate::i18n::{ts, ts_fmt};
 
 use self::ctx::{WatcherCmd, WatcherCmdTx};
-pub use self::row::LibraryDelegate;
+use self::delegate::LibraryDelegate;
 
 /// Library 页面 entity。
 pub struct LibraryPage {
