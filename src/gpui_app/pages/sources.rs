@@ -34,11 +34,11 @@ use gpui_component::{
 };
 
 use crate::app::{AppModel, SourcesFilterStatus};
-use crate::crawler::health::SourceHealth;
+use crate::crawler::health::{HealthStatus, SourceHealth};
 use crate::gpui_app::components::{
-    EmptyState, PageHeader, Pagination, StatusBadge, compute_page_window, truncate,
+    EmptyState, PageHeader, Pagination, StatusBadge, StatusKind, compute_page_window, truncate,
 };
-use crate::gpui_app::i18n::{ts, ts_fmt};
+use crate::i18n::{ts, ts_fmt};
 use crate::models::Rule;
 
 /// Sources 页面 entity。
@@ -605,8 +605,10 @@ fn render_source_row(
         )
         // ---- 健康状态 Badge ----
         .child(div().w(px(150.)).justify_end().child({
-            let badge_kind = health_status_kind(health);
-            let label = health_status_label(health);
+            let (badge_kind, label) = match health {
+                None => (StatusKind::Neutral, ts("Sources.health.not_tested").to_string()),
+                Some(h) => (health_status_kind_from(h.classify()), h.label()),
+            };
             StatusBadge::new(badge_kind, label)
         }))
         // ---- 启用开关 ----
@@ -646,43 +648,16 @@ fn render_source_row(
         })
 }
 
-/// 健康状态 → 语义色枚举。
-fn health_status_kind(h: Option<&SourceHealth>) -> crate::gpui_app::components::StatusKind {
-    use crate::gpui_app::components::StatusKind as K;
-    match h {
-        None => K::Neutral,
-        Some(h) if h.error.is_some() => K::Error,
-        Some(h) => match h.http_status {
-            Some(s) if (200..300).contains(&s) => K::Success,
-            Some(s) if (300..400).contains(&s) => K::Info,
-            Some(_) => K::Warning,
-            None => K::Warning,
-        },
-    }
-}
-
-/// 健康状态 → 显示文本。
-fn health_status_label(h: Option<&SourceHealth>) -> String {
-    match h {
-        None => ts("Sources.health.not_tested").to_string(),
-        Some(h) if h.error.is_some() => ts("Sources.health.error").to_string(),
-        Some(h) => match h.http_status {
-            // 2xx（健康）—— 测速最关心的是延迟，状态码冗余。只显示 ms。
-            Some(s) if (200..300).contains(&s) => {
-                ts_fmt("Sources.health.latency", &[("ms", &h.delay_ms.to_string())]).to_string()
-            }
-            // 3xx/4xx/5xx —— 状态码 + 延迟并存，方便区分「慢但通（3xx 跳转）」和
-            // 「真的失败（4xx/5xx）」。`ts_fmt` 替换 2 个占位符（不能直接 `format!`
-            // 拼字符串，否则切语言后占位符翻译也跟着拼，顺序会乱）。
-            Some(s) => ts_fmt(
-                "Sources.health.http_status",
-                &[("status", &s.to_string()), ("ms", &h.delay_ms.to_string())],
-            )
-            .to_string(),
-            // 源错误但没 HTTP 响应（DNS 失败 / 超时 等）—— 调试输出太长塞不进 StatusBadge，
-            // 用一句"网络错误"代替。原来的 `format!("{:?}", h.error)` 会把 anyhow 内部
-            // chain 全部展开，超长且对用户没意义。
-            None => ts("Sources.health.network_error").to_string(),
-        },
+/// HealthStatus (domain) → StatusKind (UI theme) 映射。
+///
+/// `crawler::health` 不依赖 `gpui_app`（layering 解耦），所以这层映射留在 UI 侧。
+fn health_status_kind_from(status: HealthStatus) -> StatusKind {
+    use HealthStatus as H;
+    match status {
+        H::Ok => StatusKind::Success,
+        H::Redirect => StatusKind::Info,
+        H::BadResponse => StatusKind::Warning,
+        H::ProbeError => StatusKind::Error,
+        H::NetworkError => StatusKind::Warning,
     }
 }

@@ -30,7 +30,7 @@ use crate::app::AppModel;
 use crate::gpui_app::components::{
     EmptyState, PageHeader, Pagination, StatusBadge, StatusKind, compute_page_window, truncate,
 };
-use crate::gpui_app::i18n::{ts, ts_fmt};
+use crate::i18n::{ts, ts_fmt};
 use crate::models::{Book, SearchResult};
 use crate::util::system::{open_path, reveal_in_folder};
 use std::path::PathBuf;
@@ -468,27 +468,6 @@ impl ListDelegate for TasksDelegate {
     }
 }
 
-/// 把 unix 秒格式化成 `YYYY-MM-DD HH:MM`（本地时区）。0 / 失败走 i18n fallback。
-///
-/// 跟 library.rs `format_unix_secs` 同款实现（Rfc3339 截前 16 字符 + T 换空格）。
-fn format_started_time(secs: i64) -> String {
-    use time::OffsetDateTime;
-    use time::format_description::well_known::Rfc3339;
-    if secs <= 0 {
-        return ts("Tasks.card.meta.time_unknown").to_string();
-    }
-    let Ok(dt) = OffsetDateTime::from_unix_timestamp(secs) else {
-        return ts("Tasks.card.meta.time_unknown").to_string();
-    };
-    let local =
-        dt.to_offset(time::UtcOffset::current_local_offset().unwrap_or(time::UtcOffset::UTC));
-    local
-        .format(&Rfc3339)
-        .ok()
-        .map(|s| s[..16].replace('T', " "))
-        .unwrap_or_else(|| ts("Tasks.card.meta.time_unknown").to_string())
-}
-
 /// 渲染一条任务行（卡片式：序号 / 标题行 / 进度条 / 失败折叠 / 动作按钮）。
 fn render_task_row(task: TaskSummary, page: Entity<TasksPage>, cx: &mut App) -> impl IntoElement {
     let running = task.is_running();
@@ -497,12 +476,18 @@ fn render_task_row(task: TaskSummary, page: Entity<TasksPage>, cx: &mut App) -> 
     let cancelled = task.is_cancelled();
 
     let title = truncate(task.book_name(), 50);
+
     let total = task.total_chapters;
     let completed = task.completed;
     let failed_count = task.failed;
     // 全局序号（1-based，跨分页连续）+ 开始时间。
     let seq = task.index + 1;
-    let started_display = format_started_time(task.started_at_unix);
+    let started_display = crate::util::formatting::format_local_unix_secs(
+        task.started_at_unix,
+        "Tasks.card.meta.time_unknown",
+        "Tasks.card.meta.time_unknown",
+        "Tasks.card.meta.time_unknown",
+    );
 
     let progress_pct = if total > 0 {
         (completed as f32 / total as f32).clamp(0.0, 1.0) * 100.0

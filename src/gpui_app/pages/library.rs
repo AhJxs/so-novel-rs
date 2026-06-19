@@ -36,10 +36,9 @@ use gpui_component::{
 };
 
 use crate::app::{AppModel, LibraryEntry};
-use crate::gpui_app::components::{
-    EmptyState, PageHeader, Pagination, compute_page_window, format_size, truncate,
-};
-use crate::gpui_app::i18n::{ts, ts_fmt};
+use crate::gpui_app::components::{EmptyState, PageHeader, Pagination, compute_page_window};
+use crate::i18n::{ts, ts_fmt};
+use crate::util::formatting::{format_size, truncate};
 use crate::util::system::{open_path, reveal_in_folder};
 
 /// Watcher 任务命令：让任务内部 drop 旧 watcher 并 arm 到新路径上。
@@ -197,8 +196,8 @@ impl LibraryPage {
                             // 切路径后立即 rescan（用户在 Settings 切完路径想马上看到新目录内容）。
                             // 改用 async 版本：read_dir / metadata 阻塞 IO 不再卡 UI 帧。
                             let _ = page_weak.update(async_cx, |_p, cx| {
-                                model_for_watcher.update(cx, |m, cx| {
-                                    m.refresh_library_async(cx);
+                                model_for_watcher.update(cx, |m, _cx| {
+                                    m.refresh_library_async();
                                 });
                                 cx.notify();
                             });
@@ -237,8 +236,8 @@ impl LibraryPage {
                         .unwrap_or(false);
                     if !skip_due_to_delete {
                         let _ = page_weak.update(async_cx, |_p, cx| {
-                            model_for_watcher.update(cx, |m, cx| {
-                                m.refresh_library_async(cx);
+                            model_for_watcher.update(cx, |m, _cx| {
+                                m.refresh_library_async();
                             });
                             cx.notify();
                         });
@@ -279,7 +278,7 @@ impl LibraryPage {
             Some(p) => p != &download_path,
         };
         if need_scan {
-            self.model.update(cx, |m, cx| m.refresh_library_async(cx));
+            self.model.update(cx, |m, _cx| m.refresh_library_async());
             // 路径变了 → 让 watcher 任务重建监听目标。`try_send` 不阻塞，cap=8 不会满；
             // 失败（任务已退出）忽略。
             let _ = self
@@ -676,7 +675,12 @@ fn render_row(
         .to_string();
     let stem_display = truncate(&stem, 30);
     let ext_upper = entry.ext.to_uppercase();
-    let mod_time = format_unix_secs(entry.modified_unix_secs);
+    let mod_time = crate::util::formatting::format_local_unix_secs(
+        entry.modified_unix_secs as i64,
+        "Library.time.unknown",
+        "Library.time.invalid",
+        "Library.time.format_failed",
+    );
 
     h_flex()
         // 不要 `.id(...)`：外层 `ListItem::new(ix)` 已经给了 id，自己再加会和 List 的
@@ -809,23 +813,4 @@ fn render_row(
                         }),
                 ),
         )
-}
-
-/// 简单 unix 秒 → "YYYY-MM-DD HH:MM"。本地时区。
-fn format_unix_secs(secs: u64) -> String {
-    use time::OffsetDateTime;
-    use time::format_description::well_known::Rfc3339;
-    if secs == 0 {
-        return ts("Library.time.unknown").to_string();
-    }
-    let Ok(dt) = OffsetDateTime::from_unix_timestamp(secs as i64) else {
-        return ts("Library.time.invalid").to_string();
-    };
-    let local =
-        dt.to_offset(time::UtcOffset::current_local_offset().unwrap_or(time::UtcOffset::UTC));
-    local
-        .format(&Rfc3339)
-        .ok()
-        .map(|s| s[..16].replace('T', " "))
-        .unwrap_or_else(|| ts("Library.time.format_failed").to_string())
 }
