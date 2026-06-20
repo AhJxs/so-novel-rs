@@ -158,7 +158,7 @@ pub struct RenderedChapter {
 
 /// 如果 `dir/filename` 已存在，追加 ` (1)` / ` (2)` 后缀直到不冲突。
 /// 正常路径（无冲突）零开销：只做一次 `exists()` 检查。
-fn unique_path(dir: &Path, filename: &str) -> PathBuf {
+pub fn unique_path(dir: &Path, filename: &str) -> PathBuf {
     let path = dir.join(filename);
     if !path.exists() {
         return path;
@@ -321,5 +321,46 @@ mod tests {
             std::fs::read_to_string(&deduped).unwrap(),
             "<html>second</html>"
         );
+    }
+
+    #[test]
+    fn unique_path_returns_input_when_no_collision() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = unique_path(dir.path(), "book.epub");
+        assert_eq!(p, dir.path().join("book.epub"));
+    }
+
+    #[test]
+    fn unique_path_adds_suffix_on_collision() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("book.epub"), b"old").unwrap();
+        let p = unique_path(dir.path(), "book.epub");
+        assert_eq!(p, dir.path().join("book (1).epub"));
+    }
+
+    #[test]
+    fn unique_path_increments_suffix_chain() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("book.epub"), b"old").unwrap();
+        std::fs::write(dir.path().join("book (1).epub"), b"old1").unwrap();
+        let p = unique_path(dir.path(), "book.epub");
+        assert_eq!(p, dir.path().join("book (2).epub"));
+    }
+
+    #[test]
+    fn unique_path_preserves_extension() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("data.txt"), b"x").unwrap();
+        let p = unique_path(dir.path(), "data.txt");
+        assert_eq!(p, dir.path().join("data (1).txt"));
+    }
+
+    #[test]
+    fn unique_path_handles_filename_without_extension() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("README"), b"x").unwrap();
+        let p = unique_path(dir.path(), "README");
+        // stem=README, ext=None → fallback "html" used
+        assert_eq!(p, dir.path().join("README (1).html"));
     }
 }

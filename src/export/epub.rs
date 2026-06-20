@@ -21,7 +21,7 @@ use std::path::{Path, PathBuf};
 
 use epub_builder::{EpubBuilder, EpubContent, EpubVersion, ReferenceType, ZipLibrary};
 
-use crate::export::exporter::{ExportError, Exporter, sort_chapter_files};
+use crate::export::exporter::{ExportError, Exporter, sort_chapter_files, unique_path};
 use crate::models::Book;
 use crate::util::fs::sanitize_filename;
 
@@ -144,7 +144,7 @@ pub fn merge_with_cover_bytes(
     // 落盘
     std::fs::create_dir_all(out_dir)?;
     let out_name = sanitize_filename(&format!("{}({}).epub", book.book_name, book.author));
-    let out_path = out_dir.join(out_name);
+    let out_path = unique_path(out_dir, &out_name);
     let file = File::create(&out_path)?;
     let mut writer = BufWriter::new(file);
     builder

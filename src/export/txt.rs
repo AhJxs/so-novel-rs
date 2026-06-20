@@ -18,7 +18,7 @@ use encoding_rs::{Encoding, UTF_8};
 use once_cell::sync::Lazy;
 use regex::Regex;
 
-use crate::export::exporter::{ExportError, Exporter, sort_chapter_files};
+use crate::export::exporter::{ExportError, Exporter, sort_chapter_files, unique_path};
 use crate::models::Book;
 use crate::util::fs::sanitize_filename;
 
@@ -93,7 +93,7 @@ impl Exporter for TxtExporter {
         // 转码 + 写入
         std::fs::create_dir_all(out_dir)?;
         let filename = sanitize_filename(&format!("{}({}).txt", book.book_name, book.author));
-        let out_path = out_dir.join(filename);
+        let out_path = unique_path(out_dir, &filename);
 
         let (encoded, _, had_errors) = self.encoding.encode(&buf);
         if had_errors {
@@ -261,5 +261,34 @@ mod tests {
         let exp = TxtExporter::new("not-a-real-encoding");
         // 不抛错；TxtExporter::new 内部会 warn 并用 UTF-8。
         assert_eq!(exp.encoding, encoding_rs::UTF_8);
+    }
+
+    #[test]
+    fn merge_dedup_output_filename_on_collision() {
+        // 同一本书二次导出到同 out_dir：第一次得到 `<book>(<author>).txt`，
+        // 第二次因 `unique_path` 加 ` (1)` 后缀，不应覆盖前一次。
+        let dir = tempfile::tempdir().unwrap();
+        let chapters = dir.path().join("chapters");
+        let out = dir.path().join("out");
+        std::fs::create_dir_all(&chapters).unwrap();
+        std::fs::create_dir_all(&out).unwrap();
+        write_chapter_files(&chapters, &sample_chapters(), ExportFormat::Txt).unwrap();
+
+        let exp = TxtExporter::new("UTF-8");
+        let book = sample_book();
+        let p1 = exp.merge(&book, &chapters, &out).unwrap();
+        let p2 = exp.merge(&book, &chapters, &out).unwrap();
+
+        assert!(p1.exists());
+        assert!(p2.exists());
+        assert_ne!(p1, p2, "second merge should pick a different filename");
+        assert!(p1.file_name().unwrap().to_str().unwrap().ends_with(").txt"));
+        assert!(
+            p2.file_name()
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .contains(" (1).txt")
+        );
     }
 }

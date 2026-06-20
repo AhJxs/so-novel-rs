@@ -30,7 +30,7 @@ use once_cell::sync::Lazy;
 use pdf_oxide::writer::{DocumentBuilder, DocumentMetadata, EmbeddedFont, PageSize};
 use regex::Regex;
 
-use crate::export::exporter::{ExportError, Exporter, sort_chapter_files};
+use crate::export::exporter::{ExportError, Exporter, sort_chapter_files, unique_path};
 use crate::models::Book;
 use crate::util::fs::sanitize_filename;
 
@@ -75,7 +75,7 @@ impl Exporter for PdfExporter {
 
         std::fs::create_dir_all(out_dir)?;
         let out_name = sanitize_filename(&format!("{}({}).pdf", book.book_name, book.author));
-        let out_path = out_dir.join(out_name);
+        let out_path = unique_path(out_dir, &out_name);
 
         // CJK 字体：找到 → 量宽用 EmbeddedFont，注册到 builder；找不到 → 启发式量宽，
         // 不注册字体（中文 tofu 但排版照常）。

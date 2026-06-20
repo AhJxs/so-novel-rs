@@ -20,7 +20,7 @@ use regex::Regex;
 use zip::CompressionMethod;
 use zip::write::SimpleFileOptions;
 
-use crate::export::exporter::{ExportError, Exporter, sort_chapter_files};
+use crate::export::exporter::{ExportError, Exporter, sort_chapter_files, unique_path};
 use crate::models::Book;
 use crate::util::fs::sanitize_filename;
 
@@ -60,7 +60,7 @@ impl Exporter for HtmlExporter {
         // 2. 打包 zip
         std::fs::create_dir_all(out_dir)?;
         let zip_name = sanitize_filename(&format!("{}({}).zip", book.book_name, book.author));
-        let zip_path = out_dir.join(zip_name);
+        let zip_path = unique_path(out_dir, &zip_name);
         zip_directory(chapters_dir, &zip_path)?;
 
         Ok(zip_path)
