@@ -230,7 +230,7 @@ pub async fn resolve_book(
 
     let rule = source.rule.clone();
     let book_url_owned = book_url.to_string();
-    let cf_bypass_owned = cf_bypass.map(String::from);
+    let cf_bypass_owned: Option<Arc<str>> = cf_bypass.map(Arc::from);
     let qidian_cookie_owned = qidian_cookie.map(String::from);
     let eff = source.effective_crawl.clone();
     let max_attempts = if cfg.enable_retry { eff.max_retries } else { 0 };
@@ -245,7 +245,7 @@ pub async fn resolve_book(
             let client = client.clone();
             let rule = rule.clone();
             let url = book_url_owned.clone();
-            let cf = cf_bypass_owned.clone();
+            let cf = cf_bypass_owned.as_ref().map(Arc::clone);
             let qc = qidian_cookie_owned.clone();
             let cancel = cancel.clone();
             async move {
@@ -276,7 +276,7 @@ pub async fn resolve_book(
             let client = client.clone();
             let rule = rule.clone();
             let url = book_url_owned.clone();
-            let cf = cf_bypass_owned.clone();
+            let cf = cf_bypass_owned.as_ref().map(Arc::clone);
             let cancel = cancel.clone();
             async move {
                 if cancel.is_cancelled() {
@@ -342,7 +342,7 @@ pub async fn download_chapters(
     };
 
     let rule = Arc::new(source.rule.clone());
-    let cf_bypass_owned = cf_bypass.map(String::from);
+    let cf_bypass_owned: Option<Arc<str>> = cf_bypass.map(Arc::from);
 
     // 准备 chapters 目录
     let book_dir_name = build_book_dir_name(book, cfg.ext_name);
@@ -374,7 +374,7 @@ pub async fn download_chapters(
         let client = client.clone();
         let rule = Arc::clone(&rule);
         let rule_chapter = Arc::clone(&rule_chapter);
-        let cf = cf_bypass_owned.clone();
+        let cf = cf_bypass_owned.as_ref().map(Arc::clone);
         let progress = progress.clone();
         let cancel = cancel.clone();
         let eff = eff.clone();

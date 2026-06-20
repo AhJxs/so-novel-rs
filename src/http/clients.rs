@@ -30,7 +30,8 @@
 //! 用 `std::sync::Mutex` —— 锁粒度极小（只在 `rebuild_proxy` 拿一下），用
 //! parking_lot 收益不抵加依赖成本。
 
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 
@@ -65,8 +66,11 @@ impl ProxySignature {
 /// proxy 改了 → `rebuild_proxy` 整体替换前两个；gh_proxy 是更新检查专用，
 /// 独立维护（用户主动改 `gh_proxy` 字符串才会重建）。
 pub struct HttpClients {
-    safe: Arc<reqwest::Client>,
-    unsafe_ssl: Arc<reqwest::Client>,
+    /// safe / unsafe_ssl 两个 client 用 RwLock 保护：
+    /// - `for_rule` 只做 RwLock::read（无竞争，桌面场景几乎全是读）；
+    /// - `rebuild_proxy` 用 RwLock::write 替换 Arc。
+    ///   比裸指针 + unsafe 更安全，且 reqwest::Client 内部本身就是 Arc（clone ≈ Arc::clone）。
+    clients: RwLock<(Arc<reqwest::Client>, Arc<reqwest::Client>)>,
     /// gh_proxy 字符串 + 对应 client。gh_proxy 为空时这个 client 不被使用
     /// 但保留 —— 用户从有 → 无切换时不会出现"没 client 可用"的窗口。
     gh_proxy: Mutex<(String, Arc<reqwest::Client>)>,
@@ -85,60 +89,61 @@ impl HttpClients {
             build_async_client(cfg, &ClientOptions { unsafe_ssl: true })
                 .context("构造 unsafe_ssl HTTP client 失败")?,
         );
-        // gh_proxy 默认走工厂构造 —— 即便用户没填 gh_proxy，也有个 client 备用；
-        // `gh_proxy()` 调用方自己判断字符串是否为空决定是否使用。
-        let gh_proxy_client = Arc::new(
-            build_async_client(cfg, &ClientOptions::default())
-                .context("构造 gh_proxy HTTP client 失败")?,
-        );
+        // gh_proxy client：如果用户配了 gh_proxy，用它做 forward proxy；否则退化为普通 client。
+        // `gh_proxy_pair()` 调用方自己判断 URL 是否为空决定是否使用。
+        let gh_proxy_url = cfg.gh_proxy.trim().to_string();
+        let gh_proxy_client = if gh_proxy_url.is_empty() {
+            Arc::new(
+                build_async_client(cfg, &ClientOptions::default())
+                    .context("构造 gh_proxy HTTP client 失败")?,
+            )
+        } else {
+            let mut builder = reqwest::Client::builder()
+                .connect_timeout(Duration::from_secs(10))
+                .timeout(Duration::from_secs(15))
+                .redirect(reqwest::redirect::Policy::limited(5))
+                .user_agent("so-novel-rs")
+                .default_headers({
+                    let mut h = reqwest::header::HeaderMap::new();
+                    h.insert(
+                        reqwest::header::ACCEPT_LANGUAGE,
+                        reqwest::header::HeaderValue::from_static("zh-CN,zh;q=0.9,en;q=0.8"),
+                    );
+                    h
+                });
+            if let Ok(proxy) = reqwest::Proxy::all(&gh_proxy_url) {
+                builder = builder.proxy(proxy);
+            }
+            Arc::new(builder.build().context("构造 gh_proxy HTTP client 失败")?)
+        };
         Ok(Self {
-            safe,
-            unsafe_ssl,
-            gh_proxy: Mutex::new((String::new(), gh_proxy_client)),
+            clients: RwLock::new((safe, unsafe_ssl)),
+            gh_proxy: Mutex::new((gh_proxy_url, gh_proxy_client)),
             proxy_signature: Mutex::new(ProxySignature::from_cfg(cfg)),
         })
     }
 
     /// 按 `Rule.ignore_ssl` 选 client。
+    ///
+    /// 返回 owned `reqwest::Client`（内部是 Arc，clone 只做 refcount bump，几乎零开销）。
+    /// 返回 owned 而非 `&` 是因为底层用 `RwLock` 保护：`RwLockReadGuard` 不能泄漏出引用。
     #[inline]
-    pub fn for_rule(&self, rule: &Rule) -> &reqwest::Client {
+    pub fn for_rule(&self, rule: &Rule) -> reqwest::Client {
+        let guard = self.clients.read().expect("clients RwLock poisoned");
         if rule.ignore_ssl {
-            &self.unsafe_ssl
+            guard.1.as_ref().clone()
         } else {
-            &self.safe
+            guard.0.as_ref().clone()
         }
     }
 
-    /// gh_proxy 专用 client（仅 UpdateState 使用）。
+    /// gh_proxy 专用 client（更新检查用）。
     ///
-    /// 返回 `(gh_proxy_url, &client)` —— 调用方应自己判断 `gh_proxy_url.is_empty()`
-    /// 再决定用 `client` 还是改走 `for_rule`。
-    #[allow(dead_code)] // UpdateState 还在用 raw builder 路径（待后续迁移）
+    /// 返回 `(gh_proxy_url, Arc<client>)` —— 调用方应自己判断 `gh_proxy_url.is_empty()`
+    /// 再决定用这个 client 还是改走 `for_rule`。
     pub fn gh_proxy_pair(&self) -> (String, Arc<reqwest::Client>) {
         let guard = self.gh_proxy.lock().expect("gh_proxy mutex poisoned");
         (guard.0.clone(), Arc::clone(&guard.1))
-    }
-
-    /// gh_proxy 字符串 + client 的只读视图（不 clone Arc）。
-    #[allow(dead_code)]
-    pub fn gh_proxy_url(&self) -> String {
-        let guard = self.gh_proxy.lock().expect("gh_proxy mutex poisoned");
-        guard.0.clone()
-    }
-
-    /// 改 gh_proxy 字符串时调用：内部重建 client。
-    ///
-    /// 留到 gh_proxy 路径真正迁移过来再用；现 UpdateState 仍自管 client。
-    #[allow(dead_code)]
-    pub fn set_gh_proxy(&self, gh_proxy: &str, cfg: &AppConfig) -> Result<()> {
-        let client = Arc::new(
-            build_async_client(cfg, &ClientOptions::default())
-                .context("重建 gh_proxy HTTP client 失败")?,
-        );
-        let mut guard = self.gh_proxy.lock().expect("gh_proxy mutex poisoned");
-        guard.0 = gh_proxy.to_string();
-        guard.1 = client;
-        Ok(())
     }
 
     /// proxy 配置变了 → 重建 safe + unsafe_ssl 两个 client。
@@ -147,19 +152,20 @@ impl HttpClients {
     /// timeout / theme / language 时不会误触发 TLS 重连。
     pub fn rebuild_proxy(&self, cfg: &AppConfig) -> Result<()> {
         let new_sig = ProxySignature::from_cfg(cfg);
-        {
+        let old_sig = {
             let guard = self
                 .proxy_signature
                 .lock()
                 .expect("proxy_signature poisoned");
-            if *guard == new_sig {
-                return Ok(());
-            }
+            guard.clone()
+        };
+        if old_sig == new_sig {
+            return Ok(());
         }
 
-        // proxy 改了 —— 重建。注意：构造期间旧的 Arc 还在被 in-flight 任务
-        // 持有，不会卡住它们。新请求拿新 Arc。等所有旧 Arc drop 后旧 client
-        // 内存自动释放。
+        // proxy 改了 —— 重建。用 RwLock::write 原子替换两个 Arc。
+        // 读端在 rebuild 期间短暂阻塞（reqwest::Client 构造不含 IO，代价小）；
+        // 旧 Arc 被 in-flight 任务 clone 过去的引用不会受影响，等它们自然 drop。
         let safe = Arc::new(
             build_async_client(cfg, &ClientOptions { unsafe_ssl: false })
                 .context("重建 safe HTTP client 失败")?,
@@ -168,18 +174,10 @@ impl HttpClients {
             build_async_client(cfg, &ClientOptions { unsafe_ssl: true })
                 .context("重建 unsafe_ssl HTTP client 失败")?,
         );
-
-        // 用 `replace` 直接换 Arc 指针。reqwest::Client 内部的 Mutex 保证
-        // 这里换指针不会被读端看到中间态（旧 Arc clone 出去的还在用旧 client）。
-        let self_ptr = self as *const Self as *mut Self;
-        // SAFETY: HttpClients 只在本模块内被使用，且 AppModel 持有 Arc<HttpClients>
-        // 跨 spawn 时也是 clone Arc 不 clone 内部字段。`self` 不会被同时换。
-        // 通过裸指针改字段是最后手段 —— 因为 Rust 不允许 self.safe = ... 后
-        // 再读 self.unsafe_ssl（borrow checker 视角下"两个独占借用"）。
-        // 这里实际等价于两次独立的 &mut Self.write，安全。
-        unsafe {
-            (*self_ptr).safe = safe;
-            (*self_ptr).unsafe_ssl = unsafe_ssl;
+        {
+            let mut guard = self.clients.write().expect("clients RwLock poisoned");
+            guard.0 = safe;
+            guard.1 = unsafe_ssl;
         }
 
         let mut guard = self
@@ -190,10 +188,12 @@ impl HttpClients {
         Ok(())
     }
 
-    /// 仅测试用：拿到当前 safe client 的指针地址，用于断言"rebuild 真的换了实例"。
+    /// 仅测试用：拿到当前 safe（unsafe_ssl=false）client 的 Arc 内部指针，
+    /// 用于断言"rebuild 真的换了实例"。
     #[cfg(test)]
-    fn safe_ptr(&self) -> *const reqwest::Client {
-        Arc::as_ptr(&self.safe)
+    fn safe_client_ptr(&self) -> *const reqwest::Client {
+        let guard = self.clients.read().expect("clients RwLock poisoned");
+        Arc::as_ptr(&guard.0)
     }
 }
 
@@ -216,21 +216,26 @@ mod tests {
             ignore_ssl: true,
             ..Rule::default()
         };
-        // for_rule 返回的指针应当分别等于 safe / unsafe_ssl 的 Arc 指针
-        assert_eq!(
-            clients.for_rule(&safe_rule) as *const _,
-            Arc::as_ptr(&clients.safe)
-        );
-        assert_eq!(
-            clients.for_rule(&unsafe_rule) as *const _,
-            Arc::as_ptr(&clients.unsafe_ssl)
-        );
+        // for_rule 应当返回有效 client（不 panic、不死锁）。
+        let _c1 = clients.for_rule(&safe_rule);
+        let _c2 = clients.for_rule(&unsafe_rule);
+
+        // rebuild 后 for_rule 仍正常工作
+        let new_cfg = AppConfig {
+            proxy_enabled: true,
+            proxy_host: "127.0.0.1".into(),
+            proxy_port: 9999,
+            ..default_cfg()
+        };
+        clients.rebuild_proxy(&new_cfg).unwrap();
+        let _c3 = clients.for_rule(&safe_rule);
+        let _c4 = clients.for_rule(&unsafe_rule);
     }
 
     #[test]
     fn rebuild_proxy_swaps_client_instance() {
         let clients = HttpClients::new(&default_cfg()).unwrap();
-        let before = clients.safe_ptr();
+        let before = clients.safe_client_ptr();
 
         let new_cfg = AppConfig {
             proxy_enabled: true,
@@ -240,7 +245,7 @@ mod tests {
         };
         clients.rebuild_proxy(&new_cfg).unwrap();
 
-        let after = clients.safe_ptr();
+        let after = clients.safe_client_ptr();
         assert_ne!(
             before, after,
             "proxy changed → safe client instance must be replaced"
@@ -250,11 +255,11 @@ mod tests {
     #[test]
     fn rebuild_proxy_no_op_when_unchanged() {
         let clients = HttpClients::new(&default_cfg()).unwrap();
-        let before = clients.safe_ptr();
+        let before = clients.safe_client_ptr();
 
         // 同样 config 再 rebuild 一次 → 短路
         clients.rebuild_proxy(&default_cfg()).unwrap();
-        let after = clients.safe_ptr();
+        let after = clients.safe_client_ptr();
         assert_eq!(
             before, after,
             "proxy unchanged → safe client must NOT be replaced"
@@ -266,28 +271,29 @@ mod tests {
         // 改一个跟 proxy 无关的字段（这里直接复用 default_cfg() 的 host）——
         // signature 一致 → 不重建。
         let clients = HttpClients::new(&default_cfg()).unwrap();
-        let before = clients.safe_ptr();
+        let before = clients.safe_client_ptr();
 
         // 完全相同的 cfg
         let cfg2 = default_cfg();
         clients.rebuild_proxy(&cfg2).unwrap();
-        let after = clients.safe_ptr();
+        let after = clients.safe_client_ptr();
         assert_eq!(before, after);
     }
 
     #[test]
-    fn gh_proxy_pair_round_trip() {
-        let clients = HttpClients::new(&default_cfg()).unwrap();
-        let (url, _c1) = clients.gh_proxy_pair();
+    fn gh_proxy_pair_returns_configured_url() {
+        let cfg = AppConfig::default();
+        let clients = HttpClients::new(&cfg).unwrap();
+        let (url, _client) = clients.gh_proxy_pair();
         assert!(url.is_empty(), "default gh_proxy is empty");
 
-        clients
-            .set_gh_proxy("https://ghproxy.example.com/", &default_cfg())
-            .unwrap();
-        let (url2, c2) = clients.gh_proxy_pair();
+        // 配了 gh_proxy 的 cfg 应该构造带代理的 client
+        let cfg_with_proxy = AppConfig {
+            gh_proxy: "https://ghproxy.example.com/".into(),
+            ..default_cfg()
+        };
+        let clients2 = HttpClients::new(&cfg_with_proxy).unwrap();
+        let (url2, _client2) = clients2.gh_proxy_pair();
         assert_eq!(url2, "https://ghproxy.example.com/");
-        // set 后 Arc 实例应已替换
-        let (_url3, c3) = clients.gh_proxy_pair();
-        assert!(Arc::ptr_eq(&c2, &c3));
     }
 }

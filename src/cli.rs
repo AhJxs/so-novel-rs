@@ -281,7 +281,14 @@ fn run_download(
 
     let download_task = rt.spawn(async move {
         let client = http_for_task.for_rule(&source_for_task.rule);
-        crawler::download_book(&cfg_for_task, client, &source_for_task, &url_for_task, opts).await
+        crawler::download_book(
+            &cfg_for_task,
+            &client,
+            &source_for_task,
+            &url_for_task,
+            opts,
+        )
+        .await
     });
 
     let mut last_completed: u32 = 0;

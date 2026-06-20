@@ -19,32 +19,39 @@ use super::super::download_task::DownloadTask;
 use super::super::now::now_unix_secs;
 use super::super::search_state::TocEvent;
 
+/// spawn 共享上下文：提取 `rules` / `config` / `http` / `runtime` 四个参数，
+/// 消除 `spawn_download` / `spawn_download_range` / `spawn_resolve_toc` 的重复参数列表。
+pub(crate) struct OpsCtx<'a> {
+    pub rules: &'a [Rule],
+    pub config: &'a AppConfig,
+    pub http: Arc<HttpClients>,
+    pub runtime: &'a tokio::runtime::Runtime,
+}
+
 /// 派一个 TOC 预取任务（获取元数据 + 章节列表，不开始下载）。
 /// 返回接收端，调用方存入 `search.toc_rx`。
 pub fn spawn_resolve_toc(
-    rules: &[Rule],
-    config: &AppConfig,
-    http: Arc<HttpClients>,
-    runtime: &tokio::runtime::Runtime,
+    ctx: &OpsCtx<'_>,
     target: &SearchResult,
 ) -> mpsc::UnboundedReceiver<TocEvent> {
     let (tx, rx) = mpsc::unbounded_channel::<TocEvent>();
 
-    let rule = rules.iter().find(|r| r.id == target.source_id).cloned();
-    let cfg = config.clone();
+    let rule = ctx.rules.iter().find(|r| r.id == target.source_id).cloned();
+    let cfg = ctx.config.clone();
+    let http = Arc::clone(&ctx.http);
     let book_url = target.url.clone();
     let source_id = target.source_id;
     let url_for_event = target.url.clone();
 
     tracing::info!(source_id = source_id, book_url = %book_url, "TOC 预取派发");
 
-    runtime.spawn(async move {
+    ctx.runtime.spawn(async move {
         let started = std::time::Instant::now();
         let state = if let Some(rule) = rule {
             let source = Source::from(rule, &cfg);
             let cancel = CancelToken::new();
             let client = http.for_rule(&source.rule);
-            match resolve_book(&cfg, client, &source, &book_url, &cancel).await {
+            match resolve_book(&cfg, &client, &source, &book_url, &cancel).await {
                 Ok((book, chapters)) => {
                     tracing::info!(source_id = source_id, book = %book.book_name, chapters = chapters.len(), elapsed_ms = started.elapsed().as_millis() as u64, "TOC 预取成功");
                     TocState::Loaded(Box::new(book), chapters)
@@ -70,30 +77,20 @@ pub fn spawn_resolve_toc(
 
 /// 派一个指定章节范围的下载任务。跳过 resolve 阶段，直接进入下载。
 /// `chapters` 已由调用方按用户选择过滤过范围。
-// 参数刚好 8 个：rules/config/http/runtime/next_task_id 是共享的"spawn 上下文"，
-// target/book/chapters 是任务数据。Phase 3.1 加了 `http: Arc<HttpClients>`
-// 后触发了 too_many_arguments（阈值 7）。理论上的解法是把前 5 个字段塞进一个
-// `OpsCtx` 结构（类似其他大型项目的 `AppContext`），但那是一个跨 3 个 spawn
-// 函数 + 上层 AppModel::spawn_* 的小重构，超出 Phase 3.1 范围。本次保持参数
-// 表面稳定，留待后续 Phase 集中重构时再做。
-#[allow(clippy::too_many_arguments)]
 pub fn spawn_download_range(
-    rules: &[Rule],
-    config: &AppConfig,
-    http: Arc<HttpClients>,
-    runtime: &tokio::runtime::Runtime,
-    next_task_id: &mut u64,
+    ctx: &OpsCtx<'_>,
+    next_task_id: u64,
     target: SearchResult,
     book: Book,
     chapters: Vec<Chapter>,
 ) -> (u64, DownloadTask) {
-    let id = *next_task_id;
-    *next_task_id += 1;
+    let id = next_task_id;
     let (tx, rx) = mpsc::unbounded_channel::<Progress>();
     let cancel = CancelToken::new();
 
-    let rule = rules.iter().find(|r| r.id == target.source_id).cloned();
-    let cfg = config.clone();
+    let rule = ctx.rules.iter().find(|r| r.id == target.source_id).cloned();
+    let cfg = ctx.config.clone();
+    let http = Arc::clone(&ctx.http);
     let book_url = target.url.clone();
     let cancel_for_task = cancel.clone();
     let tx_for_task = tx.clone();
@@ -107,7 +104,7 @@ pub fn spawn_download_range(
 
     tracing::info!(task_id = id, source_id = target.source_id, book = %book.book_name, total_chapters = total, book_url = %book_url, "下载任务派发（指定范围）");
 
-    runtime.spawn(async move {
+    ctx.runtime.spawn(async move {
         let Some(rule) = rule else {
             let _ = tx_for_task.send(Progress::Cancelled);
             return;
@@ -121,7 +118,7 @@ pub fn spawn_download_range(
             cancel: cancel_for_task,
         };
         if let Err(e) =
-            download_chapters(&cfg, client, &source, &book_url, &book, chapters, opts).await
+            download_chapters(&cfg, &client, &source, &book_url, &book, chapters, opts).await
         {
             // 用户取消已由 crawler 内部发 Progress::Cancelled；真正的失败发
             // Progress::Failed，让 UI 区分"取消"与"失败"并保留原因。
@@ -155,29 +152,26 @@ pub fn spawn_download_range(
     (id, task)
 }
 
-/// 派一个新的下载任务到后台。返回新任务的 id。
+/// 派一个新的下载任务到后台。返回 `(task_id, task)`。
 pub fn spawn_download(
-    rules: &[Rule],
-    config: &AppConfig,
-    http: Arc<HttpClients>,
-    runtime: &tokio::runtime::Runtime,
-    next_task_id: &mut u64,
+    ctx: &OpsCtx<'_>,
+    next_task_id: u64,
     target: SearchResult,
 ) -> (u64, DownloadTask) {
-    let id = *next_task_id;
-    *next_task_id += 1;
+    let id = next_task_id;
     let (tx, rx) = mpsc::unbounded_channel::<Progress>();
     let cancel = CancelToken::new();
 
-    let rule = rules.iter().find(|r| r.id == target.source_id).cloned();
-    let cfg = config.clone();
+    let rule = ctx.rules.iter().find(|r| r.id == target.source_id).cloned();
+    let cfg = ctx.config.clone();
+    let http = Arc::clone(&ctx.http);
     let book_url = target.url.clone();
     let cancel_for_task = cancel.clone();
     let tx_for_task = tx.clone();
 
     tracing::info!(task_id = id, source_id = target.source_id, book_name = %target.book_name, book_url = %book_url, "下载任务派发");
 
-    runtime.spawn(async move {
+    ctx.runtime.spawn(async move {
         let Some(rule) = rule else {
             tracing::warn!(task_id = id, "下载任务取消: 书源未找到（可能已被删除）");
             let _ = tx_for_task.send(Progress::Cancelled);
@@ -191,7 +185,7 @@ pub fn spawn_download(
             progress: tx_for_task,
             cancel: cancel_for_task,
         };
-        if let Err(e) = download_book(&cfg, client, &source, &book_url, opts).await {
+        if let Err(e) = download_book(&cfg, &client, &source, &book_url, opts).await {
             // 用户取消已由 crawler 内部发 Progress::Cancelled；真正的失败发
             // Progress::Failed，让 UI 区分"取消"与"失败"并保留原因。
             if !matches!(e, CrawlerError::Cancelled) {

@@ -51,6 +51,12 @@ use crate::http::HttpClients;
 use crate::i18n::{ts, ts_fmt};
 use crate::models::{Book, Chapter, Rule, SearchResult};
 use crate::rules::SourceOverrides;
+use ops::{
+    OpsCtx, add_sources_from_file, clear_finished_tasks, delete_library_entry, delete_source,
+    persist_settings, refresh_library, save_task_to_db, select_search_result, spawn_download,
+    spawn_download_range, spawn_health_check, spawn_resolve_toc, spawn_search, spawn_update_check,
+    toggle_source_disabled,
+};
 
 /// 应用整体状态。UI 中立结构 —— 不依赖任何 GUI 框架，由 `gpui_app` 层渲染。
 pub struct AppModel {
@@ -217,30 +223,30 @@ impl AppModel {
         });
     }
 
+    /// 构造 spawn 共享上下文。
+    fn ops_ctx(&self) -> OpsCtx<'_> {
+        OpsCtx {
+            rules: &self.rules,
+            config: &self.config,
+            http: Arc::clone(&self.http),
+            runtime: self.runtime,
+        }
+    }
+
     /// 派一个新的下载任务。返回新任务 id。
     pub fn spawn_download(&mut self, target: SearchResult) -> u64 {
-        let (id, task) = crate::app::ops::spawn_download(
-            &self.rules,
-            &self.config,
-            Arc::clone(&self.http),
-            self.runtime,
-            &mut self.next_task_id,
-            target,
-        );
-        crate::app::ops::save_task_to_db(&self.db, &task);
+        let ctx = self.ops_ctx();
+        let (id, task) = spawn_download(&ctx, self.next_task_id, target);
+        self.next_task_id += 1;
+        save_task_to_db(&self.db, &task);
         self.tasks.push(task);
         id
     }
 
     /// 派一个 TOC 预取任务（获取元数据 + 章节列表，不开始下载）。
     pub fn spawn_resolve_toc(&mut self, target: &SearchResult) {
-        let rx = crate::app::ops::spawn_resolve_toc(
-            &self.rules,
-            &self.config,
-            Arc::clone(&self.http),
-            self.runtime,
-            target,
-        );
+        let ctx = self.ops_ctx();
+        let rx = spawn_resolve_toc(&ctx, target);
         self.search.toc_rx = Some(rx);
     }
 
@@ -252,24 +258,17 @@ impl AppModel {
         book: Book,
         chapters: Vec<Chapter>,
     ) -> u64 {
-        let (id, task) = crate::app::ops::spawn_download_range(
-            &self.rules,
-            &self.config,
-            Arc::clone(&self.http),
-            self.runtime,
-            &mut self.next_task_id,
-            target,
-            book,
-            chapters,
-        );
-        crate::app::ops::save_task_to_db(&self.db, &task);
+        let ctx = self.ops_ctx();
+        let (id, task) = spawn_download_range(&ctx, self.next_task_id, target, book, chapters);
+        self.next_task_id += 1;
+        save_task_to_db(&self.db, &task);
         self.tasks.push(task);
         id
     }
 
     /// 派聚合搜索任务。
     pub fn spawn_search(&mut self) -> bool {
-        crate::app::ops::spawn_search(
+        spawn_search(
             &self.rules,
             &self.config,
             Arc::clone(&self.http),
@@ -280,7 +279,7 @@ impl AppModel {
 
     /// 选中某条搜索结果。
     pub fn select_search_result(&mut self, idx: usize) {
-        crate::app::ops::select_search_result(
+        select_search_result(
             &self.rules,
             &self.config,
             Arc::clone(&self.http),
@@ -292,7 +291,7 @@ impl AppModel {
 
     /// 切换书源禁用状态。
     pub fn toggle_source_disabled(&mut self, source_id: i32) {
-        crate::app::ops::toggle_source_disabled(
+        toggle_source_disabled(
             &self.db,
             &mut self.source_overrides,
             &mut self.rules,
@@ -305,7 +304,7 @@ impl AppModel {
     /// 自动按 `url` 去重 —— DB 已有的 url（忽略大小写、首尾空格）跳过，不重复插入。
     /// 反馈给用户的 toast 同时显示"导入 X / 跳过 Y"。
     pub fn add_sources_from_file(&mut self, path: &std::path::Path) {
-        match crate::app::ops::add_sources_from_file(
+        match add_sources_from_file(
             &mut self.db,
             &mut self.rules,
             &mut self.rule_load_error,
@@ -341,7 +340,7 @@ impl AppModel {
 
     /// 删除一条书源。
     pub fn delete_source(&mut self, source_id: i32) {
-        match crate::app::ops::delete_source(
+        match delete_source(
             &mut self.db,
             &mut self.rules,
             &mut self.source_overrides,
@@ -368,7 +367,7 @@ impl AppModel {
     /// cx.spawn(timer 500ms) 合并多次 persist_settings 调用 —— 单次写盘本来就很快
     /// （小 TOML 几 ms），目前不做 debounce。
     pub fn persist_settings(&mut self) {
-        if let Err(msg) = crate::app::ops::persist_settings(&self.config, &self.paths.config_file) {
+        if let Err(msg) = persist_settings(&self.config, &self.paths.config_file) {
             tracing::warn!("自动保存 config.toml 失败: {msg}");
             self.push_error(msg);
             return;
@@ -393,7 +392,7 @@ impl AppModel {
             self.push_warning(ts("Toasts.no_sources_detected"));
             return;
         }
-        crate::app::ops::spawn_health_check(
+        spawn_health_check(
             &self.rules,
             &self.config,
             Arc::clone(&self.http),
@@ -404,7 +403,7 @@ impl AppModel {
 
     /// 手动检查 GitHub release 是否有新版本。
     pub fn spawn_update_check(&mut self) {
-        crate::app::ops::spawn_update_check(
+        spawn_update_check(
             &self.config,
             Arc::clone(&self.http),
             self.runtime,
@@ -414,7 +413,7 @@ impl AppModel {
 
     /// 扫描下载目录。
     pub fn refresh_library(&mut self) {
-        crate::app::ops::refresh_library(&mut self.library, &self.config.download_path);
+        refresh_library(&mut self.library, &self.config.download_path);
     }
 
     /// 异步扫描下载目录。
@@ -475,11 +474,7 @@ impl AppModel {
 
     /// 真正删除一个本地文件。
     pub fn delete_library_entry(&mut self, path: &std::path::Path) {
-        match crate::app::ops::delete_library_entry(
-            &mut self.library,
-            &self.config.download_path,
-            path,
-        ) {
+        match delete_library_entry(&mut self.library, &self.config.download_path, path) {
             Ok(msg) if !msg.is_empty() => self.push_success(msg),
             Ok(_) => {}
             Err(msg) => self.push_error(msg),
@@ -489,7 +484,7 @@ impl AppModel {
     /// 清掉所有已结束的任务。
     pub fn clear_finished_tasks(&mut self) {
         let before = self.tasks.len();
-        crate::app::ops::clear_finished_tasks(&mut self.tasks, &self.db);
+        clear_finished_tasks(&mut self.tasks, &self.db);
         let removed = before - self.tasks.len();
         if removed > 0 {
             self.push_success(ts_fmt(
@@ -522,6 +517,6 @@ impl AppModel {
 
     /// 把单条任务 upsert 到 DB。
     pub fn save_task_to_db(&self, task: &DownloadTask) {
-        crate::app::ops::save_task_to_db(&self.db, task);
+        save_task_to_db(&self.db, task);
     }
 }

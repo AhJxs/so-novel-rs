@@ -103,14 +103,14 @@ pub async fn fetch(client: &Client, req: &FetchRequest<'_>) -> Result<FetchRespo
 mod tests {
     use super::*;
     use crate::config::AppConfig;
-    use crate::http::client::{ClientOptions, build_blocking_client};
+    use crate::http::client::{ClientOptions, build_async_client};
 
     /// 这条测试只验证 fetch 函数能编译、能用 builder 模式调用；
     /// 不真发请求。真实联网测试在 search/book 模块下用 `#[ignore]` 标记。
-    #[test]
-    fn fetch_request_struct_compiles() {
+    #[tokio::test]
+    async fn fetch_request_struct_compiles() {
         let cfg = AppConfig::default();
-        let _client = build_blocking_client(&cfg, &ClientOptions::default()).unwrap();
+        let _client = build_async_client(&cfg, &ClientOptions::default()).unwrap();
         let _req = FetchRequest {
             url: "https://example.com/",
             method: HttpMethod::Get,

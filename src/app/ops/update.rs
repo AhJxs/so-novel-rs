@@ -8,11 +8,10 @@ use crate::http::HttpClients;
 
 /// 手动检查 GitHub release 是否有新版本。
 ///
-/// `http` 共享 client 集合：`gh_proxy` 为空时复用 `http.safe`（HTTP CONNECT
-/// 代理路径与搜索/详情共用）；非空时仍走 raw builder（forward proxy 与
-/// HTTP CONNECT 互斥）。
+/// 代理逻辑集中在 `HttpClients.gh_proxy_pair()`：
+/// gh_proxy 非空时走预构建的前向代理 client，否则复用共享 safe client。
 pub fn spawn_update_check(
-    config: &AppConfig,
+    _config: &AppConfig,
     http: Arc<HttpClients>,
     runtime: &tokio::runtime::Runtime,
     update_state: &mut UpdateState,
@@ -27,13 +26,9 @@ pub fn spawn_update_check(
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
     update_state.rx = Some(rx);
 
-    let gh_proxy = config.gh_proxy.clone();
-    let config = config.clone();
     let http = Arc::clone(&http);
     runtime.spawn(async move {
-        let result =
-            super::super::update_state::check_github_latest_release(&config, &http, &gh_proxy)
-                .await;
+        let result = super::super::update_state::check_github_latest_release(&http).await;
         let _ = tx.send(result);
     });
 }

@@ -2,7 +2,6 @@
 
 use tokio::sync::mpsc;
 
-use crate::config::AppConfig;
 use crate::http::HttpClients;
 use crate::models::Rule;
 
@@ -92,51 +91,21 @@ fn classify(result: &UpdateCheckResult) -> UpdateOutcome {
 /// 向 GitHub API 查询最新 release 版本号。
 ///
 /// **代理策略**（优先级从高到低）：
-/// 1. `gh_proxy` 非空 → 走 GH 镜像前向代理（**优先级最高**，无视全局代理开关）。
-///    用户主动填了 `gh_proxy` 就是明确要它管 GitHub 流量；全局代理是兜底。
-///    这一支仍 raw builder（forward proxy 与 HTTP CONNECT 互斥，无法叠加到共享
-///    client），且 gh_proxy 检查频率极低（启动一次 + 用户手动），不构成热路径。
+/// 1. `HttpClients.gh_proxy_pair()` URL 非空 → 走预构建的 GH 镜像前向代理 client
+///    （构造时已含 proxy + UA，启动时一次性 build，不重复创建连接池）。
+///    gh_proxy 检查频率极低（启动一次 + 用户手动），不构成热路径。
 /// 2. 否则从共享 [`HttpClients`] 复用 `safe` client（按占位 rule 选）——
-///    该 client 已包含 HTTP CONNECT 代理 / TLS session cache / 默认 headers，
-///    与搜索/详情/封面路径保持一致，避免每次检查都重建连接池。
+///    该 client 已包含 HTTP CONNECT 代理 / TLS session cache / 默认 headers。
 /// 3. 两者都空 → `safe` client 直接走，无代理直连。
-///
-/// `_cfg` 保留仅为 API 表面稳定（外部调用按 `(&cfg, &http, &gh_proxy)` 顺序
-/// 传参；日后若需要根据 cfg 决定 endpoint / 镜像分流再加回来）。
-pub async fn check_github_latest_release(
-    _cfg: &AppConfig,
-    http: &HttpClients,
-    gh_proxy: &str,
-) -> UpdateCheckResult {
+pub async fn check_github_latest_release(http: &HttpClients) -> UpdateCheckResult {
     let url = "https://api.github.com/repos/AhJxs/so-novel-rs/releases/latest";
 
-    // GitHub API 对无 UA 的请求返回 403；共享 `safe` client 未设默认 UA
-    // （工厂只设 Accept-Language），所以两分支都要显式带 UA header。
-    let result = if !gh_proxy.is_empty() {
-        // gh_proxy 镜像分支：raw builder + gh_proxy 作 forward HTTP proxy。
-        let proxy = match reqwest::Proxy::all(gh_proxy) {
-            Ok(p) => p,
-            Err(e) => {
-                return UpdateCheckResult {
-                    latest_version: None,
-                    error: Some(format!("gh_proxy URL 无效: {e}")),
-                };
-            }
-        };
-        let client = match reqwest::Client::builder()
-            .user_agent("so-novel-rs")
-            .proxy(proxy)
-            .build()
-        {
-            Ok(c) => c,
-            Err(e) => {
-                return UpdateCheckResult {
-                    latest_version: None,
-                    error: Some(format!("构建 gh_proxy 客户端失败: {e}")),
-                };
-            }
-        };
-        client.get(url).send().await
+    let (gh_proxy_url, gh_proxy_client) = http.gh_proxy_pair();
+
+    // GitHub API 对无 UA 的请求返回 403；gh_proxy client 构造时已设 UA；
+    // safe client 分支需显式带 UA header。
+    let result = if !gh_proxy_url.is_empty() {
+        gh_proxy_client.get(url).send().await
     } else {
         // 共享 client 分支：复用 `safe` —— 用占位 rule（ignore_ssl=false），
         // 因为查询 GitHub API 不需要忽略证书校验。

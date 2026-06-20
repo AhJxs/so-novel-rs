@@ -445,40 +445,4 @@ mod search_state_tests {
         std::thread::sleep(std::time::Duration::from_millis(500));
         drop(rt);
     }
-
-    /// 真实回归测试：spawn_blocking + reqwest::blocking + drop 触发 panic。
-    /// 验证修复方向：等 download 路径迁到 async reqwest 后，这个 panic 应该消失。
-    #[test]
-    #[ignore = "真实网络 + 反模式；cargo test -- --ignored 跑"]
-    fn download_blocking_client_real_request_in_spawn_blocking_panics() {
-        use std::sync::Arc;
-        let rt = Arc::new(
-            tokio::runtime::Builder::new_multi_thread()
-                .worker_threads(2)
-                .enable_all()
-                .thread_name("so-novel-rt-test")
-                .build()
-                .unwrap(),
-        );
-        let cfg = AppConfig::default();
-
-        rt.block_on(async {
-            let _ = tokio::task::spawn_blocking(move || {
-                let client = crate::http::client::build_blocking_client(
-                    &cfg,
-                    &crate::http::client::ClientOptions::default(),
-                )
-                .unwrap();
-                let _ = client
-                    .get("https://example.com/")
-                    .timeout(std::time::Duration::from_secs(5))
-                    .send();
-                drop(client);
-            })
-            .await;
-        });
-
-        std::thread::sleep(std::time::Duration::from_millis(200));
-        drop(rt);
-    }
 }

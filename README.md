@@ -22,7 +22,13 @@
 
 ## 📸 截图
 
-> 截图待补充。运行 `cargo run` 启动 GUI 后，可截取主界面、设置页、书库等放入 `docs/screenshots/` 目录。
+| 搜索 | 任务 |
+|:---:|:---:|
+| ![搜索](screenshots/search.png) | ![任务](screenshots/task.png) |
+
+| 书库 | 设置 |
+|:---:|:---:|
+| ![书库](screenshots/library.png) | ![设置](screenshots/settings.png) |
 
 ## ✨ 功能
 

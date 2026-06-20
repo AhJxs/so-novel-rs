@@ -31,10 +31,6 @@ pub struct SourceSearchOutcome {
 ///
 /// `cf_bypass_base` 与各 parser 中的同名参数一致：CF 命中时若非空则
 /// 调用外部 bypass 服务。
-///
-/// **注意**：此函数会**为每个源单独构造一个 reqwest Client**，因为不同书源
-/// 可能有不同的 `ignore_ssl` 设置（rate-limit.json 里 0xs 书源就是这样）。
-/// 客户端构造很轻（不发请求），代价可接受。
 pub async fn search_aggregated(
     cfg: &AppConfig,
     http: Arc<HttpClients>,
@@ -45,41 +41,7 @@ pub async fn search_aggregated(
 ) -> Vec<SourceSearchOutcome> {
     tracing::info!(sources = sources.len(), keyword = %crate::util::fs::truncate_log(&keyword, 10), "search_aggregated: 启动 {} 个并发源", sources.len());
 
-    let mut set: JoinSet<SourceSearchOutcome> = JoinSet::new();
-
-    // `cfg` 当前在 `run_one` 内未直接消费（HTTP 复用通过 `http` 解决）；
-    // 保留 `cfg: &AppConfig` 参数仅为接口稳定 + 未来 per-source 调度参数扩展。
-    let _cfg = cfg;
-    let http = Arc::clone(&http);
-    let kw = Arc::new(keyword);
-    let cf = Arc::new(cf_bypass_base);
-
-    for src in sources {
-        let http = Arc::clone(&http);
-        let kw = Arc::clone(&kw);
-        let cf = Arc::clone(&cf);
-        set.spawn(async move {
-            let source_id = src.rule.id;
-            let source_name = src.rule.name.clone();
-            let started = std::time::Instant::now();
-
-            tracing::debug!(source_id = source_id, source = %source_name, "search_aggregated: 单源搜索开始");
-
-            let client = http.for_rule(&src.rule);
-            let cf_borrow: Option<&str> = cf.as_ref().as_ref().map(|s| s.as_str());
-            let result = run_one(client, &src, kw.as_str(), limit, cf_borrow).await;
-            let elapsed_ms = started.elapsed().as_millis() as u64;
-            match &result {
-                Ok(list) => tracing::info!(source_id = source_id, source = %source_name, hits = list.len(), elapsed_ms = elapsed_ms, "search_aggregated: 单源搜索成功"),
-                Err(e) => tracing::warn!(source_id = source_id, source = %source_name, elapsed_ms = elapsed_ms, error = %e, "search_aggregated: 单源搜索失败"),
-            }
-            SourceSearchOutcome {
-                source_id,
-                source_name,
-                result,
-            }
-        });
-    }
+    let mut set = spawn_search_tasks(cfg, http, sources, keyword, limit, cf_bypass_base);
 
     let mut out = Vec::with_capacity(set.len());
     while let Some(joined) = set.join_next().await {
@@ -110,9 +72,35 @@ pub async fn search_streaming(
 ) {
     tracing::info!(sources = sources.len(), keyword = %crate::util::fs::truncate_log(&keyword, 10), "search_streaming: 启动 {} 个并发源", sources.len());
 
+    let mut set = spawn_search_tasks(cfg, http, sources, keyword, limit, cf_bypass_base);
+
+    while let Some(joined) = set.join_next().await {
+        match joined {
+            Ok(o) => {
+                // 接收端已关闭（UI 侧 drop）→ 放弃剩余任务
+                if tx.send(o).is_err() {
+                    break;
+                }
+            }
+            Err(e) => tracing::warn!("聚合搜索任务 join 失败: {e}"),
+        }
+    }
+}
+
+/// 为每个 source spawn 一个异步搜索任务，返回 `JoinSet`。
+///
+/// 调用方决定如何消费结果（收集到 Vec 或逐个推送 channel）。
+/// 共享逻辑：日志、Client 复用、per-source 计时、结果包装。
+fn spawn_search_tasks(
+    _cfg: &AppConfig,
+    http: Arc<HttpClients>,
+    sources: Vec<Source>,
+    keyword: String,
+    limit: Option<usize>,
+    cf_bypass_base: Option<String>,
+) -> JoinSet<SourceSearchOutcome> {
     let mut set: JoinSet<SourceSearchOutcome> = JoinSet::new();
 
-    let _cfg = cfg;
     let http = Arc::clone(&http);
     let kw = Arc::new(keyword);
     let cf = Arc::new(cf_bypass_base);
@@ -126,15 +114,15 @@ pub async fn search_streaming(
             let source_name = src.rule.name.clone();
             let started = std::time::Instant::now();
 
-            tracing::debug!(source_id = source_id, source = %source_name, "search_streaming: 单源搜索开始");
+            tracing::debug!(source_id = source_id, source = %source_name, "单源搜索开始");
 
             let client = http.for_rule(&src.rule);
             let cf_borrow: Option<&str> = cf.as_ref().as_ref().map(|s| s.as_str());
-            let result = run_one(client, &src, kw.as_str(), limit, cf_borrow).await;
+            let result = run_one(&client, &src, kw.as_str(), limit, cf_borrow).await;
             let elapsed_ms = started.elapsed().as_millis() as u64;
             match &result {
-                Ok(list) => tracing::info!(source_id = source_id, source = %source_name, hits = list.len(), elapsed_ms = elapsed_ms, "search_streaming: 单源搜索成功"),
-                Err(e) => tracing::warn!(source_id = source_id, source = %source_name, elapsed_ms = elapsed_ms, error = %e, "search_streaming: 单源搜索失败"),
+                Ok(list) => tracing::info!(source_id = source_id, source = %source_name, hits = list.len(), elapsed_ms = elapsed_ms, "单源搜索成功"),
+                Err(e) => tracing::warn!(source_id = source_id, source = %source_name, elapsed_ms = elapsed_ms, error = %e, "单源搜索失败"),
             }
             SourceSearchOutcome {
                 source_id,
@@ -144,17 +132,7 @@ pub async fn search_streaming(
         });
     }
 
-    while let Some(joined) = set.join_next().await {
-        match joined {
-            Ok(o) => {
-                // 接收端已关闭（UI 侧 drop）→ 放弃剩余任务
-                if tx.send(o).is_err() {
-                    break;
-                }
-            }
-            Err(e) => tracing::warn!("聚合搜索任务 join 失败: {e}"),
-        }
-    }
+    set
 }
 
 async fn run_one(

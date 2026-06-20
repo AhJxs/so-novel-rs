@@ -238,7 +238,7 @@ pub fn select_search_result(
         let qc = qidian_cookie.clone();
         let result: Result<Book, String> = async {
             let client = http.for_rule(&rule);
-            crate::parser::parse_book_detail(client, &rule, &url, cf.as_deref(), qc.as_deref())
+            crate::parser::parse_book_detail(&client, &rule, &url, cf.as_deref(), qc.as_deref())
                 .await
                 .map_err(|e| format!("{e:#}"))
         }

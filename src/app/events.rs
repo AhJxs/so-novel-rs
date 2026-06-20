@@ -39,14 +39,14 @@ pub fn drain(model: &mut AppModel) -> bool {
     //    `pending_cover_prefetch`；此处统一取出 spawn。
     let to_fetch = std::mem::take(&mut model.search.pending_cover_prefetch);
     // cover 始终走 safe 分支（unsafe_ssl=false）；用占位 rule 取 safe client。
-    let safe_client: &reqwest::Client = model.http.for_rule(&crate::models::Rule {
+    let safe_client = model.http.for_rule(&crate::models::Rule {
         ignore_ssl: false,
         ..crate::models::Rule::default()
     });
     for (sid, url) in to_fetch {
         model
             .search
-            .spawn_cover_download(sid, &url, safe_client, model.runtime);
+            .spawn_cover_download(sid, &url, &safe_client, model.runtime);
     }
 
     // 2b. 本地书库后台扫描结果（refresh_library_async 通过 smol channel 回送）。
