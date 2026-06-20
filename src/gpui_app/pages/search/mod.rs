@@ -251,6 +251,7 @@ impl SearchPage {
     fn run_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let kw = self.keyword.read(cx).value().to_string();
         self.model.update(cx, |m, _cx| m.search.keyword = kw);
+        self.current_page = 0;
         let started = self.model.update(cx, |m, _cx| m.spawn_search());
         if !started {
             window.push_notification(
