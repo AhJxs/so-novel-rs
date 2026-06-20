@@ -123,7 +123,7 @@ impl AppModel {
             }
         }
 
-        let runtime = build_shared_runtime();
+        let runtime = build_shared_runtime()?;
 
         let mut db = match Db::open(&paths.db_file) {
             Ok(db) => db,
