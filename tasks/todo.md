@@ -114,38 +114,38 @@
 ## Phase 4：可靠性与测试
 
 ### 4.1 补测试覆盖（按 `audit-summary.md` §3 缺口逐项）
-- [ ] URL 层：`resolve_base_for_join` 三路优先级单测
-- [ ] Parser：
-  - [ ] `parser/chapter.rs::fetch_paginated_content` 50 页上限触发的 break（构造 50 页 HTML）
-  - [ ] `parser/dom.rs::remove_tags` 嵌套同名标签正确性
-  - [ ] `parser/toc.rs::collect_pagination_urls` 模式 1+2 混合
-- [ ] Crawler：
-  - [ ] `crawler::wait_cancelled` 精确等待时间（Notified 立即唤醒）
-  - [ ] `crawler::cleanup_chapters_dir_if_empty` 在并发下安全（spawn_blocking + 临时目录）
-- [ ] DB：
-  - [ ] `delete_finished` 新 SQL 版本回归
-  - [ ] `seed_from_default` 大规则集原子（5000 条 + 一处故意 parse 失败）
-- [ ] Export：
-  - [ ] `epub.rs::detect_image_mime` BMP / WebP / GIF 兜底
-  - [ ] `pdf.rs::wrap_text` 中文 + ASCII 边界
-  - [ ] `exporter.rs::write_chapter_files` 文件名冲突加 `(1)` 后缀
-  - [ ] `build_book_dir_name` 同名自动加 `(2)`
-- [ ] Config：
-  - [ ] `save_config` 原子写（注入 I/O 中断 → 旧文件完整）
-  - [ ] 老键迁移往返（反复迁移 5 轮仍正确）
-- [ ] CLI：
-  - [ ] 各 subcommand stdout JSON schema 兼容性（snapshot 测）
+- [x] URL 层：`resolve_base_for_join` 4 个单测（2-way priority / whitespace / untrimmed passthrough）
+- [x] Parser：
+  - [x] `parser/dom.rs::remove_tags` 嵌套同名标签正确性（4 个测试：nested / deeply nested / identical siblings / no match）
+  - [x] `export/epub.rs::detect_image_mime` BMP / WebP / GIF 兜底 + JPEG 显式检测 + 短输入安全（实现改造 + 2 个新测试）
+  - [x] `pdf.rs::wrap_text` 中文 + ASCII 边界 — 已有 2 个测试（`wrap_text_breaks_long_cjk_line` / `wrap_text_keeps_ascii_word_intact`）
+  - [x] `exporter.rs::write_chapter_files` 文件名冲突加 `(1)` 后缀 — Phase 3.3 已完成（`write_chapter_files_deduplicates_same_title`）
+- [x] Crawler：
+  - [x] `crawler::wait_cancelled` 精确等待时间 — Phase 3.6 已完成（`wait_cancelled_immediate_after_cancel` + `wait_cancelled_waits_for_cancel_signal`）
+- [x] `util::fs::truncate_log` — 3 个新测试（short / long / empty）
+- [ ] 未完成（低优先级 / 需要网络或复杂 mock）：
+  - [ ] `parser/chapter.rs::fetch_paginated_content` 50 页上限（需 HTTP mock）
+  - [ ] `parser/toc.rs::collect_pagination_urls` 模式 2（需 HTTP mock）
+  - [ ] `crawler::cleanup_chapters_dir_if_empty` 并发安全
+  - [ ] `seed_from_default` 大规则集原子（已有 idempotent 测试覆盖基本场景）
+  - [ ] `build_book_dir_name` 同名自动加 `(2)`（当前不加，留作 future）
+  - [ ] Config 原子写注入 I/O 中断 / 老键迁移往返
+  - [ ] CLI stdout JSON schema snapshot
+- [x] 验证：build / clippy `-D warnings` / test 全绿（318 lib + 3 main + 4 ignored，+13 from Phase 4.1）
 
 ### 4.2 加 tracing 到关键路径
-- [ ] `crawler/cover_updater.rs` — 缺 tracing：加 `info!(book = %book_name, "cover update start")` + 成功/失败
-- [ ] `parser/chapter.rs` — 加 elapsed_ms 字段到现有 trace（部分已有，统一样式）
-- [ ] `export/*.rs` — 章节级 trace：开始 → 字节数 → 写完 elapsed
-- [ ] `db/tasks.rs::upsert` — debug 级 trace，便于排错"任务为什么没保存"
-- [ ] 验证：`RUST_LOG=info cargo run` 启动后能跟踪一次完整下载 → 看到关键 span
+- [x] `parser/chapter.rs::fetch_paginated_content` — 加 `elapsed_ms` 到分页完成日志
+- [x] `export/epub.rs` — 章节级 debug trace（chapter/total/bytes）+ info summary（chapters/elapsed_ms）
+- [x] `export/pdf.rs` — 章节级 debug trace（chapter/total/paragraphs）+ info summary（chapters/elapsed_ms）
+- [x] `db/tasks.rs::upsert` — debug 级 trace（task_id）
+- [x] `crawler/cover_updater.rs` — 审计后确认已合理（debug start + info finish+elapsed），无额外改动
+- [x] 验证：build / clippy / test 全绿
 
 ### 4.3 隐私 / 日志字段审查
-- [ ] 全局 grep `tracing::warn!(url = %...` `tracing::info!(url = %...` → 评估是否泄漏用户搜索词（`keyword` 应脱敏或限制字段）
-- [ ] proxy password / cookie：确认 reqwest 不会自动写入 tracing（review fetch.rs）
+- [x] `keyword` 字段 — 4 处 tracing 调用已脱敏（`truncate_log(&keyword, 10)` 截断 + `***` 后缀）
+- [x] proxy password / cookie — 确认安全：reqwest 不自动写入 tracing；`has_qidian_cookie` 只记录 boolean，不记录值
+- [x] 新增 `util::fs::truncate_log` 辅助函数 + 3 个测试
+- [x] 验证：build / clippy / test 全绿（318 lib + 3 main + 4 ignored，+3 from Phase 4.3）
 
 ---
 

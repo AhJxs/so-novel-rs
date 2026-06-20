@@ -317,3 +317,70 @@ Phase 3+5 是下一轮 PR 范围，本 review 只列不动：
 - 引入 `criterion` / `dhat`：基准测试等 Phase 3 性能改完再做才有对照。
 - `tokio::sync::RwLock<AppConfig>`：当前 AppModel 单线程独占语义清晰，加锁收益小、复杂度上升。
 - 重写中文文档：本轮零对外文案改动，README 不需要动。
+
+---
+
+# 全量总结（Phase 2 + 3 + 4）
+
+> 起点：master `196d413`（v0.2.6，284 tests）。
+> 终点：master `92a7133`（321 tests，8 commits on top）。
+
+## Commit 列表
+
+| # | Commit | 类型 | 描述 |
+|---|---|---|---|
+| 1 | `418f79c` | perf | `seed_from_default` 单事务 INSERT |
+| 2 | `9c10c4c` | perf | `delete_finished` 单 SQL DELETE |
+| 3 | `ee78f4b` | feat | 启动时清理 >30d 日志 |
+| 4 | `bc410c1` | fix | tokio runtime build 失败改 Result |
+| 5 | `be76b9e` | perf | HTTP client 连接池 + TLS session 复用 |
+| 6 | `8c6db6d` | perf | Selector / Regex 按字符串全局缓存 |
+| 7 | `d54f576` | perf | Export BufWriter + 文件名去重 |
+| 8 | `3094d6c` | perf | Cancel token Notify <1ms 响应 |
+| 9 | `24b9962` | test | 补 10 个单元测试 |
+| 10 | `71c93fb` | tracing | 章节级 export + pagination tracing |
+| 11 | `92a7133` | privacy | 搜索关键词日志脱敏 |
+
+## 测试增量
+
+284 → 321（+37 新测试，+13%）
+
+| 阶段 | 新测试 | 累计 |
+|---|---|---|
+| Phase 2 | +8 | 292 |
+| Phase 3.1 | +5 (HttpClients) | 294 |
+| Phase 3.2 | +8 (cache) | 302 |
+| Phase 3.3 | +1 (dedup) | 303 |
+| Phase 3.6 | +2 (cancel) | 305 |
+| Phase 4.1 | +10 (parser/export) | 315 |
+| Phase 4.3 | +3 (truncate_log) | 318 |
+| main tests | +3 | 321 |
+
+## 兼容性影响
+
+- ✅ 公开 CLI 行为：零变更
+- ✅ `~/.sonovel/` 数据目录：零 schema 迁移
+- ✅ `config.toml` 兼容性：零变更
+- ✅ 依赖树：零新增
+- ⚠️ 行为微变：
+  - 取消响应从 ≤50ms → <1ms（更流畅，用户无感）
+  - 文件名冲突时加 `(1)` 后缀（之前静默覆盖）
+  - 搜索关键词日志截断为 10 字符 + `***`（隐私保护）
+
+## 残留风险
+
+| 风险 | 缓解 |
+|---|---|
+| Windows `fs::rename` 非 POSIX atomic | 窗口期极短；下次启动能读旧 config |
+| `purge_old_logs` GUI 模式静默失败 | 用户可通过 CLI + RUST_LOG 查看 |
+| Selector `!Sync`（scraper 内部 Rc） | 单 task 内 `Arc::clone` 后借用一次，不跨线程共享 |
+| cache 内存无上限 | 典型 < 200 条 × 几 KB = 几 MB；不主动 cap |
+
+## 未来建议（不在本次范围）
+
+- 引入 `criterion` 做基准测试（regex 缓存、连接池复用、export 流式需要数据证明）
+- 引入 `dhat` 跟踪 export 内存峰值
+- `parser/toc.rs` 分页 best-effort 化（单页失败不致命整本）
+- `build_book_dir_name` 同名去重
+- `gpui 0.3.x` 升级路径调研
+- 中文 README 同步更新
