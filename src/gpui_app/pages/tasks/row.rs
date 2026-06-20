@@ -6,7 +6,6 @@ use gpui::{
 };
 use gpui_component::{
     ActiveTheme as _, Disableable, Icon, IconName, Sizable,
-    accordion::Accordion,
     button::{Button, ButtonVariants as _},
     h_flex,
     progress::Progress,
@@ -213,45 +212,10 @@ pub(super) fn render(task: TaskSummary, page: Entity<TasksPage>, cx: &mut App) -
                                 .w_full()
                                 .bg(cx.theme().success),
                         )
-                        // 失败章节折叠
-                        .when(!task.failures.is_empty(), |this| {
-                            let fail_count = task.failures.len();
-                            this.child(Accordion::new(("task-fails", task.id)).item(|item| {
-                                item.title(ts_fmt(
-                                    "Tasks.card.failures",
-                                    &[("n", &fail_count.to_string())],
-                                ))
-                                .child(
-                                    v_flex()
-                                        .gap_1()
-                                        .p_2()
-                                        .text_xs()
-                                        .text_color(cx.theme().muted_foreground)
-                                        .children(task.failures.iter().take(20).map(
-                                            |(idx, title, reason)| {
-                                                div().gap_1().child(
-                                                    div()
-                                                        .font_weight(FontWeight::MEDIUM)
-                                                        .child(format!(
-                                                            "{} · {}",
-                                                            ts_fmt(
-                                                                "Tasks.card.failure_chapter",
-                                                                &[
-                                                                    ("idx", &idx.to_string()),
-                                                                    ("title", title)
-                                                                ]
-                                                            ),
-                                                            ts_fmt(
-                                                                "Tasks.card.failure_reason",
-                                                                &[("reason", reason)]
-                                                            ),
-                                                        )),
-                                                )
-                                            },
-                                        )),
-                                )
-                            }))
-                        })
+                        // 失败章节不再用行内 Accordion 折叠 —— `List` 要求所有行等高 +
+                        // `overflow_hidden`（见 gpui-component list.rs），Accordion 展开撑高
+                        // 会被裁掉。改成动作按钮区的「失败明细」按钮 → 弹 Dialog 只读列表
+                        // （`TasksPage::show_failures`），把可变高度内容移出虚拟列表行。
                         // 动作按钮行
                         .child(
                             h_flex()
@@ -295,6 +259,33 @@ pub(super) fn render(task: TaskSummary, page: Entity<TasksPage>, cx: &mut App) -
                                             .on_click(move |_, _window, cx| {
                                                 page_for_retry.update(cx, |p, cx| {
                                                     p.retry(task_id, cx);
+                                                });
+                                            }),
+                                    )
+                                })
+                                // 失败明细（有失败章节时）→ 弹只读 Dialog 列出失败章节 + 原因。
+                                // 不再用行内 Accordion（List 等高 + overflow_hidden 撑不开）。
+                                .when(!task.failures.is_empty(), |this| {
+                                    let page_for_fails = page.clone();
+                                    let task_id = task.id;
+                                    let failures = task.failures.clone();
+                                    let book_name = task.book_name().to_string();
+                                    let fail_count = failures.len();
+                                    this.child(
+                                        Button::new(("task-fails", task_id))
+                                            .small()
+                                            .outline()
+                                            .icon(Icon::new(IconName::TriangleAlert))
+                                            .label(ts_fmt(
+                                                "Tasks.card.action.failures",
+                                                &[("n", &fail_count.to_string())],
+                                            ))
+                                            .on_click(move |_, window: &mut Window, cx| {
+                                                // Fn handler：每次点击重新 clone 给 update 闭包。
+                                                let failures = failures.clone();
+                                                let book_name = book_name.clone();
+                                                page_for_fails.update(cx, |p, cx| {
+                                                    p.show_failures(failures, book_name, window, cx);
                                                 });
                                             }),
                                     )

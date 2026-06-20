@@ -32,6 +32,7 @@ use gpui_component::{
     button::ButtonVariant,
     dialog::{Dialog, DialogButtonProps},
     list::{List, ListState},
+    scroll::ScrollableElement as _,
     v_flex,
 };
 
@@ -139,6 +140,70 @@ impl TasksPage {
                     cx.notify(model_id_for_ok);
                     true // 关闭 dialog
                 })
+        });
+    }
+
+    /// 点「失败明细」按钮 → 弹只读 Dialog 列出失败章节 + 原因。
+    ///
+    /// 不再用行内 `Accordion`：`List` 要求所有行等高 + `overflow_hidden`
+    /// （gpui-component `list.rs`），Accordion 展开撑高会被裁掉。把可变高度内容
+    /// 移出虚拟列表行，放进 Dialog（`.alert()` 单 OK 按钮 + 可滚动列表）。
+    pub(super) fn show_failures(
+        &self,
+        failures: Vec<(u32, String, String)>,
+        book_name: String,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        // 书名兜底：空时用 i18n fallback。
+        let name: String = if book_name.trim().is_empty() {
+            ts("Tasks.fallback_unknown_book").to_string()
+        } else {
+            book_name
+        };
+
+        window.open_dialog(cx, move |dialog: Dialog, _window, cx| {
+            // builder 是 Fn（每帧重调）—— 捕获用引用 / clone，不能 FnOnce。
+            let name_for_title = name.clone();
+            let failures_for_list = failures.clone();
+            // 跟书籍详情 Dialog 同款样式：宽 640px + 不调 `.alert()`/`.confirm()`，
+            // 保留默认 `close_button: true` 的右上角 X 关闭按钮 + overlay 点击关闭 + Esc。
+            dialog
+                .title(ts_fmt(
+                    "Tasks.failures_dialog.title",
+                    &[("book_name", &name_for_title)],
+                ))
+                .w(px(640.))
+                // 失败章节可能很多 —— 限高 + 纵向滚动，避免 Dialog 撑出屏幕。
+                // `overflow_y_scrollbar` 是 terminal builder（返回 `Scrollable<Div>`），
+                // 必须放在链尾；详见 search/detail_dialog.rs 同款用法。
+                .child(
+                    v_flex()
+                        .max_h(px(400.))
+                        .gap_1()
+                        .py_1()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .children(
+                            failures_for_list
+                                .iter()
+                                .take(50)
+                                .map(|(idx, title, reason)| {
+                                    div().gap_1().child(div().child(format!(
+                                        "{} · {}",
+                                        ts_fmt(
+                                            "Tasks.card.failure_chapter",
+                                            &[("idx", &idx.to_string()), ("title", title)],
+                                        ),
+                                        ts_fmt(
+                                            "Tasks.card.failure_reason",
+                                            &[("reason", reason)],
+                                        ),
+                                    )))
+                                }),
+                        )
+                        .overflow_y_scrollbar(),
+                )
         });
     }
 

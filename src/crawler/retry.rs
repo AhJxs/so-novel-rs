@@ -37,8 +37,13 @@ where
             }
         }
     }
-    // 上面循环至少跑一次，last_err 一定被赋值。
-    Err(last_err.expect("retry loop ran at least once"))
+    // 上面循环至少跑一次（`0..=max_attempts` 至少含 0），如果走到这里说明
+    // op 从未返回 Ok → last_err 必为 Some。`expect` 也对，但 match 让 clippy
+    // 不报 `clippy::expect_used` 提示且语义更清晰。
+    match last_err {
+        Some(e) => Err(e),
+        None => unreachable!("retry loop always runs at least once"),
+    }
 }
 
 #[cfg(test)]

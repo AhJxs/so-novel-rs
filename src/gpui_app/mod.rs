@@ -82,7 +82,22 @@ pub fn run() -> Result<()> {
         gpui_component::init(cx);
 
         // 1. 创建 AppModel。
-        let model: Entity<AppModel> = cx.new(|_cx| AppModel::new());
+        //    启动期致命错误（如持久化数据库磁盘 + 内存都打不开）→ 弹原生
+        //    错误对话框后直接退出 GPUI 循环，不开任何窗口。
+        let model: Entity<AppModel> = match AppModel::new() {
+            Ok(m) => cx.new(|_cx| m),
+            Err(e) => {
+                tracing::error!("AppModel 初始化失败: {e:#}");
+                rfd::MessageDialog::new()
+                    .set_title("So Novel 启动失败")
+                    .set_description(format!(
+                        "初始化失败，无法启动应用：\n\n{e:#}\n\n请检查磁盘权限或重装应用。"
+                    ))
+                    .set_level(rfd::MessageLevel::Error)
+                    .show();
+                return;
+            }
+        };
 
         // 2. 注册快捷键。
         root::register_key_bindings(cx);

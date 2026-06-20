@@ -97,8 +97,12 @@ pub fn convert_html_body(body: &str, target: &LangType) -> String {
         };
         // 闭标签 </script 含 '>'，位置 = rel_close + end_tag.len() + 1
         let block_end_incl = pos + rel_close + end_tag.len() + 1;
-        // 找到开标签的 '>' 结束
-        let open_gt_rel = rest[pos..].find('>').expect("script/style 开标签必有 '>'");
+        // 找到开标签的 '>' 结束。理论上 `<script` / `<style` 后面必有 `>`，
+        // 但防御性兜底：找不到 → 把整个块原样追加、不转，避免 panic 杀掉整次转换。
+        let Some(open_gt_rel) = rest[pos..].find('>') else {
+            out.push_str(&rest[pos..]);
+            break;
+        };
         let open_gt = pos + open_gt_rel + 1;
         // 开标签原样（zhconv 不改 ASCII 字符，但保险起见原样保留）
         out.push_str(&rest[pos..open_gt]);

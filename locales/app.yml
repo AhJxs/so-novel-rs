@@ -630,12 +630,7 @@ Tasks:
         en: "(unknown time)"
         zh-CN: "(未知时间)"
         zh-HK: "(未知時間)"
-    # 失败章节折叠标题
-    failures:
-      en: "Failed chapters ({n})"
-      zh-CN: "失败章节明细 ({n})"
-      zh-HK: "失敗章節明細 ({n})"
-    # "第 {idx} 章 — {title}" / "原因: {reason}"
+    # "第 {idx} 章 — {title}" / "原因: {reason}" —— 失败明细 Dialog 里复用
     failure_chapter:
       en: "Chapter {idx} — {title}"
       zh-CN: "第 {idx} 章 — {title}"
@@ -670,6 +665,19 @@ Tasks:
         en: Delete
         zh-CN: 删除
         zh-HK: 刪除
+      # 失败明细按钮（{n} = 失败章节数）—— 点击弹 Dialog 列出失败章节 + 原因。
+      # 不再用行内 Accordion（List 等高 + overflow_hidden 撑不开）。
+      failures:
+        en: "Failed ({n})"
+        zh-CN: "失败明细 ({n})"
+        zh-HK: "失敗明細 ({n})"
+  # 失败明细 Dialog（只读列表，跟书籍详情 Dialog 同款：右上角 X 关闭 + Esc + overlay 点击）
+  failures_dialog:
+    # {book_name} 占位符
+    title:
+      en: 'Failed chapters — "{book_name}"'
+      zh-CN: "失败章节明细——《{book_name}》"
+      zh-HK: "失敗章節明細——《{book_name}》"
   # 无书名时的 fallback
   fallback_unknown_book:
     en: "(unknown book)"

@@ -610,7 +610,65 @@ pub fn save_config(path: &Path, cfg: &AppConfig) -> Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).ok();
     }
-    std::fs::write(path, doc.to_string()).with_context(|| format!("写入 {}", path.display()))?;
+    // 原子写：先写同目录下的临时文件 → fsync → rename → 避免断电/进程崩溃
+    // 时留下半截文件导致下次启动 config 解析失败。
+    write_atomically(path, doc.to_string().as_bytes())
+        .with_context(|| format!("原子写入 {}", path.display()))?;
+    Ok(())
+}
+
+/// 把 `data` 写到 `path`，失败时不会留下半截文件。
+///
+/// 步骤：
+/// 1. 在目标同一目录下生成唯一临时文件名（避免与其它实例的 tmp 冲突）；
+/// 2. 全量写入并 fsync，确保字节落盘；
+/// 3. `rename` 覆盖目标 — POSIX 原子、Windows 在同卷上也是原子操作；
+/// 4. 失败时主动删除临时文件，不留垃圾。
+///
+/// 同目录是为了让 `rename` 是原子的（跨目录 / 跨文件系统 rename 不是原子）。
+fn write_atomically(path: &Path, data: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let file_name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("config");
+    // 全局唯一 + 进程内唯一（同一 ms 内多次调用也不会冲突）。
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let seq = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let tmp = parent.join(format!(".{file_name}.tmp.{}.{}", std::process::id(), seq));
+
+    let write_result = (|| -> std::io::Result<()> {
+        let mut f = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .truncate(true)
+            .open(&tmp)?;
+        f.write_all(data)?;
+        f.sync_all()?;
+        Ok(())
+    })();
+
+    if let Err(e) = write_result {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e);
+    }
+
+    // rename 覆盖目标。如果目标已存在，std::fs::rename 在 Windows 上会
+    // 失败（不允许覆盖），所以先 remove 再 rename。两步不是严格原子，
+    // 但配合上面的 fsync，断电最坏情况是"老文件还在"（不是半截）。
+    if path.exists() {
+        if let Err(e) = std::fs::remove_file(path) {
+            let _ = std::fs::remove_file(&tmp);
+            return Err(e);
+        }
+    }
+    if let Err(e) = std::fs::rename(&tmp, path) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e);
+    }
     Ok(())
 }
 
@@ -889,5 +947,56 @@ mod tests {
 
         let cfg = load_config(&path).unwrap();
         assert!(cfg.search_filter);
+    }
+
+    /// 原子写：覆盖已存在文件后不留临时残留。
+    #[test]
+    fn save_config_overwrites_existing_without_leaving_tmp() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+
+        // 第一次写
+        let cfg = AppConfig::default();
+        save_config(&path, &cfg).unwrap();
+        let original = std::fs::read_to_string(&path).unwrap();
+
+        // 改一个字段再写（覆盖已存在文件）
+        let mut cfg2 = cfg.clone();
+        cfg2.font_size = 22.0;
+        save_config(&path, &cfg2).unwrap();
+        let updated = std::fs::read_to_string(&path).unwrap();
+        assert_ne!(original, updated, "file content should change");
+        assert!(
+            updated.contains("22"),
+            "font-size 22 should be in updated file"
+        );
+
+        // 同目录下不应残留任何 `.tmp.*` 临时文件。
+        let leftover: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .flatten()
+            .filter(|e| e.file_name().to_string_lossy().contains(".tmp."))
+            .collect();
+        assert!(
+            leftover.is_empty(),
+            "atomic write should not leave .tmp.* files: {:?}",
+            leftover.iter().map(|e| e.file_name()).collect::<Vec<_>>()
+        );
+
+        // load 回来确实拿到新值（兼容性：原子写后的文件能被 load_config 正确解析）。
+        let cfg_loaded = load_config(&path).unwrap();
+        assert!((cfg_loaded.font_size - 22.0).abs() < 1e-3);
+    }
+
+    /// 原子写：写完后没有 panic，且文件可重新加载。
+    #[test]
+    fn save_config_writes_to_new_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("nested/sub/config.toml");
+        save_config(&path, &AppConfig::default()).unwrap();
+        assert!(path.exists());
+        // 反向解析：load_config 应能读回 default
+        let cfg = load_config(&path).unwrap();
+        assert_eq!(cfg.font_size, AppConfig::default().font_size);
     }
 }

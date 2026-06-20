@@ -10,7 +10,6 @@ use gpui_component::{
     ActiveTheme as _, Icon, IconName, Sizable, StyledExt,
     button::{Button, ButtonVariants as _},
     h_flex,
-    link::Link,
     switch::Switch,
     tag::Tag,
 };
@@ -84,8 +83,7 @@ pub(super) fn render(
         )
         // ---- URL（可点击跳浏览器；Link 内置 link 色 + 下划线 + hover 反馈）----
         .child(
-            Link::new(("source-url", index as u64))
-                .href(SharedString::from(rule.url.clone()))
+            div()
                 .w(px(250.))
                 .text_xs()
                 .overflow_x_hidden()
