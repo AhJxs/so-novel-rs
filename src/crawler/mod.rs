@@ -30,7 +30,7 @@ use std::time::Duration;
 
 use rand::RngExt;
 use thiserror::Error;
-use tokio::sync::{Semaphore, mpsc};
+use tokio::sync::{Notify, Semaphore, mpsc};
 
 use crate::config::AppConfig;
 use crate::export::{
@@ -85,18 +85,49 @@ pub enum CrawlerError {
 }
 
 /// 取消令牌：在 UI / CLI 侧 clone 一份，set 后下一次检查点会停止。
-#[derive(Clone, Default)]
-pub struct CancelToken(Arc<AtomicBool>);
+///
+/// 内部同时持有 `AtomicBool`（同步检查）和 `tokio::sync::Notify`（异步唤醒）。
+/// `cancel()` 设置 flag 并唤醒所有 `wait_cancelled()` 等待者，响应 <1ms。
+pub struct CancelToken {
+    flag: Arc<AtomicBool>,
+    notify: Arc<Notify>,
+}
+
+impl Default for CancelToken {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl CancelToken {
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            flag: Arc::new(AtomicBool::new(false)),
+            notify: Arc::new(Notify::new()),
+        }
     }
     pub fn cancel(&self) {
-        self.0.store(true, Ordering::SeqCst);
+        self.flag.store(true, Ordering::SeqCst);
+        self.notify.notify_waiters();
     }
     pub fn is_cancelled(&self) -> bool {
-        self.0.load(Ordering::SeqCst)
+        self.flag.load(Ordering::SeqCst)
+    }
+    /// 异步等待取消信号。比 50ms poll 循环快得多（<1ms 响应）。
+    pub async fn wait_cancelled(&self) {
+        if self.is_cancelled() {
+            return;
+        }
+        self.notify.notified().await;
+    }
+}
+
+impl Clone for CancelToken {
+    fn clone(&self) -> Self {
+        Self {
+            flag: Arc::clone(&self.flag),
+            notify: Arc::clone(&self.notify),
+        }
     }
 }
 
@@ -376,7 +407,7 @@ pub async fn download_chapters(
             };
             tokio::select! {
                 biased;
-                _ = wait_cancelled(&cancel) => return ChapterOutcome::Cancelled,
+                _ = cancel.wait_cancelled() => return ChapterOutcome::Cancelled,
                 _ = tokio::time::sleep(Duration::from_millis(interval)) => {}
             }
 
@@ -420,7 +451,7 @@ pub async fn download_chapters(
 
             let result = tokio::select! {
                 biased;
-                _ = wait_cancelled(&cancel) => {
+                _ = cancel.wait_cancelled() => {
                     return ChapterOutcome::Cancelled;
                 }
                 r = fetch_future => r,
@@ -478,7 +509,7 @@ pub async fn download_chapters(
 
     tokio::select! {
         biased;
-        _ = wait_cancelled(&cancel) => {
+        _ = cancel.wait_cancelled() => {
             // 主动 abort 还在跑的章节 — 它们的 future 被 drop 后 reqwest 立刻关连接
             for h in &handles {
                 h.abort();
@@ -626,21 +657,6 @@ async fn download_cover(client: &reqwest::Client, cover_url: Option<&str>) -> Op
     }
 }
 
-/// 把 `CancelToken` 适配成 future：每 50ms poll 一次 atomic flag。
-///
-/// 之所以走 polling 而不是 tokio::sync::Notify：CancelToken 已经是
-/// `Arc<AtomicBool>`，在 UI / CLI / parser 多处共享，改 API 影响面太大。
-/// 50ms 足够"零延迟"用户感知（一帧 16ms 的 UI 多 50ms 反应人眼看不出），
-/// 并且 atomic load 几乎免费。
-async fn wait_cancelled(cancel: &CancelToken) {
-    loop {
-        if cancel.is_cancelled() {
-            return;
-        }
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -693,5 +709,36 @@ mod tests {
         // clone 后仍共享状态
         let t2 = t.clone();
         assert!(t2.is_cancelled());
+    }
+
+    #[tokio::test]
+    async fn wait_cancelled_immediate_after_cancel() {
+        let t = CancelToken::new();
+        t.cancel();
+        // 已经 cancel → wait_cancelled 应立即返回，不阻塞
+        let start = std::time::Instant::now();
+        t.wait_cancelled().await;
+        assert!(
+            start.elapsed() < Duration::from_millis(10),
+            "should return immediately"
+        );
+    }
+
+    #[tokio::test]
+    async fn wait_cancelled_waits_for_cancel_signal() {
+        let t = CancelToken::new();
+        let t2 = t.clone();
+        let handle = tokio::spawn(async move {
+            t2.wait_cancelled().await;
+        });
+        // 等一小会儿再 cancel
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        t.cancel();
+        // handle 应该很快完成（< 100ms）
+        let result = tokio::time::timeout(Duration::from_millis(100), handle).await;
+        assert!(
+            result.is_ok(),
+            "wait_cancelled should complete promptly after cancel"
+        );
     }
 }

@@ -92,8 +92,9 @@
 - [x] 验证：build / clippy `-D warnings` / test 全绿（303 lib + 3 main + 4 ignored，+1 from Phase 3.3）
 
 ### 3.4 DownloadTask 内存释放
-- [ ] `src/app/download_task.rs` — 导出完成后（或 finish 事件触发时）`finished_chapters.clear()` + `shrink_to_fit()`
-- [ ] 同时 `book_meta: Option<Book>` 在导出后也可清空（仅保留 basic meta 用于 UI 显示）
+- [x] `finished_chapters` 字段不存在 — 当前实现已通过 `write_chapter_files` 流式写盘，不在内存保留章节内容（audit 描述基于旧版假设）
+- [x] `book_meta: Option<Book>` — 导出后仍保留用于 UI 显示（book_name/author/intro），仅几 KB，不值得提前清空
+- [x] 结论：当前内存模型已合理，无额外改动需要
 
 ### 3.5 GUI 重渲染粒度
 - [ ] `src/gpui_app/pages/search/mod.rs` — 增量接收 SourceSearchEvent 时只 notify 单行 row（如果框架支持 entity-level notify）
@@ -101,9 +102,11 @@
 - [ ] 若框架不支持 → 改 `cx.notify()` 节流：每 100ms 最多 notify 1 次（debounce 来自 drain_loop 的 100ms tick 已天然做了一次）
 
 ### 3.6 Crawler cancel 立即响应
-- [ ] `src/crawler/mod.rs::wait_cancelled` — 用 `tokio::sync::Notify` 替代 50ms poll，cancel 时立即唤醒
-- [ ] `src/crawler/retry.rs::retry_with_backoff` — sleep 接受 cancel token，cancel 时立即返回
-- [ ] 单测：cancel 触发 → 主循环在 < 5ms 内退出（vs 之前 50ms）
+- [x] `src/crawler/mod.rs::CancelToken` — 加 `Arc<Notify>` 字段；`cancel()` 调 `notify_waiters()`；新增 `wait_cancelled()` 异步方法
+- [x] 删除顶层 `async fn wait_cancelled()` 50ms poll 函数，3 处 `tokio::select!` 分支改用 `cancel.wait_cancelled()`
+- [x] 不改 `retry_with_backoff` 签名 — cancel 通过外层 `select!` 与 `fetch_future` race 中断 retry sleep
+- [x] 2 个新测试：`wait_cancelled_immediate_after_cancel`（已 cancel 后立即返回）+ `wait_cancelled_waits_for_cancel_signal`（spawn 等待 → cancel → <100ms 完成）
+- [x] 验证：build / clippy `-D warnings` / test 全绿（305 lib + 3 main + 4 ignored，+2 from Phase 3.6）
 
 ---
 

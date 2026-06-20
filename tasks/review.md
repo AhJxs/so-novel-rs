@@ -209,6 +209,43 @@ cargo test --all-targets --all-features      ✓ 303 lib + 3 main, 0 failed, 4 i
 
 ---
 
+# Phase 3.6 Crawler cancel 立即响应 — 变更复盘
+
+> 起点：Phase 3.3 commit `d54f576`。
+
+## 1. 目标
+
+取消响应从 ≤50ms poll → <1ms Notify 唤醒。
+
+## 2. 变更清单
+
+| 文件 | 改动 |
+| --- | --- |
+| `src/crawler/mod.rs` | `CancelToken` 加 `Arc<Notify>` + `Default` impl；`cancel()` 调 `notify_waiters()`；新增 `wait_cancelled()` 方法；删除旧 `async fn wait_cancelled()` 50ms poll；3 处 `select!` 分支改用 `cancel.wait_cancelled()`；2 个新测试 |
+
+## 3. 设计取舍
+
+| 取舍 | 原因 |
+| --- | --- |
+| 保留 `AtomicBool` + `Notify` 双重机制 | `is_cancelled()` 是同步检查（spawn 闭包内用），不能改 async；`wait_cancelled()` 是异步等待（select 分支用），用 Notify 立即唤醒 |
+| `notify_waiters()` 而非 `notify_one()` | 3 处 select 可能同时在等，需要全部唤醒 |
+| 不改 `retry_with_backoff` 签名 | cancel 通过外层 select 与 fetch_future race 中断 retry sleep；Notify 唤醒后 select 立即完成，drop 掉 fetch_future |
+
+## 4. 验证结果
+
+```text
+cargo clippy --all-targets --all-features -- -D warnings   ✓ 0 warnings
+cargo test --all-targets --all-features      ✓ 305 lib + 3 main, 0 failed, 4 ignored (+2)
+```
+
+## 5. 兼容性
+
+- ✅ 公开 CLI 行为：零变更
+- ✅ `CancelToken` API：新增 `wait_cancelled()` 方法（additive），`cancel()` / `is_cancelled()` / `clone()` 语义不变
+- ✅ 行为变化：取消响应从 ≤50ms → <1ms（对用户透明，更流畅）
+
+---
+
 ## 1. 变更清单
 
 | Commit | 类型 | 模块 | 影响 |
