@@ -23,7 +23,7 @@ const CURRENT_SCHEMA_VERSION: i32 = 1;
 pub mod sources;
 pub mod tasks;
 
-pub use tasks::{DownloadTaskRecord, FailureRecord};
+pub use tasks::{DownloadTaskRecord, FailureRecord, FinishedReason};
 
 /// 包装一个 `rusqlite::Connection`，负责打开 + 初始化 schema + 提供表级 API。
 pub struct Db {

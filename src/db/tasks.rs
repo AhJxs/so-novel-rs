@@ -127,21 +127,19 @@ pub fn upsert(conn: &Connection, rec: &DownloadTaskRecord) -> rusqlite::Result<(
 
 /// 删所有 `finished IS NOT NULL` 的任务（即已结束 — 完成 / 失败 / 取消），
 /// 返回受影响行数。运行中的任务（`finished` 字段为 None）不会动。
+///
+/// 单条 `DELETE FROM ... WHERE json_extract(data, '$.finished') IS NOT NULL`：
+/// 一次 SQL round-trip + 一次 fsync；之前是 N+1（list 拉所有行 + 每条一个 DELETE）。
+///
+/// 用 SQLite 内建 JSON1 (`json_extract`) 直接判 `finished` 字段 —— 业务字段本来
+/// 就序列化在 `data` JSON 里，没必要反序列化整行。SQLite bundled 总是启用 JSON1，
+/// `rusqlite = { version = "0.40", features = ["bundled"] }` 也是。
 pub fn delete_finished(conn: &Connection) -> rusqlite::Result<usize> {
-    // 简化实现：拉所有行 → 在 Rust 侧判 finished → 删非 running 的。
-    // 几百条规模走全表扫描足够；如果以后上万条再考虑 SQL WHERE 过滤。
-    let all = list(conn)?;
-    let mut deleted = 0;
-    for r in &all {
-        if r.finished.is_some() {
-            let n = conn.execute(
-                "DELETE FROM download_tasks WHERE id = ?1",
-                params![r.id as i64],
-            )?;
-            deleted += n;
-        }
-    }
-    Ok(deleted)
+    let n = conn.execute(
+        "DELETE FROM download_tasks WHERE json_extract(data, '$.finished') IS NOT NULL",
+        [],
+    )?;
+    Ok(n)
 }
 
 /// 删单条（按 id）。返回是否真的删了。
@@ -171,5 +169,91 @@ pub fn get(conn: &Connection, id: u64) -> rusqlite::Result<Option<DownloadTaskRe
             )
         })?)),
         None => Ok(None),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::{Db, FailureRecord, FinishedReason};
+    use crate::models::SearchResult;
+    use std::path::PathBuf;
+
+    fn fresh_db() -> Db {
+        Db::open_in_memory().unwrap()
+    }
+
+    fn sample_rec(
+        id: u64,
+        finished: Option<Result<PathBuf, FinishedReason>>,
+    ) -> DownloadTaskRecord {
+        DownloadTaskRecord {
+            id,
+            origin: SearchResult::default(),
+            started_at_unix: 1_700_000_000,
+            finished_at_unix: finished.as_ref().map(|_| 1_700_000_100),
+            book_meta: None,
+            total_chapters: 100,
+            completed: if finished.is_some() { 100 } else { 0 },
+            failed: 0,
+            last_chapter_title: String::new(),
+            finished,
+            failures: Vec::<FailureRecord>::new(),
+        }
+    }
+
+    /// 混合数据：3 条已结束 + 1 条 running → 删 3 条、留 1 条。
+    #[test]
+    fn delete_finished_only_finished() {
+        let db = fresh_db();
+        let ok = sample_rec(1, Some(Ok(PathBuf::from("/tmp/a.epub"))));
+        let cancelled = sample_rec(2, Some(Err(FinishedReason::UserCancelled)));
+        let failed = sample_rec(
+            3,
+            Some(Err(FinishedReason::Failed {
+                message: "boom".into(),
+            })),
+        );
+        let running = sample_rec(4, None);
+        for r in [&ok, &cancelled, &failed, &running] {
+            upsert(db.conn(), r).unwrap();
+        }
+
+        let n = delete_finished(db.conn()).unwrap();
+        assert_eq!(n, 3, "应删 3 条已结束，running 保留");
+
+        let remaining = list(db.conn()).unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].id, 4, "只剩 running 的");
+        assert!(remaining[0].finished.is_none());
+    }
+
+    /// 空表 / 全是 running → 删 0 条、不报错。
+    #[test]
+    fn delete_finished_empty_or_all_running() {
+        let db = fresh_db();
+        // 空表
+        assert_eq!(delete_finished(db.conn()).unwrap(), 0);
+
+        // 全是 running
+        for id in 1..=5 {
+            upsert(db.conn(), &sample_rec(id, None)).unwrap();
+        }
+        assert_eq!(delete_finished(db.conn()).unwrap(), 0);
+        assert_eq!(list(db.conn()).unwrap().len(), 5);
+    }
+
+    /// 反复清空 idempotent —— 第二次删 0 条。
+    #[test]
+    fn delete_finished_idempotent() {
+        let db = fresh_db();
+        upsert(
+            db.conn(),
+            &sample_rec(1, Some(Ok(PathBuf::from("/tmp/a.epub")))),
+        )
+        .unwrap();
+
+        assert_eq!(delete_finished(db.conn()).unwrap(), 1);
+        assert_eq!(delete_finished(db.conn()).unwrap(), 0);
     }
 }
