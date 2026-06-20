@@ -52,7 +52,7 @@ pub fn filter_chapter(chapter: &Chapter, rule_chapter: &RuleChapter) -> Chapter 
 
     // 3. filterTxt 广告正则
     if !rule_chapter.filter_txt.is_empty() {
-        match Regex::new(&rule_chapter.filter_txt) {
+        match crate::parser::cache::cached_regex(&rule_chapter.filter_txt) {
             Ok(re) => {
                 content = re.replace_all(&content, "").into_owned();
             }

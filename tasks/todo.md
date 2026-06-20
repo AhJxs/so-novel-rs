@@ -68,10 +68,20 @@
 - [x] 验证：build / clippy `-D warnings` / test 全绿（294 lib + 3 main + 4 ignored）
 
 ### 3.2 Regex / Selector 缓存
-- [ ] `src/parser/chapter.rs::is_last_page` — `next_chapter_link` 正则编译改 `OnceCell` cache（key = rule_id）
-- [ ] `src/parser/toc.rs::extract_book_id` — 同上，cache key = rule_id
-- [ ] 单测：重复抓 50 页正则只编译一次（用 `AtomicU64` 计数或打日志断言）
-- [ ] 检查 `src/parser/dom.rs` 是否还有未缓存的 Lazy regex → 一次性扫完
+- [x] 新建 `src/parser/cache.rs` — `cached_selector` / `cached_regex`，按原始字符串 keyed，`OnceLock<Mutex<HashMap>>` 全局缓存，失败结果**不**缓存
+- [x] `src/parser/dom.rs::dom_select_text` / `element_select_text` — 两个 funnel helper 切到 cache（覆盖 book / search / chapter.content 三大块）
+- [x] `src/parser/toc.rs::parse_one_toc_page` — `item` 选择器切到 cache
+- [x] `src/parser/chapter.rs::fetch_paginated_content` — `next_page` 选择器切到 cache
+- [x] `src/parser/chapter.rs::is_last_page` — `next_chapter_link` 正则切到 cache
+- [x] `src/parser/toc.rs::extract_book_id` — `book_rule.url` 正则切到 cache
+- [x] `src/parser/filter.rs::filter_chapter` — `filter_txt` 正则切到 cache（保留 warn + skip 语义）
+- [x] `src/parser/formatter.rs::format_open` — `paragraph_tag` 正则切到 cache（保留 warn + 降级语义）
+- [x] `src/parser/search.rs::parse_search_results` — `result` 选择器切到 cache
+- [x] `src/parser/cache.rs::tests` — 8 个单元测试（同字符串 Arc::ptr_eq / 不同字符串 Arc 独立 / 非法输入不污染 cache / 失败重试 / 16 线程并发安全 ×2）
+- [x] 不动 `filter.rs::strip_leading_title`（动态生成 title per chapter，命中率低）
+- [x] 不动 4 个已有静态 `Lazy<Regex>`（已最优）
+- [x] 清理未使用的 `Regex` / `Selector` import（toc.rs / chapter.rs / search.rs）
+- [x] 验证：build / clippy `-D warnings` / test 全绿（302 lib + 3 main + 4 ignored，+8 from Phase 3.1）
 
 ### 3.3 Export 流式写
 - [ ] `src/export/epub.rs` — 改 BufWriter<File> 包裹 builder，章节按 `add_content` 一章章 push（不要先 collect 全 Vec<u8>）

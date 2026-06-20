@@ -88,8 +88,7 @@ pub fn dom_select_text(
     selector: &str,
     content_type: ContentType,
 ) -> Result<String, SelectError> {
-    let sel = Selector::parse(selector)
-        .map_err(|e| SelectError::BadSelector(format!("`{selector}`: {e:?}")))?;
+    let sel = crate::parser::cache::cached_selector(selector)?;
     let mut iter = document.select(&sel);
     let Some(first) = iter.next() else {
         return Ok(String::new());
@@ -104,8 +103,7 @@ fn element_select_text(
     selector: &str,
     content_type: ContentType,
 ) -> Result<String, SelectError> {
-    let sel = Selector::parse(selector)
-        .map_err(|e| SelectError::BadSelector(format!("`{selector}`: {e:?}")))?;
+    let sel = crate::parser::cache::cached_selector(selector)?;
     let elements: Vec<ElementRef<'_>> = el.select(&sel).collect();
     Ok(extract_from_elements(&elements, content_type))
 }

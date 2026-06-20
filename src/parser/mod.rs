@@ -2,6 +2,7 @@
 //! 等子模块各自对应一类页面解析，filter/formatter/search_filter 是结果后处理。
 
 pub mod book;
+pub mod cache;
 pub mod chapter;
 pub mod dom;
 pub mod filter;

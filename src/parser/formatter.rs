@@ -66,7 +66,7 @@ fn format_open(html: &str, paragraph_tag: &str) -> String {
         // 没有切分符，整段当一段
         return wrap_p_if_nonblank(html.trim());
     }
-    let Ok(re) = Regex::new(paragraph_tag) else {
+    let Ok(re) = crate::parser::cache::cached_regex(paragraph_tag) else {
         // 切分正则不合法时降级：原样返回，至少不丢失正文。
         tracing::warn!("paragraphTag 不被 Rust regex 支持，已降级为不切分；regex={paragraph_tag}");
         return wrap_p_if_nonblank(html.trim());

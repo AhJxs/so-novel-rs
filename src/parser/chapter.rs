@@ -22,7 +22,9 @@ use anyhow::Result;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use reqwest::Client;
-use scraper::{Html, Selector};
+use scraper::Html;
+#[cfg(test)]
+use scraper::Selector;
 use thiserror::Error;
 
 use crate::http::{FetchRequest, HttpMethod, abs_url, fetch, fetch_via_cf_bypass, has_cloudflare};
@@ -155,7 +157,7 @@ async fn fetch_paginated_content(
             let next_sel = if chapter_rule.next_page.is_empty() {
                 None
             } else {
-                Selector::parse(&chapter_rule.next_page).ok()
+                crate::parser::cache::cached_selector(&chapter_rule.next_page).ok()
             };
             let next_els: Vec<scraper::ElementRef<'_>> = match &next_sel {
                 Some(s) => document.select(s).collect(),
@@ -230,7 +232,7 @@ fn is_last_page(
     };
 
     if !chapter_rule.next_chapter_link.is_empty() {
-        if let Ok(re) = Regex::new(&chapter_rule.next_chapter_link) {
+        if let Ok(re) = crate::parser::cache::cached_regex(&chapter_rule.next_chapter_link) {
             if re.is_match(next_url) {
                 return true;
             }

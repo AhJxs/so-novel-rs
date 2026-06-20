@@ -16,7 +16,6 @@
 //! - `chapter.url` 段含 `@js:` 后处理（极少见）。
 
 use anyhow::Result;
-use regex::Regex;
 use reqwest::Client;
 use scraper::{Html, Selector};
 use thiserror::Error;
@@ -113,7 +112,17 @@ pub async fn parse_toc(
             let cf = cf_bypass_base.map(|s| s.to_string());
             let sem = sem.clone();
             set.spawn(async move {
-                let _permit = sem.acquire_owned().await.expect("semaphore not closed");
+                // `acquire_owned` 在 Semaphore 不被 close 的情况下永远成功；
+                // 防御性：万一未来切换实现 / close 信号进来，转换成 TocError::Parse
+                // 让上层知道分页抓取出问题，而不是 panic 把整个目录解析任务搞炸。
+                let _permit = match sem.acquire_owned().await {
+                    Ok(p) => p,
+                    Err(e) => {
+                        return Err(TocError::Parse(format!(
+                            "分页抓取 semaphore acquire 失败: {e}"
+                        )));
+                    }
+                };
                 let html = fetch_with_cf_fallback(&client, &url, timeout, cf.as_deref()).await?;
                 Ok::<(usize, String), TocError>((idx, html))
             });
@@ -153,7 +162,7 @@ pub fn parse_one_toc_page(
     let toc_rule = rule.toc.as_ref().ok_or(TocError::TocRuleMissing)?;
     let document = Html::parse_document(html);
 
-    let item_selector = Selector::parse(&toc_rule.item)
+    let item_selector = crate::parser::cache::cached_selector(&toc_rule.item)
         .map_err(|e| TocError::Parse(format!("无效的 item 选择器 `{}`: {e:?}", toc_rule.item)))?;
 
     // 当 toc.list 配置时（极少数书源），先把 list 的 inner_html 当成新文档处理。
@@ -187,7 +196,7 @@ pub fn parse_one_toc_page(
 
 fn parse_items_from_fragment(
     frag: &Html,
-    sel: &Selector,
+    sel: &std::sync::Arc<Selector>,
     base_for_href: &str,
     order_counter: &mut u32,
 ) -> Result<Vec<Chapter>, TocError> {
@@ -354,7 +363,7 @@ fn extract_book_id(rule: &Rule, book_url: &str) -> Option<String> {
     }
     // Java 端用 hutool `ReUtil.getGroup1`；规则里 `Book.url` 一定含一个捕获组。
     // 这里允许规则形如 `https://(?:www\.)?69shuba\.com/book/(.*?)\.htm`。
-    let re = Regex::new(&book_rule.url).ok()?;
+    let re = crate::parser::cache::cached_regex(&book_rule.url).ok()?;
     let cap = re.captures(book_url)?;
     cap.get(1).map(|m| m.as_str().to_string())
 }

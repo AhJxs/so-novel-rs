@@ -20,7 +20,7 @@
 
 use anyhow::Result;
 use reqwest::Client;
-use scraper::{Html, Selector};
+use scraper::Html;
 use thiserror::Error;
 
 use crate::http::{
@@ -149,7 +149,7 @@ pub fn parse_search_results(
     let s = rule.search.as_ref().ok_or(SearchError::SearchDisabled)?;
 
     let document = Html::parse_document(html);
-    let result_selector = Selector::parse(&s.result)
+    let result_selector = crate::parser::cache::cached_selector(&s.result)
         .map_err(|e| SearchError::Parse(format!("无效的 result 选择器 `{}`: {e:?}", s.result)))?;
 
     let mut out: Vec<SearchResult> = Vec::new();

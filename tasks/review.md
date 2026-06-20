@@ -86,6 +86,88 @@
 
 ---
 
+# Phase 3.2 Regex / Selector 缓存 — 变更复盘
+
+> 起点：Phase 3.1 commit `be76b9e`。
+> 终点：本次会话尚未 commit（所有改动在工作区）。
+> 配套 plan：`tasks/.../scalable-fluttering-kite.md` Phase 3.2 节。
+
+## 1. 目标与收益
+
+每次解析 Rule 驱动的 CSS 选择器 / 正则都从零编译。1000 章 × ≤50 子页 paginated 抓取路径估算 ≈ 40,000 次重编译 / 本。Phase 3.2 把编译结果收敛到 `OnceLock<Mutex<HashMap<String, Arc<...>>>>` 全局缓存，按原始字符串 keyed，跨 Rule 共享、按调用自动 miss / hit。
+
+**预期收益**：paginated chapter 抓取节省 15-25%（主要来自 `fetch_paginated_content` 的 `chapter.content` / `next_page` / `next_chapter_link` 三件套，rule 不变时全部命中缓存）。
+
+## 2. 变更清单
+
+### 新增文件
+
+| 文件 | 行数 | 内容 |
+| --- | --- | --- |
+| `src/parser/cache.rs` | ~175 | `cached_selector` / `cached_regex` + 8 单元测试 |
+
+### 修改文件
+
+| 文件 | 主要改动 |
+| --- | --- |
+| `src/parser/mod.rs` | `pub mod cache;` 注册 |
+| `src/parser/dom.rs` | `dom_select_text` + `element_select_text` 切到 `cache::cached_selector`（两个 funnel helper 覆盖绝大部分 per-Rule 选择器调用） |
+| `src/parser/toc.rs` | `item` 选择器 + `book_rule.url` 正则切到 cache；删除未用 `use regex::Regex` |
+| `src/parser/chapter.rs` | `next_page` 选择器 + `next_chapter_link` 正则切到 cache；`use scraper::Selector` 加 `#[cfg(test)]` |
+| `src/parser/filter.rs` | `filter_txt` 正则切到 cache（保留 warn + skip 语义） |
+| `src/parser/formatter.rs` | `paragraph_tag` 正则切到 cache（保留 warn + 降级语义） |
+| `src/parser/search.rs` | `result` 选择器切到 cache；删除未用 `use scraper::Selector` |
+
+### 设计取舍
+
+| 取舍 | 原因 |
+| --- | --- |
+| 用 `std::sync::Mutex`，不引 `parking_lot` / `dashmap` | 与 Phase 3.1 一致；锁粒度只在 cache miss 时争 |
+| 按原始字符串 keyed（不按 Rule） | 同一字符串跨 Rule 共享；用户编辑 Rule 自动 miss，无需显式失效 |
+| 失败结果**不**缓存 | 用户修复规则后下一章抓取走新字符串，能立即重试编译 |
+| `Arc<Selector>` / `Arc<Regex>` 返回 | `Selector: !Sync` 但 `Arc<Selector>: Send`；调用方在单 task 内 `Arc::clone` 后借用一次即可，跨 spawn 安全 |
+| 不动 `filter.rs::strip_leading_title` | `pat` 是 `format!("^((?:\\s|<[^>]+>)*)(?:{})", regex::escape(title))` 动态生成，title 每章变，命中率极低 |
+| 不动 4 个静态 `Lazy<Regex>` | 已是最优（DOM 改写 XPath / HTML 实体 / 空 tag / 段落 split 等） |
+
+## 3. 验证结果
+
+| 命令 | 结果 |
+| --- | --- |
+| `cargo clippy --all-targets --all-features -- -D warnings` | ✅ 0 警告 |
+| `cargo test --all-targets --all-features` | ✅ 302 lib + 3 main passed, 4 ignored, 0 failed（294 → 302, +8 cache tests） |
+| `cargo fmt --all` | ✅ clean |
+
+新增 8 个 cache 测试：
+
+| 模块 | 测试名 | 覆盖点 |
+| --- | --- | --- |
+| `parser::cache` | `cached_selector_returns_same_arc_for_same_string` | hit 路径 |
+| `parser::cache` | `cached_selector_distinct_strings_get_distinct_arcs` | 不同 key 隔离 |
+| `parser::cache` | `cached_selector_invalid_returns_error` | 不合法 CSS 报错 |
+| `parser::cache` | `cached_selector_invalid_does_not_pollute_cache` | 失败字符串不入 cache |
+| `parser::cache` | `cached_regex_returns_same_arc_for_same_pattern` | hit 路径 |
+| `parser::cache` | `cached_regex_invalid_returns_err_and_does_not_cache` | 失败不缓存 + 重试 OK |
+| `parser::cache` | `cached_selector_concurrent_safe` | 16 线程 × 50 字符串并发 |
+| `parser::cache` | `cached_regex_concurrent_safe` | 同上 regex 版本 |
+
+## 4. 残留风险与未来工作
+
+| 风险 | 缓解 / 后续 |
+| --- | --- |
+| 未跑 live 网络基准 | `live_22biqu_*` 测试需要真实网络；性能数字（15-25%）基于静态分析 + audit 推算，验证留待手动 |
+| cache 内存无上限 | HashMap 默认无界；典型 < 200 条 selector × 几 KB = 几 MB 上限；不主动 cap |
+| `Arc<Selector>` 不是 `Sync` | 调用方在单 task 内借用 `&Selector` 一次，不跨线程共享 `&Selector`；`Arc::clone` 跨 spawn 安全 |
+| 用户编辑 Rule 字符串 → 旧缓存永远 miss | 缓存 key 是字符串本身；旧字符串留在 cache 中到进程退出（无害，仅占几 KB） |
+
+## 5. 兼容性影响
+
+- ✅ 公开 CLI 行为：零变更
+- ✅ `~/.sonovel/` 数据目录：零变更
+- ✅ `config.toml` 兼容性：零变更
+- ✅ 依赖树：零新增（沿用 `regex = "1"` + `scraper = "0.27"` + `std::sync::Mutex`）
+
+---
+
 ## 1. 变更清单
 
 | Commit | 类型 | 模块 | 影响 |
