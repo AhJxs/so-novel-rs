@@ -43,7 +43,7 @@ pub async fn search_aggregated(
     limit: Option<usize>,
     cf_bypass_base: Option<String>,
 ) -> Vec<SourceSearchOutcome> {
-    tracing::info!(sources = sources.len(), keyword = %keyword, "search_aggregated: 启动 {} 个并发源", sources.len());
+    tracing::info!(sources = sources.len(), keyword = %crate::util::fs::truncate_log(&keyword, 10), "search_aggregated: 启动 {} 个并发源", sources.len());
 
     let mut set: JoinSet<SourceSearchOutcome> = JoinSet::new();
 
@@ -108,7 +108,7 @@ pub async fn search_streaming(
     cf_bypass_base: Option<String>,
     tx: mpsc::UnboundedSender<SourceSearchOutcome>,
 ) {
-    tracing::info!(sources = sources.len(), keyword = %keyword, "search_streaming: 启动 {} 个并发源", sources.len());
+    tracing::info!(sources = sources.len(), keyword = %crate::util::fs::truncate_log(&keyword, 10), "search_streaming: 启动 {} 个并发源", sources.len());
 
     let mut set: JoinSet<SourceSearchOutcome> = JoinSet::new();
 

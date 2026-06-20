@@ -41,6 +41,19 @@ pub fn sanitize_filename(name: &str) -> String {
     }
 }
 
+/// 日志字段脱敏：超过 `max_chars` 的字符串截断并加 `***` 后缀。
+///
+/// 用于搜索关键词等用户输入字段，避免完整查询词写入日志文件。
+/// 短于阈值的字符串原样返回，零开销。
+pub fn truncate_log(s: &str, max_chars: usize) -> String {
+    let chars: Vec<char> = s.chars().collect();
+    if chars.len() <= max_chars {
+        return s.to_string();
+    }
+    let prefix: String = chars[..max_chars].iter().collect();
+    format!("{prefix}***")
+}
+
 /// 把相对路径转为绝对路径（基于当前工作目录）；输入已是绝对路径则原样返回。
 pub fn to_absolute(p: impl AsRef<Path>) -> std::path::PathBuf {
     let p = p.as_ref();
@@ -112,5 +125,22 @@ mod tests {
         assert_eq!(format_size(2048), "2.0 KB");
         assert_eq!(format_size(2 * 1024 * 1024), "2.00 MB");
         assert_eq!(format_size(3 * 1024 * 1024 * 1024), "3.00 GB");
+    }
+
+    #[test]
+    fn truncate_log_short_string_unchanged() {
+        assert_eq!(truncate_log("abc", 10), "abc");
+        assert_eq!(truncate_log("12345", 5), "12345");
+    }
+
+    #[test]
+    fn truncate_log_long_string_truncated() {
+        assert_eq!(truncate_log("abcdefghijk", 5), "abcde***");
+        assert_eq!(truncate_log("很长的中文关键词测试", 4), "很长的中***");
+    }
+
+    #[test]
+    fn truncate_log_empty_string() {
+        assert_eq!(truncate_log("", 10), "");
     }
 }

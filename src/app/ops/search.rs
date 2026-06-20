@@ -54,9 +54,9 @@ pub fn spawn_search(
     if target_sources.is_empty() {
         search.last_error = Some("没有可用的书源（请在 [书源管理] 检查规则文件）".to_string());
         if let Some(id) = search.source_id {
-            tracing::warn!(keyword = %keyword, source_id = id, "搜索派发失败：选中的书源被禁用或已删除");
+            tracing::warn!(keyword = %crate::util::fs::truncate_log(&keyword, 10), source_id = id, "搜索派发失败：选中的书源被禁用或已删除");
         } else {
-            tracing::warn!(keyword = %keyword, "搜索派发失败：无可用书源（全部被禁用或无规则）");
+            tracing::warn!(keyword = %crate::util::fs::truncate_log(&keyword, 10), "搜索派发失败：无可用书源（全部被禁用或无规则）");
         }
         return false;
     }
