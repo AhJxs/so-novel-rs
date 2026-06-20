@@ -160,6 +160,10 @@ cargo build --release --target aarch64-unknown-linux-gnu    # Linux ARM64
 * 新增 / 改动 UI 文案 → 同步 `locales/app.yml` 三语
 * 新增书源 → 走 `bundle/rules/` JSON，规则语法见 `docs/rules.md`（如存在）
 
+## 🙏 致谢
+
+本项目基于 [freeok/so-novel](https://github.com/freeok/so-novel)（Java 版）重写为 Rust + GPUI 原生桌面客户端。感谢原作者的书源规则设计与核心架构思路。
+
 ## ⚠️ 免责声明
 
 本项目是**技术工具**，仅供个人学习与研究使用。**严禁用于侵犯著作权、传播非法内容等任何违法用途**。详细条款见 [DISCLAIMER.md](./DISCLAIMER.md)。
