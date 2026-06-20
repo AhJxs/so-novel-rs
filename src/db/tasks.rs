@@ -122,6 +122,7 @@ pub fn upsert(conn: &Connection, rec: &DownloadTaskRecord) -> rusqlite::Result<(
          ON CONFLICT(id) DO UPDATE SET data = excluded.data",
         params![rec.id as i64, data],
     )?;
+    tracing::debug!(task_id = rec.id, "download_tasks upsert 完成");
     Ok(())
 }
 

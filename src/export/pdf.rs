@@ -120,14 +120,27 @@ impl Exporter for PdfExporter {
         } else {
             "Helvetica"
         };
+        let total_chapters = chapters.len();
+        let started = std::time::Instant::now();
         {
             let mut pg = Paginator::new(&mut builder, &measurer, font_name);
             pg.render_cover(book);
-            for (title, paras) in &chapters {
+            for (idx, (title, paras)) in chapters.iter().enumerate() {
                 pg.render_chapter(title.as_deref(), paras);
+                tracing::debug!(
+                    chapter = idx + 1,
+                    total = total_chapters,
+                    paragraphs = paras.len(),
+                    "PDF 章节排版"
+                );
             }
             pg.finish();
         }
+        tracing::info!(
+            chapters = total_chapters,
+            elapsed_ms = started.elapsed().as_millis() as u64,
+            "PDF 排版完成"
+        );
 
         let bytes = builder
             .build()

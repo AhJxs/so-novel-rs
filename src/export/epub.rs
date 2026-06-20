@@ -113,6 +113,7 @@ pub fn merge_with_cover_bytes(
     // 章节
     let total_chapters = files.len();
     let digit = total_chapters.to_string().len().max(3);
+    let started = std::time::Instant::now();
     for (idx, path) in files.iter().enumerate() {
         let mut buf = Vec::new();
         File::open(path)?.read_to_end(&mut buf)?;
@@ -127,7 +128,18 @@ pub fn merge_with_cover_bytes(
                     .reftype(ReferenceType::Text),
             )
             .map_err(|e| ExportError::Epub(format!("add chapter {entry_name}: {e}")))?;
+        tracing::debug!(
+            chapter = idx + 1,
+            total = total_chapters,
+            bytes = buf.len(),
+            "EPUB 章节写入"
+        );
     }
+    tracing::info!(
+        chapters = total_chapters,
+        elapsed_ms = started.elapsed().as_millis() as u64,
+        "EPUB 章节合并完成"
+    );
 
     // 落盘
     std::fs::create_dir_all(out_dir)?;

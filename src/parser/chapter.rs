@@ -132,6 +132,7 @@ async fn fetch_paginated_content(
     let mut buf = String::new();
     let mut current_url = start_url.to_string();
     let mut pages = 0usize;
+    let started = std::time::Instant::now();
 
     // 防御性上限：单章超过 50 页基本是反爬死循环
     for _ in 0..50 {
@@ -182,13 +183,24 @@ async fn fetch_paginated_content(
 
         match next_step {
             NextStep::Stop => {
-                tracing::debug!(pages = pages, bytes = buf.len(), "分页正文抓取完成（终止）");
+                tracing::debug!(
+                    pages = pages,
+                    bytes = buf.len(),
+                    elapsed_ms = started.elapsed().as_millis() as u64,
+                    "分页正文抓取完成（终止）"
+                );
                 break;
             }
             NextStep::Goto(next_url) => current_url = next_url,
         }
     }
 
+    tracing::debug!(
+        pages = pages,
+        bytes = buf.len(),
+        elapsed_ms = started.elapsed().as_millis() as u64,
+        "分页正文抓取完成（循环结束）"
+    );
     Ok(buf)
 }
 
