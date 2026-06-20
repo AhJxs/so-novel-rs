@@ -12,7 +12,7 @@ use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 
 use crate::config::AppConfig;
-use crate::http::client::{ClientOptions, build_async_client};
+use crate::http::HttpClients;
 use crate::http::ua::random_ua;
 use crate::models::Rule;
 
@@ -97,20 +97,21 @@ impl SourceHealth {
 ///
 /// 完成后通道关闭（tx drop），UI 端 try_recv 看到 Disconnected 即知道全部跑完。
 pub async fn check_sources_health(
-    cfg: Arc<AppConfig>,
+    _cfg: Arc<AppConfig>,
+    http: Arc<HttpClients>,
     rules: Vec<Rule>,
     tx: mpsc::UnboundedSender<SourceHealth>,
 ) {
     let mut set: JoinSet<()> = JoinSet::new();
 
     for rule in rules {
-        let cfg = Arc::clone(&cfg);
+        let http = Arc::clone(&http);
         let tx = tx.clone();
         set.spawn(async move {
             // 直接在 tokio task 里 async 探测。不用 spawn_blocking + blocking client ——
             // 后者会在工作线程 drop Client，触发 reqwest::blocking 已知 panic
             // （见 http/client.rs 的反模式警告 + search_state.rs 的 ignore 回归测试）。
-            let result = probe_one(&cfg, &rule).await;
+            let result = probe_one(&http, &rule).await;
             let _ = tx.send(result);
         });
     }
@@ -119,23 +120,9 @@ pub async fn check_sources_health(
     // tx drop（与 set 同生命周期），UI 端通道收尾。
 }
 
-async fn probe_one(cfg: &AppConfig, rule: &Rule) -> SourceHealth {
+async fn probe_one(http: &HttpClients, rule: &Rule) -> SourceHealth {
     let started = Instant::now();
-    let opts = ClientOptions {
-        unsafe_ssl: rule.ignore_ssl,
-    };
-    let client = match build_async_client(cfg, &opts) {
-        Ok(c) => c,
-        Err(e) => {
-            return SourceHealth {
-                source_id: rule.id,
-                source_name: rule.name.clone(),
-                http_status: None,
-                delay_ms: started.elapsed().as_millis() as u64,
-                error: Some(format!("client: {e:#}")),
-            };
-        }
-    };
+    let client = http.for_rule(rule);
 
     let result = client
         .head(&rule.url)
@@ -187,8 +174,9 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn empty_rules_finishes_immediately() {
         let cfg = Arc::new(AppConfig::default());
+        let http = Arc::new(crate::http::HttpClients::new(&cfg).unwrap());
         let (tx, mut rx) = mpsc::unbounded_channel::<SourceHealth>();
-        check_sources_health(cfg, Vec::new(), tx).await;
+        check_sources_health(cfg, http, Vec::new(), tx).await;
         assert!(rx.try_recv().is_err(), "no rules → no events");
     }
 
@@ -196,6 +184,7 @@ mod tests {
     async fn unreachable_host_yields_error_with_id() {
         // 用一个保留地址，远端肯定不通；验证流程把错误封装到 SourceHealth。
         let cfg = Arc::new(AppConfig::default());
+        let http = Arc::new(crate::http::HttpClients::new(&cfg).unwrap());
         let rule = Rule {
             id: 42,
             name: "test".to_string(),
@@ -204,7 +193,7 @@ mod tests {
             ..Rule::default()
         };
         let (tx, mut rx) = mpsc::unbounded_channel::<SourceHealth>();
-        check_sources_health(cfg, vec![rule], tx).await;
+        check_sources_health(cfg, http, vec![rule], tx).await;
 
         let h = rx.try_recv().expect("should yield exactly one event");
         assert_eq!(h.source_id, 42);

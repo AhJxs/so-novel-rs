@@ -1,8 +1,11 @@
 //! 搜索相关业务方法：spawn_search / select_search_result。
 
+use std::sync::Arc;
+
 use tokio::sync::mpsc;
 
 use crate::config::AppConfig;
+use crate::http::HttpClients;
 use crate::models::{Book, Rule};
 use crate::rules::Source;
 
@@ -12,6 +15,7 @@ use super::super::search_state::{DetailEvent, DetailState, SourceSearchEvent, So
 pub fn spawn_search(
     rules: &[Rule],
     config: &AppConfig,
+    http: Arc<HttpClients>,
     runtime: &tokio::runtime::Runtime,
     search: &mut super::super::search_state::SearchState,
 ) -> bool {
@@ -105,9 +109,11 @@ pub fn spawn_search(
             .map(|s| (s.rule.id, s.rule.name.clone()))
             .collect();
 
+        let http = Arc::clone(&http);
         let search_handle = tokio::spawn(async move {
             crate::crawler::search::search_streaming(
                 &cfg,
+                http,
                 target_sources,
                 keyword,
                 limit,
@@ -172,6 +178,7 @@ pub fn spawn_search(
 pub fn select_search_result(
     rules: &[Rule],
     config: &AppConfig,
+    http: Arc<HttpClients>,
     runtime: &tokio::runtime::Runtime,
     search: &mut super::super::search_state::SearchState,
     idx: usize,
@@ -212,7 +219,6 @@ pub fn select_search_result(
         }
     };
 
-    let cfg = config.clone();
     let url = r.url.clone();
     let source_id = r.source_id;
     let cf_bypass = if config.cf_bypass.trim().is_empty() {
@@ -231,12 +237,8 @@ pub fn select_search_result(
         let cf = cf_bypass.clone();
         let qc = qidian_cookie.clone();
         let result: Result<Book, String> = async {
-            let opts = crate::http::client::ClientOptions {
-                unsafe_ssl: rule.ignore_ssl,
-            };
-            let client = crate::http::client::build_async_client(&cfg, &opts)
-                .map_err(|e| format!("client: {e:#}"))?;
-            crate::parser::parse_book_detail(&client, &rule, &url, cf.as_deref(), qc.as_deref())
+            let client = http.for_rule(&rule);
+            crate::parser::parse_book_detail(client, &rule, &url, cf.as_deref(), qc.as_deref())
                 .await
                 .map_err(|e| format!("{e:#}"))
         }

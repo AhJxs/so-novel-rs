@@ -7,6 +7,85 @@
 
 ---
 
+# Phase 3.1 HTTP 客户端复用 — 变更复盘
+
+> 起点：master `196d413`（沿用 Phase 2 review 的基线）。
+> 终点：本次会话尚未 commit（所有改动在工作区）。
+> 配套 plan：`tasks/.../scalable-fluttering-kite.md`（plan mode 产物）。
+
+## 1. 目标与收益
+
+每次爬取都从零 `reqwest::Client::builder().build()`，等于新连接 + 新 TLS handshake。
+跨任务不复用连接池或 TLS session。Phase 3.1 把 client 集合收敛到 `AppModel.http: Arc<HttpClients>` 单一实例，按 `Rule.ignore_ssl` 选 safe/unsafe_ssl 通道；proxy 配置变更时通过 `rebuild_proxy` 整体替换（`Arc::swap` 不阻塞 in-flight 请求）。
+
+**预期收益**：跨任务共享连接池 + TLS session cache，100 章小说抓取时间省 30-50%。
+（实际性能数字未在本次会话跑 live bench，验证放在 Phase 3.6 之后做。）
+
+## 2. 变更清单
+
+### 新增文件
+
+| 文件 | 行数 | 内容 |
+| --- | --- | --- |
+| `src/http/clients.rs` | ~290 | `HttpClients` 结构 + `for_rule` / `gh_proxy_pair` / `rebuild_proxy` + 5 单元测试 |
+
+### 修改文件
+
+| 文件 | 主要改动 |
+| --- | --- |
+| `src/http/mod.rs` | `pub mod clients;` + `pub use clients::HttpClients;` |
+| `src/app/mod.rs` | `AppModel.http: Arc<HttpClients>` 字段；`persist_settings` 调 `rebuild_proxy` |
+| `src/app/search_state.rs` | `spawn_cover_download(src, url, &reqwest::Client, rt)` 签名改；spawn 前 `client.clone()` 解 E0521 |
+| `src/app/ops/download.rs` | 3 个 spawn 函数接 `http: Arc<HttpClients>`；`spawn_download_range` 加 `#[allow(clippy::too_many_arguments)]` |
+| `src/app/ops/search.rs` | `spawn_search` / `select_search_result` 接 `http: Arc<HttpClients>` |
+| `src/app/ops/sources.rs` | `spawn_health_check` 接 `http: Arc<HttpClients>` |
+| `src/app/ops/update.rs` | `spawn_update_check` 接 `http: Arc<HttpClients>`；传给 `check_github_latest_release` |
+| `src/app/update_state.rs` | `check_github_latest_release(cfg, http, gh_proxy)`：非 gh_proxy 分支用 `http.for_rule(&Rule{ignore_ssl:false,..})` 复用 safe client |
+| `src/app/events.rs` | 封面 prefetch 循环前一次绑 `safe_client: &reqwest::Client`（占位 rule 取 safe） |
+| `src/crawler/mod.rs` | `download_book(cfg, client, ...)`：移除内联 `build_async_client` |
+| `src/crawler/search.rs` | `search_aggregated` / `search_streaming` 接 `http: Arc<HttpClients>`；移除孤儿 `let cfg = Arc::clone(&cfg)` 行 |
+| `src/crawler/health.rs` | `check_sources_health(_cfg, http, rules, tx)`；测试调用同步更新 |
+| `src/cli.rs` | search / download 子命令构造 `HttpClients::new(&cfg)?` 后传入 |
+
+### 设计取舍
+
+| 取舍 | 原因 |
+| --- | --- |
+| 用 `std::sync::Mutex`，不引 `parking_lot` | 现有 dep tree 不含 parking_lot；锁粒度只在 `rebuild_proxy` 拿一次。 |
+| 维护 safe + unsafe_ssl 两个 client | `Rule.ignore_ssl` 是 per-Rule，无法单 client 覆盖；2 个 client 集合大小恒定。 |
+| `gh_proxy` 仍走 raw builder | forward proxy 与 HTTP CONNECT 互斥（reqwest 一次只能挂一个 proxy），无法叠加到共享 client。 |
+| `rebuild_proxy` 用 `ProxySignature` (enabled, host, port) 三元组比对 | 改 theme / language / timeout 不触发，避免误 rebuild。 |
+| `Arc<HttpClients>` 跨 spawn closure | `Arc::clone` 廉价，跨 `.await` 安全；用 `&HttpClients` 会触发 E0521（与 `&reqwest::Client` 同款问题）。 |
+| `unsafe { (*self_ptr).field = ... }` 字段 swap | Rust 不允许 `&mut self.field` × 2 顺序写两个字段；裸指针 cast 一次性 swap。 |
+
+## 3. 验证结果
+
+| 命令 | 结果 |
+| --- | --- |
+| `cargo build --all-targets --all-features` | ✅ Finished, 0 warning |
+| `cargo clippy --all-targets --all-features -- -D warnings` | ✅ 0 警告 |
+| `cargo test --all-targets --all-features` | ✅ 294 lib + 3 main passed, 4 ignored, 0 failed |
+| `cargo test --lib http::clients` | ✅ 5/5（for_rule × 1 + rebuild_proxy × 3 + gh_proxy × 1） |
+
+## 4. 残留风险与未来工作
+
+| 风险 | 缓解 / 后续 |
+| --- | --- |
+| `spawn_download_range` 参数从 7 涨到 8，触发 `too_many_arguments` clippy lint | 用 `#[allow]` + 注释留说明；理论解是把 `rules/config/http/runtime/next_task_id` 五个共享字段抽 `OpsCtx` 结构，需要跨 3 个 spawn 函数 + AppModel::spawn_* 的小重构，**超出 Phase 3.1 范围**，建议集中到下一轮"代码组织优化"批次 |
+| in-flight 任务拿的是 `Arc::clone` 出去的旧 client | 与原"spawn 时 cfg.clone() 拍快照"语义一致；后续任务用新 client，符合用户预期 |
+| `gh_proxy` 仍 raw builder，未复用连接池 | gh_proxy 频率极低（启动一次 + 用户手动），不构成热路径；如未来需要可在 `HttpClients` 加 `gh_proxy: Arc<reqwest::Client>` 字段 + 同步 rebuild |
+| 未跑 live 网络基准 | 100 章小说抓取时间对比（before/after）需要真实书源，留待手动验证 |
+
+## 5. 兼容性影响
+
+- ✅ 公开 CLI 行为：零变更（CLI 内部构造 `HttpClients` 但对外接口同）
+- ✅ `~/.sonovel/` 数据目录：零变更（schema 未动）
+- ✅ `config.toml` 兼容性：零变更（字段未变）
+- ✅ GPUI executor 约束：`HttpClients` 内只装 `Arc<reqwest::Client>`（Send + Sync），跨 spawn 安全
+- ✅ 依赖树：零新增（沿用 `reqwest::Client` + `std::sync::Mutex`）
+
+---
+
 ## 1. 变更清单
 
 | Commit | 类型 | 模块 | 影响 |

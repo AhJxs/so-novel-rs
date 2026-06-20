@@ -54,13 +54,18 @@
 ## Phase 3：性能优化（确认 Phase 2 后再做）
 
 ### 3.1 HTTP 客户端复用（最重要的一项）
-- [ ] `src/app/mod.rs` — `AppModel` 增加 `pub http_client: reqwest::Client` 字段
-- [ ] `src/http/client.rs` — 抽出 `build_http_client` 工厂，异步版即 reqwest::Client（不区分 blocking/async，把现存的 async 当默认；同步路径用 reqwest::blocking::Client 单例）
-- [ ] `src/app/mod.rs::new` — 用 `http::client::build_async_client(&config, &opts)` 构造一次，存 `http_client`
-- [ ] 持久化层变更：配置改 proxy / unsafe_ssl 时重建 client 并替换（`Arc<Client>` 模式）
-- [ ] 所有 `crawler/ops/*.rs` / `parser/*.rs` 调用点：接受 `&Client` 形参，调用方传入 `model.http_client`
-- [ ] 单测：100 章抓取时间对比 before/after（手测或 `#[ignore]` 性能测）
-- [ ] 验证：clippy + test 全绿
+- [x] 新建 `src/http/clients.rs` — `HttpClients` 集合（safe + unsafe_ssl + gh_proxy 三个 Arc<Client>）+ `rebuild_proxy` 按 `(enabled, host, port)` 三元组 no-op 跳过
+- [x] `src/app/mod.rs` — `AppModel` 加 `pub http: Arc<HttpClients>` 字段；`new()` 构造一次共享实例
+- [x] `src/crawler/mod.rs` — `download_book` / `resolve_book` / `download_chapters` 接 `client: &reqwest::Client`，调用方传 `http.for_rule(&source.rule)`
+- [x] `src/crawler/search.rs` — `search_aggregated` / `search_streaming` 接 `http: Arc<HttpClients>`；同源单 client 共享
+- [x] `src/crawler/health.rs` — `check_sources_health` / `probe_one` 接 `Arc<HttpClients>`
+- [x] `src/app/search_state.rs` — `spawn_cover_download` 接 `client: &reqwest::Client`；drain 中按占位 rule 取 safe
+- [x] `src/app/ops/search.rs` / `download.rs` / `sources.rs` / `update.rs` — 全部接 `Arc<HttpClients>` 或 `for_rule(&rule)` 返回值
+- [x] `src/app/update_state.rs` — `check_github_latest_release(cfg, http, gh_proxy)`；非 gh_proxy 分支复用 `http.safe`
+- [x] `src/cli.rs` — search / download 子命令构造 `HttpClients::new(&cfg)?` 后传入
+- [x] `src/app/mod.rs::persist_settings` — 写盘成功后调 `self.http.rebuild_proxy(&self.config)`，proxy 未变 no-op
+- [x] 5 个 `HttpClients` 单元测试（for_rule / rebuild_proxy 三变体 / gh_proxy）
+- [x] 验证：build / clippy `-D warnings` / test 全绿（294 lib + 3 main + 4 ignored）
 
 ### 3.2 Regex / Selector 缓存
 - [ ] `src/parser/chapter.rs::is_last_page` — `next_chapter_link` 正则编译改 `OnceCell` cache（key = rule_id）

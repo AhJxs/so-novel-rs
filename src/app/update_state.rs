@@ -3,7 +3,8 @@
 use tokio::sync::mpsc;
 
 use crate::config::AppConfig;
-use crate::http::client::{ClientOptions, build_async_client};
+use crate::http::HttpClients;
+use crate::models::Rule;
 
 #[derive(Default)]
 pub struct UpdateState {
@@ -93,22 +94,26 @@ fn classify(result: &UpdateCheckResult) -> UpdateOutcome {
 /// **代理策略**（优先级从高到低）：
 /// 1. `gh_proxy` 非空 → 走 GH 镜像前向代理（**优先级最高**，无视全局代理开关）。
 ///    用户主动填了 `gh_proxy` 就是明确要它管 GitHub 流量；全局代理是兜底。
-/// 2. 否则 `cfg.proxy_enabled=true` → 走 `build_async_client` 工厂，HTTP CONNECT
-///    代理自动生效（Charles / mitmproxy / 公司代理抓包场景）。
-/// 3. 两者都空 → 走工厂无代理直连。
+///    这一支仍 raw builder（forward proxy 与 HTTP CONNECT 互斥，无法叠加到共享
+///    client），且 gh_proxy 检查频率极低（启动一次 + 用户手动），不构成热路径。
+/// 2. 否则从共享 [`HttpClients`] 复用 `safe` client（按占位 rule 选）——
+///    该 client 已包含 HTTP CONNECT 代理 / TLS session cache / 默认 headers，
+///    与搜索/详情/封面路径保持一致，避免每次检查都重建连接池。
+/// 3. 两者都空 → `safe` client 直接走，无代理直连。
 ///
-/// 把 `&AppConfig` 透传进这里就是为了让"检查更新"按钮兼容全局代理抓包；
-/// 之前是 raw client 完全绕开工厂。
-pub async fn check_github_latest_release(cfg: &AppConfig, gh_proxy: &str) -> UpdateCheckResult {
+/// `_cfg` 保留仅为 API 表面稳定（外部调用按 `(&cfg, &http, &gh_proxy)` 顺序
+/// 传参；日后若需要根据 cfg 决定 endpoint / 镜像分流再加回来）。
+pub async fn check_github_latest_release(
+    _cfg: &AppConfig,
+    http: &HttpClients,
+    gh_proxy: &str,
+) -> UpdateCheckResult {
     let url = "https://api.github.com/repos/AhJxs/so-novel-rs/releases/latest";
 
-    // 两分支：(gh_proxy 镜像) / (工厂 —— 工厂内部按 cfg.proxy_enabled 决定
-    // 是否挂全局代理，所以"开了走代理、没开走直连"都在这一支里搞定) —— gh_proxy 优先。
+    // GitHub API 对无 UA 的请求返回 403；共享 `safe` client 未设默认 UA
+    // （工厂只设 Accept-Language），所以两分支都要显式带 UA header。
     let result = if !gh_proxy.is_empty() {
         // gh_proxy 镜像分支：raw builder + gh_proxy 作 forward HTTP proxy。
-        // 即便用户开了全局代理，这里也忽略（用户填 gh_proxy 是更明确的
-        // 「GitHub 流量用这个镜像」意图）。`reqwest::ClientBuilder::proxy()`
-        // 一次只能挂一个代理，没法同时挂 gh_proxy + 全局 CONNECT 代理。
         let proxy = match reqwest::Proxy::all(gh_proxy) {
             Ok(p) => p,
             Err(e) => {
@@ -133,18 +138,12 @@ pub async fn check_github_latest_release(cfg: &AppConfig, gh_proxy: &str) -> Upd
         };
         client.get(url).send().await
     } else {
-        // 工厂分支 —— `build_async_client` 内部自己看 `cfg.proxy_enabled`：
-        // 开了就挂 HTTP CONNECT 代理，没开就直连。`unsafe_ssl` / 默认 headers
-        // 也一并接上，与搜索/详情/封面路径保持一致。
-        let client = match build_async_client(cfg, &ClientOptions::default()) {
-            Ok(c) => c,
-            Err(e) => {
-                return UpdateCheckResult {
-                    latest_version: None,
-                    error: Some(format!("构建 HTTP 客户端失败: {e}")),
-                };
-            }
-        };
+        // 共享 client 分支：复用 `safe` —— 用占位 rule（ignore_ssl=false），
+        // 因为查询 GitHub API 不需要忽略证书校验。
+        let client = http.for_rule(&Rule {
+            ignore_ssl: false,
+            ..Rule::default()
+        });
         client
             .get(url)
             .header(reqwest::header::USER_AGENT, "so-novel-rs")

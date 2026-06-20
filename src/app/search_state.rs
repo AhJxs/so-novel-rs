@@ -4,7 +4,6 @@ use std::collections::{HashMap, HashSet};
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
 
-use crate::config::AppConfig;
 use crate::models::{Book, Chapter, SearchResult};
 
 use super::cover::{CoverEntry, cover_entry_from_bytes};
@@ -282,12 +281,13 @@ impl SearchState {
     }
 
     /// 派一个封面下载任务。已有缓存 / 正在下载 / url 为空时直接返回（幂等）。
-    /// `cfg` 仅在调用期间借用，函数内部 clone 后 move 进 async block。
+    /// `client` 是共享 HTTP client 集合，封面下载固定走 safe 通道（unsafe_ssl=false
+    /// 的常规请求），不复用 `cfg` 自己造 client。
     pub fn spawn_cover_download(
         &mut self,
         source_id: i32,
         url: &str,
-        cfg: &AppConfig,
+        client: &reqwest::Client,
         runtime: &Runtime,
     ) {
         let url = url.trim();
@@ -310,58 +310,46 @@ impl SearchState {
             }
         };
 
-        let cfg = cfg.clone();
         let url_owned = url.to_string();
         let source_id_send = source_id;
+        // `client` 是 `&reqwest::Client` 借自 caller，不能跨 `.await` move。
+        // reqwest::Client::clone 是廉价 Arc clone（共享底层连接池），
+        // 这正是 Phase 3.1 想要的"跨任务复用连接池"语义。
+        let client = client.clone();
         runtime.spawn(async move {
             let key_send = (source_id_send, url_owned.clone());
-            let opts = crate::http::client::ClientOptions { unsafe_ssl: false };
             let referer = crate::http::origin_or_self(&url_owned);
             let ua = crate::http::ua::random_ua();
-            let result: Option<Vec<u8>> = match crate::http::client::build_async_client(&cfg, &opts)
+            let result: Option<Vec<u8>> = match client
+                .get(&url_owned)
+                .timeout(std::time::Duration::from_secs(15))
+                .header(reqwest::header::USER_AGENT, ua)
+                .header(reqwest::header::REFERER, referer)
+                .header(reqwest::header::ACCEPT, "image/*,*/*;q=0.8")
+                .send()
+                .await
             {
-                Ok(client) => match client
-                    .get(&url_owned)
-                    .timeout(std::time::Duration::from_secs(15))
-                    .header(reqwest::header::USER_AGENT, ua)
-                    .header(reqwest::header::REFERER, referer)
-                    .header(reqwest::header::ACCEPT, "image/*,*/*;q=0.8")
-                    .send()
-                    .await
-                {
-                    Ok(r) => {
-                        let status = r.status();
-                        if !status.is_success() {
-                            tracing::warn!(
-                                "封面下载失败（已忽略）: HTTP {} for {}",
-                                status,
-                                url_owned
-                            );
-                            None
-                        } else {
-                            match r.bytes().await {
-                                Ok(b) if !b.is_empty() => Some(b.to_vec()),
-                                Ok(_) => {
-                                    tracing::warn!(
-                                        "封面下载失败（已忽略）: 空 body for {}",
-                                        url_owned
-                                    );
-                                    None
-                                }
-                                Err(e) => {
-                                    tracing::warn!("封面下载失败（已忽略）: {e} for {}", url_owned);
-                                    None
-                                }
+                Ok(r) => {
+                    let status = r.status();
+                    if !status.is_success() {
+                        tracing::warn!("封面下载失败（已忽略）: HTTP {} for {}", status, url_owned);
+                        None
+                    } else {
+                        match r.bytes().await {
+                            Ok(b) if !b.is_empty() => Some(b.to_vec()),
+                            Ok(_) => {
+                                tracing::warn!("封面下载失败（已忽略）: 空 body for {}", url_owned);
+                                None
+                            }
+                            Err(e) => {
+                                tracing::warn!("封面下载失败（已忽略）: {e} for {}", url_owned);
+                                None
                             }
                         }
                     }
-                    Err(e) => {
-                        tracing::warn!("封面请求失败（已忽略）: {e} for {}", url_owned);
-                        None
-                    }
-                },
+                }
                 Err(e) => {
-                    tracing::warn!("封面 client 构造失败（已忽略）: {e}");
+                    tracing::warn!("封面请求失败（已忽略）: {e} for {}", url_owned);
                     None
                 }
             };
@@ -378,6 +366,7 @@ impl SearchState {
 #[cfg(test)]
 mod search_state_tests {
     use super::*;
+    use crate::config::AppConfig;
 
     #[test]
     fn cover_cache_initially_empty() {
@@ -389,24 +378,32 @@ mod search_state_tests {
         assert!(s.pending_cover_prefetch.is_empty());
     }
 
+    fn make_test_client() -> reqwest::Client {
+        crate::http::client::build_async_client(
+            &AppConfig::default(),
+            &crate::http::client::ClientOptions::default(),
+        )
+        .unwrap()
+    }
+
     #[test]
     fn spawn_cover_download_is_idempotent() {
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
             .unwrap();
-        let cfg = AppConfig::default();
+        let client = make_test_client();
         let mut s = SearchState::default();
         let url = "https://example.com/cover.png";
 
-        s.spawn_cover_download(1, url, &cfg, &rt);
+        s.spawn_cover_download(1, url, &client, &rt);
         let in_flight_after_first = s.cover_in_flight.len();
         assert_eq!(in_flight_after_first, 1);
 
-        s.spawn_cover_download(1, url, &cfg, &rt);
+        s.spawn_cover_download(1, url, &client, &rt);
         assert_eq!(s.cover_in_flight.len(), 1, "重复调用不应重复入队");
 
-        s.spawn_cover_download(1, "  https://example.com/cover.png  ", &cfg, &rt);
+        s.spawn_cover_download(1, "  https://example.com/cover.png  ", &client, &rt);
         assert_eq!(
             s.cover_in_flight.len(),
             1,
@@ -420,11 +417,11 @@ mod search_state_tests {
             .enable_all()
             .build()
             .unwrap();
-        let cfg = AppConfig::default();
+        let client = make_test_client();
         let mut s = SearchState::default();
 
-        s.spawn_cover_download(1, "", &cfg, &rt);
-        s.spawn_cover_download(1, "   ", &cfg, &rt);
+        s.spawn_cover_download(1, "", &client, &rt);
+        s.spawn_cover_download(1, "   ", &client, &rt);
         assert!(s.cover_in_flight.is_empty());
     }
 
@@ -441,10 +438,10 @@ mod search_state_tests {
                 .build()
                 .unwrap(),
         );
-        let cfg = AppConfig::default();
+        let client = make_test_client();
         let mut s = SearchState::default();
 
-        s.spawn_cover_download(1, "https://example.com/cover.png", &cfg, &rt);
+        s.spawn_cover_download(1, "https://example.com/cover.png", &client, &rt);
         std::thread::sleep(std::time::Duration::from_millis(500));
         drop(rt);
     }

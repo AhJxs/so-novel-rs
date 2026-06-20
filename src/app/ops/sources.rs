@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use crate::config::AppConfig;
 use crate::db::Db;
+use crate::http::HttpClients;
 use crate::models::Rule;
 use crate::rules::SourceOverrides;
 
@@ -155,6 +156,7 @@ pub fn delete_source(
 pub fn spawn_health_check(
     rules: &[Rule],
     config: &AppConfig,
+    http: Arc<HttpClients>,
     runtime: &tokio::runtime::Runtime,
     sources_state: &mut SourcesState,
 ) {
@@ -174,8 +176,9 @@ pub fn spawn_health_check(
     sources_state.rx = Some(rx);
 
     let cfg = Arc::new(config.clone());
+    let http = Arc::clone(&http);
     let rules = rules.to_vec();
     runtime.spawn(async move {
-        crate::crawler::health::check_sources_health(cfg, rules, tx).await;
+        crate::crawler::health::check_sources_health(cfg, http, rules, tx).await;
     });
 }

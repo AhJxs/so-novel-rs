@@ -40,11 +40,14 @@ pub use update_state::{
     UpdateCheckResult, UpdateOutcome, UpdateState, check_github_latest_release,
 };
 
+use std::sync::Arc;
+
 use anyhow::{Context, Result};
 use tokio::runtime::Runtime;
 
 use crate::config::{AppConfig, ConfigPaths, load_config};
 use crate::db::Db;
+use crate::http::HttpClients;
 use crate::i18n::{ts, ts_fmt};
 use crate::models::{Book, Chapter, Rule, SearchResult};
 use crate::rules::SourceOverrides;
@@ -68,6 +71,11 @@ pub struct AppModel {
     /// 通过 `Box::leak` 得到 `&'static Runtime`，永不 drop ——
     /// 见 `build_shared_runtime` 注释，规避 Runtime drop panic。
     pub runtime: &'static Runtime,
+
+    /// 共享 HTTP client 集合。一次性构造，跨所有爬取任务复用
+    /// 连接池 + TLS session cache —— 改 proxy / unsafe_ssl 时
+    /// `HttpClients::rebuild_proxy` 会整体替换实例。
+    pub http: Arc<HttpClients>,
 
     /// 搜索下载页状态。
     pub search: SearchState,
@@ -151,6 +159,10 @@ impl AppModel {
 
         let search = SearchState::default();
 
+        // 共享 HTTP client 集合。构造失败（proxy URL 非法等）沿 Result 冒到
+        // gpui_app 入口，由 rfd 弹致命错误对话框 —— 与 runtime 失败同等待遇。
+        let http = Arc::new(HttpClients::new(&config)?);
+
         Ok(Self {
             paths,
             config,
@@ -160,6 +172,7 @@ impl AppModel {
             source_overrides,
             db,
             runtime,
+            http,
             search,
             tasks,
             next_task_id,
@@ -209,6 +222,7 @@ impl AppModel {
         let (id, task) = crate::app::ops::spawn_download(
             &self.rules,
             &self.config,
+            Arc::clone(&self.http),
             self.runtime,
             &mut self.next_task_id,
             target,
@@ -220,8 +234,13 @@ impl AppModel {
 
     /// 派一个 TOC 预取任务（获取元数据 + 章节列表，不开始下载）。
     pub fn spawn_resolve_toc(&mut self, target: &SearchResult) {
-        let rx =
-            crate::app::ops::spawn_resolve_toc(&self.rules, &self.config, self.runtime, target);
+        let rx = crate::app::ops::spawn_resolve_toc(
+            &self.rules,
+            &self.config,
+            Arc::clone(&self.http),
+            self.runtime,
+            target,
+        );
         self.search.toc_rx = Some(rx);
     }
 
@@ -236,6 +255,7 @@ impl AppModel {
         let (id, task) = crate::app::ops::spawn_download_range(
             &self.rules,
             &self.config,
+            Arc::clone(&self.http),
             self.runtime,
             &mut self.next_task_id,
             target,
@@ -249,7 +269,13 @@ impl AppModel {
 
     /// 派聚合搜索任务。
     pub fn spawn_search(&mut self) -> bool {
-        crate::app::ops::spawn_search(&self.rules, &self.config, self.runtime, &mut self.search)
+        crate::app::ops::spawn_search(
+            &self.rules,
+            &self.config,
+            Arc::clone(&self.http),
+            self.runtime,
+            &mut self.search,
+        )
     }
 
     /// 选中某条搜索结果。
@@ -257,6 +283,7 @@ impl AppModel {
         crate::app::ops::select_search_result(
             &self.rules,
             &self.config,
+            Arc::clone(&self.http),
             self.runtime,
             &mut self.search,
             idx,
@@ -344,8 +371,19 @@ impl AppModel {
         if let Err(msg) = crate::app::ops::persist_settings(&self.config, &self.paths.config_file) {
             tracing::warn!("自动保存 config.toml 失败: {msg}");
             self.push_error(msg);
-        } else {
-            tracing::debug!("config.toml 自动保存成功");
+            return;
+        }
+        tracing::debug!("config.toml 自动保存成功");
+
+        // proxy / unsafe_ssl 改了 → 重建共享 HTTP client。
+        // `rebuild_proxy` 内部按 `(proxy_enabled, proxy_host, proxy_port)` 三元组
+        // 比对，未变则 no-op；其它字段（theme / language / timeout 等）不触发。
+        // 重建失败：config 已写盘但客户端拿的是旧配置 → 推 error 让用户知道；
+        // 下次重启 / 再次触发 persist_settings 会重试。
+        if let Err(e) = self.http.rebuild_proxy(&self.config) {
+            let msg = format!("HTTP client 重建失败（配置已保存）: {e}");
+            tracing::warn!("{msg}");
+            self.push_error(msg);
         }
     }
 
@@ -358,6 +396,7 @@ impl AppModel {
         crate::app::ops::spawn_health_check(
             &self.rules,
             &self.config,
+            Arc::clone(&self.http),
             self.runtime,
             &mut self.sources_state,
         );
@@ -365,7 +404,12 @@ impl AppModel {
 
     /// 手动检查 GitHub release 是否有新版本。
     pub fn spawn_update_check(&mut self) {
-        crate::app::ops::spawn_update_check(&self.config, self.runtime, &mut self.update_state);
+        crate::app::ops::spawn_update_check(
+            &self.config,
+            Arc::clone(&self.http),
+            self.runtime,
+            &mut self.update_state,
+        );
     }
 
     /// 扫描下载目录。

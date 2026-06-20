@@ -14,7 +14,7 @@ use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 
 use crate::config::AppConfig;
-use crate::http::client::{ClientOptions, build_async_client};
+use crate::http::HttpClients;
 use crate::models::SearchResult;
 use crate::parser::{SearchError, search_one};
 use crate::rules::Source;
@@ -37,6 +37,7 @@ pub struct SourceSearchOutcome {
 /// 客户端构造很轻（不发请求），代价可接受。
 pub async fn search_aggregated(
     cfg: &AppConfig,
+    http: Arc<HttpClients>,
     sources: Vec<Source>,
     keyword: String,
     limit: Option<usize>,
@@ -46,31 +47,27 @@ pub async fn search_aggregated(
 
     let mut set: JoinSet<SourceSearchOutcome> = JoinSet::new();
 
-    let cfg = Arc::new(cfg.clone());
+    // `cfg` 当前在 `run_one` 内未直接消费（HTTP 复用通过 `http` 解决）；
+    // 保留 `cfg: &AppConfig` 参数仅为接口稳定 + 未来 per-source 调度参数扩展。
+    let _cfg = cfg;
+    let http = Arc::clone(&http);
     let kw = Arc::new(keyword);
     let cf = Arc::new(cf_bypass_base);
 
     for src in sources {
-        let cfg = Arc::clone(&cfg);
+        let http = Arc::clone(&http);
         let kw = Arc::clone(&kw);
         let cf = Arc::clone(&cf);
         set.spawn(async move {
             let source_id = src.rule.id;
             let source_name = src.rule.name.clone();
-            let client_opts = ClientOptions {
-                unsafe_ssl: src.rule.ignore_ssl,
-            };
             let started = std::time::Instant::now();
 
             tracing::debug!(source_id = source_id, source = %source_name, "search_aggregated: 单源搜索开始");
 
-            let result = match build_async_client(&cfg, &client_opts) {
-                Ok(client) => {
-                    let cf_borrow: Option<&str> = cf.as_ref().as_ref().map(|s| s.as_str());
-                    run_one(&client, &src, kw.as_str(), limit, cf_borrow).await
-                }
-                Err(e) => Err(SearchError::Http(format!("client: {e:#}"))),
-            };
+            let client = http.for_rule(&src.rule);
+            let cf_borrow: Option<&str> = cf.as_ref().as_ref().map(|s| s.as_str());
+            let result = run_one(client, &src, kw.as_str(), limit, cf_borrow).await;
             let elapsed_ms = started.elapsed().as_millis() as u64;
             match &result {
                 Ok(list) => tracing::info!(source_id = source_id, source = %source_name, hits = list.len(), elapsed_ms = elapsed_ms, "search_aggregated: 单源搜索成功"),
@@ -104,6 +101,7 @@ pub async fn search_aggregated(
 /// - `search_streaming` 每完成一源就推送，适合 UI 逐源更新进度。
 pub async fn search_streaming(
     cfg: &AppConfig,
+    http: Arc<HttpClients>,
     sources: Vec<Source>,
     keyword: String,
     limit: Option<usize>,
@@ -114,31 +112,25 @@ pub async fn search_streaming(
 
     let mut set: JoinSet<SourceSearchOutcome> = JoinSet::new();
 
-    let cfg = Arc::new(cfg.clone());
+    let _cfg = cfg;
+    let http = Arc::clone(&http);
     let kw = Arc::new(keyword);
     let cf = Arc::new(cf_bypass_base);
 
     for src in sources {
-        let cfg = Arc::clone(&cfg);
+        let http = Arc::clone(&http);
         let kw = Arc::clone(&kw);
         let cf = Arc::clone(&cf);
         set.spawn(async move {
             let source_id = src.rule.id;
             let source_name = src.rule.name.clone();
-            let client_opts = ClientOptions {
-                unsafe_ssl: src.rule.ignore_ssl,
-            };
             let started = std::time::Instant::now();
 
             tracing::debug!(source_id = source_id, source = %source_name, "search_streaming: 单源搜索开始");
 
-            let result = match build_async_client(&cfg, &client_opts) {
-                Ok(client) => {
-                    let cf_borrow: Option<&str> = cf.as_ref().as_ref().map(|s| s.as_str());
-                    run_one(&client, &src, kw.as_str(), limit, cf_borrow).await
-                }
-                Err(e) => Err(SearchError::Http(format!("client: {e:#}"))),
-            };
+            let client = http.for_rule(&src.rule);
+            let cf_borrow: Option<&str> = cf.as_ref().as_ref().map(|s| s.as_str());
+            let result = run_one(client, &src, kw.as_str(), limit, cf_borrow).await;
             let elapsed_ms = started.elapsed().as_millis() as u64;
             match &result {
                 Ok(list) => tracing::info!(source_id = source_id, source = %source_name, hits = list.len(), elapsed_ms = elapsed_ms, "search_streaming: 单源搜索成功"),
@@ -196,7 +188,9 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn empty_sources_returns_empty() {
         let cfg = AppConfig::default();
-        let outcomes = search_aggregated(&cfg, Vec::new(), "any".into(), Some(10), None).await;
+        let http = Arc::new(crate::http::HttpClients::new(&cfg).unwrap());
+        let outcomes =
+            search_aggregated(&cfg, http, Vec::new(), "any".into(), Some(10), None).await;
         assert!(outcomes.is_empty());
     }
 
@@ -204,8 +198,9 @@ mod tests {
     async fn each_source_yields_one_outcome_with_typed_error() {
         // 没有 search 段的规则会立即返回 SearchDisabled，不发起任何网络请求。
         let cfg = AppConfig::default();
+        let http = Arc::new(crate::http::HttpClients::new(&cfg).unwrap());
         let sources = vec![make_source(1, "A"), make_source(2, "B")];
-        let outcomes = search_aggregated(&cfg, sources, "any".into(), Some(10), None).await;
+        let outcomes = search_aggregated(&cfg, http, sources, "any".into(), Some(10), None).await;
         assert_eq!(outcomes.len(), 2);
         assert!(matches!(
             outcomes[0].result,

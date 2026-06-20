@@ -37,7 +37,6 @@ use crate::export::{
     ExportError, RenderTarget, RenderedChapter, build_book_dir_name, exporter_for,
     write_chapter_files,
 };
-use crate::http::client::{ClientOptions, build_async_client};
 use crate::models::{Book, Chapter};
 use crate::parser::{
     BookError, ChapterError, SelectError, TocError, parse_book_detail, parse_chapter, parse_toc,
@@ -113,6 +112,7 @@ pub struct DownloadOptions {
 /// 返回成品文件路径（一个 `.epub` / `.txt` / `.zip`）。
 pub async fn download_book(
     cfg: &AppConfig,
+    client: &reqwest::Client,
     source: &Source,
     book_url: &str,
     opts: DownloadOptions,
@@ -128,7 +128,7 @@ pub async fn download_book(
         "download_book: 开始",
     );
 
-    let (book, toc) = resolve_book(cfg, source, book_url, &cancel).await?;
+    let (book, toc) = resolve_book(cfg, client, source, book_url, &cancel).await?;
 
     if toc.is_empty() {
         tracing::warn!(
@@ -149,7 +149,7 @@ pub async fn download_book(
         return Err(CrawlerError::Cancelled);
     }
 
-    let out = download_chapters(cfg, source, book_url, &book, toc, opts).await;
+    let out = download_chapters(cfg, client, source, book_url, &book, toc, opts).await;
     match &out {
         Ok(path) => tracing::info!(
             source_id = source.rule.id,
@@ -175,19 +175,13 @@ pub async fn download_book(
 /// `download_chapters`。
 pub async fn resolve_book(
     cfg: &AppConfig,
+    client: &reqwest::Client,
     source: &Source,
     book_url: &str,
     cancel: &CancelToken,
 ) -> Result<(Book, Vec<Chapter>), CrawlerError> {
     let started = std::time::Instant::now();
     tracing::info!(source_id = source.rule.id, source = %source.rule.name, book_url = %book_url, "resolve_book: 抓取详情 + 章节列表");
-
-    // HTTP 客户端
-    let client_options = ClientOptions {
-        unsafe_ssl: source.rule.ignore_ssl,
-    };
-    let client = build_async_client(cfg, &client_options)
-        .map_err(|e| CrawlerError::Client(format!("{e:#}")))?;
 
     let cf_bypass = if cfg.cf_bypass.trim().is_empty() {
         None
@@ -294,6 +288,7 @@ pub async fn resolve_book(
 /// progress sender 和 cancel token。
 pub async fn download_chapters(
     cfg: &AppConfig,
+    client: &reqwest::Client,
     source: &Source,
     _book_url: &str,
     book: &Book,
@@ -308,13 +303,6 @@ pub async fn download_chapters(
     if chapters.is_empty() {
         return Err(CrawlerError::EmptyToc);
     }
-
-    // HTTP 客户端（导出封面等用）
-    let client_options = ClientOptions {
-        unsafe_ssl: source.rule.ignore_ssl,
-    };
-    let client = build_async_client(cfg, &client_options)
-        .map_err(|e| CrawlerError::Client(format!("{e:#}")))?;
 
     let cf_bypass = if cfg.cf_bypass.trim().is_empty() {
         None
@@ -367,8 +355,16 @@ pub async fn download_chapters(
         let target_lang = cfg.language.to_book_target_lang();
 
         handles.push(tokio::spawn(async move {
-            // 限并发
-            let _permit = permit.acquire_owned().await.expect("semaphore not closed");
+            // 限并发。`acquire_owned` 当前 tokio 实现在 Semaphore 不被 close 的情况
+            // 下永远成功，但 API 返回 Result；防御性：万一未来切换实现/close 信号进来，
+            // 把这一章记为 Failed 而不是 panic 把整个下载任务搞炸。
+            let _permit = match permit.acquire_owned().await {
+                Ok(p) => p,
+                Err(e) => {
+                    tracing::warn!("semaphore acquire 失败: {e}");
+                    return ChapterOutcome::Failed;
+                }
+            };
 
             // 章节内随机间隔（爬取礼貌性）。
             // 用 select! 配合 cancel — interval 一般是 100ms-2s，整段 sleep
@@ -516,7 +512,7 @@ pub async fn download_chapters(
 
     // 封面：仅 EPUB 才下载；失败 soft-skip。
     let cover_bytes = if matches!(render_target, RenderTarget::Epub) {
-        download_cover(&client, book.cover_url.as_deref()).await
+        download_cover(client, book.cover_url.as_deref()).await
     } else {
         None
     };

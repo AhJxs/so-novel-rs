@@ -8,6 +8,7 @@
 
 pub mod cf;
 pub mod client;
+pub mod clients;
 pub mod encoding;
 pub mod fetch;
 pub mod ua;
@@ -16,6 +17,7 @@ pub mod util;
 
 pub use cf::{fetch_via_cf_bypass, has_cloudflare};
 pub use client::{ClientOptions, build_blocking_client};
+pub use clients::HttpClients;
 pub use encoding::decode_response_bytes;
 pub use fetch::{FetchRequest, FetchResponse, HttpMethod, fetch};
 pub use ua::random_ua;

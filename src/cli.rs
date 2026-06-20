@@ -160,8 +160,15 @@ fn run_search(
         .thread_name("so-novel-cli")
         .build()
         .context("build tokio runtime")?;
+
+    // CLI 临时构造共享 HTTP client 集合 —— 与 GUI AppModel::new 一致路径：
+    // 工厂函数被 HttpClients 取代后，CLI 不能再直接调 build_async_client。
+    // 一次构造、走所有 source（search_aggregated 内部按 rule.ignore_ssl 选）。
+    let http = std::sync::Arc::new(crate::http::HttpClients::new(cfg)?);
+
     let outcomes = rt.block_on(crawler::search::search_aggregated(
         cfg,
+        http,
         target_sources,
         keyword.clone(),
         limit,
@@ -267,8 +274,14 @@ fn run_download(
         .thread_name("so-novel-cli")
         .build()
         .context("build tokio runtime")?;
+
+    // CLI 临时构造共享 HTTP client 集合（与 search 子命令同款），由
+    // download_book 内部按 source.rule.ignore_ssl 选 safe/unsafe_ssl 通道。
+    let http_for_task = std::sync::Arc::new(crate::http::HttpClients::new(&cfg_for_task)?);
+
     let download_task = rt.spawn(async move {
-        crawler::download_book(&cfg_for_task, &source_for_task, &url_for_task, opts).await
+        let client = http_for_task.for_rule(&source_for_task.rule);
+        crawler::download_book(&cfg_for_task, client, &source_for_task, &url_for_task, opts).await
     });
 
     let mut last_completed: u32 = 0;
