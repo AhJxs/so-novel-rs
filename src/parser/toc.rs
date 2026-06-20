@@ -570,4 +570,31 @@ mod tests {
         let err = parse_one_toc_page("", "https://x", &rule, &mut order).unwrap_err();
         assert!(matches!(err, TocError::TocRuleMissing));
     }
+
+    // ---------- resolve_base_for_join ----------
+
+    #[test]
+    fn resolve_base_prefers_toc_base_uri() {
+        let base = resolve_base_for_join("https://example.com/base/", "https://other.com/page");
+        assert_eq!(base, "https://example.com/base/");
+    }
+
+    #[test]
+    fn resolve_base_falls_back_to_current_page_url() {
+        let base = resolve_base_for_join("", "https://other.com/page");
+        assert_eq!(base, "https://other.com/page");
+    }
+
+    #[test]
+    fn resolve_base_whitespace_only_toc_uri_falls_back() {
+        let base = resolve_base_for_join("   ", "https://other.com/page");
+        assert_eq!(base, "https://other.com/page");
+    }
+
+    #[test]
+    fn resolve_base_preserves_untrimmed_toc_uri() {
+        // 代码 trim 检查但返回原串 — 记录这个行为
+        let base = resolve_base_for_join("  https://x.com/  ", "https://y.com/");
+        assert_eq!(base, "  https://x.com/  ");
+    }
 }

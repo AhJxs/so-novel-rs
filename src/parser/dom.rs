@@ -501,6 +501,38 @@ mod tests {
         assert_eq!(remove_tags(html, ""), html);
     }
 
+    #[test]
+    fn remove_tags_nested_same_name_removes_all() {
+        let html = "<div><div>inner</div></div><p>keep</p>";
+        let out = remove_tags(html, "div");
+        assert!(out.contains("keep"), "p lost: {out}");
+        assert!(!out.contains("inner"), "inner div not removed: {out}");
+    }
+
+    #[test]
+    fn remove_tags_deeply_nested_mixed_names() {
+        // <div><p><div>deep</div></p></div> — 两个 div 都删，p 保留
+        let html = "<div><p><div>deep</div></p></div>";
+        let out = remove_tags(html, "div");
+        assert!(!out.contains("deep"), "deep div not removed: {out}");
+        // p 的开闭标签可能还在（取决于 outer HTML 替换顺序）
+    }
+
+    #[test]
+    fn remove_tags_identical_siblings() {
+        let html = "<div>ad</div><div>ad</div><p>正文</p>";
+        let out = remove_tags(html, "div");
+        assert!(out.contains("正文"), "content lost: {out}");
+        assert!(!out.contains("ad"), "ad not removed: {out}");
+    }
+
+    #[test]
+    fn remove_tags_no_match_returns_original() {
+        let html = "<p>only</p>";
+        let out = remove_tags(html, "div.nonexistent");
+        assert_eq!(out, html);
+    }
+
     // ---------- 真实测试资源 ----------
 
     #[test]

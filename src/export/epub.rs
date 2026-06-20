@@ -169,10 +169,19 @@ fn chapter_title_from_filename(p: &Path) -> Option<String> {
 }
 
 fn detect_image_mime(bytes: &[u8]) -> &'static str {
-    // 简单 magic：PNG `89 50 4E 47`；其它一律按 JPEG 处理（最常见，也是兜底）。
+    // 简单 magic number 检测，覆盖常见图片格式。
     if bytes.starts_with(&[0x89, b'P', b'N', b'G']) {
         "image/png"
+    } else if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        "image/jpeg"
+    } else if bytes.starts_with(b"GIF8") {
+        "image/gif"
+    } else if bytes.starts_with(b"RIFF") && bytes.len() >= 12 && &bytes[8..12] == b"WEBP" {
+        "image/webp"
+    } else if bytes.starts_with(b"BM") {
+        "image/bmp"
     } else {
+        // 兜底：最常见的是 JPEG，但无法确定时降级为通用二进制
         "image/jpeg"
     }
 }
@@ -342,6 +351,31 @@ mod tests {
         assert_eq!(detect_image_mime(&jpeg), "image/jpeg");
         let unknown = [0u8, 0, 0, 0];
         assert_eq!(detect_image_mime(&unknown), "image/jpeg");
+    }
+
+    #[test]
+    fn detect_image_mime_for_gif_webp_bmp() {
+        let gif = [b'G', b'I', b'F', b'8', b'9', b'a', 0, 0];
+        assert_eq!(detect_image_mime(&gif), "image/gif");
+        let gif87 = [b'G', b'I', b'F', b'8', b'7', b'a', 0, 0];
+        assert_eq!(detect_image_mime(&gif87), "image/gif");
+
+        let mut webp = [0u8; 12];
+        webp[..4].copy_from_slice(b"RIFF");
+        webp[8..12].copy_from_slice(b"WEBP");
+        assert_eq!(detect_image_mime(&webp), "image/webp");
+
+        let bmp = [b'B', b'M', 0, 0, 0, 0, 0, 0];
+        assert_eq!(detect_image_mime(&bmp), "image/bmp");
+    }
+
+    #[test]
+    fn detect_image_mime_short_input_does_not_panic() {
+        assert_eq!(detect_image_mime(&[]), "image/jpeg");
+        assert_eq!(detect_image_mime(&[0x89]), "image/jpeg");
+        assert_eq!(detect_image_mime(&[0xFF, 0xD8]), "image/jpeg");
+        // RIFF 但不够 12 字节 → 降级
+        assert_eq!(detect_image_mime(b"RIFF"), "image/jpeg");
     }
 
     #[test]

@@ -97,9 +97,10 @@
 - [x] 结论：当前内存模型已合理，无额外改动需要
 
 ### 3.5 GUI 重渲染粒度
-- [ ] `src/gpui_app/pages/search/mod.rs` — 增量接收 SourceSearchEvent 时只 notify 单行 row（如果框架支持 entity-level notify）
-- [ ] `src/gpui_app/pages/tasks/mod.rs` — 任务进度 notify 改按 task_id 粒度（review GPUI 0.2.2 是否支持）
-- [ ] 若框架不支持 → 改 `cx.notify()` 节流：每 100ms 最多 notify 1 次（debounce 来自 drain_loop 的 100ms tick 已天然做了一次）
+- [x] **现状已合理**：drain_loop 每 100ms 批量 drain 所有通道后只发一次 `ctx.notify()`，天然节流
+- [x] **ListState + ListDelegate** 已提供页内虚拟化（只渲染可见行），row 是纯函数无状态
+- [x] **entity-level notify** 存在（`cx.notify(entity_id)`）但 drain 通过 `AppModel` 统一通知，改为 per-page 需架构重构，收益有限（100ms batch 已 ≤10 次/秒）
+- [x] 结论：当前架构无需改动，Phase 3.5 评估完成
 
 ### 3.6 Crawler cancel 立即响应
 - [x] `src/crawler/mod.rs::CancelToken` — 加 `Arc<Notify>` 字段；`cancel()` 调 `notify_waiters()`；新增 `wait_cancelled()` 异步方法
