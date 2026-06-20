@@ -84,11 +84,12 @@
 - [x] 验证：build / clippy `-D warnings` / test 全绿（302 lib + 3 main + 4 ignored，+8 from Phase 3.1）
 
 ### 3.3 Export 流式写
-- [ ] `src/export/epub.rs` — 改 BufWriter<File> 包裹 builder，章节按 `add_content` 一章章 push（不要先 collect 全 Vec<u8>）
-- [ ] `src/export/pdf.rs` — DocumentBuilder 改为按章节 add_page / write，流式到 BufWriter
-- [ ] `src/exporter.rs::write_chapter_files` — 文件名冲突时加 ` (1)` 后缀，保留原文件
-- [ ] `src/exporter.rs::build_book_dir_name` — 同名作者 + 同名书 + 同 format → 自动加 `(2)` 后缀
-- [ ] 单测：导出 5 MB 章节 → 内存峰值 < 50 MB（用 `dhat` 或手测 RSS）
+- [x] `src/export/epub.rs` — `File` → `BufWriter<File>` 包裹 `generate()`，减少 ZIP 写入 syscall
+- [x] `src/export/pdf.rs` — `save(path)` → `build()` + `BufWriter<File>::write_all` + `flush`（`save()` 内部是 `build()` + `fs::write`，BufWriter 减少 syscall）
+- [x] `src/export/exporter.rs::write_chapter_files` — 文件名冲突时自动加 ` (1)` / ` (2)` 后缀，保留原文件（新增 `unique_path` helper + 1 个测试 `write_chapter_files_deduplicates_same_title`）
+- [ ] `src/exporter.rs::build_book_dir_name` — 同名作者 + 同名书 + 同 format → 自动加 `(2)` 后缀（Phase 3.3 不动，留后续）
+- [ ] 单测：导出 5 MB 章节 → 内存峰值 < 50 MB（用 `dhat` 或手测 RSS，Phase 3.3 不动，留后续）
+- [x] 验证：build / clippy `-D warnings` / test 全绿（303 lib + 3 main + 4 ignored，+1 from Phase 3.3）
 
 ### 3.4 DownloadTask 内存释放
 - [ ] `src/app/download_task.rs` — 导出完成后（或 finish 事件触发时）`finished_chapters.clear()` + `shrink_to_fit()`

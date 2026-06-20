@@ -16,7 +16,7 @@
 //!   作为输入参数，由调度层负责 soft-skip 决策。
 
 use std::fs::File;
-use std::io::{Read, Write};
+use std::io::{BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
 
 use epub_builder::{EpubBuilder, EpubContent, EpubVersion, ReferenceType, ZipLibrary};
@@ -133,11 +133,12 @@ pub fn merge_with_cover_bytes(
     std::fs::create_dir_all(out_dir)?;
     let out_name = sanitize_filename(&format!("{}({}).epub", book.book_name, book.author));
     let out_path = out_dir.join(out_name);
-    let mut file = File::create(&out_path)?;
+    let file = File::create(&out_path)?;
+    let mut writer = BufWriter::new(file);
     builder
-        .generate(&mut file)
+        .generate(&mut writer)
         .map_err(|e| ExportError::Epub(format!("generate: {e}")))?;
-    file.flush()?;
+    writer.flush()?;
 
     Ok(out_path)
 }

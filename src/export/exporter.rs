@@ -107,7 +107,7 @@ pub fn write_chapter_files(
             ExportFormat::Epub => format!("{order}_{safe_title}.html"),
             ExportFormat::Pdf => format!("{order}_.html"),
         };
-        let path = chapters_dir.join(filename);
+        let path = unique_path(chapters_dir, &filename);
         std::fs::write(&path, &ch.body)
             .with_context(|| format!("write chapter file {}", path.display()))?;
     }
@@ -154,6 +154,27 @@ pub struct RenderedChapter {
     pub order: u32,
     pub title: String,
     pub body: String,
+}
+
+/// 如果 `dir/filename` 已存在，追加 ` (1)` / ` (2)` 后缀直到不冲突。
+/// 正常路径（无冲突）零开销：只做一次 `exists()` 检查。
+fn unique_path(dir: &Path, filename: &str) -> PathBuf {
+    let path = dir.join(filename);
+    if !path.exists() {
+        return path;
+    }
+    let stem = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("chapter");
+    let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("html");
+    for i in 1u32.. {
+        let candidate = dir.join(format!("{stem} ({i}).{ext}"));
+        if !candidate.exists() {
+            return candidate;
+        }
+    }
+    unreachable!()
 }
 
 fn pad_zero(n: u32, width: usize) -> String {
@@ -267,5 +288,38 @@ mod tests {
         let files = sort_chapter_files(dir.path()).unwrap();
         let first = files[0].file_name().unwrap().to_string_lossy().into_owned();
         assert!(first.starts_with("0_"));
+    }
+
+    #[test]
+    fn write_chapter_files_deduplicates_same_title() {
+        let dir = tempfile::tempdir().unwrap();
+        let rendered = vec![
+            RenderedChapter {
+                order: 1,
+                title: "第1章 楔子".into(),
+                body: "<html>first</html>".into(),
+            },
+            RenderedChapter {
+                order: 1,
+                title: "第1章 楔子".into(),
+                body: "<html>second</html>".into(),
+            },
+        ];
+        let count = write_chapter_files(dir.path(), &rendered, ExportFormat::Epub).unwrap();
+        assert_eq!(count, 2);
+        // 原文件 + 去重文件都应存在
+        let original = dir.path().join("001_第1章 楔子.html");
+        let deduped = dir.path().join("001_第1章 楔子 (1).html");
+        assert!(original.exists(), "original missing");
+        assert!(deduped.exists(), "deduped missing");
+        // 内容不同
+        assert_eq!(
+            std::fs::read_to_string(&original).unwrap(),
+            "<html>first</html>"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&deduped).unwrap(),
+            "<html>second</html>"
+        );
     }
 }

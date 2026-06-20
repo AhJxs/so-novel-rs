@@ -168,6 +168,47 @@
 
 ---
 
+# Phase 3.3 Export 流式写 — 变更复盘
+
+> 起点：Phase 3.2 commit `8c6db6d`。
+> 终点：本次会话尚未 commit。
+
+## 1. 目标
+
+1. epub/pdf 导出用 BufWriter 减少 syscall
+2. write_chapter_files 文件名冲突时保留原文件（加 ` (1)` 后缀）
+
+## 2. 变更清单
+
+| 文件 | 改动 |
+| --- | --- |
+| `src/export/epub.rs` | `File` → `BufWriter<File>` 包裹 `generate()` |
+| `src/export/pdf.rs` | `save(path)` → `build()` + `BufWriter<File>::write_all` + `flush` |
+| `src/export/exporter.rs` | `write_chapter_files` 加 `unique_path` 文件名去重 + 1 个测试 |
+
+## 3. 设计取舍
+
+| 取舍 | 原因 |
+| --- | --- |
+| PDF 仍用 `build() → Vec<u8>` | `pdf_oxide::DocumentBuilder` 不支持 streaming write trait；`save()` 内部就是 `build()` + `fs::write`。BufWriter 只优化写入 syscall |
+| 文件名去重用 `Path::exists()` + ` (1)` 后缀 | 单线程导出，`exists()` 安全；` (1)` 人类可读，与 Java 端行为一致 |
+| 正常路径零开销 | `unique_path` 只在 `path.exists()` 为 true 时才进入循环 |
+
+## 4. 验证结果
+
+```text
+cargo clippy --all-targets --all-features -- -D warnings   ✓ 0 warnings
+cargo test --all-targets --all-features      ✓ 303 lib + 3 main, 0 failed, 4 ignored (+1)
+```
+
+## 5. 兼容性
+
+- ✅ 公开 CLI 行为：零变更
+- ✅ 导出文件格式：零变更（内容一致，仅写入方式优化）
+- ✅ 文件名：正常路径无变化；冲突路径生成 `(1)` 后缀（之前静默覆盖，现在保留原文件）
+
+---
+
 ## 1. 变更清单
 
 | Commit | 类型 | 模块 | 影响 |

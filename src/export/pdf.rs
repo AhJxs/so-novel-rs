@@ -129,9 +129,13 @@ impl Exporter for PdfExporter {
             pg.finish();
         }
 
-        builder
-            .save(&out_path)
-            .map_err(|e| ExportError::Pdf(format!("save: {e}")))?;
+        let bytes = builder
+            .build()
+            .map_err(|e| ExportError::Pdf(format!("build: {e}")))?;
+        let file = std::fs::File::create(&out_path)?;
+        let mut writer = std::io::BufWriter::new(file);
+        std::io::Write::write_all(&mut writer, &bytes)?;
+        std::io::Write::flush(&mut writer)?;
 
         Ok(out_path)
     }
