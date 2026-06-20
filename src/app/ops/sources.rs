@@ -105,7 +105,7 @@ pub fn add_sources_from_file(
     let n = crate::db::sources::insert_many(db.conn_mut(), &to_insert)
         .map_err(|e| format!("导入失败: {e}"))?;
 
-    match crate::rules::load_rules_from_db(db.conn()) {
+    match crate::rules::load_rules_from_db(db.conn_mut()) {
         Ok(rs) => {
             *rules = rs;
             *rule_load_error = None;

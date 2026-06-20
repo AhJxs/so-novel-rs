@@ -24,7 +24,13 @@ const DEFAULT_RULES_JSON: &str = include_str!("../../bundle/rules/main.json");
 /// 把默认规则 seed 进 `sources` 表（仅当表为空时）。
 ///
 /// 返回插入的行数。已存在数据时返回 0。
-pub fn seed_from_default(conn: &Connection) -> Result<usize> {
+///
+/// 整批包在一个事务里：N 条 INSERT 单次 commit，对 SQLite 一次 fsync 而不是 N 次；
+/// 同时半成品状态不会污染列表（任意一条失败 → 整批回滚）。
+///
+/// 取 `&mut Connection` 是因为 `Connection::transaction()` 要求可变借用；
+/// 调用方在持有 Db 的地方用 `db.conn_mut()` 即可。
+pub fn seed_from_default(conn: &mut Connection) -> Result<usize> {
     let count: i64 = conn
         .query_row("SELECT COUNT(*) FROM sources", [], |r| r.get(0))
         .unwrap_or(0);
@@ -35,18 +41,21 @@ pub fn seed_from_default(conn: &Connection) -> Result<usize> {
     let rules: Vec<Rule> =
         serde_json::from_str(DEFAULT_RULES_JSON).context("解析嵌入的默认 main.json")?;
 
+    let tx = conn.transaction().context("begin seed tx")?;
     let mut inserted = 0;
     for (idx, rule) in rules.iter().enumerate() {
         let data = serde_json::to_string(rule).context("序列化默认规则")?;
         // id 由 ord+1 直接复用：跟之前 load_rules_from_path 的"按出现顺序自增 id"一致。
         let id = (idx + 1) as i64;
         let ord = idx as i64;
-        conn.execute(
+        tx.execute(
             "INSERT INTO sources (id, ord, data) VALUES (?1, ?2, ?3)",
             params![id, ord, data],
-        )?;
+        )
+        .with_context(|| format!("seed 第 {} 条规则失败", idx + 1))?;
         inserted += 1;
     }
+    tx.commit().context("commit seed tx")?;
     Ok(inserted)
 }
 
@@ -238,19 +247,19 @@ mod tests {
 
     #[test]
     fn seed_inserts_main_rules_then_idempotent() {
-        let db = fresh_db();
-        let n = seed_from_default(db.conn()).unwrap();
+        let mut db = fresh_db();
+        let n = seed_from_default(db.conn_mut()).unwrap();
         assert!(n >= 5, "expected ≥5 seeded rules, got {n}");
 
         // 第二次调用不再插入
-        let n2 = seed_from_default(db.conn()).unwrap();
+        let n2 = seed_from_default(db.conn_mut()).unwrap();
         assert_eq!(n2, 0);
     }
 
     #[test]
     fn list_returns_seeded_rules_in_order() {
-        let db = fresh_db();
-        seed_from_default(db.conn()).unwrap();
+        let mut db = fresh_db();
+        seed_from_default(db.conn_mut()).unwrap();
 
         let rules = list_with_overrides(db.conn()).unwrap();
         assert!(!rules.is_empty());
@@ -262,8 +271,8 @@ mod tests {
 
     #[test]
     fn toggle_disabled_round_trip() {
-        let db = fresh_db();
-        seed_from_default(db.conn()).unwrap();
+        let mut db = fresh_db();
+        seed_from_default(db.conn_mut()).unwrap();
 
         let now = toggle_disabled(db.conn(), 1).unwrap();
         assert!(now);
@@ -279,7 +288,7 @@ mod tests {
     #[test]
     fn insert_many_appends_with_new_ids_after_seed() {
         let mut db = fresh_db();
-        seed_from_default(db.conn()).unwrap();
+        seed_from_default(db.conn_mut()).unwrap();
         let before = list_with_overrides(db.conn()).unwrap();
         let max_before = before.iter().map(|r| r.id).max().unwrap();
 
@@ -312,7 +321,7 @@ mod tests {
     #[test]
     fn delete_one_removes_source_and_override() {
         let mut db = fresh_db();
-        seed_from_default(db.conn()).unwrap();
+        seed_from_default(db.conn_mut()).unwrap();
         // 先把 id=2 标成禁用 → source_overrides 表留下记录
         set_disabled(db.conn(), 2, true).unwrap();
         assert!(list_disabled(db.conn()).unwrap().contains(&2));

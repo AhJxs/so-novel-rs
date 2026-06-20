@@ -73,7 +73,7 @@ pub fn load_rules_from_path(path: &Path) -> Result<Vec<Rule>, RulesError> {
 ///
 /// 这是阶段二之后的主入口 — `app.rs` / `cli.rs` 都从这里拿规则。
 /// 表为空时会先 seed 默认 main.json（编译期嵌入），所以删 DB 重启依然能用。
-pub fn load_rules_from_db(conn: &rusqlite::Connection) -> anyhow::Result<Vec<Rule>> {
+pub fn load_rules_from_db(conn: &mut rusqlite::Connection) -> anyhow::Result<Vec<Rule>> {
     // seed 是幂等的：只有在 sources 表为空时才插。
     crate::db::sources::seed_from_default(conn)?;
     let mut rules = crate::db::sources::list_with_overrides(conn)?;

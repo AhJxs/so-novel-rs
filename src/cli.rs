@@ -114,9 +114,9 @@ fn effective_cfg(cfg: AppConfig, output: Option<String>, format: Option<String>)
 }
 
 fn load_active_sources(cfg: &AppConfig, paths: &ConfigPaths) -> Result<Vec<Source>> {
-    let db = Db::open(&paths.db_file)
+    let mut db = Db::open(&paths.db_file)
         .with_context(|| format!("打开 sonovel.db 失败: {}", paths.db_file.display()))?;
-    let rules = load_rules_from_db(db.conn()).context("加载规则失败")?;
+    let rules = load_rules_from_db(db.conn_mut()).context("加载规则失败")?;
     Ok(rules
         .into_iter()
         .filter(|r| !r.disabled)
@@ -324,9 +324,9 @@ fn run_download(
 
 fn run_sources(cfg: &AppConfig, paths: &ConfigPaths, json: bool) -> Result<()> {
     let _ = cfg; // 当前未用到 cfg 字段，保留参数为未来扩展（按 lang 过滤等）
-    let db = Db::open(&paths.db_file)
+    let mut db = Db::open(&paths.db_file)
         .with_context(|| format!("打开 sonovel.db 失败: {}", paths.db_file.display()))?;
-    let rules: Vec<Rule> = load_rules_from_db(db.conn()).context("加载规则失败")?;
+    let rules: Vec<Rule> = load_rules_from_db(db.conn_mut()).context("加载规则失败")?;
 
     if json {
         // 机器可读：Rule 已 derive(Serialize)。

@@ -40,6 +40,7 @@ pub use update_state::{
     UpdateCheckResult, UpdateOutcome, UpdateState, check_github_latest_release,
 };
 
+use anyhow::{Context, Result};
 use tokio::runtime::Runtime;
 
 use crate::config::{AppConfig, ConfigPaths, load_config};
@@ -97,15 +98,13 @@ pub struct AppModel {
     pub pending_notifications: Vec<UIEvent>,
 }
 
-impl Default for AppModel {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl AppModel {
     /// UI 中立的构造函数。
-    pub fn new() -> Self {
+    ///
+    /// 返回 `Result`：磁盘 DB 与内存 DB 都打不开时（极少见，通常是磁盘权限或
+    /// sqlite 损坏到连 in-memory 都建不出来），调用方应捕获并向用户展示
+    /// 致命错误（如 `rfd::MessageDialog`），不要 panic。
+    pub fn new() -> Result<Self> {
         let paths = ConfigPaths::discover();
 
         let (config, config_load_error) = match load_config(&paths.config_file) {
@@ -126,16 +125,19 @@ impl AppModel {
 
         let runtime = build_shared_runtime();
 
-        let db = match Db::open(&paths.db_file) {
+        let mut db = match Db::open(&paths.db_file) {
             Ok(db) => db,
             Err(e) => {
-                tracing::warn!("sonovel.db 打开失败: {e:#}");
-                Db::open_in_memory()
-                    .unwrap_or_else(|e| panic!("既开不了磁盘 DB 也开不了内存 DB：{e}"))
+                tracing::warn!("sonovel.db 打开失败，回退到内存 DB（重启会丢失任务记录）: {e:#}");
+                // in-memory DB 创建在标准 rusqlite 几乎不会失败；如果失败，
+                // 把错误向上抛，让 gpui_app 入口弹致命错误对话框。
+                Db::open_in_memory().with_context(|| {
+                    format!("无法初始化持久化数据库：磁盘 DB 打开失败，且内存 DB 也建不出来：{e:#}")
+                })?
             }
         };
 
-        let (rules, rule_load_error) = match crate::rules::load_rules_from_db(db.conn()) {
+        let (rules, rule_load_error) = match crate::rules::load_rules_from_db(db.conn_mut()) {
             Ok(rs) => (rs, None),
             Err(e) => {
                 tracing::warn!("rules load failed: {e:#}");
@@ -149,7 +151,7 @@ impl AppModel {
 
         let search = SearchState::default();
 
-        Self {
+        Ok(Self {
             paths,
             config,
             rules,
@@ -165,7 +167,7 @@ impl AppModel {
             sources_state: SourcesState::default(),
             update_state: UpdateState::default(),
             pending_notifications: Vec::new(),
-        }
+        })
     }
 
     /// 推一条 info 级通知。语义见 [`Self::pending_notifications`]。
