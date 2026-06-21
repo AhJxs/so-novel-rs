@@ -1,6 +1,6 @@
 [package]
 name = "so-novel-rs"
-version = "0.2.6"
+version = "0.3.0"
 edition = "2024"
 rust-version = "1.85"
 description = "So Novel — Rust desktop client (gpui + gpui-component)."
@@ -113,6 +113,14 @@ zip = { version = "8", default-features = false, features = ["deflate-flate2"] }
 
 # CLI 子命令（5c）。
 clap = { version = "4", features = ["derive"] }
+
+# Web 服务：axum（tokio 原生 HTTP 框架）+ tower-http（CORS 中间件）。
+axum = { version = "0.8", features = ["macros"] }
+axum_session = "0.20"
+async-stream = "0.3"
+futures = "0.3"
+tower-http = { version = "0.6", features = ["cors"] }
+
 
 # 原生文件选择对话框（书源管理「添加」按钮：选 JSON 文件导入）。
 # Linux 走 xdg-portal 而非默认 GTK3，避免引入 gtk3 系统依赖；

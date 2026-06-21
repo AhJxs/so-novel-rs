@@ -93,7 +93,8 @@ so-novel-rs/
     ├── models/            # Rule / Book / Chapter / SearchResult
     ├── parser/            # DOM / 搜索 / 详情 / 目录 / 章节 / 过滤
     ├── rules/             # 从 DB 加载书源 + 用户覆写
-    └── util/              # 文件名清洗 / 时间 / 语言检测 / 简繁转换
+    ├── util/              # 文件名清洗 / 时间 / 语言检测 / 简繁转换
+    └── web/               # Web 服务（axum + SSE + 单页前端）
 ```
 
 ## 🚀 快速开始
@@ -132,6 +133,36 @@ so-novel-rs download "https://example.com/book/123" --output D:\novels --format 
 # 列出书源
 so-novel-rs sources --json
 ```
+
+### 🌐 Web 模式
+
+启动 Web 服务器，通过浏览器访问：
+
+```sh
+# 命令行启动
+so-novel-rs --web
+so-novel-rs --web --host 0.0.0.0 --port 9000
+
+# 环境变量（Docker 友好）
+SO_NOVEL_WEB=1 so-novel-rs
+```
+
+浏览器打开 `http://localhost:8080` 即可使用。支持手机、平板、桌面多端响应式。
+
+### 🐳 Docker 部署
+
+```sh
+# 构建镜像
+docker build -t so-novel .
+
+# 运行（挂载数据目录）
+docker run -d -p 8080:8080 -v so-novel-data:/root/.sonovel --name so-novel so-novel
+
+# 自定义端口
+docker run -d -p 9000:8080 -e SO_NOVEL_WEB=1 so-novel
+```
+
+`config.toml` 存放在 `/root/.sonovel/config.toml`（容器内），下载的文件在 `/root/.sonovel/downloads/`。
 
 ### 📦 打包
 

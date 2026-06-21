@@ -302,16 +302,6 @@ pub(super) fn build(ctx: &PageCtx<'_>, cx: &App) -> SettingPage {
                         ),
                     )
                     .description(ts("Settings.desc.preserve_chapter_cache")),
-                    // -- 启用下载进度条 --
-                    SettingItem::new(
-                        ts("Settings.item.enable_progressbar"),
-                        bool_field(
-                            &m,
-                            move |model| model.config.enable_progressbar,
-                            move |model, val| model.config.enable_progressbar = val,
-                        ),
-                    )
-                    .description(ts("Settings.desc.enable_progressbar")),
                 ]),
         ])
 }

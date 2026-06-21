@@ -46,7 +46,7 @@ where
     )
 }
 
-/// bool 字段（Switch）—— 5 处（search_filter / preserve_chapter_cache / enable_progressbar / enable_retry / proxy_enabled）。
+/// bool 字段（Switch）—— 5 处（search_filter / preserve_chapter_cache / enable_retry / proxy_enabled）。
 pub(super) fn bool_field<G, S>(
     m: &Entity<AppModel>,
     getter: G,

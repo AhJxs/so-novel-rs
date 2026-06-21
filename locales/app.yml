@@ -200,10 +200,6 @@ Settings:
       en: "Preserve chapter cache"
       zh-CN: 保留章节缓存目录
       zh-HK: 保留章節快取目錄
-    enable_progressbar:
-      en: "Enable download progress bar"
-      zh-CN: 启用下载进度条
-      zh-HK: 啟用下載進度條
     search_limit:
       en: "Search result limit"
       zh-CN: 搜索条数上限
@@ -321,10 +317,6 @@ Settings:
       en: "When disabled, re-downloading will fetch all chapters from scratch."
       zh-CN: 关闭后下次重新下载会全章节再爬。
       zh-HK: 關閉後下次重新下載會全章節再爬。
-    enable_progressbar:
-      en: "Takes effect in terminal / CLI mode."
-      zh-CN: 终端/CLI 模式下生效。
-      zh-HK: 終端/CLI 模式下生效。
     search_limit:
       en: "Max results per source; -1 means unlimited."
       zh-CN: 每源最多返回条数；-1 表示不限。
