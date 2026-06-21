@@ -1,0 +1,571 @@
+<!-- ═══ 验证页 ═══ -->
+<div x-show="authChecked && !authenticated" x-transition:enter="transition ease-out duration-300" x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100"
+     class="min-h-screen flex items-center justify-center px-4">
+  <div class="w-full max-w-sm">
+    <div class="text-center mb-8">
+      <div class="w-16 h-16 bg-indigo-100 dark:bg-indigo-900 rounded-2xl flex items-center justify-center mx-auto mb-4">
+        <svg class="w-8 h-8 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+      </div>
+      <h1 class="text-xl font-bold">So Novel</h1>
+      <p class="text-sm text-gray-400 mt-1">请输入访问码以继续</p>
+    </div>
+    <div class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-6 shadow-sm">
+      <input type="text" x-model="authCode" maxlength="6" placeholder="输入 6 位访问码"
+             @keydown.enter="verifyAuth()" @input="authError = ''"
+             class="w-full text-center text-2xl tracking-[0.5em] font-mono px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none"
+             :class="authError ? 'border-red-400 dark:border-red-500' : ''">
+      <p x-show="authError" class="text-xs text-red-500 mt-2 text-center" x-text="authError"></p>
+      <button @click="verifyAuth()" :disabled="authCode.length < 6"
+              class="w-full mt-4 px-6 py-3 bg-indigo-500 hover:bg-indigo-600 disabled:bg-gray-400 text-white rounded-xl font-medium text-sm transition-colors">
+        验证
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ 主应用（验证通过后显示） ═══ -->
+<div x-show="authChecked && authenticated" x-cloak>
+<!-- 顶部导航栏 -->
+<header class="sticky top-0 z-40 bg-white/90 dark:bg-gray-900/90 backdrop-blur border-b border-gray-200 dark:border-gray-800">
+  <div class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div class="flex items-center justify-between h-14">
+      <!-- Logo -->
+      <div class="flex items-center gap-2 flex-shrink-0">
+        <img src="/logo.png" alt="logo" class="w-7 h-7">
+        <span class="text-lg font-bold">So Novel</span>
+      </div>
+
+      <!-- 桌面/平板：横向菜单（≥ sm 640px 显示） -->
+      <nav class="hidden sm:flex items-center gap-1 overflow-x-auto">
+        <template x-for="item in navItems" :key="item.id">
+          <button @click="page = item.id"
+                  :class="page === item.id ? 'bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-gray-100'"
+                  class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors whitespace-nowrap flex-shrink-0">
+            <span class="w-4 h-4" x-html="item.icon"></span>
+            <span x-text="item.label"></span>
+            <span x-show="item.id === 'tasks' && activeTasks > 0"
+                  class="ml-1 bg-indigo-500 text-white text-xs px-1.5 py-0 rounded-full min-w-[1.25rem] text-center" x-text="activeTasks"></span>
+          </button>
+        </template>
+      </nav>
+
+      <!-- 桌面：右侧版本号（≥ lg 1024px） -->
+      <div class="hidden lg:flex items-center gap-2 text-xs text-gray-400 flex-shrink-0">
+        <span>v0.2.6</span>
+      </div>
+
+      <!-- 手机：汉堡按钮（< sm 640px） -->
+      <button @click="mobileMenu = !mobileMenu"
+              class="sm:hidden p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-300">
+        <svg x-show="!mobileMenu" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
+        <svg x-show="mobileMenu" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+      </button>
+    </div>
+
+    <!-- 手机：下拉菜单（展开时显示） -->
+    <div x-show="mobileMenu" x-transition:enter="transition ease-out duration-200" x-transition:leave="transition ease-in duration-150"
+         class="sm:hidden border-t border-gray-200 dark:border-gray-800 py-2 space-y-1">
+      <template x-for="item in navItems" :key="item.id">
+        <button @click="page = item.id; mobileMenu = false"
+                :class="page === item.id ? 'bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400' : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'"
+                class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors">
+          <span class="w-4 h-4" x-html="item.icon"></span>
+          <span x-text="item.label" class="flex-1 text-left"></span>
+          <span x-show="item.id === 'tasks' && activeTasks > 0"
+                class="bg-indigo-500 text-white text-xs px-2 py-0.5 rounded-full min-w-[1.25rem] text-center" x-text="activeTasks"></span>
+        </button>
+      </template>
+    </div>
+  </div>
+</header>
+
+<!-- 主内容区 -->
+<main class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+
+  <!-- ═══ 搜索页 ═══ -->
+  <div x-show="page === 'search'">
+        <div class="mb-6">
+          <h1 class="text-2xl font-bold mb-4">搜索小说</h1>
+          <!-- 手机：书源占一行 -->
+          <div class="sm:hidden relative mb-2">
+            <select x-model="selectedSourceId"
+                    class="w-full appearance-none pl-3 pr-10 py-3 rounded-xl border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none text-sm"
+                    title="选择搜索范围">
+              <option value="">全部源</option>
+              <template x-for="s in sources.filter(x => x.enabled)" :key="s.id">
+                <option :value="String(s.id)" x-text="s.name"></option>
+              </template>
+            </select>
+            <svg class="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+          </div>
+          <!-- 输入框 + 搜索按钮 -->
+          <div class="flex gap-2">
+            <div class="relative flex-1 min-w-0">
+              <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+              <input type="text" x-model="keyword" @keydown.enter="doSearch()" placeholder="输入书名或作者..."
+                     class="w-full pl-10 pr-4 py-3 rounded-xl border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none text-sm">
+            </div>
+            <!-- 平板/桌面：书源选择嵌入搜索行 -->
+            <div class="hidden sm:block relative">
+              <select x-model="selectedSourceId"
+                      class="appearance-none pl-3 pr-9 py-3 rounded-xl border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none text-sm w-40 max-w-[10rem] truncate"
+                      title="选择搜索范围">
+                <option value="">全部源</option>
+                <template x-for="s in sources.filter(x => x.enabled)" :key="s.id">
+                  <option :value="String(s.id)" x-text="s.name"></option>
+                </template>
+              </select>
+              <svg class="absolute right-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+            </div>
+            <button @click="doSearch()" :disabled="searching"
+                    class="px-6 py-3 bg-indigo-500 hover:bg-indigo-600 disabled:bg-gray-400 text-white rounded-xl font-medium text-sm transition-colors flex items-center gap-2 flex-shrink-0">
+              <svg x-show="!searching" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+              <svg x-show="searching" class="w-4 h-4 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+              <span x-text="searching ? '搜索中...' : '搜索'"></span>
+            </button>
+          </div>
+          <div x-show="searchSources.length > 0" class="mt-2 text-xs text-gray-500">
+            <span x-text="'已搜索 ' + searchSources.length + ' 个源'"></span>
+            <span x-show="searchResults.length > 0" x-text="'，找到 ' + searchResults.length + ' 本'"></span>
+          </div>
+        </div>
+
+        <!-- 搜索结果 -->
+        <div x-show="searchResults.length > 0" class="space-y-2">
+          <template x-for="(r, i) in pagedResults" :key="i">
+            <div @click="showDetail(r)" class="group bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 px-5 py-3.5 hover:shadow-md hover:border-indigo-300 dark:hover:border-indigo-700 cursor-pointer transition-all">
+              <div class="flex items-center gap-4 min-w-0">
+                <!-- 左侧：书名 + 简介 -->
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-baseline gap-2 min-w-0">
+                    <h3 class="font-semibold text-sm truncate group-hover:text-indigo-500 transition-colors" x-text="r.book_name"></h3>
+                    <span x-show="r.author" class="text-xs text-gray-400 flex-shrink-0 truncate max-w-[30%]" :title="r.author" x-text="r.author"></span>
+                  </div>
+                  <p x-show="r.intro" class="text-xs text-gray-400 dark:text-gray-500 mt-1 truncate" x-text="r.intro"></p>
+                </div>
+                <!-- 右侧：标签 + 来源 -->
+                <div class="flex items-center gap-2 flex-shrink-0">
+                  <span x-show="r.category" class="text-xs bg-gray-100 dark:bg-gray-700 text-gray-500 px-2 py-0.5 rounded-full whitespace-nowrap" x-text="r.category"></span>
+                  <span x-show="r.status" class="text-xs bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300 px-2 py-0.5 rounded-full whitespace-nowrap" x-text="r.status"></span>
+                  <span x-show="r.source_name" class="text-xs text-gray-300 dark:text-gray-600 whitespace-nowrap" :title="r.source_name" x-text="r.source_name"></span>
+                </div>
+              </div>
+            </div>
+          </template>
+        </div>
+
+        <!-- 翻页 -->
+        <div x-show="searchResults.length > 0 && totalPages > 1" class="mt-6 flex items-center justify-center gap-1">
+          <!-- 桌面：完整页码 -->
+          <div class="hidden sm:flex items-center gap-1">
+            <!-- 首页 -->
+            <button @click="searchPage = 1" :disabled="searchPage === 1"
+                    class="px-3 py-1.5 rounded-lg text-sm font-medium border border-gray-300 dark:border-gray-600 disabled:opacity-30 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">«</button>
+            <!-- 上一页 -->
+            <button @click="searchPage = Math.max(1, searchPage - 1)" :disabled="searchPage === 1"
+                    class="px-3 py-1.5 rounded-lg text-sm font-medium border border-gray-300 dark:border-gray-600 disabled:opacity-30 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">‹</button>
+            <!-- 页码（最多显示 5 个：当前页前后各 2 个） -->
+            <template x-for="p in visiblePages" :key="p">
+              <span>
+                <span x-show="p === '...'" class="px-2 text-gray-400 text-sm">…</span>
+                <button x-show="p !== '...'" @click="searchPage = p"
+                        :class="p === searchPage ? 'bg-indigo-500 text-white' : 'border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-800'"
+                        class="px-3 py-1.5 rounded-lg text-sm font-medium transition-colors min-w-[2.5rem]"
+                        x-text="p"></button>
+              </span>
+            </template>
+            <!-- 下一页 -->
+            <button @click="searchPage = Math.min(totalPages, searchPage + 1)" :disabled="searchPage === totalPages"
+                    class="px-3 py-1.5 rounded-lg text-sm font-medium border border-gray-300 dark:border-gray-600 disabled:opacity-30 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">›</button>
+            <!-- 末页 -->
+            <button @click="searchPage = totalPages" :disabled="searchPage === totalPages"
+                    class="px-3 py-1.5 rounded-lg text-sm font-medium border border-gray-300 dark:border-gray-600 disabled:opacity-30 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">»</button>
+          </div>
+          <!-- 手机：紧凑模式（仅显示当前/总页 + 上下页） -->
+          <div class="flex sm:hidden items-center gap-2">
+            <button @click="searchPage = Math.max(1, searchPage - 1)" :disabled="searchPage === 1"
+                    class="px-3 py-1.5 rounded-lg text-sm font-medium border border-gray-300 dark:border-gray-600 disabled:opacity-30">‹</button>
+            <span class="text-sm text-gray-600 dark:text-gray-400" x-text="searchPage + ' / ' + totalPages"></span>
+            <button @click="searchPage = Math.min(totalPages, searchPage + 1)" :disabled="searchPage === totalPages"
+                    class="px-3 py-1.5 rounded-lg text-sm font-medium border border-gray-300 dark:border-gray-600 disabled:opacity-30">›</button>
+          </div>
+        </div>
+
+        <!-- 空状态 -->
+        <div x-show="!searching && searchResults.length === 0 && searched" class="text-center py-20 text-gray-400">
+          <svg class="w-16 h-16 mx-auto mb-4 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+          <p class="text-sm">没有找到相关书籍</p>
+        </div>
+      </div>
+
+      <!-- ═══ 详情页 ═══ -->
+      <div x-show="page === 'detail'">
+        <button @click="page = 'search'" class="mb-4 flex items-center gap-1 text-sm text-gray-500 hover:text-indigo-500 transition-colors">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+          返回搜索
+        </button>
+
+        <div x-show="detailBook" class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 overflow-hidden">
+          <div class="p-6 sm:flex gap-6">
+            <div class="w-24 h-32 rounded-xl flex-shrink-0 mx-auto sm:mx-0 overflow-hidden bg-gray-100 dark:bg-gray-700 relative">
+              <img x-show="coverUrl"
+                   :src="coverUrl"
+                   :alt="detailBook?.book_name"
+                   referrerpolicy="no-referrer"
+                   @error="detailBook && (detailBook.cover_url = '')"
+                   class="absolute inset-0 w-full h-full object-cover">
+              <div x-show="!coverUrl"
+                   class="absolute inset-0 bg-gradient-to-br from-indigo-400 to-purple-500 flex items-center justify-center text-white text-3xl font-bold"
+                   x-text="detailBook?.book_name?.charAt(0) || '?'"></div>
+            </div>
+            <div class="mt-4 sm:mt-0 flex-1">
+              <h2 class="text-xl font-bold" x-text="detailBook?.book_name"></h2>
+              <p class="text-gray-500 text-sm mt-1" x-text="detailBook?.author"></p>
+              <p x-show="detailBook?.category" class="text-xs text-gray-400 mt-1" x-text="detailBook?.category"></p>
+              <p x-show="detailBook?.intro" class="text-sm text-gray-600 dark:text-gray-400 mt-3 line-clamp-3" x-text="detailBook?.intro"></p>
+              <div class="flex flex-wrap gap-2 mt-3">
+                <span x-show="detailBook?.status" class="text-xs bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300 px-2.5 py-1 rounded-full" x-text="detailBook?.status"></span>
+                <span x-show="detailBook?.latest_chapter" class="text-xs bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 px-2.5 py-1 rounded-full" x-text="'最新: ' + detailBook?.latest_chapter"></span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 章节目录 -->
+          <div class="border-t border-gray-200 dark:border-gray-700 p-6">
+            <div class="flex items-center justify-between mb-4">
+              <h3 class="font-semibold">目录 <span class="text-sm text-gray-400" x-text="'(' + chapters.length + ' 章)'"></span></h3>
+              <button @click="loadToc()" :disabled="loadingToc"
+                      class="text-sm text-indigo-500 hover:text-indigo-600 disabled:text-gray-400 transition-colors">
+                <span x-text="loadingToc ? '加载中...' : (chapters.length ? '刷新目录' : '加载目录')"></span>
+              </button>
+            </div>
+            <div x-show="chapters.length > 0" class="max-h-64 overflow-y-auto grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-1">
+              <template x-for="ch in chapters.slice(0, 200)" :key="ch.order">
+                <div class="text-xs text-gray-600 dark:text-gray-400 py-1 px-2 rounded hover:bg-gray-100 dark:hover:bg-gray-700 truncate" x-text="ch.title"></div>
+              </template>
+              <div x-show="chapters.length > 200" class="text-xs text-gray-400 py-1 px-2">...</div>
+            </div>
+          </div>
+
+          <!-- 下载区 -->
+          <div class="border-t border-gray-200 dark:border-gray-700 p-6 bg-gray-50 dark:bg-gray-800">
+            <div class="flex flex-wrap items-center gap-3">
+              <label class="text-sm font-medium">格式：</label>
+              <div class="flex gap-1">
+                <template x-for="f in ['epub','txt','html','pdf']" :key="f">
+                  <button @click="dlFormat = f" :class="dlFormat === f ? 'bg-indigo-500 text-white' : 'bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600'"
+                          class="px-3 py-1.5 rounded-lg text-xs font-medium uppercase transition-colors" x-text="f"></button>
+                </template>
+              </div>
+              <button @click="startDownload()" :disabled="downloading"
+                      class="ml-auto px-6 py-2.5 bg-indigo-500 hover:bg-indigo-600 disabled:bg-gray-400 text-white rounded-xl font-medium text-sm transition-colors flex items-center gap-2">
+                <svg x-show="!downloading" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+                <svg x-show="downloading" class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+                <span x-text="downloading ? '下载中...' : '开始下载'"></span>
+              </button>
+            </div>
+            <!-- 下载进度 -->
+            <div x-show="dlProgress" class="mt-4">
+              <div class="flex justify-between text-xs text-gray-500 mb-1">
+                <span x-text="dlStatusText"></span>
+                <span x-text="dlProgressText"></span>
+              </div>
+              <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+                <div class="bg-indigo-500 h-2 rounded-full transition-all duration-300" :style="'width:' + dlPercent + '%'"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══ 下载任务页 ═══ -->
+      <div x-show="page === 'tasks'">
+        <h1 class="text-2xl font-bold mb-6">下载任务</h1>
+        <div x-show="tasks.length === 0" class="text-center py-20 text-gray-400">
+          <svg class="w-16 h-16 mx-auto mb-4 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+          <p class="text-sm">暂无下载任务</p>
+        </div>
+        <div class="space-y-3">
+          <template x-for="t in tasks" :key="t.id">
+            <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
+              <!-- 顶部：书名 + 状态徽章 -->
+              <div class="flex items-center gap-3 mb-3">
+                <div class="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0"
+                     :class="t.status === 'Downloading' ? 'bg-blue-100 dark:bg-blue-900' : t.status === 'Finished' ? 'bg-green-100 dark:bg-green-900' : t.status === 'Failed' ? 'bg-red-100 dark:bg-red-900' : 'bg-gray-100 dark:bg-gray-700'">
+                  <!-- 下载中：旋转图标 -->
+                  <svg x-show="t.status === 'Downloading'" class="w-5 h-5 text-blue-500 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+                  <!-- 完成：勾 -->
+                  <svg x-show="t.status === 'Finished'" class="w-5 h-5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                  <!-- 失败：叉 -->
+                  <svg x-show="t.status === 'Failed'" class="w-5 h-5 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                  <!-- 取消：禁止 -->
+                  <svg x-show="t.status === 'Cancelled'" class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"/></svg>
+                </div>
+                <div class="flex-1 min-w-0">
+                  <h3 class="font-semibold text-sm truncate" x-text="t.book_name || t.filename || ('任务 #' + t.id)"></h3>
+                  <span class="text-xs px-2 py-0.5 rounded-full inline-block mt-0.5"
+                        :class="t.status === 'Downloading' ? 'bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-300' : t.status === 'Finished' ? 'bg-green-100 dark:bg-green-900 text-green-600 dark:text-green-300' : t.status === 'Failed' ? 'bg-red-100 dark:bg-red-900 text-red-600 dark:text-red-300' : 'bg-gray-100 dark:bg-gray-700 text-gray-500'"
+                        x-text="t.status === 'Downloading' ? '下载中' : t.status === 'Finished' ? '已完成' : t.status === 'Failed' ? '失败' : '已取消'"></span>
+                </div>
+                <button x-show="t.status === 'Downloading'" @click="cancelTask(t.id)"
+                        class="px-3 py-1.5 text-xs text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors flex-shrink-0">取消</button>
+              </div>
+              <!-- 进度条（仅下载中显示） -->
+              <div x-show="t.status === 'Downloading' && t.total_chapters > 0">
+                <div class="flex justify-between text-xs text-gray-400 mb-1.5">
+                  <span x-text="t.current_chapter + ' / ' + t.total_chapters + ' 章'"></span>
+                  <span x-text="t.total_chapters > 0 ? Math.round(t.current_chapter / t.total_chapters * 100) + '%' : '0%'"></span>
+                </div>
+                <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1.5">
+                  <div class="bg-blue-500 h-1.5 rounded-full transition-all duration-300"
+                       :style="'width:' + (t.total_chapters > 0 ? Math.round(t.current_chapter / t.total_chapters * 100) : 0) + '%'"></div>
+                </div>
+              </div>
+              <!-- 完成：文件名 + 下载按钮 -->
+              <div x-show="t.status === 'Finished' && t.filename" class="flex items-center justify-between gap-2 mt-1">
+                <span class="text-xs text-gray-400 truncate" x-text="t.filename"></span>
+                <a :href="'/api/files/' + encodeURIComponent(t.filename)" download
+                   class="flex items-center gap-1 px-3 py-1 text-xs text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/30 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 rounded-lg transition-colors flex-shrink-0">
+                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+                  下载
+                </a>
+              </div>
+            </div>
+          </template>
+        </div>
+      </div>
+
+      <!-- ═══ 书库页 ═══ -->
+      <div x-show="page === 'library'">
+        <div class="flex items-center justify-between mb-6">
+          <h1 class="text-2xl font-bold">本地书库</h1>
+          <button @click="loadLibrary()"
+                  class="flex items-center gap-1.5 px-4 py-2 text-sm font-medium bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-750 transition-colors">
+            <svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+            刷新
+          </button>
+        </div>
+        <div x-show="library.length === 0" class="text-center py-20 text-gray-400">
+          <svg class="w-16 h-16 mx-auto mb-4 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"/></svg>
+          <p class="text-sm">书库为空</p>
+        </div>
+        <!-- 列表 -->
+        <div x-show="library.length > 0" class="space-y-2">
+          <template x-for="f in pagedLibrary" :key="f.filename">
+            <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 px-5 py-3.5 group hover:shadow-md hover:border-indigo-300 dark:hover:border-indigo-700 transition-all">
+              <div class="flex items-center gap-4 min-w-0">
+                <!-- 格式标签 -->
+                <div class="w-10 h-10 rounded-lg flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
+                     :class="f.ext === 'epub' ? 'bg-green-500' : f.ext === 'pdf' ? 'bg-red-500' : f.ext === 'txt' ? 'bg-blue-500' : 'bg-gray-500'"
+                     x-text="f.ext.toUpperCase()"></div>
+                <!-- 文件信息 -->
+                <div class="flex-1 min-w-0">
+                  <p class="text-sm font-medium truncate" x-text="f.filename"></p>
+                  <p class="text-xs text-gray-400 mt-0.5" x-text="formatSize(f.size) + ' · ' + formatDate(f.modified)"></p>
+                </div>
+                <!-- 操作按钮 -->
+                <div class="flex items-center gap-2 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <a :href="'/api/files/' + encodeURIComponent(f.filename)" download
+                     class="flex items-center gap-1 px-3 py-1.5 text-xs text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/30 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 rounded-lg transition-colors">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+                    下载
+                  </a>
+                  <button @click="deleteFile(f.filename)"
+                          class="flex items-center gap-1 px-3 py-1.5 text-xs text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                    删除
+                  </button>
+                </div>
+              </div>
+            </div>
+          </template>
+        </div>
+        <!-- 分页 -->
+        <div x-show="library.length > 0 && libraryTotalPages > 1" class="mt-6 flex items-center justify-center gap-1">
+          <div class="hidden sm:flex items-center gap-1">
+            <button @click="libraryPage = 1" :disabled="libraryPage === 1"
+                    class="px-3 py-1.5 rounded-lg text-sm font-medium border border-gray-300 dark:border-gray-600 disabled:opacity-30 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">«</button>
+            <button @click="libraryPage = Math.max(1, libraryPage - 1)" :disabled="libraryPage === 1"
+                    class="px-3 py-1.5 rounded-lg text-sm font-medium border border-gray-300 dark:border-gray-600 disabled:opacity-30 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">‹</button>
+            <template x-for="p in libraryVisiblePages" :key="p">
+              <span>
+                <span x-show="p === '...'" class="px-2 text-gray-400 text-sm">…</span>
+                <button x-show="p !== '...'" @click="libraryPage = p"
+                        :class="p === libraryPage ? 'bg-indigo-500 text-white' : 'border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-800'"
+                        class="px-3 py-1.5 rounded-lg text-sm font-medium transition-colors min-w-[2.5rem]"
+                        x-text="p"></button>
+              </span>
+            </template>
+            <button @click="libraryPage = Math.min(libraryTotalPages, libraryPage + 1)" :disabled="libraryPage === libraryTotalPages"
+                    class="px-3 py-1.5 rounded-lg text-sm font-medium border border-gray-300 dark:border-gray-600 disabled:opacity-30 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">›</button>
+            <button @click="libraryPage = libraryTotalPages" :disabled="libraryPage === libraryTotalPages"
+                    class="px-3 py-1.5 rounded-lg text-sm font-medium border border-gray-300 dark:border-gray-600 disabled:opacity-30 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">»</button>
+          </div>
+          <div class="flex sm:hidden items-center gap-2">
+            <button @click="libraryPage = Math.max(1, libraryPage - 1)" :disabled="libraryPage === 1"
+                    class="px-3 py-1.5 rounded-lg text-sm font-medium border border-gray-300 dark:border-gray-600 disabled:opacity-30">‹</button>
+            <span class="text-sm text-gray-600 dark:text-gray-400" x-text="libraryPage + ' / ' + libraryTotalPages"></span>
+            <button @click="libraryPage = Math.min(libraryTotalPages, libraryPage + 1)" :disabled="libraryPage === libraryTotalPages"
+                    class="px-3 py-1.5 rounded-lg text-sm font-medium border border-gray-300 dark:border-gray-600 disabled:opacity-30">›</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══ 书源页 ═══ -->
+      <div x-show="page === 'sources'">
+        <div class="flex items-center justify-between mb-6">
+          <h1 class="text-2xl font-bold">书源管理</h1>
+          <span class="text-xs text-gray-400"
+                x-text="sources.filter(s => s.enabled).length + ' / ' + sources.length + ' 已启用'"></span>
+        </div>
+        <div x-show="sources.length === 0" class="text-center py-20 text-gray-400">
+          <svg class="w-16 h-16 mx-auto mb-4 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 6h16M4 10h16M4 14h16M4 18h16"/></svg>
+          <p class="text-sm">暂无书源</p>
+        </div>
+        <!-- 列表 -->
+        <div x-show="sources.length > 0" class="space-y-2">
+          <template x-for="s in sources" :key="s.id">
+            <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 px-5 py-3.5 hover:shadow-md hover:border-indigo-300 dark:hover:border-indigo-700 transition-all"
+                 :class="!s.enabled && 'opacity-60'">
+              <div class="flex items-center gap-4 min-w-0">
+                <!-- 状态指示灯 -->
+                <div class="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                     :class="s.enabled ? 'bg-green-500' : 'bg-gray-300 dark:bg-gray-600'"></div>
+                <!-- 名称 + URL -->
+                <div class="flex-1 min-w-0">
+                  <p class="text-sm font-medium truncate" x-text="s.name"></p>
+                  <p class="text-xs text-gray-400 truncate" x-text="s.url"></p>
+                </div>
+                <!-- 测速结果 -->
+                <span x-show="s._testResult"
+                      class="text-xs px-2 py-0.5 rounded-full flex-shrink-0"
+                      :class="s._testResult && s._testResult.ok ? 'bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300' : 'bg-red-100 dark:bg-red-900 text-red-600 dark:text-red-300'"
+                      x-text="s._testResult && s._testResult.ok ? s._testResult.latency_ms + 'ms' : '超时'"></span>
+                <!-- 操作按钮 -->
+                <div class="flex items-center gap-1.5 flex-shrink-0">
+                  <!-- 测速 -->
+                  <button @click="testSource(s)"
+                          :disabled="s._testing"
+                          class="flex items-center gap-1 px-2.5 py-1.5 text-xs text-gray-500 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 rounded-lg transition-colors disabled:opacity-50">
+                    <svg x-show="!s._testing" class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+                    <svg x-show="s._testing" class="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+                    测速
+                  </button>
+                  <!-- 开关 -->
+                  <button @click="toggleSource(s)"
+                          class="relative inline-flex h-5 w-9 items-center rounded-full transition-colors flex-shrink-0"
+                          :class="s.enabled ? 'bg-indigo-500' : 'bg-gray-300 dark:bg-gray-600'">
+                    <span class="inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform shadow-sm"
+                          :class="s.enabled ? 'translate-x-4' : 'translate-x-0.5'"></span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </template>
+        </div>
+      </div>
+
+      <!-- ═══ 设置页 ═══ -->
+      <div x-show="page === 'settings'">
+        <h1 class="text-2xl font-bold mb-6">设置</h1>
+        <div class="space-y-4">
+          <!-- 安全设置 -->
+          <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
+            <div class="px-5 py-3.5 border-b border-gray-100 dark:border-gray-700 flex items-center gap-2">
+              <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+              <h3 class="font-semibold text-sm">安全设置</h3>
+            </div>
+            <div class="p-5">
+              <label class="text-xs text-gray-500 block mb-1.5">访问密码</label>
+              <div class="flex gap-2">
+                <input type="password" x-model="accessCode"
+                       :placeholder="accessCodeSet ? '******' : '留空则不需要验证（6 位数字）'"
+                       @focus="if(accessCodeSet) accessCode = ''"
+                       maxlength="6"
+                       class="flex-1 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none">
+                <button @click="saveAccessCode()"
+                        class="px-4 py-2 bg-indigo-500 hover:bg-indigo-600 text-white text-sm rounded-lg transition-colors flex-shrink-0">
+                  保存
+                </button>
+              </div>
+              <p class="text-xs text-gray-400 mt-2">设置后打开页面需输入此密码，留空则取消验证（重启后失效）</p>
+            </div>
+          </div>
+          <!-- 代理设置 -->
+          <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
+            <div class="px-5 py-3.5 border-b border-gray-100 dark:border-gray-700 flex items-center gap-2">
+              <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"/></svg>
+              <h3 class="font-semibold text-sm">代理设置</h3>
+            </div>
+            <div class="p-5">
+              <div class="flex items-center gap-3 mb-4">
+                <button @click="settings.proxy_enabled = !settings.proxy_enabled; saveSettings()"
+                        class="relative inline-flex h-5 w-9 items-center rounded-full transition-colors flex-shrink-0"
+                        :class="settings.proxy_enabled ? 'bg-indigo-500' : 'bg-gray-300 dark:bg-gray-600'">
+                  <span class="inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform shadow-sm"
+                        :class="settings.proxy_enabled ? 'translate-x-4' : 'translate-x-0.5'"></span>
+                </button>
+                <span class="text-sm">启用代理</span>
+              </div>
+              <div class="grid gap-3 sm:grid-cols-2">
+                <div>
+                  <label class="text-xs text-gray-500 block mb-1.5">主机</label>
+                  <input x-model="settings.proxy_host" @change="saveSettings()"
+                         class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none">
+                </div>
+                <div>
+                  <label class="text-xs text-gray-500 block mb-1.5">端口</label>
+                  <input type="number" x-model.number="settings.proxy_port" @change="saveSettings()"
+                         class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none">
+                </div>
+              </div>
+            </div>
+          </div>
+          <!-- 爬取设置 -->
+          <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
+            <div class="px-5 py-3.5 border-b border-gray-100 dark:border-gray-700 flex items-center gap-2">
+              <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+              <h3 class="font-semibold text-sm">爬取设置</h3>
+            </div>
+            <div class="p-5">
+              <div class="grid gap-4 sm:grid-cols-2 mb-4">
+                <div>
+                  <label class="text-xs text-gray-500 block mb-1.5">并发数</label>
+                  <input type="number" x-model.number="settings.concurrency" @change="saveSettings()"
+                         class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none">
+                </div>
+                <div>
+                  <label class="text-xs text-gray-500 block mb-1.5">最大重试</label>
+                  <input type="number" x-model.number="settings.max_retries" @change="saveSettings()"
+                         class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none">
+                </div>
+              </div>
+              <div class="flex items-center gap-3">
+                <button @click="settings.enable_retry = !settings.enable_retry; saveSettings()"
+                        class="relative inline-flex h-5 w-9 items-center rounded-full transition-colors flex-shrink-0"
+                        :class="settings.enable_retry ? 'bg-indigo-500' : 'bg-gray-300 dark:bg-gray-600'">
+                  <span class="inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform shadow-sm"
+                        :class="settings.enable_retry ? 'translate-x-4' : 'translate-x-0.5'"></span>
+                </button>
+                <span class="text-sm">启用重试</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </main>
+</div>
+
+<!-- Toast 通知 -->
+<div class="fixed top-16 right-4 z-50 space-y-2">
+  <template x-for="t in toasts" :key="t.id">
+    <div x-show="t.show" x-transition:enter="transition ease-out duration-300" x-transition:leave="transition ease-in duration-200"
+         :class="t.type === 'error' ? 'bg-red-500' : t.type === 'success' ? 'bg-green-500' : 'bg-gray-800'"
+         class="text-white px-4 py-3 rounded-xl shadow-lg text-sm max-w-xs">
+      <span x-text="t.message"></span>
+    </div>
+  </template>
+</div>
+</div><!-- /主应用 -->

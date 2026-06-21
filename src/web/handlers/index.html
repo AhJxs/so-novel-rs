@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="zh-CN" class="h-full">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>So Novel</title>
+        <link rel="icon" type="image/x-icon" href="/favicon.ico" />
+        <script src="https://cdn.tailwindcss.com"></script>
+        <script
+            defer
+            src="https://cdn.jsdelivr.net/npm/alpinejs@3/dist/cdn.min.js"
+        ></script>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link
+            href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+            rel="stylesheet"
+        />
+        <script>
+            tailwind.config = {
+                darkMode: "class",
+                theme: {
+                    extend: {
+                        fontFamily: {
+                            sans: ["Inter", "system-ui", "sans-serif"],
+                        },
+                    },
+                },
+            };
+        </script>
+        <style>
+            __STYLE__
+        </style>
+    </head>
+    <body
+        class="h-full bg-gray-50 dark:bg-gray-950 text-gray-900 dark:text-gray-100 font-sans"
+        x-data="app()"
+        x-init="init()"
+        x-cloak
+    >
+        __BODY__
+        <script>
+            __THEME_JS__;
+        </script>
+        <script>
+            __APP_JS__;
+        </script>
+    </body>
+</html>

@@ -10,23 +10,38 @@
 
 use anyhow::Result;
 
-fn main() -> Result<()> {
-    // 任意 argv（除程序名外）→ CLI 模式；不带任何参数 → GUI。
-    // 与 Unix 惯例一致：so-novel-rs search <kw> / so-novel-rs sources / etc.
-    let is_cli = std::env::args().len() > 1;
+/// Web 服务默认配置。
+const DEFAULT_WEB_HOST: &str = "0.0.0.0";
+const DEFAULT_WEB_PORT: u16 = 8080;
 
-    // 解析日志目录 —— tracing 文件 layer 需要它（按天滚到 `log_dir/so-novel-rs.YYYY-MM-DD.log`）。
-    // 这里不算完整 paths（gpui_app::run 内部自己 discover），只为 tracing 拿 log_dir。
+fn main() -> Result<()> {
+    let args: Vec<String> = std::env::args().collect();
+
+    // 判断启动模式：--web → Web 服务；其它参数 → CLI；无参数 → GUI。
+    // 环境变量 SO_NOVEL_WEB=1 也可触发 Web 模式（Docker 友好）。
+    let is_web = args.iter().any(|a| a == "--web")
+        || std::env::var("SO_NOVEL_WEB")
+            .map(|v| v == "1" || v == "true")
+            .unwrap_or(false);
+    let is_cli = !is_web && args.len() > 1;
+
     let log_dir = so_novel_rs::config::ConfigPaths::discover().log_dir;
 
     // GUI subsystem 的 exe 默认没有 stdio 句柄；从 cmd / PowerShell 跑 CLI 子命令
-    // 时附加到父进程的控制台，这样 println! / tracing 都能正常输出。
-    // 双击或从开发环境直接跑 GUI 时不调 — 调了反而会闪一个父 cmd 窗口出来。
-    if is_cli {
+    // 时附加到父进程的控制台。
+    if is_cli || is_web {
         attach_parent_console();
     }
 
     so_novel_rs::logging::init_tracing(&log_dir);
+
+    if is_web {
+        let host = parse_arg_value(&args, "--host").unwrap_or_else(|| DEFAULT_WEB_HOST.to_string());
+        let port = parse_arg_value(&args, "--port")
+            .and_then(|v| v.parse::<u16>().ok())
+            .unwrap_or(DEFAULT_WEB_PORT);
+        return run_web(host, port);
+    }
 
     if is_cli {
         return so_novel_rs::cli::run();
@@ -34,6 +49,34 @@ fn main() -> Result<()> {
 
     // 启动 GPUI + gpui-component GUI。
     so_novel_rs::gpui_app::run()
+}
+
+/// 从命令行参数中提取 `--key value` 形式的值。
+fn parse_arg_value(args: &[String], key: &str) -> Option<String> {
+    let mut iter = args.iter();
+    while let Some(arg) = iter.next() {
+        if arg == key {
+            return iter.next().cloned();
+        }
+    }
+    None
+}
+
+/// Web 服务模式：初始化共享资源并启动 axum 服务器。
+fn run_web(host: String, port: u16) -> Result<()> {
+    use so_novel_rs::config::{ConfigPaths, load_config};
+    use so_novel_rs::db::Db;
+    use so_novel_rs::http::HttpClients;
+    use so_novel_rs::rules::load_rules_from_db;
+
+    let paths = ConfigPaths::discover();
+    let config = load_config(&paths.config_file).unwrap_or_default();
+
+    let mut db = Db::open(&paths.db_file).or_else(|_| Db::open_in_memory())?;
+    let rules = load_rules_from_db(db.conn_mut()).unwrap_or_default();
+    let http = HttpClients::new(&config)?;
+
+    so_novel_rs::web::run(config, http.into(), rules, db, host, port)
 }
 
 /// 把当前进程附加到父进程的控制台（仅 Windows）。

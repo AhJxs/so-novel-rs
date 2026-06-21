@@ -232,11 +232,9 @@ pub struct AppConfig {
     pub ext_name: ExportFormat,
     pub txt_encoding: String,
     pub preserve_chapter_cache: bool,
-    pub enable_progressbar: bool,
 
     // [source]
     /// `None` 表示未指定（旧 INI `-1`）。
-    pub source_id: Option<i32>,
     pub search_limit: Option<i32>,
     pub search_filter: bool,
 
@@ -276,9 +274,7 @@ impl Default for AppConfig {
             ext_name: ExportFormat::Epub,
             txt_encoding: "UTF-8".to_string(),
             preserve_chapter_cache: false,
-            enable_progressbar: true,
 
-            source_id: None,
             search_limit: None,
             search_filter: true,
 
@@ -286,7 +282,6 @@ impl Default for AppConfig {
             min_interval: 200,
             max_interval: 400,
             enable_retry: true,
-            // README 写 3，Java 代码默认值是 5；以代码为准。
             max_retries: 5,
             retry_min_interval: 2000,
             retry_max_interval: 4000,
@@ -424,12 +419,8 @@ pub fn load_config(path: &Path) -> Result<AppConfig> {
     if let Some(v) = t_bool(&doc, "download", "preserve-chapter-cache") {
         cfg.preserve_chapter_cache = v;
     }
-    if let Some(v) = t_bool(&doc, "download", "enable-progressbar") {
-        cfg.enable_progressbar = v;
-    }
 
     // [source]
-    cfg.source_id = t_int(&doc, "source", "source-id").map(sat_i32);
     cfg.search_limit = t_int(&doc, "source", "search-limit").map(sat_i32);
     if let Some(v) = t_bool(&doc, "source", "search-filter") {
         cfg.search_filter = v;
@@ -559,18 +550,8 @@ pub fn save_config(path: &Path, cfg: &AppConfig) -> Result<()> {
         "preserve-chapter-cache",
         cfg.preserve_chapter_cache,
     );
-    set_bool(
-        &mut doc,
-        "download",
-        "enable-progressbar",
-        cfg.enable_progressbar,
-    );
 
     // [source]
-    match cfg.source_id {
-        Some(v) => set_int(&mut doc, "source", "source-id", v as i64),
-        None => unset(&mut doc, "source", "source-id"),
-    }
     match cfg.search_limit {
         Some(v) => set_int(&mut doc, "source", "search-limit", v as i64),
         None => unset(&mut doc, "source", "search-limit"),
@@ -600,7 +581,7 @@ pub fn save_config(path: &Path, cfg: &AppConfig) -> Result<()> {
     );
 
     // [cookie]
-    set_str(&mut doc, "cookie", "qidian_cookie", &cfg.qidian_cookie);
+    set_str(&mut doc, "cookie", "qidian-cookie", &cfg.qidian_cookie);
 
     // [proxy]
     set_bool(&mut doc, "proxy", "enabled", cfg.proxy_enabled);
@@ -696,63 +677,60 @@ fn default_download_path() -> String {
 }
 
 /// 第一次启动 / 模板 / 文件被破坏时使用的默认 TOML 文档。
-/// 字段顺序与默认值与 Java 端 `bundle/config.ini` 对齐，方便老用户对照。
 fn default_template_doc() -> DocumentMut {
     let template = r#"# So Novel 配置文件
-                        # 字段语义与旧版 config.ini 一致；规则与下载任务记录已迁到根目录的 sonovel.db。
+[global]
+# 主题偏好：
+#   theme-kind = "dynamic"（默认）或 "static"
+#     - dynamic：theme-light / theme-dark 各选一个主题，按 theme-dyn-mode（system/light/dark）切换
+#     - static  ：固定用 theme-name 这一个主题，不随明暗变化
+#   主题名与 `src/gpui_app/themes/*.json` 里变体的 name 一致（如 "Catppuccin Latte"），
+#   留空 = 用 gpui-component 内置默认主题。
+theme-kind = "dynamic"
+theme-name = ""
+theme-dyn-mode = "system"
+theme-light = ""
+theme-dark = ""
 
-                        [global]
-                        # 主题偏好：
-                        #   theme-kind = "dynamic"（默认）或 "static"
-                        #     - dynamic：theme-light / theme-dark 各选一个主题，按 theme-dyn-mode（system/light/dark）切换
-                        #     - static  ：固定用 theme-name 这一个主题，不随明暗变化
-                        #   主题名与 `src/gpui_app/themes/*.json` 里变体的 name 一致（如 "Catppuccin Latte"），
-                        #   留空 = 用 gpui-component 内置默认主题。
-                        theme-kind = "dynamic"
-                        theme-name = ""
-                        theme-dyn-mode = "system"
-                        theme-light = ""
-                        theme-dark = ""
-                        # language = 应用语言（Sidebar placeholder / Select / Dialog 等所有 gpui-component
-                        # 内部 `t!("...")` 文案的语言，同时决定下载章节正文的目标语言 —— 见
-                        # `Language::to_book_target_lang`）。三选一：zh-CN / zh-TW / en。
-                        language = "zh-CN"
-                        gh-proxy = ""
-                        cf-bypass = ""
-                        # 左侧 Sidebar 是否折叠。重启后保持上次状态。
-                        sidebar-collapsed = false
-                        # UI 字号（px），范围 12–24，默认 16。整个 app 按 rem 等比缩放。
-                        font-size = 16
+# language = 应用语言（Sidebar placeholder / Select / Dialog 等所有 gpui-component
+# 内部 `t!("...")` 文案的语言，同时决定下载章节正文的目标语言 —— 见
+# `Language::to_book_target_lang`）。三选一：zh-CN / zh-TW / en。
+language = "zh-CN"
+gh-proxy = ""
+cf-bypass = ""
+# 左侧 Sidebar 是否折叠。重启后保持上次状态。
+sidebar-collapsed = false
+# UI 字号（px），范围 12–24，默认 16。整个 app 按 rem 等比缩放。
+font-size = 16
 
-                        [download]
-                        # download-path 默认为系统 Documents/Novel/（由 AppConfig::default() 注入）。
-                        # 占位写空串，save_config 会按当前 cfg.download_path 覆盖此处的值。
-                        download-path = ""
-                        extname = "epub"
-                        txt-encoding = "UTF-8"
-                        preserve-chapter-cache = false
-                        enable-progressbar = true
+[download]
+# download-path 默认为系统 Documents/Novel/（由 AppConfig::default() 注入）。
+# 占位写空串，save_config 会按当前 cfg.download_path 覆盖此处的值。
+download-path = ""
+extname = "epub"
+txt-encoding = "UTF-8"
+preserve-chapter-cache = false
 
-                        [source]
-                        search-limit = 30
-                        search-filter = true
+[source]
+search-limit = 30
+search-filter = true
 
-                        [crawl]
-                        min-interval = 200
-                        max-interval = 400
-                        enable-retry = true
-                        max-retries = 5
-                        retry-min-interval = 2000
-                        retry-max-interval = 4000
+[crawl]
+min-interval = 200
+max-interval = 400
+enable-retry = true
+max-retries = 5
+retry-min-interval = 2000
+retry-max-interval = 4000
 
-                        [cookie]
-                        qidian-cookie = ""
+[cookie]
+qidian-cookie = ""
 
-                        [proxy]
-                        enabled = false
-                        host = "127.0.0.1"
-                        port = 7890
-                    "#;
+[proxy]
+enabled = false
+host = "127.0.0.1"
+port = 7890
+    "#;
     template.parse().expect("default template must parse")
 }
 
@@ -911,8 +889,7 @@ mod tests {
         .unwrap();
 
         let cfg = load_config(&path).unwrap();
-        // source-id / search-limit / concurrency 都没填，应当是 None
-        assert!(cfg.source_id.is_none());
+        // search-limit / concurrency 都没填，应当是 None
         assert!(cfg.search_limit.is_none());
         assert!(cfg.concurrency.is_none());
     }
