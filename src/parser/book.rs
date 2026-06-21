@@ -68,6 +68,7 @@ pub async fn parse_book_detail(
             method: HttpMethod::Get,
             cookies: None,
             timeout_secs: book_rule.timeout,
+            referer: None,
         },
     )
     .await
@@ -139,6 +140,8 @@ pub fn parse_book_html(html: &str, base_url: &str, rule: &Rule) -> Result<Book, 
         &book_rule.author,
         content_type_for(&book_rule.author),
     )?;
+    // Java 端 BookParser: author.replace("作者：", "")
+    let author = author.replace("作者：", "").replace("作者:", "");
     if book_name.is_empty() || author.is_empty() {
         return Err(BookError::MissingTitleOrAuthor);
     }
@@ -146,7 +149,17 @@ pub fn parse_book_html(html: &str, base_url: &str, rule: &Rule) -> Result<Book, 
     let intro = optional_field(&document, &book_rule.intro)?;
     let category = optional_field(&document, &book_rule.category)?;
     let latest_chapter = optional_field(&document, &book_rule.latest_chapter)?;
-    let last_update_time = optional_field(&document, &book_rule.last_update_time)?;
+    let latest_chapter_url = optional_field(&document, &book_rule.latest_chapter_url)?
+        .and_then(|u| crate::http::abs_url(base_url, &u).or(Some(u)));
+    let last_update_time = optional_field(&document, &book_rule.last_update_time)?.map(|s| {
+        // Java 端 BookParser: lastUpdateTime.replaceAll("(更新时间|最后更新)：", "")
+        use once_cell::sync::Lazy;
+        use regex::Regex;
+        static RE: Lazy<Regex> = Lazy::new(|| {
+            Regex::new(r"^(更新时间|最后更新)[：:]?\s*").expect("lastUpdateTime prefix re")
+        });
+        RE.replace(&s, "").into_owned()
+    });
     let status = optional_field(&document, &book_rule.status)?;
 
     // coverUrl 抽出来如果是相对路径，按 baseUri 拼成绝对（Java 端 jsoup `absUrl("content")`
@@ -170,8 +183,10 @@ pub fn parse_book_html(html: &str, base_url: &str, rule: &Rule) -> Result<Book, 
         category,
         cover_url,
         latest_chapter,
+        latest_chapter_url,
         last_update_time,
         status,
+        language: rule.language.clone(),
     })
 }
 

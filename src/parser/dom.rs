@@ -38,7 +38,8 @@ pub enum SelectError {
 /// 返回值约定：
 /// - 选不到任何元素时返回空字符串（与 Java 端一致）；
 /// - 多个元素：按 ContentType 聚合（text 用空格连接、html 拼接、attr 取首个）；
-/// - 含 `@js:` 时把抽取结果交给 JS 引擎处理后返回。
+/// - 含 `@js:` 时把抽取结果交给 JS 引擎处理后返回；
+/// - 含 `@href` / `@src` 后缀时自动切换到对应属性抽取模式。
 pub fn select_and_invoke_js(
     document: &Html,
     query: &str,
@@ -48,6 +49,8 @@ pub fn select_and_invoke_js(
         return Ok(String::new());
     }
 
+    // 先剥离 @href / @src 后缀，同时覆盖 caller 传入的 content_type。
+    let (query, content_type) = strip_at_suffix(query, content_type);
     let (selector_part, js_body) = split_js(query);
 
     let selector_norm = normalize_selector(selector_part)?;
@@ -71,6 +74,7 @@ pub fn select_and_invoke_js_within(
     if query.is_empty() {
         return Ok(String::new());
     }
+    let (query, content_type) = strip_at_suffix(query, content_type);
     let (selector_part, js_body) = split_js(query);
     let selector_norm = normalize_selector(selector_part)?;
     let raw = element_select_text(el, &selector_norm, content_type)?;
@@ -144,6 +148,20 @@ fn extract_from_elements(els: &[ElementRef<'_>], content_type: ContentType) -> S
                 .unwrap_or("")
                 .to_string()
         }
+    }
+}
+
+/// 剥离查询末尾的 `@href` / `@src` 后缀，并据此覆盖 `content_type`。
+///
+/// Java 端 `JsoupUtils.stripAt()` + `BookParser.getContentType()` 的等价实现。
+/// 规则作者可以写 `#info > a@href` 来表示"取 href 属性而非文本"。
+fn strip_at_suffix(query: &str, ct: ContentType) -> (&str, ContentType) {
+    if let Some(q) = query.strip_suffix("@href") {
+        (q.trim_end(), ContentType::AttrHref)
+    } else if let Some(q) = query.strip_suffix("@src") {
+        (q.trim_end(), ContentType::AttrSrc)
+    } else {
+        (query, ct)
     }
 }
 

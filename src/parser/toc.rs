@@ -70,7 +70,7 @@ pub async fn parse_toc(
 
     // 4. 收集所有分页 URL（含第一页，按出现顺序去重）。
     let mut page_urls: Vec<String> = vec![first_url.clone()];
-    if toc_rule.pagination && !toc_rule.next_page.is_empty() {
+    if !toc_rule.next_page.is_empty() {
         let extra = collect_pagination_urls(
             client,
             &first_html,
@@ -337,6 +337,7 @@ async fn fetch_with_cf_fallback(
             method: HttpMethod::Get,
             cookies: None,
             timeout_secs: timeout,
+            referer: None,
         },
     )
     .await
@@ -406,7 +407,6 @@ mod tests {
                 "book": {},
                 "toc": {
                     "item": "div:nth-child(4) > ul > li > a",
-                    "pagination": true,
                     "nextPage": "#indexselect > option"
                 }
             }"##,

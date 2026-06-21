@@ -58,9 +58,9 @@ pub enum LangType {
 impl LangType {
     pub fn as_str(self) -> &'static str {
         match self {
-            LangType::ZhCn => "zh_CN",
-            LangType::ZhTw => "zh_TW",
-            LangType::ZhHant => "zh_Hant",
+            LangType::ZhCn => "zh-CN",
+            LangType::ZhTw => "zh-TW",
+            LangType::ZhHant => "zh-Hant",
         }
     }
 

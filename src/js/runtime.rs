@@ -29,20 +29,28 @@ fn install_console_shim(ctx: &mut Context) {
 ///
 /// `body` 通常是规则中 `@js:` 后面的 JS 片段（不带 `function func()` 包装）。
 ///
+/// 若 `body` 含 `return` 语句，包装为 IIFE（与 Java `JsCaller.call` 一致）：
+/// `(function(r){<body>; return r;})(input)`，让 `return` 合法。
+///
 /// 示例：
 /// ```ignore
 /// post_process("r=r.replace('作者：','')", "作者：苹果").unwrap() == "苹果";
 /// ```
 pub fn post_process(body: &str, input: &str) -> Result<String> {
-    // 包装为：
-    //   var r = <input 字面量>;
-    //   <body>;
-    //   r
-    // 注入 input 时用 JSON.stringify，避免输入里的引号 / 反斜杠破坏脚本。
+    // 注入 input 时用 JSON.stringify 风格转义，避免引号 / 反斜杠破坏脚本。
     let mut ctx = Context::default();
     install_console_shim(&mut ctx);
     let injected_input = json_quote_for_js(input);
-    let script = format!("var r = {injected_input};\n{body};\nr");
+
+    let script = if body.contains("return") {
+        // IIFE 包装：与 Java JsCaller.call 行为一致。
+        // (function(r){ <body>; return r; })(<input>)
+        format!("(function(r){{ {body}; return r; }})({injected_input})")
+    } else {
+        // 简单包装：var r = <input>; <body>; r
+        format!("var r = {injected_input};\n{body};\nr")
+    };
+
     let value = ctx
         .eval(Source::from_bytes(&script))
         .map_err(|e| anyhow::anyhow!("js eval failed: {e}"))?;
@@ -56,8 +64,8 @@ pub fn post_process(body: &str, input: &str) -> Result<String> {
 
 /// 加载一个 JS 文件（含全局函数定义），调用其中某个函数，返回字符串结果。
 ///
-/// 等价 Java `JsCaller#callFunction`，但当前只用于 quanben5 search 加密参数 `b`，
-/// 入参/出参都是字符串，不需要全 ECMAScript Value 互转。
+/// 等价 Java `JsCaller#callFunction`，入参/出参都是字符串，
+/// 不需要全 ECMAScript Value 互转。
 pub fn eval_function_returning_string(
     module_js: &str,
     fn_name: &str,
@@ -153,6 +161,22 @@ mod tests {
     }
 
     #[test]
+    fn return_statement_in_body_uses_iife() {
+        // 模拟 quanben5 @js: URL：body 含 return，需 IIFE 包装。
+        let body = r#"var x = r + "!"; return x"#;
+        let out = post_process(body, "hello").unwrap();
+        assert_eq!(out, "hello!");
+    }
+
+    #[test]
+    fn return_url_concatenation_pattern() {
+        // 模拟 proxy-required.json quanben5 搜索 URL 的 @js: 表达式
+        let body = r#"return 'https://example.com/?q=' + r"#;
+        let out = post_process(body, "测试").unwrap();
+        assert_eq!(out, "https://example.com/?q=测试");
+    }
+
+    #[test]
     fn matchall_es6() {
         // rate-limit.json 实战样例（精简）：用 matchAll 抽取 dd id 后排序拼接
         let body = r#"
@@ -169,41 +193,6 @@ mod tests {
     // ---------- eval_function（独立 JS 文件 + 函数调用）----------
 
     #[test]
-    fn quanben5_get_param_b_returns_non_empty() {
-        //   getParamB(keyword) -> 加密后的字符串
-        //
-        // 算法：encodeURI(keyword) → 每字符在 staticchars(62) 内做 +3 偏移，
-        // 不在表内则保留；外层每输出 1 个原字符插入 2 个随机字符（共 3）；
-        // 最后再 encodeURI 一次（让 `%` 也被编码为 `%25`）。
-        // 因此长度并非简单 keyword.len()*3 — 不要硬编码长度，只断言可重复且非空。
-        let js_path = repo_web().join("js").join("quanben5.js");
-        assert!(js_path.exists(), "missing {}", js_path.display());
-
-        let module = std::fs::read_to_string(&js_path).unwrap();
-        let out = eval_function_returning_string(&module, "getParamB", &["三体"]).unwrap();
-        assert!(!out.is_empty(), "param b should not be empty");
-        // 输出必须是纯 ASCII（所有非 ASCII 字符都被 encodeURI 转成 %XX）
-        assert!(
-            out.bytes().all(|b| b < 128),
-            "expected ASCII-only output, got {out:?}"
-        );
-    }
-
-    #[test]
-    fn quanben5_param_b_uses_only_static_chars_and_uri_chars() {
-        // 验证 JS 行为细节：staticchars + URI 编码后的 % 数字会一并输出。
-        // 这里只断言结果中没有非 ASCII 字节，因为 base64 函数把任何字符
-        // 都映射到 staticchars 里的 ASCII 字符；URI 编码后是 % + hex。
-        let js_path = repo_web().join("js").join("quanben5.js");
-        let module = std::fs::read_to_string(&js_path).unwrap();
-        let out = eval_function_returning_string(&module, "getParamB", &["abc"]).unwrap();
-        assert!(
-            out.bytes().all(|b| b < 128),
-            "expected ASCII-only output, got {out:?}"
-        );
-    }
-
-    #[test]
     fn loads_test_resource_js_chapter_module() {
         // 测试资源里的 96dushu / wxsy.net JS 都是"自带 r 字面量 + 处理"
         // 的脚本（按"复制粘贴到浏览器调试"的格式）。Java 端运行环境
@@ -217,15 +206,5 @@ mod tests {
         // 96dushu 脚本里有 r = `<html...>` 自我赋值，覆盖了我们的 var r，
         // 也能跑通——只要不抛异常即视为通过。
         let _ = post_process(&body, "ignored").expect("96dushu-chapter.js should run on boa");
-    }
-
-    #[test]
-    fn quanben5_search_js_runs() {
-        let js_path = repo_web().join("js").join("quanben5.com-search.js");
-        let module = std::fs::read_to_string(&js_path).unwrap();
-        // 这个脚本只定义函数，没有顶层副作用，eval 通过即可。
-        let out = eval_function_returning_string(&module, "getParamB", &["三体"]).unwrap();
-        assert!(!out.is_empty());
-        assert!(out.bytes().all(|b| b < 128));
     }
 }

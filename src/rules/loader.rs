@@ -20,6 +20,7 @@ pub const META_INTRO: &str = r#"meta[name="description"]"#;
 pub const META_CATEGORY: &str = r#"meta[property="og:novel:category"]"#;
 pub const META_COVER_URL: &str = r#"meta[property="og:image"]"#;
 pub const META_LATEST_CHAPTER: &str = r#"meta[property="og:novel:latest_chapter_name"]"#;
+pub const META_LATEST_CHAPTER_URL: &str = r#"meta[property="og:novel:latest_chapter_url"]"#;
 pub const META_LAST_UPDATE_TIME: &str = r#"meta[property="og:novel:update_time"]"#;
 pub const META_STATUS: &str = r#"meta[property="og:novel:status"]"#;
 
@@ -196,6 +197,9 @@ pub fn apply_default_rule(rule: &mut Rule, system_lang: LangType) {
         }
         if b.latest_chapter.is_empty() {
             b.latest_chapter = META_LATEST_CHAPTER.to_string();
+        }
+        if b.latest_chapter_url.is_empty() {
+            b.latest_chapter_url = META_LATEST_CHAPTER_URL.to_string();
         }
         if b.last_update_time.is_empty() {
             b.last_update_time = META_LAST_UPDATE_TIME.to_string();

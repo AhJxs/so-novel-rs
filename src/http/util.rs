@@ -153,9 +153,8 @@ mod tests {
     }
 
     #[test]
-    fn build_form_data_two_placeholders_quanben5() {
-        // proxy-required.json 里 quanben5 search 的 url 含 %s 两次（第二处用 JS 加密结果）。
-        // form_data 不会用到此场景，但顺序消费保持稳定。
+    fn build_form_data_two_placeholders() {
+        // 含两个 %s 占位符的 data 模板，顺序消费保持稳定。
         let kv = build_form_data("{a: %s, b: %s}", &["x", "y"]);
         assert_eq!(
             kv,

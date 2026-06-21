@@ -127,10 +127,11 @@ pub struct RuleSearch {
     pub status: String,
     #[serde(default)]
     pub word_count: String,
-    #[serde(default, deserialize_with = "lenient_bool_default")]
-    pub pagination: bool,
     #[serde(default)]
     pub next_page: String,
+    /// 自定义 Referer 头。非空时覆盖默认的 origin Referer。
+    #[serde(default)]
+    pub referer: String,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -155,6 +156,8 @@ pub struct RuleBook {
     #[serde(default)]
     pub latest_chapter: String,
     #[serde(default)]
+    pub latest_chapter_url: String,
+    #[serde(default)]
     pub last_update_time: String,
     #[serde(default)]
     pub status: String,
@@ -176,8 +179,6 @@ pub struct RuleToc {
     /// 经 camelCase 反序列化后映射到本字段。
     #[serde(rename = "isDesc", default, deserialize_with = "lenient_bool_default")]
     pub is_desc: bool,
-    #[serde(default, deserialize_with = "lenient_bool_default")]
-    pub pagination: bool,
     #[serde(default)]
     pub next_page: String,
 }
@@ -200,8 +201,6 @@ pub struct RuleChapter {
     pub filter_txt: String,
     #[serde(default)]
     pub filter_tag: String,
-    #[serde(default, deserialize_with = "lenient_bool_default")]
-    pub pagination: bool,
     #[serde(default)]
     pub next_page: String,
     #[serde(default)]

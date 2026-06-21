@@ -94,9 +94,9 @@ jobs:
           echo "version=$v" >> "$GITHUB_OUTPUT"
 
       # ---- 打包 ----
-      # 规则 / HTML 模板 / quanben5.js / logo 都通过 include_*! 嵌入二进制，
-      # 不需要随包带任何 bundle/ 资源 —— 各平台只打可执行文件。
-      # Linux 复用 scripts/package-linux.sh（含 README + tar.gz）。
+      # HTML 模板 / logo 通过 include_*! 嵌入二进制；
+      # bundle/rules/ 随包携带，方便用户编辑或导入规则。
+      # Linux 复用 scripts/package-linux.sh（含 README + rules + tar.gz）。
       - name: Stage artifacts (Linux)
         if: runner.os == 'Linux'
         shell: bash
@@ -112,6 +112,7 @@ jobs:
           mkdir -p "dist/$STAGE"
           cp "$BIN" "dist/$STAGE/"
           chmod +x "dist/$STAGE/so-novel-rs"
+          cp -r bundle/rules "dist/$STAGE/rules"
           ( cd dist && tar -czf "$STAGE.tar.gz" "$STAGE" )
 
       - name: Stage artifacts (Windows)
@@ -123,6 +124,7 @@ jobs:
           BIN="target/${{ matrix.target }}/release/so-novel-rs.exe"
           mkdir -p "dist/$STAGE"
           cp "$BIN" "dist/$STAGE/"
+          cp -r bundle/rules "dist/$STAGE/rules"
           ( cd dist && 7z a -tzip "$STAGE.zip" "$STAGE" )
 
       - name: Upload artifacts

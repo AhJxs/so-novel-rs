@@ -9,7 +9,6 @@ pub mod filter;
 pub mod formatter;
 pub mod search;
 pub mod search_filter;
-pub mod search_quanben5;
 pub mod toc;
 
 pub use book::{BookError, parse_book_detail};

@@ -67,7 +67,7 @@ pub async fn parse_chapter(
         .ok_or(ChapterError::ChapterRuleMissing)?;
 
     let started = std::time::Instant::now();
-    let pagination = chapter_rule.pagination;
+    let pagination = !chapter_rule.next_page.is_empty();
     tracing::debug!(order = chapter.order, title = %chapter.title, url = %chapter.url, pagination = pagination, "parse_chapter: 开始");
 
     let content = if pagination {
@@ -282,6 +282,7 @@ async fn fetch_with_cf_fallback(
             method: HttpMethod::Get,
             cookies: None,
             timeout_secs: timeout,
+            referer: None,
         },
     )
     .await

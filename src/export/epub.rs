@@ -74,13 +74,20 @@ pub fn merge_with_cover_bytes(
     let mut builder =
         EpubBuilder::new(zip).map_err(|e| ExportError::Epub(format!("new builder: {e}")))?;
 
+    // EPUB lang：优先用 book.language（如 "zh-CN"），回落到 "zh"。
+    let epub_lang = if book.language.is_empty() {
+        "zh".to_string()
+    } else {
+        // EPUB 规范接受 "zh-CN" 等 BCP 47 标签，直接使用。
+        book.language.clone()
+    };
     builder
         .epub_version(EpubVersion::V30)
         .metadata("title", &book.book_name)
         .map_err(|e| ExportError::Epub(format!("metadata title: {e}")))?
         .metadata("author", &book.author)
         .map_err(|e| ExportError::Epub(format!("metadata author: {e}")))?
-        .metadata("lang", "zh")
+        .metadata("lang", &epub_lang)
         .map_err(|e| ExportError::Epub(format!("metadata lang: {e}")))?
         .metadata("description", book.intro.as_deref().unwrap_or(""))
         .map_err(|e| ExportError::Epub(format!("metadata description: {e}")))?
@@ -99,7 +106,7 @@ pub fn merge_with_cover_bytes(
             tracing::warn!("EPUB 封面写入失败，跳过封面: {e}");
         } else {
             // 添加封面 XHTML 页（Apple Books 兼容）
-            let cover_xhtml = build_cover_xhtml(&cover_name, &book.book_name);
+            let cover_xhtml = build_cover_xhtml(&cover_name, &book.book_name, &epub_lang);
             if let Err(e) = builder.add_content(
                 EpubContent::new("cover.xhtml", cover_xhtml.as_bytes())
                     .title("封面")
@@ -198,11 +205,12 @@ fn detect_image_mime(bytes: &[u8]) -> &'static str {
     }
 }
 
-fn build_cover_xhtml(cover_filename: &str, book_name: &str) -> String {
+fn build_cover_xhtml(cover_filename: &str, book_name: &str, lang: &str) -> String {
+    let lang_attr = if lang.is_empty() { "zh" } else { lang };
     format!(
         r#"<?xml version="1.0" encoding="UTF-8" ?>
 <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
-<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="zh">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="{lang_attr}">
 <head>
   <title>{book_name}</title>
   <style type="text/css">body{{margin:0;padding:0;text-align:center;}} img{{max-width:100%;height:auto;}}</style>
@@ -212,6 +220,7 @@ fn build_cover_xhtml(cover_filename: &str, book_name: &str) -> String {
 </body>
 </html>
 "#,
+        lang_attr = html_escape(lang_attr),
         book_name = html_escape(book_name),
         cover_filename = cover_filename
     )

@@ -15,8 +15,7 @@
 //! - 搜索结果分页（`pagination = true`）合并；
 //! - "完全匹配跳详情页"的 fallback 路径；
 //! - 简繁转换（属阶段 5）；
-//! - 聚合搜索（属阶段 4 UI 接入）；
-//! - quanben5 加密参数 `b` 的特殊路径（属阶段 2c）。
+//! - 聚合搜索（属阶段 4 UI 接入）。
 
 use anyhow::Result;
 use reqwest::Client;
@@ -70,25 +69,26 @@ pub async fn search_one(
         return Err(SearchError::SearchDisabled);
     }
 
-    // 特殊分支：quanben5 双 %s 模板（加密参数 b + JSONP 响应）。
-    // 不污染普通分支，复用同一套 result/bookName/author 选择器。
-    if crate::parser::search_quanben5::is_quanben5_pattern(&s.url) {
-        return crate::parser::search_quanben5::search_one_quanben5(
-            client,
-            rule,
-            keyword,
-            limit,
-            cf_bypass_base,
-        )
-        .await;
-    }
-
     // 1. 构造请求
-    let url_with_keyword = format_url_query(&s.url, keyword);
+    // 若 url 含 @js:，则 JS 接收 keyword 返回完整 URL（与 Java SearchParser 一致）；
+    // 否则直接格式化（%s → keyword）。
+    let url_with_keyword = if s.url.contains("@js:") {
+        let js_body = &s.url[s.url.find("@js:").unwrap() + 4..];
+        crate::js::post_process(js_body, keyword)
+            .map_err(|e| SearchError::Parse(format!("搜索 URL @js: 执行失败: {e:#}")))?
+    } else {
+        format_url_query(&s.url, keyword)
+    };
+    tracing::debug!(url = %url_with_keyword, "搜索请求 URL");
     let cookies = if s.cookies.trim().is_empty() {
         None
     } else {
         Some(s.cookies.as_str())
+    };
+    let custom_referer = if s.referer.trim().is_empty() {
+        None
+    } else {
+        Some(s.referer.as_str())
     };
 
     let response = match s.method.to_ascii_lowercase().as_str() {
@@ -102,6 +102,7 @@ pub async fn search_one(
                     method: HttpMethod::Post(&form_owned),
                     cookies,
                     timeout_secs: s.timeout,
+                    referer: custom_referer,
                 },
             )
             .await
@@ -114,6 +115,7 @@ pub async fn search_one(
                 method: HttpMethod::Get,
                 cookies,
                 timeout_secs: s.timeout,
+                referer: custom_referer,
             },
         )
         .await
@@ -149,51 +151,99 @@ pub fn parse_search_results(
     let s = rule.search.as_ref().ok_or(SearchError::SearchDisabled)?;
 
     let document = Html::parse_document(html);
-    let result_selector = crate::parser::cache::cached_selector(&s.result)
-        .map_err(|e| SearchError::Parse(format!("无效的 result 选择器 `{}`: {e:?}", s.result)))?;
+
+    // result 字段可能含 @js: 后处理（如 quanben5 的 JSONP 解析）。
+    // 有 @js: 时：先用 CSS 选择器取元素 innerHTML → JS 后处理 → 结果当新文档再解析；
+    // 无 @js: 时：直接用 CSS 选择器迭代元素。
+    let has_js = s.result.contains("@js:");
 
     let mut out: Vec<SearchResult> = Vec::new();
 
-    for el in document.select(&result_selector) {
-        // bookName 是必填字段；空则跳过该条（Java 端 `bookName.isEmpty() continue`）
-        let book_name = select_and_invoke_js_within(el, &s.book_name, ContentType::Text)?;
-        if book_name.is_empty() {
-            continue;
+    if has_js {
+        // Java SearchParser.processResultWithJs：把**整个响应体**传给 JS，
+        // JS 接收 body 返回转换后的 HTML，再用 CSS 选择器从结果中选元素。
+        let js_body = &s.result[s.result.find("@js:").unwrap() + 4..];
+        let css_selector = s.result.split("@js:").next().unwrap_or("").trim();
+        let processed = crate::js::post_process(js_body, html)
+            .map_err(|e| SearchError::Parse(format!("result @js: 执行失败: {e:#}")))?;
+        tracing::debug!(css_selector, processed_len = processed.len(), processed_preview = %processed.chars().take(300).collect::<String>(), "@js: result 处理完成");
+        if processed.is_empty() {
+            return Ok(out);
         }
-
-        // href 走 attr_href；如果是相对路径，用 base_url 拼绝对。
-        let raw_href = select_and_invoke_js_within(el, &s.book_name, ContentType::AttrHref)?;
-        let url = crate::http::abs_url(base_url, &raw_href).unwrap_or_default();
-
-        let author = optional_field(el, &s.author)?;
-        let category = optional_field(el, &s.category)?;
-        let latest_chapter = optional_field(el, &s.latest_chapter)?;
-        let last_update_time = optional_field(el, &s.last_update_time)?;
-        let status = optional_field(el, &s.status)?;
-        let word_count = optional_field(el, &s.word_count)?;
-
-        out.push(SearchResult {
-            source_id: rule.id,
-            source_name: rule.name.clone(),
-            url,
-            book_name,
-            author,
-            category,
-            latest_chapter,
-            last_update_time,
-            status,
-            word_count,
-            ..SearchResult::default()
-        });
-
-        if let Some(n) = limit {
-            if out.len() >= n {
-                break;
+        let result_doc = Html::parse_document(&processed);
+        let result_selector = crate::parser::cache::cached_selector(css_selector).map_err(|e| {
+            SearchError::Parse(format!("无效的 result 选择器 `{css_selector}`: {e:?}"))
+        })?;
+        let matched_count = result_doc.select(&result_selector).count();
+        tracing::debug!(css_selector, matched_count, "CSS 选择器匹配元素数");
+        for el in result_doc.select(&result_selector) {
+            push_search_result(el, s, base_url, rule.id, &rule.name, &mut out);
+            if let Some(n) = limit {
+                if out.len() >= n {
+                    break;
+                }
+            }
+        }
+    } else {
+        let result_selector = crate::parser::cache::cached_selector(&s.result).map_err(|e| {
+            SearchError::Parse(format!("无效的 result 选择器 `{}`: {e:?}", s.result))
+        })?;
+        for el in document.select(&result_selector) {
+            push_search_result(el, s, base_url, rule.id, &rule.name, &mut out);
+            if let Some(n) = limit {
+                if out.len() >= n {
+                    break;
+                }
             }
         }
     }
 
     Ok(out)
+}
+
+/// 从单个搜索结果元素中提取字段并推入结果列表。
+fn push_search_result(
+    el: scraper::ElementRef<'_>,
+    s: &crate::models::RuleSearch,
+    base_url: &str,
+    source_id: i32,
+    source_name: &str,
+    out: &mut Vec<SearchResult>,
+) {
+    // bookName 是必填字段；空则跳过该条（Java 端 `bookName.isEmpty() continue`）
+    let book_name = match select_and_invoke_js_within(el, &s.book_name, ContentType::Text) {
+        Ok(v) => v,
+        Err(_) => return,
+    };
+    if book_name.is_empty() {
+        return;
+    }
+
+    // href 走 attr_href；如果是相对路径，用 base_url 拼绝对。
+    let raw_href =
+        select_and_invoke_js_within(el, &s.book_name, ContentType::AttrHref).unwrap_or_default();
+    let url = crate::http::abs_url(base_url, &raw_href).unwrap_or_default();
+
+    let author = optional_field(el, &s.author).unwrap_or(None);
+    let category = optional_field(el, &s.category).unwrap_or(None);
+    let latest_chapter = optional_field(el, &s.latest_chapter).unwrap_or(None);
+    let last_update_time = optional_field(el, &s.last_update_time).unwrap_or(None);
+    let status = optional_field(el, &s.status).unwrap_or(None);
+    let word_count = optional_field(el, &s.word_count).unwrap_or(None);
+
+    out.push(SearchResult {
+        source_id,
+        source_name: source_name.to_string(),
+        url,
+        book_name,
+        author,
+        category,
+        latest_chapter,
+        last_update_time,
+        status,
+        word_count,
+        ..SearchResult::default()
+    });
 }
 
 fn optional_field(el: scraper::ElementRef<'_>, query: &str) -> Result<Option<String>, SearchError> {

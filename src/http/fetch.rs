@@ -30,6 +30,8 @@ pub struct FetchRequest<'a> {
     pub cookies: Option<&'a str>,
     /// 单次请求超时（秒）。规则里以秒为单位；None 时用 client 默认。
     pub timeout_secs: Option<u32>,
+    /// 自定义 Referer 头。非空时覆盖默认的 origin Referer。
+    pub referer: Option<&'a str>,
 }
 
 pub enum HttpMethod<'a> {
@@ -49,7 +51,11 @@ pub struct FetchResponse {
 /// Async：调用方在 `tokio::select!` 里 race 这个 future 和 cancel 信号，
 /// 取消时 in-flight HTTP 立刻被 drop（reqwest 关闭底层连接），无超时等待。
 pub async fn fetch(client: &Client, req: &FetchRequest<'_>) -> Result<FetchResponse> {
-    let referer = origin_or_self(req.url);
+    let referer = req
+        .referer
+        .filter(|s| !s.trim().is_empty())
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| origin_or_self(req.url));
     let ua = random_ua();
 
     let mut builder = match req.method {
@@ -116,6 +122,7 @@ mod tests {
             method: HttpMethod::Get,
             cookies: None,
             timeout_secs: Some(15),
+            referer: None,
         };
         // 不调用 send；只确保 API 形状稳定。
     }
@@ -129,6 +136,7 @@ mod tests {
             method: HttpMethod::Post(&form),
             cookies: Some("a=1; b=2"),
             timeout_secs: Some(15),
+            referer: None,
         };
     }
 }

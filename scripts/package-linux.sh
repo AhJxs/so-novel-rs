@@ -9,9 +9,9 @@
 # - 自动选择构建工具：在 Linux 主机上（如 CI runner）用原生 `cargo`，
 #   否则用 `cross`（容器化交叉编译，要装 Docker + cross）。
 #   设 `FORCE_CROSS=1` 强制使用 cross；`FORCE_CARGO=1` 强制原生 cargo。
-# - 把可执行文件 + README 打成 tar.gz。
-#   规则 / HTML 模板 / quanben5.js / logo 已通过 `include_*!` 嵌入二进制，
-#   无需随包带任何 bundle/ 资源。
+# - 把可执行文件 + README + rules 打成 tar.gz。
+#   HTML 模板 / logo 已通过 `include_*!` 嵌入二进制；
+#   bundle/rules/ 随包携带，方便用户编辑或导入规则。
 #
 # 产物：dist/so-novel-rs-<version>-linux-<arch>.tar.gz
 
@@ -84,6 +84,7 @@ mkdir -p "$OUTDIR"
 
 cp "$BIN" "$OUTDIR/"
 chmod +x "$OUTDIR/${NAME}"
+cp -r bundle/rules "$OUTDIR/rules"
 
 # README 让用户知道运行时依赖。
 cat > "$OUTDIR/README.md" <<'EOF'

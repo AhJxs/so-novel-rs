@@ -14,6 +14,10 @@ pub struct Book {
     pub category: Option<String>,
     pub cover_url: Option<String>,
     pub latest_chapter: Option<String>,
+    pub latest_chapter_url: Option<String>,
     pub last_update_time: Option<String>,
     pub status: Option<String>,
+    /// 书源语言（如 `zh-CN`、`zh-TW`），由解析时从 rule.language 填入。
+    #[serde(default)]
+    pub language: String,
 }
