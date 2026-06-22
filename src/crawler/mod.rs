@@ -49,7 +49,10 @@ use retry::retry_with_backoff;
 #[derive(Debug, Clone)]
 pub enum Progress {
     /// 详情解析完成，得到书籍元信息。
-    BookResolved { book: Book, total_chapters: usize },
+    BookResolved {
+        book: Box<Book>,
+        total_chapters: usize,
+    },
     /// 一章完成（成功），index 是 1-based 顺序号。
     ChapterDone { index: u32, title: String },
     /// 一章失败（已用尽重试，但不中断整本下载）。
@@ -171,7 +174,7 @@ pub async fn download_book(
     }
 
     let _ = progress.send(Progress::BookResolved {
-        book: book.clone(),
+        book: Box::new(book.clone()),
         total_chapters: toc.len(),
     });
 

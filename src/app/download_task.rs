@@ -86,7 +86,7 @@ impl DownloadTask {
                             book,
                             total_chapters,
                         } => {
-                            self.book_meta = Some(book);
+                            self.book_meta = Some(*book);
                             self.total_chapters = total_chapters;
                         }
                         Progress::ChapterDone { index, title } => {

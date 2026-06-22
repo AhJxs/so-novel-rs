@@ -98,7 +98,7 @@ pub fn spawn_download_range(
     let total = chapters.len();
     let book_for_meta = book.clone();
     let _ = tx_for_task.send(Progress::BookResolved {
-        book: book.clone(),
+        book: Box::new(book.clone()),
         total_chapters: total,
     });
 
