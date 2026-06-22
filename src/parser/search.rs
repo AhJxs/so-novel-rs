@@ -54,6 +54,17 @@ pub enum SearchError {
 /// `cf_bypass_base` 是 `[global] cf-bypass` 配置：若命中 CF 真人验证页
 /// 且该值非空，则自动重试外部 bypass 服务（详见 `http::cf::fetch_via_cf_bypass`）；
 /// 为空时直接返回 `SearchError::Cloudflare`。
+#[tracing::instrument(
+    name = "parser_search_one",
+    skip_all,
+    fields(
+        source_id = rule.id,
+        source = %rule.name,
+        keyword = %keyword,
+        limit = ?limit,
+        cf_bypass = cf_bypass_base.is_some(),
+    )
+)]
 pub async fn search_one(
     client: &Client,
     rule: &Rule,
@@ -409,6 +420,76 @@ mod tests {
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].book_name, "某书");
         assert_eq!(results[0].author.as_deref(), Some("某人"));
+    }
+
+    /// 端到端：跑 `search_one` 走真实网络（offline mock 不可行 —— search_one 把
+    /// fetch + parse 绑死），断言 span 字段里出现 `url=` / `method=` / `final_url=`，
+    /// 且 keyword 替换 %s 后出现在 URL 里。
+    ///
+    /// 默认 ignore（依赖网络），本机用 `cargo test -- --ignored` 跑。
+    /// 网络失败时 soft-skip：行内打印错误就 return，不让 CI 红。
+    ///
+    /// 实现：用 `MakeWriter` 把 fmt layer 的输出全部 capture 起来，
+    /// 然后断言"url= / method= / final_url="三个字段都出现过。
+    #[tokio::test]
+    #[ignore = "live network: depends on 22biqu availability"]
+    async fn search_one_span_records_url_method_final_url() {
+        use std::sync::{Arc, Mutex};
+        use tracing_subscriber::fmt::MakeWriter;
+
+        #[derive(Clone, Default)]
+        struct Capture(Arc<Mutex<Vec<u8>>>);
+        impl std::io::Write for Capture {
+            fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+                self.0.lock().unwrap().extend_from_slice(buf);
+                Ok(buf.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        impl<'a> MakeWriter<'a> for Capture {
+            type Writer = Capture;
+            fn make_writer(&'a self) -> Self::Writer {
+                self.clone()
+            }
+        }
+        let cap = Capture::default();
+
+        // 关键：开 span events = active（默认是 full）—— 没有事件触发，
+        // fmt layer 就不会调 writer，capture 永远空。
+        // active = 仅 enter/exit。full = enter/exit+字段变化。我们选 full。
+        let subscriber = tracing_subscriber::fmt()
+            .with_writer(cap.clone())
+            .with_ansi(false)
+            .with_target(false)
+            .with_span_events(tracing_subscriber::fmt::format::FmtSpan::FULL)
+            .event_format(
+                tracing_subscriber::fmt::format()
+                    .with_ansi(false)
+                    .with_target(false),
+            )
+            .finish();
+        let _g = tracing::subscriber::set_default(subscriber);
+
+        use crate::config::AppConfig;
+        use crate::http::client::{ClientOptions, build_async_client};
+
+        let cfg = AppConfig::default();
+        let client = build_async_client(&cfg, &ClientOptions::default()).unwrap();
+        let rule = rule_22biqu();
+
+        if let Err(e) = search_one(&client, &rule, "诡秘之主", Some(5), None).await {
+            eprintln!("live test soft-skip: {e}");
+            return;
+        }
+
+        let buf = cap.0.lock().unwrap();
+        let s = String::from_utf8_lossy(&buf);
+        // 断言三个动态字段都被记上了
+        assert!(s.contains("url="), "missing url= in: {s}");
+        assert!(s.contains("method="), "missing method= in: {s}");
+        assert!(s.contains("final_url="), "missing final_url= in: {s}");
     }
 
     /// **真实联网测试**：默认 ignore，本机用 `cargo test -- --ignored` 跑。

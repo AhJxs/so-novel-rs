@@ -41,10 +41,9 @@ smol = "2"
 anyhow = "1"
 thiserror = "2"
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-# 按天滚动的日志文件 appender（main.rs 注册到 tracing subscriber，跟 stdout 一起输出）。
-# 保留策略（30 天）由启动时清理逻辑自己做 —— tracing-appender 不自带 retention。
-tracing-appender = "0.2"
+# `ansi` feature 必须开：`tracing-subscriber` 默认会用 `Style::italic/dimmed`
+# 给字段名（`trace_id=` 等）加颜色码；不开启此 feature 时 `.with_ansi(false)`
+tracing-subscriber = { version = "0.3", features = ["env-filter", "ansi"] }
 
 # Config / serde
 serde = { version = "1", features = ["derive"] }

@@ -19,6 +19,7 @@ mod search_state;
 mod sources_state;
 pub use sources_state::SourcesFilterStatus;
 mod tasks_db;
+pub(crate) mod trace;
 mod ui_event;
 mod update_state;
 

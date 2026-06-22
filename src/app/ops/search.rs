@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use tokio::sync::mpsc;
+use tracing::Instrument;
 
 use crate::config::AppConfig;
 use crate::http::HttpClients;
@@ -10,6 +11,7 @@ use crate::models::{Book, Rule};
 use crate::rules::Source;
 
 use super::super::search_state::{DetailEvent, DetailState, SourceSearchEvent, SourceStatus};
+use super::super::trace::{TraceId, sub};
 
 /// 派聚合搜索任务。返回是否成功派发。
 pub fn spawn_search(
@@ -83,93 +85,106 @@ pub fn spawn_search(
         .map(|v| v.max(0) as usize)
         .filter(|v| *v > 0);
 
-    let target_ids: Vec<i32> = target_sources.iter().map(|s| s.rule.id).collect();
-    tracing::info!(
-        source_ids = ?target_ids,
-        source_count = target_sources.len(),
-        source_id = ?search.source_id,
-        limit = ?limit,
-        cf_bypass = cf_bypass.is_some(),
-        "搜索派发: 关键词={:?}, 目标源 {} 个",
-        keyword,
-        target_sources.len(),
+    // 顶层 trace_id：在所有 spawn 之前 mint；通过 `info_span!` 跨 .await 传播。
+    // 之后所有 `tracing::info!/warn!`（含 crawler 内部）都会自动带 trace_id 字段。
+    let trace_id = TraceId::mint();
+    let span = tracing::info_span!(
+        sub::SEARCH,
+        trace_id = %trace_id,
+        keyword = %crate::util::fs::truncate_log(&keyword, 10),
+        sources = target_sources.len(),
+        single_source = search.source_id.is_some(),
     );
 
-    runtime.spawn(async move {
-        let (inner_tx, mut inner_rx) =
-            mpsc::unbounded_channel::<crate::crawler::search::SourceSearchOutcome>();
+    // outer 也要 clone 一份：内部 `async move` 会 move 走一份，.instrument 还要一份。
+    let span_outer = span.clone();
+    let span_for_instrument = span_outer.clone();
+    runtime.spawn(
+        async move {
+            let (inner_tx, mut inner_rx) =
+                mpsc::unbounded_channel::<crate::crawler::search::SourceSearchOutcome>();
 
-        // 把搜索放在独立的 tokio task 里，与下面的桥接循环并发运行。
-        // async move 会把 cfg 移入内部，&cfg 引用的是 task 自己拥有的值，
-        // 满足 'static 要求。
-        // 在 target_sources move 进 search_streaming 前，建好 id→name 映射，
-        // 用于桥接循环结束后给"未出结果的源"补失败事件。
-        let source_names: std::collections::HashMap<i32, String> = target_sources
-            .iter()
-            .map(|s| (s.rule.id, s.rule.name.clone()))
-            .collect();
+            // 把搜索放在独立的 tokio task 里，与下面的桥接循环并发运行。
+            // async move 会把 cfg 移入内部，&cfg 引用的是 task 自己拥有的值，
+            // 满足 'static 要求。
+            // 在 target_sources move 进 search_streaming 前，建好 id→name 映射，
+            // 用于桥接循环结束后给"未出结果的源"补失败事件。
+            let source_names: std::collections::HashMap<i32, String> = target_sources
+                .iter()
+                .map(|s| (s.rule.id, s.rule.name.clone()))
+                .collect();
 
-        let http = Arc::clone(&http);
-        let search_handle = tokio::spawn(async move {
-            crate::crawler::search::search_streaming(
-                &cfg,
-                http,
-                target_sources,
-                keyword,
-                limit,
-                cf_bypass,
-                inner_tx,
-            )
-            .await
-        });
+            let http = Arc::clone(&http);
+            // search_streaming 必须运行在 search span 的子上下文里 ——
+            // 否则 crawler 内部的 `tracing::info!` 拿不到 trace_id。
+            // `tracing::Span` 本身 !Send，但 `.instrument(span)` 包装出来的 future
+            // 是 Send 的（Instrumented<F, F::Output> 的 Send 是这样实现的），
+            // 所以 span 可以安全穿过 tokio::spawn 边界。
+            let span_for_task = span_outer.clone();
+            let search_handle = tokio::spawn(
+                async move {
+                    crate::crawler::search::search_streaming(
+                        &cfg,
+                        http,
+                        target_sources,
+                        keyword,
+                        limit,
+                        cf_bypass,
+                        inner_tx,
+                    )
+                    .await
+                }
+                .instrument(span_for_task),
+            );
 
-        // 桥接循环：每收到一源结果就立即转发给 UI，与搜索并发。
-        let mut seen_ids: std::collections::HashSet<i32> = std::collections::HashSet::new();
-        while let Some(o) = inner_rx.recv().await {
-            seen_ids.insert(o.source_id);
-            let send_result = match o.result {
-                Ok(list) => Ok(list),
-                Err(e) => Err(format!("{e:#}")),
-            };
-            if tx
-                .send(SourceSearchEvent {
-                    source_id: o.source_id,
-                    source_name: o.source_name,
-                    result: send_result,
-                })
-                .is_err()
-            {
-                break;
-            }
-        }
-
-        // 通道关闭后，仍有源未出结果（task panic / 提前退出）→ 给它们补一条失败事件，
-        // 否则该源在 UI 永远停在 Pending，且 received 永远到不了 expected（搜索卡死）。
-        // source_names 在 target_sources move 进 search_streaming 前已建好，这里直接用它。
-        let mut missing = 0usize;
-        if !tx.is_closed() {
-            for (id, name) in &source_names {
-                if !seen_ids.contains(id) {
-                    missing += 1;
-                    let _ = tx.send(SourceSearchEvent {
-                        source_id: *id,
-                        source_name: name.clone(),
-                        result: Err("后台任务异常退出".to_string()),
-                    });
+            // 桥接循环：每收到一源结果就立即转发给 UI，与搜索并发。
+            // 这里 .instrument(span) 已经在 runtime.spawn 上挂上了，所以内部
+            // 的 tracing::*! 自动带 trace_id。
+            let mut seen_ids: std::collections::HashSet<i32> = std::collections::HashSet::new();
+            while let Some(o) = inner_rx.recv().await {
+                seen_ids.insert(o.source_id);
+                let send_result = match o.result {
+                    Ok(list) => Ok(list),
+                    Err(e) => Err(format!("{e:#}")),
+                };
+                if tx
+                    .send(SourceSearchEvent {
+                        source_id: o.source_id,
+                        source_name: o.source_name,
+                        result: send_result,
+                    })
+                    .is_err()
+                {
+                    break;
                 }
             }
-        }
 
-        if let Err(e) = search_handle.await {
-            tracing::warn!("search task panicked: {e}");
-        }
+            // 通道关闭后，仍有源未出结果（task panic / 提前退出）→ 给它们补一条失败事件，
+            // 否则该源在 UI 永远停在 Pending，且 received 永远到不了 expected（搜索卡死）。
+            // source_names 在 target_sources move 进 search_streaming 前已建好，这里直接用它。
+            let mut missing = 0usize;
+            if !tx.is_closed() {
+                for (id, name) in &source_names {
+                    if !seen_ids.contains(id) {
+                        missing += 1;
+                        let _ = tx.send(SourceSearchEvent {
+                            source_id: *id,
+                            source_name: name.clone(),
+                            result: Err("后台任务异常退出".to_string()),
+                        });
+                    }
+                }
+            }
 
-        tracing::debug!(
-            received = seen_ids.len(),
-            missing = missing,
-            "搜索桥接循环结束"
-        );
-    });
+            if let Err(e) = search_handle.await {
+                tracing::warn!("search task panicked: {e}");
+            }
+            // 终止日志：每次搜索恰好一行 trace_id=N 的尾记录。
+            // success/failure 在 per-source 行（`sub=source:N`）已记录；这里只做"聚合完毕"信号。
+            tracing::info!(received = seen_ids.len(), missing = missing, "搜索聚合完毕");
+        }
+        .instrument(span_for_instrument),
+    );
 
     true
 }
@@ -232,26 +247,47 @@ pub fn select_search_result(
         Some(config.qidian_cookie.clone())
     };
 
-    runtime.spawn(async move {
+    // 详情拉取 mint 一个新 trace_id —— 它是一次独立的"动作"（不与搜索本身
+    // 共享 trace_id，方便 grep `trace_id=N` 时只看一次详情拉取）。
+    let trace_id = TraceId::mint();
+    let span = tracing::info_span!(
+        sub::DETAIL,
+        trace_id = %trace_id,
+        source_id = source_id,
+        %url,
+    );
+    // 模式：外层用 `.instrument(span)` 包住整个 future，spawn 进去。
+    // 内部 `tracing::*!` 通过 `Span::current()` 隐式拿到 span 字段（trace_id 等）。
+    // `tracing::Span` 是 `!Send` 的，但 `.instrument(...)` 包装后的 future 仍是
+    // `Send` 的（Instrumented 实现里处理了 Send-ness），所以 spawn 没问题。
+
+    let span_for_task = span.clone();
+    let task = async move {
         let url_for_event = url.clone();
         let cf = cf_bypass.clone();
         let qc = qidian_cookie.clone();
-        let result: Result<Book, String> = async {
-            let client = http.for_rule(&rule);
+        let client = http.for_rule(&rule);
+        let result: Result<Book, String> =
             crate::parser::parse_book_detail(&client, &rule, &url, cf.as_deref(), qc.as_deref())
                 .await
-                .map_err(|e| format!("{e:#}"))
-        }
-        .await;
+                .map_err(|e| format!("{e:#}"));
 
         let state = match result {
-            Ok(book) => DetailState::Loaded(Box::new(book)),
-            Err(e) => DetailState::Failed(e),
+            Ok(book) => {
+                tracing::info!(book = %book.book_name, "详情拉取成功");
+                DetailState::Loaded(Box::new(book))
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "详情拉取失败");
+                DetailState::Failed(e)
+            }
         };
         let _ = tx.send(DetailEvent {
             source_id,
             url: url_for_event,
             state,
         });
-    });
+    }
+    .instrument(span_for_task);
+    runtime.spawn(task);
 }

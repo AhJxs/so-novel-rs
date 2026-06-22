@@ -144,6 +144,15 @@ pub struct DownloadOptions {
 /// 配合 `tokio::select!` 让外部 `cancel` 信号瞬间中断 in-flight HTTP（reqwest 关闭连接）。
 ///
 /// 返回成品文件路径（一个 `.epub` / `.txt` / `.zip`）。
+#[tracing::instrument(
+    name = "download_book",
+    skip_all,
+    fields(
+        source_id = source.rule.id,
+        source = %source.rule.name,
+        %book_url,
+    )
+)]
 pub async fn download_book(
     cfg: &AppConfig,
     client: &reqwest::Client,
@@ -154,22 +163,11 @@ pub async fn download_book(
     let cancel = opts.cancel.clone();
     let progress = opts.progress.clone();
 
-    let started = std::time::Instant::now();
-    tracing::info!(
-        source_id = source.rule.id,
-        source = %source.rule.name,
-        book_url = %book_url,
-        "download_book: 开始",
-    );
-
     let (book, toc) = resolve_book(cfg, client, source, book_url, &cancel).await?;
 
     if toc.is_empty() {
-        tracing::warn!(
-            source_id = source.rule.id,
-            book_url = %book_url,
-            "download_book: 章节列表为空",
-        );
+        // 真实失败：书源返回 0 章，无法继续。warn 让 trace_id 里有原因可查。
+        tracing::warn!("download_book: 章节列表为空");
         return Err(CrawlerError::EmptyToc);
     }
 
@@ -184,22 +182,7 @@ pub async fn download_book(
     }
 
     let out = download_chapters(cfg, client, source, book_url, &book, toc, opts).await;
-    match &out {
-        Ok(path) => tracing::info!(
-            source_id = source.rule.id,
-            book = %book.book_name,
-            output = %path.display(),
-            elapsed_ms = started.elapsed().as_millis() as u64,
-            "download_book: 完成",
-        ),
-        Err(e) => tracing::warn!(
-            source_id = source.rule.id,
-            book = %book.book_name,
-            elapsed_ms = started.elapsed().as_millis() as u64,
-            error = %format!("{e:#}"),
-            "download_book: 失败",
-        ),
-    }
+    // 终态日志已由 ops/download.rs 的 `下载任务终止` 覆盖（含 book、elapsed_ms、outcome）。
     out
 }
 
@@ -207,6 +190,15 @@ pub async fn download_book(
 ///
 /// 返回 `(Book, Vec<Chapter>)`，供 UI 层展示章节列表、让用户选择范围后再调用
 /// `download_chapters`。
+#[tracing::instrument(
+    name = "resolve_book",
+    skip_all,
+    fields(
+        source_id = source.rule.id,
+        source = %source.rule.name,
+        %book_url,
+    )
+)]
 pub async fn resolve_book(
     cfg: &AppConfig,
     client: &reqwest::Client,
@@ -214,9 +206,6 @@ pub async fn resolve_book(
     book_url: &str,
     cancel: &CancelToken,
 ) -> Result<(Book, Vec<Chapter>), CrawlerError> {
-    let started = std::time::Instant::now();
-    tracing::info!(source_id = source.rule.id, source = %source.rule.name, book_url = %book_url, "resolve_book: 抓取详情 + 章节列表");
-
     let cf_bypass = if cfg.cf_bypass.trim().is_empty() {
         None
     } else {
@@ -311,8 +300,6 @@ pub async fn resolve_book(
     let target_lang = cfg.language.to_book_target_lang();
     let book = convert_book_meta(&book, &source.rule.language, &target_lang);
 
-    tracing::info!(source_id = source.rule.id, book = %book.book_name, chapters = toc.len(), elapsed_ms = started.elapsed().as_millis() as u64, "resolve_book: 完成");
-
     Ok((book, toc))
 }
 
@@ -320,6 +307,16 @@ pub async fn resolve_book(
 ///
 /// `chapters` 已由调用方按用户选择过滤过范围。`DownloadOptions` 中需传入
 /// progress sender 和 cancel token。
+#[tracing::instrument(
+    name = "download_chapters",
+    skip_all,
+    fields(
+        source_id = source.rule.id,
+        source = %source.rule.name,
+        book = %book.book_name,
+        chapters = chapters.len(),
+    )
+)]
 pub async fn download_chapters(
     cfg: &AppConfig,
     client: &reqwest::Client,
@@ -330,9 +327,6 @@ pub async fn download_chapters(
     opts: DownloadOptions,
 ) -> Result<PathBuf, CrawlerError> {
     let DownloadOptions { progress, cancel } = opts;
-
-    let started = std::time::Instant::now();
-    tracing::info!(source_id = source.rule.id, book = %book.book_name, chapters = chapters.len(), max_concurrent = compute_concurrency(source, chapters.len()), "download_chapters: 开始");
 
     if chapters.is_empty() {
         return Err(CrawlerError::EmptyToc);
@@ -481,7 +475,15 @@ pub async fn download_chapters(
                 }
                 Err(e) => {
                     let reason = format!("{e:#}");
-                    tracing::warn!(order = order, title = %title, error = %reason, "章节解析失败");
+                    // `sub=chapter:{order}` 让 grep `trace_id=N` 后能直接看到
+                    // 这次下载里所有失败的章节序号（按 sub 排序）。
+                    tracing::warn!(
+                        order = order,
+                        sub = %format!("chapter:{order}"),
+                        title = %title,
+                        error = %reason,
+                        "章节解析失败"
+                    );
                     let _ = progress.send(Progress::ChapterFailed {
                         index: order,
                         title: title.clone(),
@@ -571,14 +573,14 @@ pub async fn download_chapters(
     });
 
     let rendered_count = rendered.len();
-    tracing::info!(
-        source_id = source.rule.id,
-        book = %book.book_name,
+    // 终态日志已由 ops/download.rs 的 `下载任务终止 outcome=ok` 覆盖；
+    // 这里留 debug 级用于排查"为什么声称 1454 章只渲染了 1400 章"之类的细节。
+    // `book` / `chapters` 已在 `#[tracing::instrument]` 的 span 字段里 —— 不重复带。
+    tracing::debug!(
         rendered = rendered_count,
         requested = chapter_count,
         output = %final_path.display(),
-        elapsed_ms = started.elapsed().as_millis() as u64,
-        "download_chapters: 完成",
+        "download_chapters: 渲染完成"
     );
 
     Ok(final_path)

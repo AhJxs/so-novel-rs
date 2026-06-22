@@ -51,6 +51,15 @@ pub enum BookError {
 ///
 /// 末尾 `!rule.need_proxy` 时调 3 站 CoverUpdater 拿更高清封面（与 Java
 /// `BookParser.parse()` line 71 行为对齐）。
+#[tracing::instrument(
+    name = "parse_book_detail",
+    skip_all,
+    fields(
+        source_id = rule.id,
+        source = %rule.name,
+        %url,
+    )
+)]
 pub async fn parse_book_detail(
     client: &Client,
     rule: &Rule,
@@ -78,13 +87,14 @@ pub async fn parse_book_detail(
     let html_after_cf = if cf_hit {
         match cf_bypass_base.filter(|s| !s.trim().is_empty()) {
             Some(base) => {
-                tracing::info!(source_id = rule.id, book_url = %url, "详情页命中 Cloudflare，尝试 cf-bypass");
+                // `source_id` + `url` 已在 span 里 —— 事件文本只补"做了什么"。
+                tracing::info!("详情页命中 Cloudflare，尝试 cf-bypass");
                 fetch_via_cf_bypass(client, base, url)
                     .await
                     .map_err(|e| BookError::Http(format!("cf-bypass: {e:#}")))?
             }
             None => {
-                tracing::warn!(source_id = rule.id, book_url = %url, "详情页命中 Cloudflare 但未配置 cf-bypass");
+                tracing::warn!("详情页命中 Cloudflare 但未配置 cf-bypass");
                 return Err(BookError::Cloudflare(response.final_url.clone()));
             }
         }
@@ -99,7 +109,12 @@ pub async fn parse_book_detail(
     // 失败/无可用候选时 `cover_updater::fetch_cover` 内部已经返回原 fallback，
     // 这里无脑赋值即可。
     if !rule.need_proxy {
-        tracing::debug!(source_id = rule.id, book = %book.book_name, has_qidian_cookie = qidian_cookie.map(|s| !s.trim().is_empty()).unwrap_or(false), "触发 CoverUpdater（3 站 fan-out）");
+        // `source_id` 已在 span 里 —— 只补新字段 `book` 和 `has_qidian_cookie`。
+        tracing::debug!(
+            book = %book.book_name,
+            has_qidian_cookie = qidian_cookie.map(|s| !s.trim().is_empty()).unwrap_or(false),
+            "触发 CoverUpdater（3 站 fan-out）"
+        );
         let new_cover = cover_updater::fetch_cover(
             client,
             &book,
@@ -108,19 +123,21 @@ pub async fn parse_book_detail(
         )
         .await;
         if !new_cover.is_empty() && book.cover_url.as_deref() != Some(new_cover.as_str()) {
-            tracing::info!(source_id = rule.id, book = %book.book_name, "CoverUpdater 替换封面");
+            // 同样是去掉冗余的 `source_id`。
+            tracing::info!(book = %book.book_name, "CoverUpdater 替换封面");
             book.cover_url = Some(new_cover);
         }
     }
 
+    // 终止事件：保留"新信息"（author / cf_hit / cover_url / elapsed_ms），
+    // 去掉已在 span 里的 `source_id`。
     tracing::info!(
-        source_id = rule.id,
         book = %book.book_name,
         author = %book.author,
         cf_hit = cf_hit,
         cover_url = ?book.cover_url,
         elapsed_ms = started.elapsed().as_millis() as u64,
-        "parse_book_detail: 完成",
+        "parse_book_detail: 完成"
     );
     Ok(book)
 }

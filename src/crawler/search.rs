@@ -31,6 +31,7 @@ pub struct SourceSearchOutcome {
 ///
 /// `cf_bypass_base` 与各 parser 中的同名参数一致：CF 命中时若非空则
 /// 调用外部 bypass 服务。
+#[tracing::instrument(skip_all, fields(sources = sources.len(), keyword = %crate::util::fs::truncate_log(&keyword, 10)))]
 pub async fn search_aggregated(
     cfg: &AppConfig,
     http: Arc<HttpClients>,
@@ -39,8 +40,6 @@ pub async fn search_aggregated(
     limit: Option<usize>,
     cf_bypass_base: Option<String>,
 ) -> Vec<SourceSearchOutcome> {
-    tracing::info!(sources = sources.len(), keyword = %crate::util::fs::truncate_log(&keyword, 10), "search_aggregated: 启动 {} 个并发源", sources.len());
-
     let mut set = spawn_search_tasks(cfg, http, sources, keyword, limit, cf_bypass_base);
 
     let mut out = Vec::with_capacity(set.len());
@@ -52,7 +51,6 @@ pub async fn search_aggregated(
     }
     // 按 source_id 升序，UI 显示稳定
     out.sort_by_key(|o| o.source_id);
-    tracing::info!(total = out.len(), "search_aggregated: 全部完成",);
     out
 }
 
@@ -61,6 +59,7 @@ pub async fn search_aggregated(
 /// 与 `search_aggregated` 的区别：
 /// - `search_aggregated` 收集所有结果到 Vec，适合测试和一次性批量处理。
 /// - `search_streaming` 每完成一源就推送，适合 UI 逐源更新进度。
+#[tracing::instrument(skip_all, fields(sources = sources.len(), keyword = keyword))]
 pub async fn search_streaming(
     cfg: &AppConfig,
     http: Arc<HttpClients>,
@@ -70,8 +69,6 @@ pub async fn search_streaming(
     cf_bypass_base: Option<String>,
     tx: mpsc::UnboundedSender<SourceSearchOutcome>,
 ) {
-    tracing::info!(sources = sources.len(), keyword = %crate::util::fs::truncate_log(&keyword, 10), "search_streaming: 启动 {} 个并发源", sources.len());
-
     let mut set = spawn_search_tasks(cfg, http, sources, keyword, limit, cf_bypass_base);
 
     while let Some(joined) = set.join_next().await {
@@ -112,18 +109,9 @@ fn spawn_search_tasks(
         set.spawn(async move {
             let source_id = src.rule.id;
             let source_name = src.rule.name.clone();
-            let started = std::time::Instant::now();
-
-            tracing::debug!(source_id = source_id, source = %source_name, "单源搜索开始");
-
             let client = http.for_rule(&src.rule);
             let cf_borrow: Option<&str> = cf.as_ref().as_ref().map(|s| s.as_str());
             let result = run_one(&client, &src, kw.as_str(), limit, cf_borrow).await;
-            let elapsed_ms = started.elapsed().as_millis() as u64;
-            match &result {
-                Ok(list) => tracing::info!(source_id = source_id, source = %source_name, hits = list.len(), elapsed_ms = elapsed_ms, "单源搜索成功"),
-                Err(e) => tracing::warn!(source_id = source_id, source = %source_name, elapsed_ms = elapsed_ms, error = %e, "单源搜索失败"),
-            }
             SourceSearchOutcome {
                 source_id,
                 source_name,

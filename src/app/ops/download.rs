@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use tokio::sync::mpsc;
+use tracing::Instrument;
 
 use crate::app::search_state::TocState;
 use crate::config::AppConfig;
@@ -18,6 +19,7 @@ use crate::rules::Source;
 use super::super::download_task::DownloadTask;
 use super::super::now::now_unix_secs;
 use super::super::search_state::TocEvent;
+use super::super::trace::{TraceId, sub};
 
 /// spawn 共享上下文：提取 `rules` / `config` / `http` / `runtime` 四个参数，
 /// 消除 `spawn_download` / `spawn_download_range` / `spawn_resolve_toc` 的重复参数列表。
@@ -43,34 +45,54 @@ pub fn spawn_resolve_toc(
     let source_id = target.source_id;
     let url_for_event = target.url.clone();
 
-    tracing::info!(source_id = source_id, book_url = %book_url, "TOC 预取派发");
+    // 顶层 trace_id —— TOC 预取是一次独立的"动作"，独立 mint。
+    let trace_id = TraceId::mint();
+    let span = tracing::info_span!(
+        sub::TOC,
+        trace_id = %trace_id,
+        source_id = source_id,
+        %book_url,
+    );
+    let span_for_instrument = span.clone();
 
-    ctx.runtime.spawn(async move {
-        let started = std::time::Instant::now();
-        let state = if let Some(rule) = rule {
-            let source = Source::from(rule, &cfg);
-            let cancel = CancelToken::new();
-            let client = http.for_rule(&source.rule);
-            match resolve_book(&cfg, &client, &source, &book_url, &cancel).await {
-                Ok((book, chapters)) => {
-                    tracing::info!(source_id = source_id, book = %book.book_name, chapters = chapters.len(), elapsed_ms = started.elapsed().as_millis() as u64, "TOC 预取成功");
-                    TocState::Loaded(Box::new(book), chapters)
+    ctx.runtime.spawn(
+        async move {
+            let started = std::time::Instant::now();
+            let state = if let Some(rule) = rule {
+                let source = Source::from(rule, &cfg);
+                let cancel = CancelToken::new();
+                let client = http.for_rule(&source.rule);
+                match resolve_book(&cfg, &client, &source, &book_url, &cancel).await {
+                    Ok((book, chapters)) => {
+                        tracing::info!(
+                            book = %book.book_name,
+                            chapters = chapters.len(),
+                            elapsed_ms = started.elapsed().as_millis() as u64,
+                            "TOC 预取成功"
+                        );
+                        TocState::Loaded(Box::new(book), chapters)
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            elapsed_ms = started.elapsed().as_millis() as u64,
+                            error = %format!("{e:#}"),
+                            "TOC 预取失败"
+                        );
+                        TocState::Failed(format!("{e:#}"))
+                    }
                 }
-                Err(e) => {
-                    tracing::warn!(source_id = source_id, book_url = %book_url, elapsed_ms = started.elapsed().as_millis() as u64, error = %format!("{e:#}"), "TOC 预取失败");
-                    TocState::Failed(format!("{e:#}"))
-                }
-            }
-        } else {
-            tracing::warn!(source_id = source_id, "TOC 预取失败: 书源未找到（可能已被删除）");
-            TocState::Failed("书源未找到".to_string())
-        };
-        let _ = tx.send(TocEvent {
-            source_id,
-            url: url_for_event,
-            state,
-        });
-    });
+            } else {
+                tracing::warn!("TOC 预取失败: 书源未找到（可能已被删除）");
+                TocState::Failed("书源未找到".to_string())
+            };
+            let _ = tx.send(TocEvent {
+                source_id,
+                url: url_for_event,
+                state,
+            });
+        }
+        .instrument(span_for_instrument),
+    );
 
     rx
 }
@@ -102,34 +124,76 @@ pub fn spawn_download_range(
         total_chapters: total,
     });
 
-    tracing::info!(task_id = id, source_id = target.source_id, book = %book.book_name, total_chapters = total, book_url = %book_url, "下载任务派发（指定范围）");
+    // 顶层 trace_id：一次下载 = 一个 trace_id；后续所有阶段共享。
+    let trace_id = TraceId::mint();
+    let span = tracing::info_span!(
+        sub::DOWNLOAD,
+        trace_id = %trace_id,
+        task_id = id,
+        source_id = target.source_id,
+        book = %target.book_name,
+        %book_url,
+        total_chapters = total,
+    );
+    let span_for_instrument = span.clone();
+    let started = std::time::Instant::now();
+    let book_name = target.book_name.clone();
 
-    ctx.runtime.spawn(async move {
-        let Some(rule) = rule else {
-            let _ = tx_for_task.send(Progress::Cancelled);
-            return;
-        };
-        let source = Source::from(rule, &cfg);
-        let client = http.for_rule(&source.rule);
-        // 留一个 sender 副本用于失败时发 Progress::Failed（tx_for_task 会 move 进 opts）。
-        let tx_for_failure = tx_for_task.clone();
-        let opts = DownloadOptions {
-            progress: tx_for_task,
-            cancel: cancel_for_task,
-        };
-        if let Err(e) =
-            download_chapters(&cfg, &client, &source, &book_url, &book, chapters, opts).await
-        {
-            // 用户取消已由 crawler 内部发 Progress::Cancelled；真正的失败发
-            // Progress::Failed，让 UI 区分"取消"与"失败"并保留原因。
-            if !matches!(e, CrawlerError::Cancelled) {
-                tracing::warn!("download_chapters failed: {e:#}");
-                let _ = tx_for_failure.send(Progress::Failed {
-                    reason: format!("{e:#}"),
-                });
+    ctx.runtime.spawn(
+        async move {
+            let Some(rule) = rule else {
+                let _ = tx_for_task.send(Progress::Cancelled);
+                tracing::warn!(
+                    book = %book_name,
+                    elapsed_ms = started.elapsed().as_millis() as u64,
+                    outcome = "no_rule",
+                    "下载任务终止（指定范围）"
+                );
+                return;
+            };
+            let source = Source::from(rule, &cfg);
+            let client = http.for_rule(&source.rule);
+            // 留一个 sender 副本用于失败时发 Progress::Failed（tx_for_task 会 move 进 opts）。
+            let tx_for_failure = tx_for_task.clone();
+            let opts = DownloadOptions {
+                progress: tx_for_task,
+                cancel: cancel_for_task,
+            };
+            match download_chapters(&cfg, &client, &source, &book_url, &book, chapters, opts).await
+            {
+                Ok(_path) => {
+                    tracing::info!(
+                        book = %book_name,
+                        elapsed_ms = started.elapsed().as_millis() as u64,
+                        outcome = "ok",
+                        "下载任务终止（指定范围）"
+                    );
+                }
+                Err(CrawlerError::Cancelled) => {
+                    // 用户取消 — Progress::Cancelled 已由 crawler 内部发；这里只补一条尾日志。
+                    tracing::info!(
+                        book = %book_name,
+                        elapsed_ms = started.elapsed().as_millis() as u64,
+                        outcome = "cancelled",
+                        "下载任务终止（指定范围）"
+                    );
+                }
+                Err(e) => {
+                    // 真正的失败 → 区分于 cancel：发 Progress::Failed 给 UI + 一条 warn 日志。
+                    let reason = format!("{e:#}");
+                    tracing::warn!(
+                        book = %book_name,
+                        elapsed_ms = started.elapsed().as_millis() as u64,
+                        outcome = "failed",
+                        error = %reason,
+                        "下载任务终止（指定范围）"
+                    );
+                    let _ = tx_for_failure.send(Progress::Failed { reason });
+                }
             }
         }
-    });
+        .instrument(span_for_instrument),
+    );
 
     drop(tx);
 
@@ -169,33 +233,74 @@ pub fn spawn_download(
     let cancel_for_task = cancel.clone();
     let tx_for_task = tx.clone();
 
-    tracing::info!(task_id = id, source_id = target.source_id, book_name = %target.book_name, book_url = %book_url, "下载任务派发");
+    // 顶层 trace_id：一次下载 = 一个 trace_id；后续所有阶段共享。
+    let trace_id = TraceId::mint();
+    let span = tracing::info_span!(
+        sub::DOWNLOAD,
+        trace_id = %trace_id,
+        task_id = id,
+        source_id = target.source_id,
+        book = %target.book_name,
+        %book_url,
+    );
+    let span_for_instrument = span.clone();
+    let started = std::time::Instant::now();
+    let book_name = target.book_name.clone();
 
-    ctx.runtime.spawn(async move {
-        let Some(rule) = rule else {
-            tracing::warn!(task_id = id, "下载任务取消: 书源未找到（可能已被删除）");
-            let _ = tx_for_task.send(Progress::Cancelled);
-            return;
-        };
-        let source = Source::from(rule, &cfg);
-        let client = http.for_rule(&source.rule);
-        // 留一个 sender 副本用于失败时发 Progress::Failed（tx_for_task 会 move 进 opts）。
-        let tx_for_failure = tx_for_task.clone();
-        let opts = DownloadOptions {
-            progress: tx_for_task,
-            cancel: cancel_for_task,
-        };
-        if let Err(e) = download_book(&cfg, &client, &source, &book_url, opts).await {
-            // 用户取消已由 crawler 内部发 Progress::Cancelled；真正的失败发
-            // Progress::Failed，让 UI 区分"取消"与"失败"并保留原因。
-            if !matches!(e, CrawlerError::Cancelled) {
-                tracing::warn!(task_id = id, "download_book failed: {e:#}");
-                let _ = tx_for_failure.send(Progress::Failed {
-                    reason: format!("{e:#}"),
-                });
+    ctx.runtime.spawn(
+        async move {
+            let Some(rule) = rule else {
+                let _ = tx_for_task.send(Progress::Cancelled);
+                tracing::warn!(
+                    book = %book_name,
+                    elapsed_ms = started.elapsed().as_millis() as u64,
+                    outcome = "no_rule",
+                    "下载任务终止"
+                );
+                return;
+            };
+            let source = Source::from(rule, &cfg);
+            let client = http.for_rule(&source.rule);
+            // 留一个 sender 副本用于失败时发 Progress::Failed（tx_for_task 会 move 进 opts）。
+            let tx_for_failure = tx_for_task.clone();
+            let opts = DownloadOptions {
+                progress: tx_for_task,
+                cancel: cancel_for_task,
+            };
+            match download_book(&cfg, &client, &source, &book_url, opts).await {
+                Ok(_path) => {
+                    tracing::info!(
+                        book = %book_name,
+                        elapsed_ms = started.elapsed().as_millis() as u64,
+                        outcome = "ok",
+                        "下载任务终止"
+                    );
+                }
+                Err(CrawlerError::Cancelled) => {
+                    tracing::info!(
+                        book = %book_name,
+                        elapsed_ms = started.elapsed().as_millis() as u64,
+                        outcome = "cancelled",
+                        "下载任务终止"
+                    );
+                }
+                Err(e) => {
+                    // 用户取消已由 crawler 内部发 Progress::Cancelled；真正的失败发
+                    // Progress::Failed，让 UI 区分"取消"与"失败"并保留原因。
+                    let reason = format!("{e:#}");
+                    tracing::warn!(
+                        book = %book_name,
+                        elapsed_ms = started.elapsed().as_millis() as u64,
+                        outcome = "failed",
+                        error = %reason,
+                        "下载任务终止"
+                    );
+                    let _ = tx_for_failure.send(Progress::Failed { reason });
+                }
             }
         }
-    });
+        .instrument(span_for_instrument),
+    );
 
     drop(tx);
 

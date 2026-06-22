@@ -55,6 +55,17 @@ pub enum ChapterError {
 /// 未做清洗 / 模板渲染 — 那些在阶段 3 的 ChapterFilter/Formatter 里做）。
 ///
 /// `cf_bypass_base` 同其它 parser。
+#[tracing::instrument(
+    name = "parse_chapter",
+    skip_all,
+    fields(
+        source_id = rule.id,
+        source = %rule.name,
+        order = chapter.order,
+        title = %chapter.title,
+        url = %chapter.url,
+    )
+)]
 pub async fn parse_chapter(
     client: &Client,
     rule: &Rule,
@@ -65,18 +76,13 @@ pub async fn parse_chapter(
         .chapter
         .as_ref()
         .ok_or(ChapterError::ChapterRuleMissing)?;
-
-    let started = std::time::Instant::now();
     let pagination = !chapter_rule.next_page.is_empty();
-    tracing::debug!(order = chapter.order, title = %chapter.title, url = %chapter.url, pagination = pagination, "parse_chapter: 开始");
 
     let content = if pagination {
         fetch_paginated_content(client, rule, &chapter.url, cf_bypass_base).await?
     } else {
         fetch_single_page_content(client, rule, &chapter.url, cf_bypass_base).await?
     };
-
-    tracing::debug!(order = chapter.order, title = %chapter.title, len = content.len(), elapsed_ms = started.elapsed().as_millis() as u64, "parse_chapter: 完成");
 
     Ok(Chapter {
         url: chapter.url.clone(),
@@ -182,15 +188,7 @@ async fn fetch_paginated_content(
         pages += 1;
 
         match next_step {
-            NextStep::Stop => {
-                tracing::debug!(
-                    pages = pages,
-                    bytes = buf.len(),
-                    elapsed_ms = started.elapsed().as_millis() as u64,
-                    "分页正文抓取完成（终止）"
-                );
-                break;
-            }
+            NextStep::Stop => break,
             NextStep::Goto(next_url) => current_url = next_url,
         }
     }
@@ -199,7 +197,7 @@ async fn fetch_paginated_content(
         pages = pages,
         bytes = buf.len(),
         elapsed_ms = started.elapsed().as_millis() as u64,
-        "分页正文抓取完成（循环结束）"
+        "分页正文抓取完成"
     );
     Ok(buf)
 }

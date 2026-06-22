@@ -25,15 +25,13 @@ fn main() -> Result<()> {
             .unwrap_or(false);
     let is_cli = !is_web && args.len() > 1;
 
-    let log_dir = so_novel_rs::config::ConfigPaths::discover().log_dir;
-
     // GUI subsystem 的 exe 默认没有 stdio 句柄；从 cmd / PowerShell 跑 CLI 子命令
     // 时附加到父进程的控制台。
     if is_cli || is_web {
         attach_parent_console();
     }
 
-    so_novel_rs::logging::init_tracing(&log_dir);
+    so_novel_rs::logging::init_tracing();
 
     if is_web {
         let host = parse_arg_value(&args, "--host").unwrap_or_else(|| DEFAULT_WEB_HOST.to_string());

@@ -44,6 +44,15 @@ pub enum TocError {
 ///
 /// `book_url` 是详情页 URL（与 SearchResult.url 一致）。
 /// `cf_bypass_base` 同其它 parser：CF 命中且非空时调用旁路服务。
+#[tracing::instrument(
+    name = "parse_toc",
+    skip_all,
+    fields(
+        source_id = rule.id,
+        source = %rule.name,
+        %book_url,
+    )
+)]
 pub async fn parse_toc(
     client: &Client,
     rule: &Rule,
