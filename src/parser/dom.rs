@@ -45,23 +45,9 @@ pub fn select_and_invoke_js(
     query: &str,
     content_type: ContentType,
 ) -> Result<String, SelectError> {
-    if query.is_empty() {
-        return Ok(String::new());
-    }
-
-    // 先剥离 @href / @src 后缀，同时覆盖 caller 传入的 content_type。
-    let (query, content_type) = strip_at_suffix(query, content_type);
-    let (selector_part, js_body) = split_js(query);
-
-    let selector_norm = normalize_selector(selector_part)?;
-    let raw = dom_select_text(document, &selector_norm, content_type)?;
-
-    match js_body {
-        Some(body) => {
-            crate::js::post_process(body, &raw).map_err(|e| SelectError::JsFailed(format!("{e:#}")))
-        }
-        None => Ok(raw),
-    }
+    select_and_invoke_js_impl(query, content_type, |sel, ct| {
+        dom_select_text(document, sel, ct)
+    })
 }
 
 /// 同上，但作用于已选中的 `ElementRef`（嵌套查询场景，例如搜索结果列表里
@@ -71,13 +57,24 @@ pub fn select_and_invoke_js_within(
     query: &str,
     content_type: ContentType,
 ) -> Result<String, SelectError> {
+    select_and_invoke_js_impl(query, content_type, |sel, ct| {
+        element_select_text(el, sel, ct)
+    })
+}
+
+/// 共享逻辑：剥离后缀 → 拆 JS → 选择器归一化 → 抽取 → 可选 JS 后处理。
+fn select_and_invoke_js_impl(
+    query: &str,
+    content_type: ContentType,
+    select: impl FnOnce(&str, ContentType) -> Result<String, SelectError>,
+) -> Result<String, SelectError> {
     if query.is_empty() {
         return Ok(String::new());
     }
     let (query, content_type) = strip_at_suffix(query, content_type);
     let (selector_part, js_body) = split_js(query);
     let selector_norm = normalize_selector(selector_part)?;
-    let raw = element_select_text(el, &selector_norm, content_type)?;
+    let raw = select(&selector_norm, content_type)?;
     match js_body {
         Some(body) => {
             crate::js::post_process(body, &raw).map_err(|e| SelectError::JsFailed(format!("{e:#}")))
@@ -93,13 +90,8 @@ pub fn dom_select_text(
     content_type: ContentType,
 ) -> Result<String, SelectError> {
     let sel = crate::parser::cache::cached_selector(selector)?;
-    let mut iter = document.select(&sel);
-    let Some(first) = iter.next() else {
-        return Ok(String::new());
-    };
-    let mut rest: Vec<ElementRef<'_>> = iter.collect();
-    rest.insert(0, first);
-    Ok(extract_from_elements(&rest, content_type))
+    let elements: Vec<ElementRef<'_>> = document.select(&sel).collect();
+    Ok(extract_from_elements(&elements, content_type))
 }
 
 fn element_select_text(

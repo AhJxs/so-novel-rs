@@ -1,5 +1,6 @@
 //! 下载任务相关业务方法。
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use tokio::sync::mpsc;
@@ -43,7 +44,6 @@ pub fn spawn_resolve_toc(
     let http = Arc::clone(&ctx.http);
     let book_url = target.url.clone();
     let source_id = target.source_id;
-    let url_for_event = target.url.clone();
 
     // 顶层 trace_id —— TOC 预取是一次独立的"动作"，独立 mint。
     let trace_id = TraceId::mint();
@@ -87,7 +87,7 @@ pub fn spawn_resolve_toc(
             };
             let _ = tx.send(TocEvent {
                 source_id,
-                url: url_for_event,
+                url: book_url,
                 state,
             });
         }
@@ -95,6 +95,48 @@ pub fn spawn_resolve_toc(
     );
 
     rx
+}
+
+/// 记录下载任务的终态日志（ok / cancelled / failed）。
+/// 消除 `spawn_download` / `spawn_download_range` 的 match 块复制。
+fn log_download_outcome(
+    result: Result<PathBuf, CrawlerError>,
+    book_name: &str,
+    started: std::time::Instant,
+    label: &str,
+    tx_for_failure: Option<&mpsc::UnboundedSender<Progress>>,
+) {
+    match result {
+        Ok(_path) => {
+            tracing::info!(
+                book = %book_name,
+                elapsed_ms = started.elapsed().as_millis() as u64,
+                outcome = "ok",
+                "下载任务终止{label}",
+            );
+        }
+        Err(CrawlerError::Cancelled) => {
+            tracing::info!(
+                book = %book_name,
+                elapsed_ms = started.elapsed().as_millis() as u64,
+                outcome = "cancelled",
+                "下载任务终止{label}",
+            );
+        }
+        Err(e) => {
+            let reason = format!("{e:#}");
+            tracing::warn!(
+                book = %book_name,
+                elapsed_ms = started.elapsed().as_millis() as u64,
+                outcome = "failed",
+                error = %reason,
+                "下载任务终止{label}",
+            );
+            if let Some(tx) = tx_for_failure {
+                let _ = tx.send(Progress::Failed { reason });
+            }
+        }
+    }
 }
 
 /// 派一个指定章节范围的下载任务。跳过 resolve 阶段，直接进入下载。
@@ -159,38 +201,15 @@ pub fn spawn_download_range(
                 progress: tx_for_task,
                 cancel: cancel_for_task,
             };
-            match download_chapters(&cfg, &client, &source, &book_url, &book, chapters, opts).await
-            {
-                Ok(_path) => {
-                    tracing::info!(
-                        book = %book_name,
-                        elapsed_ms = started.elapsed().as_millis() as u64,
-                        outcome = "ok",
-                        "下载任务终止（指定范围）"
-                    );
-                }
-                Err(CrawlerError::Cancelled) => {
-                    // 用户取消 — Progress::Cancelled 已由 crawler 内部发；这里只补一条尾日志。
-                    tracing::info!(
-                        book = %book_name,
-                        elapsed_ms = started.elapsed().as_millis() as u64,
-                        outcome = "cancelled",
-                        "下载任务终止（指定范围）"
-                    );
-                }
-                Err(e) => {
-                    // 真正的失败 → 区分于 cancel：发 Progress::Failed 给 UI + 一条 warn 日志。
-                    let reason = format!("{e:#}");
-                    tracing::warn!(
-                        book = %book_name,
-                        elapsed_ms = started.elapsed().as_millis() as u64,
-                        outcome = "failed",
-                        error = %reason,
-                        "下载任务终止（指定范围）"
-                    );
-                    let _ = tx_for_failure.send(Progress::Failed { reason });
-                }
-            }
+            let result =
+                download_chapters(&cfg, &client, &source, &book_url, &book, chapters, opts).await;
+            log_download_outcome(
+                result,
+                &book_name,
+                started,
+                "（指定范围）",
+                Some(&tx_for_failure),
+            );
         }
         .instrument(span_for_instrument),
     );
@@ -267,37 +286,8 @@ pub fn spawn_download(
                 progress: tx_for_task,
                 cancel: cancel_for_task,
             };
-            match download_book(&cfg, &client, &source, &book_url, opts).await {
-                Ok(_path) => {
-                    tracing::info!(
-                        book = %book_name,
-                        elapsed_ms = started.elapsed().as_millis() as u64,
-                        outcome = "ok",
-                        "下载任务终止"
-                    );
-                }
-                Err(CrawlerError::Cancelled) => {
-                    tracing::info!(
-                        book = %book_name,
-                        elapsed_ms = started.elapsed().as_millis() as u64,
-                        outcome = "cancelled",
-                        "下载任务终止"
-                    );
-                }
-                Err(e) => {
-                    // 用户取消已由 crawler 内部发 Progress::Cancelled；真正的失败发
-                    // Progress::Failed，让 UI 区分"取消"与"失败"并保留原因。
-                    let reason = format!("{e:#}");
-                    tracing::warn!(
-                        book = %book_name,
-                        elapsed_ms = started.elapsed().as_millis() as u64,
-                        outcome = "failed",
-                        error = %reason,
-                        "下载任务终止"
-                    );
-                    let _ = tx_for_failure.send(Progress::Failed { reason });
-                }
-            }
+            let result = download_book(&cfg, &client, &source, &book_url, opts).await;
+            log_download_outcome(result, &book_name, started, "", Some(&tx_for_failure));
         }
         .instrument(span_for_instrument),
     );

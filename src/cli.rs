@@ -102,8 +102,7 @@ pub fn run() -> Result<()> {
     }
 }
 
-fn effective_cfg(cfg: AppConfig, output: Option<String>, format: Option<String>) -> AppConfig {
-    let mut cfg = cfg;
+fn effective_cfg(mut cfg: AppConfig, output: Option<String>, format: Option<String>) -> AppConfig {
     if let Some(o) = output {
         cfg.download_path = o;
     }

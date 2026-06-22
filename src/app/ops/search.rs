@@ -96,9 +96,8 @@ pub fn spawn_search(
         single_source = search.source_id.is_some(),
     );
 
-    // outer 也要 clone 一份：内部 `async move` 会 move 走一份，.instrument 还要一份。
-    let span_outer = span.clone();
-    let span_for_instrument = span_outer.clone();
+    // 内部 `async move` 会 move 走一份 span，.instrument 还要一份。
+    let span_for_spawn = span.clone();
     runtime.spawn(
         async move {
             let (inner_tx, mut inner_rx) =
@@ -120,7 +119,6 @@ pub fn spawn_search(
             // `tracing::Span` 本身 !Send，但 `.instrument(span)` 包装出来的 future
             // 是 Send 的（Instrumented<F, F::Output> 的 Send 是这样实现的），
             // 所以 span 可以安全穿过 tokio::spawn 边界。
-            let span_for_task = span_outer.clone();
             let search_handle = tokio::spawn(
                 async move {
                     crate::crawler::search::search_streaming(
@@ -134,7 +132,7 @@ pub fn spawn_search(
                     )
                     .await
                 }
-                .instrument(span_for_task),
+                .instrument(span),
             );
 
             // 桥接循环：每收到一源结果就立即转发给 UI，与搜索并发。
@@ -183,7 +181,7 @@ pub fn spawn_search(
             // success/failure 在 per-source 行（`sub=source:N`）已记录；这里只做"聚合完毕"信号。
             tracing::info!(received = seen_ids.len(), missing = missing, "搜索聚合完毕");
         }
-        .instrument(span_for_instrument),
+        .instrument(span_for_spawn),
     );
 
     true
@@ -221,18 +219,8 @@ pub fn select_search_result(
         .detail_cache
         .insert(key.clone(), DetailState::Pending);
 
-    let tx = match &search.detail_rx {
-        Some(_) => {
-            let (tx, rx) = mpsc::unbounded_channel();
-            search.detail_rx = Some(rx);
-            tx
-        }
-        None => {
-            let (tx, rx) = mpsc::unbounded_channel();
-            search.detail_rx = Some(rx);
-            tx
-        }
-    };
+    let (tx, rx) = mpsc::unbounded_channel();
+    search.detail_rx = Some(rx);
 
     let url = r.url.clone();
     let source_id = r.source_id;

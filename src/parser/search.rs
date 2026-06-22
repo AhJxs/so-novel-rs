@@ -161,50 +161,34 @@ pub fn parse_search_results(
 ) -> Result<Vec<SearchResult>, SearchError> {
     let s = rule.search.as_ref().ok_or(SearchError::SearchDisabled)?;
 
-    let document = Html::parse_document(html);
-
     // result 字段可能含 @js: 后处理（如 quanben5 的 JSONP 解析）。
-    // 有 @js: 时：先用 CSS 选择器取元素 innerHTML → JS 后处理 → 结果当新文档再解析；
-    // 无 @js: 时：直接用 CSS 选择器迭代元素。
-    let has_js = s.result.contains("@js:");
-
-    let mut out: Vec<SearchResult> = Vec::new();
-
-    if has_js {
-        // Java SearchParser.processResultWithJs：把**整个响应体**传给 JS，
-        // JS 接收 body 返回转换后的 HTML，再用 CSS 选择器从结果中选元素。
+    // 有 @js: 时：把整个响应体传给 JS 返回转换后的 HTML，再用 CSS 选择器选元素；
+    // 无 @js: 时：直接用 CSS 选择器从原始文档迭代元素。
+    let (css_selector, result_doc);
+    if s.result.contains("@js:") {
         let js_body = &s.result[s.result.find("@js:").unwrap() + 4..];
-        let css_selector = s.result.split("@js:").next().unwrap_or("").trim();
+        css_selector = s.result.split("@js:").next().unwrap_or("").trim();
         let processed = crate::js::post_process(js_body, html)
             .map_err(|e| SearchError::Parse(format!("result @js: 执行失败: {e:#}")))?;
         tracing::debug!(css_selector, processed_len = processed.len(), processed_preview = %processed.chars().take(300).collect::<String>(), "@js: result 处理完成");
         if processed.is_empty() {
-            return Ok(out);
+            return Ok(Vec::new());
         }
-        let result_doc = Html::parse_document(&processed);
-        let result_selector = crate::parser::cache::cached_selector(css_selector).map_err(|e| {
-            SearchError::Parse(format!("无效的 result 选择器 `{css_selector}`: {e:?}"))
-        })?;
-        let matched_count = result_doc.select(&result_selector).count();
-        tracing::debug!(css_selector, matched_count, "CSS 选择器匹配元素数");
-        for el in result_doc.select(&result_selector) {
-            push_search_result(el, s, base_url, rule.id, &rule.name, &mut out);
-            if let Some(n) = limit {
-                if out.len() >= n {
-                    break;
-                }
-            }
-        }
+        result_doc = Html::parse_document(&processed);
     } else {
-        let result_selector = crate::parser::cache::cached_selector(&s.result).map_err(|e| {
-            SearchError::Parse(format!("无效的 result 选择器 `{}`: {e:?}", s.result))
-        })?;
-        for el in document.select(&result_selector) {
-            push_search_result(el, s, base_url, rule.id, &rule.name, &mut out);
-            if let Some(n) = limit {
-                if out.len() >= n {
-                    break;
-                }
+        css_selector = s.result.as_str();
+        result_doc = Html::parse_document(html);
+    }
+
+    let result_selector = crate::parser::cache::cached_selector(css_selector)
+        .map_err(|e| SearchError::Parse(format!("无效的 result 选择器 `{css_selector}`: {e:?}")))?;
+
+    let mut out: Vec<SearchResult> = Vec::new();
+    for el in result_doc.select(&result_selector) {
+        push_search_result(el, s, base_url, rule.id, &rule.name, &mut out);
+        if let Some(n) = limit {
+            if out.len() >= n {
+                break;
             }
         }
     }
@@ -235,12 +219,12 @@ fn push_search_result(
         select_and_invoke_js_within(el, &s.book_name, ContentType::AttrHref).unwrap_or_default();
     let url = crate::http::abs_url(base_url, &raw_href).unwrap_or_default();
 
-    let author = optional_field(el, &s.author).unwrap_or(None);
-    let category = optional_field(el, &s.category).unwrap_or(None);
-    let latest_chapter = optional_field(el, &s.latest_chapter).unwrap_or(None);
-    let last_update_time = optional_field(el, &s.last_update_time).unwrap_or(None);
-    let status = optional_field(el, &s.status).unwrap_or(None);
-    let word_count = optional_field(el, &s.word_count).unwrap_or(None);
+    let author = optional_field_or_none(el, &s.author);
+    let category = optional_field_or_none(el, &s.category);
+    let latest_chapter = optional_field_or_none(el, &s.latest_chapter);
+    let last_update_time = optional_field_or_none(el, &s.last_update_time);
+    let status = optional_field_or_none(el, &s.status);
+    let word_count = optional_field_or_none(el, &s.word_count);
 
     out.push(SearchResult {
         source_id,
@@ -263,6 +247,11 @@ fn optional_field(el: scraper::ElementRef<'_>, query: &str) -> Result<Option<Str
     }
     let v = select_and_invoke_js_within(el, query, ContentType::Text)?;
     Ok(if v.is_empty() { None } else { Some(v) })
+}
+
+/// `optional_field` 的无错误变体：选择器/JS 失败时静默返回 `None`。
+fn optional_field_or_none(el: scraper::ElementRef<'_>, query: &str) -> Option<String> {
+    optional_field(el, query).unwrap_or(None)
 }
 
 #[cfg(test)]
