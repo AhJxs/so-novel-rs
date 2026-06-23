@@ -104,7 +104,7 @@ fn log_download_outcome(
     book_name: &str,
     started: std::time::Instant,
     label: &str,
-    tx_for_failure: Option<&mpsc::UnboundedSender<Progress>>,
+    tx_for_failure: &mpsc::UnboundedSender<Progress>,
 ) {
     match result {
         Ok(_path) => {
@@ -116,6 +116,7 @@ fn log_download_outcome(
             );
         }
         Err(CrawlerError::Cancelled) => {
+            // 用户取消 — Progress::Cancelled 已由 crawler 内部发；这里只补一条尾日志。
             tracing::info!(
                 book = %book_name,
                 elapsed_ms = started.elapsed().as_millis() as u64,
@@ -132,9 +133,7 @@ fn log_download_outcome(
                 error = %reason,
                 "下载任务终止{label}",
             );
-            if let Some(tx) = tx_for_failure {
-                let _ = tx.send(Progress::Failed { reason });
-            }
+            let _ = tx_for_failure.send(Progress::Failed { reason });
         }
     }
 }
@@ -201,15 +200,8 @@ pub fn spawn_download_range(
                 progress: tx_for_task,
                 cancel: cancel_for_task,
             };
-            let result =
-                download_chapters(&cfg, &client, &source, &book_url, &book, chapters, opts).await;
-            log_download_outcome(
-                result,
-                &book_name,
-                started,
-                "（指定范围）",
-                Some(&tx_for_failure),
-            );
+            let result = download_chapters(&cfg, &client, &source, &book, chapters, opts).await;
+            log_download_outcome(result, &book_name, started, "（指定范围）", &tx_for_failure);
         }
         .instrument(span_for_instrument),
     );
@@ -287,7 +279,7 @@ pub fn spawn_download(
                 cancel: cancel_for_task,
             };
             let result = download_book(&cfg, &client, &source, &book_url, opts).await;
-            log_download_outcome(result, &book_name, started, "", Some(&tx_for_failure));
+            log_download_outcome(result, &book_name, started, "", &tx_for_failure);
         }
         .instrument(span_for_instrument),
     );

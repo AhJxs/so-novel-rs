@@ -25,7 +25,7 @@ pub struct DownloadRequest {
     chapter_end: Option<u32>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Default)]
 struct ProgressEvent {
     #[serde(rename = "type")]
     kind: &'static str,
@@ -64,8 +64,7 @@ pub async fn download(
             let ev = ProgressEvent {
                 kind: "failed",
                 reason: Some("书源未找到".into()),
-                index: None, title: None, task_id: None, filename: None,
-                total: None, book_name: None,
+                ..Default::default()
             };
             yield Ok(axum::response::sse::Event::default()
                 .event("progress")
@@ -180,8 +179,7 @@ pub async fn download(
             };
 
         let result =
-            crawler::download_chapters(&config, &client, &source, &book_url, &book, chapters, opts)
-                .await;
+            crawler::download_chapters(&config, &client, &source, &book, chapters, opts).await;
 
         match result {
             Ok(path) => {
@@ -225,20 +223,20 @@ pub async fn download(
                             kind: "book_resolved",
                             book_name: Some(book.book_name),
                             total: Some(total_chapters),
-                            index: None, title: None, task_id: None, filename: None, reason: None,
+                            ..Default::default()
                         },
                         Progress::ChapterDone { index, title } => ProgressEvent {
                             kind: "chapter_done",
                             index: Some(index),
                             title: Some(title),
-                            task_id: None, filename: None, reason: None, total: None, book_name: None,
+                            ..Default::default()
                         },
                         Progress::ChapterFailed { index, title, reason } => ProgressEvent {
                             kind: "chapter_failed",
                             index: Some(index),
                             title: Some(title),
                             reason: Some(reason),
-                            task_id: None, filename: None, total: None, book_name: None,
+                            ..Default::default()
                         },
                         Progress::Finished { output_path } => {
                             let filename = output_path.file_name()
@@ -249,19 +247,17 @@ pub async fn download(
                                 kind: "finished",
                                 task_id: Some(task_id),
                                 filename: Some(filename),
-                                index: None, title: None, reason: None, total: None, book_name: None,
+                                ..Default::default()
                             }
                         }
                         Progress::Cancelled => ProgressEvent {
                             kind: "cancelled",
-                            index: None, title: None, task_id: None, filename: None,
-                            reason: None, total: None, book_name: None,
+                            ..Default::default()
                         },
                         Progress::Failed { reason } => ProgressEvent {
                             kind: "failed",
                             reason: Some(reason),
-                            index: None, title: None, task_id: None, filename: None,
-                            total: None, book_name: None,
+                            ..Default::default()
                         },
                     };
                     let data = serde_json::to_string(&ev).unwrap_or_default();

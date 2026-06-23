@@ -20,7 +20,7 @@ use reqwest::Client;
 use scraper::{Html, Selector};
 use thiserror::Error;
 
-use crate::http::{FetchRequest, HttpMethod, abs_url, fetch, fetch_via_cf_bypass, has_cloudflare};
+use crate::http::abs_url;
 use crate::models::{Chapter, ContentType, Rule};
 use crate::parser::dom::{SelectError, select_and_invoke_js};
 
@@ -339,29 +339,12 @@ async fn fetch_with_cf_fallback(
     timeout: Option<u32>,
     cf_bypass_base: Option<&str>,
 ) -> Result<String, TocError> {
-    let resp = fetch(
-        client,
-        &FetchRequest {
-            url,
-            method: HttpMethod::Get,
-            cookies: None,
-            timeout_secs: timeout,
-            referer: None,
-        },
-    )
-    .await
-    .map_err(|e| TocError::Http(format!("{e:#}")))?;
-
-    if has_cloudflare(&resp.html) {
-        match cf_bypass_base.filter(|s| !s.trim().is_empty()) {
-            Some(base) => fetch_via_cf_bypass(client, base, url)
-                .await
-                .map_err(|e| TocError::Http(format!("cf-bypass: {e:#}"))),
-            None => Err(TocError::Cloudflare(resp.final_url)),
-        }
-    } else {
-        Ok(resp.html)
-    }
+    crate::http::fetch_with_cf_fallback(client, url, timeout, cf_bypass_base)
+        .await
+        .map_err(|e| match e {
+            crate::http::CfFallbackError::Http(msg) => TocError::Http(msg),
+            crate::http::CfFallbackError::Cloudflare(final_url) => TocError::Cloudflare(final_url),
+        })
 }
 
 /// 用 `Book.url` 这个正则从详情页 URL 中提取书 ID。

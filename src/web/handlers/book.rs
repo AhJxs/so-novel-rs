@@ -43,16 +43,8 @@ pub async fn book_detail(
     let source = Source::from(rule, &config);
     let client = state.http.for_rule(&source.rule);
 
-    let cf = if config.cf_bypass.trim().is_empty() {
-        None
-    } else {
-        Some(config.cf_bypass.as_str())
-    };
-    let qc = if config.qidian_cookie.trim().is_empty() {
-        None
-    } else {
-        Some(config.qidian_cookie.as_str())
-    };
+    let cf = (!config.cf_bypass.trim().is_empty()).then_some(config.cf_bypass.as_str());
+    let qc = (!config.qidian_cookie.trim().is_empty()).then_some(config.qidian_cookie.as_str());
 
     let book = parser::parse_book_detail(&client, &source.rule, &params.url, cf, qc)
         .await

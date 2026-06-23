@@ -74,7 +74,6 @@ pub fn spawn_search(
     let (tx, rx) = mpsc::unbounded_channel::<SourceSearchEvent>();
     search.rx = Some(rx);
 
-    let cfg = config.clone();
     let cf_bypass = if config.cf_bypass.trim().is_empty() {
         None
     } else {
@@ -104,8 +103,6 @@ pub fn spawn_search(
                 mpsc::unbounded_channel::<crate::crawler::search::SourceSearchOutcome>();
 
             // 把搜索放在独立的 tokio task 里，与下面的桥接循环并发运行。
-            // async move 会把 cfg 移入内部，&cfg 引用的是 task 自己拥有的值，
-            // 满足 'static 要求。
             // 在 target_sources move 进 search_streaming 前，建好 id→name 映射，
             // 用于桥接循环结束后给"未出结果的源"补失败事件。
             let source_names: std::collections::HashMap<i32, String> = target_sources
@@ -122,7 +119,6 @@ pub fn spawn_search(
             let search_handle = tokio::spawn(
                 async move {
                     crate::crawler::search::search_streaming(
-                        &cfg,
                         http,
                         target_sources,
                         keyword,

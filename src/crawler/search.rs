@@ -9,11 +9,9 @@
 
 use std::sync::Arc;
 
-use reqwest::Client;
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 
-use crate::config::AppConfig;
 use crate::http::HttpClients;
 use crate::models::SearchResult;
 use crate::parser::{SearchError, search_one};
@@ -33,14 +31,13 @@ pub struct SourceSearchOutcome {
 /// 调用外部 bypass 服务。
 #[tracing::instrument(skip_all, fields(sources = sources.len(), keyword = %crate::util::fs::truncate_log(&keyword, 10)))]
 pub async fn search_aggregated(
-    cfg: &AppConfig,
     http: Arc<HttpClients>,
     sources: Vec<Source>,
     keyword: String,
     limit: Option<usize>,
     cf_bypass_base: Option<String>,
 ) -> Vec<SourceSearchOutcome> {
-    let mut set = spawn_search_tasks(cfg, http, sources, keyword, limit, cf_bypass_base);
+    let mut set = spawn_search_tasks(http, sources, keyword, limit, cf_bypass_base);
 
     let mut out = Vec::with_capacity(set.len());
     while let Some(joined) = set.join_next().await {
@@ -61,7 +58,6 @@ pub async fn search_aggregated(
 /// - `search_streaming` 每完成一源就推送，适合 UI 逐源更新进度。
 #[tracing::instrument(skip_all, fields(sources = sources.len(), keyword = keyword))]
 pub async fn search_streaming(
-    cfg: &AppConfig,
     http: Arc<HttpClients>,
     sources: Vec<Source>,
     keyword: String,
@@ -69,7 +65,7 @@ pub async fn search_streaming(
     cf_bypass_base: Option<String>,
     tx: mpsc::UnboundedSender<SourceSearchOutcome>,
 ) {
-    let mut set = spawn_search_tasks(cfg, http, sources, keyword, limit, cf_bypass_base);
+    let mut set = spawn_search_tasks(http, sources, keyword, limit, cf_bypass_base);
 
     while let Some(joined) = set.join_next().await {
         match joined {
@@ -89,7 +85,6 @@ pub async fn search_streaming(
 /// 调用方决定如何消费结果（收集到 Vec 或逐个推送 channel）。
 /// 共享逻辑：日志、Client 复用、per-source 计时、结果包装。
 fn spawn_search_tasks(
-    _cfg: &AppConfig,
     http: Arc<HttpClients>,
     sources: Vec<Source>,
     keyword: String,
@@ -111,7 +106,7 @@ fn spawn_search_tasks(
             let source_name = src.rule.name.clone();
             let client = http.for_rule(&src.rule);
             let cf_borrow: Option<&str> = cf.as_ref().as_ref().map(|s| s.as_str());
-            let result = run_one(&client, &src, kw.as_str(), limit, cf_borrow).await;
+            let result = search_one(&client, &src.rule, kw.as_str(), limit, cf_borrow).await;
             SourceSearchOutcome {
                 source_id,
                 source_name,
@@ -121,17 +116,6 @@ fn spawn_search_tasks(
     }
 
     set
-}
-
-async fn run_one(
-    client: &Client,
-    source: &Source,
-    keyword: &str,
-    limit: Option<usize>,
-    cf_bypass_base: Option<&str>,
-) -> Result<Vec<SearchResult>, SearchError> {
-    // 单源超时由 reqwest client 自身（10s）+ UI 取消保证；不再叠加 tokio timeout。
-    search_one(client, &source.rule, keyword, limit, cf_bypass_base).await
 }
 
 #[cfg(test)]
@@ -155,8 +139,7 @@ mod tests {
     async fn empty_sources_returns_empty() {
         let cfg = AppConfig::default();
         let http = Arc::new(crate::http::HttpClients::new(&cfg).unwrap());
-        let outcomes =
-            search_aggregated(&cfg, http, Vec::new(), "any".into(), Some(10), None).await;
+        let outcomes = search_aggregated(http, Vec::new(), "any".into(), Some(10), None).await;
         assert!(outcomes.is_empty());
     }
 
@@ -166,7 +149,7 @@ mod tests {
         let cfg = AppConfig::default();
         let http = Arc::new(crate::http::HttpClients::new(&cfg).unwrap());
         let sources = vec![make_source(1, "A"), make_source(2, "B")];
-        let outcomes = search_aggregated(&cfg, http, sources, "any".into(), Some(10), None).await;
+        let outcomes = search_aggregated(http, sources, "any".into(), Some(10), None).await;
         assert_eq!(outcomes.len(), 2);
         assert!(matches!(
             outcomes[0].result,

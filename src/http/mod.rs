@@ -17,7 +17,9 @@ pub use cf::{fetch_via_cf_bypass, has_cloudflare};
 pub use client::ClientOptions;
 pub use clients::HttpClients;
 pub use encoding::decode_response_bytes;
-pub use fetch::{FetchRequest, FetchResponse, HttpMethod, fetch};
+pub use fetch::{
+    CfFallbackError, FetchRequest, FetchResponse, HttpMethod, fetch, fetch_with_cf_fallback,
+};
 pub use ua::random_ua;
 pub use url_join::{abs_url, origin_or_self};
 pub use util::{

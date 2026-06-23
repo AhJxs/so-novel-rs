@@ -23,7 +23,7 @@ pub fn load_tasks_from_db(db: &Db) -> (Vec<DownloadTask>, u64) {
     let mut need_rewrite: Vec<DownloadTaskRecord> = Vec::new();
     for rec in records {
         max_id = max_id.max(rec.id);
-        let mut task = DownloadTask::from_record(rec.clone());
+        let mut task = DownloadTask::from_record(rec);
         if task.finished.is_none() {
             // 加载自 DB 时 rx/cancel 都是 None —— 没有活动后台任务。
             // 之前跑着的任务实际是应用退出时被中断的，标 AppRestarted 让 UI 正确归类。

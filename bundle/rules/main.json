@@ -152,24 +152,25 @@
     }
   },
   {
-    "url": "http://www.xbiquzw.net/",
+    "url": "http://www.xbiquwk.com/",
     "name": "笔尖中文",
     "comment": "",
     "search": {
-      "url": "http://www.xbiquzw.net/modules/article/search.php",
-      "method": "post",
-      "data": "{searchkey: %s}",
+      "url": "http://www.xbiquwk.com/modules/article/search.php?searchkey=%s",
+      "method": "get",
       "result": "#wrapper > table > tbody > tr",
       "bookName": "td:nth-child(1) > a",
       "author": "td:nth-child(3)",
       "latestChapter": "td:nth-child(2)",
-      "lastUpdateTime": "td:nth-child(5)"
+      "lastUpdateTime": "td:nth-child(5)",
+      "status": "td:nth-child(6)",
+      "wordCount": "td:nth-child(4)"
     },
     "book": {
-      "url": "http://www.xbiquzw.net/(.*?)/"
+      "url": "http://www.xbiquwk.com/(.*?)/"
     },
     "toc": {
-      "baseUri": "http://www.xbiquzw.net/%s/",
+      "baseUri": "http://www.xbiquwk.com/%s/",
       "item": "#list > dl > dd > a"
     },
     "chapter": {

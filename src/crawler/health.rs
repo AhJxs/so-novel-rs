@@ -11,7 +11,6 @@ use reqwest::header::{ACCEPT, USER_AGENT};
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 
-use crate::config::AppConfig;
 use crate::http::HttpClients;
 use crate::http::ua::random_ua;
 use crate::models::Rule;
@@ -97,7 +96,6 @@ impl SourceHealth {
 ///
 /// 完成后通道关闭（tx drop），UI 端 try_recv 看到 Disconnected 即知道全部跑完。
 pub async fn check_sources_health(
-    _cfg: Arc<AppConfig>,
     http: Arc<HttpClients>,
     rules: Vec<Rule>,
     tx: mpsc::UnboundedSender<SourceHealth>,
@@ -176,7 +174,7 @@ mod tests {
         let cfg = Arc::new(AppConfig::default());
         let http = Arc::new(crate::http::HttpClients::new(&cfg).unwrap());
         let (tx, mut rx) = mpsc::unbounded_channel::<SourceHealth>();
-        check_sources_health(cfg, http, Vec::new(), tx).await;
+        check_sources_health(http, Vec::new(), tx).await;
         assert!(rx.try_recv().is_err(), "no rules → no events");
     }
 
@@ -193,7 +191,7 @@ mod tests {
             ..Rule::default()
         };
         let (tx, mut rx) = mpsc::unbounded_channel::<SourceHealth>();
-        check_sources_health(cfg, http, vec![rule], tx).await;
+        check_sources_health(http, vec![rule], tx).await;
 
         let h = rx.try_recv().expect("should yield exactly one event");
         assert_eq!(h.source_id, 42);

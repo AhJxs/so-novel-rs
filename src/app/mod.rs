@@ -395,7 +395,6 @@ impl AppModel {
         }
         spawn_health_check(
             &self.rules,
-            &self.config,
             Arc::clone(&self.http),
             self.runtime,
             &mut self.sources_state,
@@ -501,12 +500,11 @@ impl AppModel {
     /// 任务 + cancel token 丢失），调用方（UI）本就只对已结束任务显示删除按钮，这里再兜底。
     /// 返回是否真的删了（false = 任务还在跑或不存在）。
     pub fn delete_task(&mut self, id: u64) -> bool {
-        // 兜底：运行中的不删。
-        if self.tasks.iter().any(|t| t.id == id && t.is_running()) {
+        // 兜底：运行中的不删；不存在的也跳过。
+        let Some(task) = self.tasks.iter().find(|t| t.id == id) else {
             return false;
-        }
-        let existed = self.tasks.iter().any(|t| t.id == id);
-        if !existed {
+        };
+        if task.is_running() {
             return false;
         }
         self.tasks.retain(|t| t.id != id);

@@ -21,6 +21,7 @@ use std::path::{Path, PathBuf};
 
 use epub_builder::{EpubBuilder, EpubContent, EpubVersion, ReferenceType, ZipLibrary};
 
+use super::exporter::pad_zero;
 use crate::export::exporter::{ExportError, Exporter, sort_chapter_files, unique_path};
 use crate::models::Book;
 use crate::util::fs::sanitize_filename;
@@ -206,11 +207,10 @@ fn detect_image_mime(bytes: &[u8]) -> &'static str {
 }
 
 fn build_cover_xhtml(cover_filename: &str, book_name: &str, lang: &str) -> String {
-    let lang_attr = if lang.is_empty() { "zh" } else { lang };
     format!(
         r#"<?xml version="1.0" encoding="UTF-8" ?>
 <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
-<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="{lang_attr}">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="{lang}">
 <head>
   <title>{book_name}</title>
   <style type="text/css">body{{margin:0;padding:0;text-align:center;}} img{{max-width:100%;height:auto;}}</style>
@@ -220,7 +220,7 @@ fn build_cover_xhtml(cover_filename: &str, book_name: &str, lang: &str) -> Strin
 </body>
 </html>
 "#,
-        lang_attr = html_escape(lang_attr),
+        lang = html_escape(lang),
         book_name = html_escape(book_name),
         cover_filename = cover_filename
     )
@@ -232,20 +232,6 @@ fn html_escape(s: &str) -> String {
         .replace('>', "&gt;")
         .replace('"', "&quot;")
         .replace('\'', "&#39;")
-}
-
-fn pad_zero(n: u32, width: usize) -> String {
-    let s = n.to_string();
-    if s.len() >= width {
-        s
-    } else {
-        let mut out = String::with_capacity(width);
-        for _ in 0..(width - s.len()) {
-            out.push('0');
-        }
-        out.push_str(&s);
-        out
-    }
 }
 
 #[cfg(test)]

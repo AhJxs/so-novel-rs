@@ -42,18 +42,12 @@ pub fn format_chapter(content: &str, rule_chapter: &RuleChapter) -> String {
     }
 }
 
-/// 处理闭合标签模式：把成对开闭标签全部改写为 `<p>...</p>`，`<p>` 自身保持。
+/// 处理闭合标签模式：把成对开闭标签全部改写为 `<p>...</p>`（含 `<p>` 自身）。
 fn format_closed(html: &str) -> String {
     NON_P_PAIR_RE
         .replace_all(html, |caps: &regex::Captures<'_>| {
-            let tag_open = caps.get(1).map(|m| m.as_str()).unwrap_or("");
             let inner = caps.get(2).map(|m| m.as_str()).unwrap_or("");
-            if tag_open.eq_ignore_ascii_case("p") {
-                // 已经是 <p>...</p>，原样保留
-                format!("<p>{inner}</p>")
-            } else {
-                format!("<p>{inner}</p>")
-            }
+            format!("<p>{inner}</p>")
         })
         .into_owned()
 }

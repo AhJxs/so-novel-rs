@@ -27,7 +27,7 @@ use crate::http::{
     has_cloudflare,
 };
 use crate::models::{ContentType, Rule, SearchResult};
-use crate::parser::dom::{SelectError, select_and_invoke_js_within};
+use crate::parser::dom::{SelectError, select_and_invoke_js_within, split_js};
 
 #[derive(Debug, Error)]
 pub enum SearchError {
@@ -83,12 +83,14 @@ pub async fn search_one(
     // 1. 构造请求
     // 若 url 含 @js:，则 JS 接收 keyword 返回完整 URL（与 Java SearchParser 一致）；
     // 否则直接格式化（%s → keyword）。
-    let url_with_keyword = if s.url.contains("@js:") {
-        let js_body = &s.url[s.url.find("@js:").unwrap() + 4..];
-        crate::js::post_process(js_body, keyword)
-            .map_err(|e| SearchError::Parse(format!("搜索 URL @js: 执行失败: {e:#}")))?
-    } else {
-        format_url_query(&s.url, keyword)
+    let url_with_keyword = {
+        let (_, js_body) = split_js(&s.url);
+        if let Some(body) = js_body {
+            crate::js::post_process(body, keyword)
+                .map_err(|e| SearchError::Parse(format!("搜索 URL @js: 执行失败: {e:#}")))?
+        } else {
+            format_url_query(&s.url, keyword)
+        }
     };
     tracing::debug!(url = %url_with_keyword, "搜索请求 URL");
     let cookies = if s.cookies.trim().is_empty() {
@@ -165,10 +167,10 @@ pub fn parse_search_results(
     // 有 @js: 时：把整个响应体传给 JS 返回转换后的 HTML，再用 CSS 选择器选元素；
     // 无 @js: 时：直接用 CSS 选择器从原始文档迭代元素。
     let (css_selector, result_doc);
-    if s.result.contains("@js:") {
-        let js_body = &s.result[s.result.find("@js:").unwrap() + 4..];
-        css_selector = s.result.split("@js:").next().unwrap_or("").trim();
-        let processed = crate::js::post_process(js_body, html)
+    let (sel_part, js_body) = split_js(&s.result);
+    if let Some(body) = js_body {
+        css_selector = sel_part;
+        let processed = crate::js::post_process(body, html)
             .map_err(|e| SearchError::Parse(format!("result @js: 执行失败: {e:#}")))?;
         tracing::debug!(css_selector, processed_len = processed.len(), processed_preview = %processed.chars().take(300).collect::<String>(), "@js: result 处理完成");
         if processed.is_empty() {
@@ -183,8 +185,15 @@ pub fn parse_search_results(
     let result_selector = crate::parser::cache::cached_selector(css_selector)
         .map_err(|e| SearchError::Parse(format!("无效的 result 选择器 `{css_selector}`: {e:?}")))?;
 
+    let matched: Vec<_> = result_doc.select(&result_selector).collect();
+    tracing::debug!(
+        css_selector,
+        matched_count = matched.len(),
+        "CSS 选择器匹配元素数"
+    );
+
     let mut out: Vec<SearchResult> = Vec::new();
-    for el in result_doc.select(&result_selector) {
+    for el in matched {
         push_search_result(el, s, base_url, rule.id, &rule.name, &mut out);
         if let Some(n) = limit {
             if out.len() >= n {
@@ -219,12 +228,12 @@ fn push_search_result(
         select_and_invoke_js_within(el, &s.book_name, ContentType::AttrHref).unwrap_or_default();
     let url = crate::http::abs_url(base_url, &raw_href).unwrap_or_default();
 
-    let author = optional_field_or_none(el, &s.author);
-    let category = optional_field_or_none(el, &s.category);
-    let latest_chapter = optional_field_or_none(el, &s.latest_chapter);
-    let last_update_time = optional_field_or_none(el, &s.last_update_time);
-    let status = optional_field_or_none(el, &s.status);
-    let word_count = optional_field_or_none(el, &s.word_count);
+    let author = optional_field(el, &s.author);
+    let category = optional_field(el, &s.category);
+    let latest_chapter = optional_field(el, &s.latest_chapter);
+    let last_update_time = optional_field(el, &s.last_update_time);
+    let status = optional_field(el, &s.status);
+    let word_count = optional_field(el, &s.word_count);
 
     out.push(SearchResult {
         source_id,
@@ -241,17 +250,24 @@ fn push_search_result(
     });
 }
 
-fn optional_field(el: scraper::ElementRef<'_>, query: &str) -> Result<Option<String>, SearchError> {
+/// 提取可选字段：选择器/JS 失败时静默返回 `None`（搜索结果容错，不阻断整条）。
+fn optional_field(el: scraper::ElementRef<'_>, query: &str) -> Option<String> {
     if query.trim().is_empty() {
-        return Ok(None);
+        return None;
     }
-    let v = select_and_invoke_js_within(el, query, ContentType::Text)?;
-    Ok(if v.is_empty() { None } else { Some(v) })
-}
-
-/// `optional_field` 的无错误变体：选择器/JS 失败时静默返回 `None`。
-fn optional_field_or_none(el: scraper::ElementRef<'_>, query: &str) -> Option<String> {
-    optional_field(el, query).unwrap_or(None)
+    match select_and_invoke_js_within(el, query, ContentType::Text) {
+        Ok(v) => {
+            if v.is_empty() {
+                None
+            } else {
+                Some(v)
+            }
+        }
+        Err(e) => {
+            tracing::debug!(query, error = %e, "可选字段提取失败，跳过");
+            None
+        }
+    }
 }
 
 #[cfg(test)]

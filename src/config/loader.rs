@@ -297,35 +297,31 @@ impl Default for AppConfig {
 
 // ---------- TOML 工具 ----------
 
-fn t_str(doc: &DocumentMut, table: &str, key: &str) -> Option<String> {
+/// 从 TOML 文档中取 `table.key` 对应的 `Item`。
+fn t_item<'a>(doc: &'a DocumentMut, table: &str, key: &str) -> Option<&'a Item> {
     doc.get(table)
         .and_then(|t| t.as_table())
         .and_then(|t| t.get(key))
+}
+
+fn t_str(doc: &DocumentMut, table: &str, key: &str) -> Option<String> {
+    t_item(doc, table, key)
         .and_then(|v| v.as_str())
         .map(|s| s.to_string())
         .filter(|s| !s.trim().is_empty())
 }
 
 fn t_bool(doc: &DocumentMut, table: &str, key: &str) -> Option<bool> {
-    doc.get(table)
-        .and_then(|t| t.as_table())
-        .and_then(|t| t.get(key))
-        .and_then(|v| v.as_bool())
+    t_item(doc, table, key).and_then(|v| v.as_bool())
 }
 
 fn t_int(doc: &DocumentMut, table: &str, key: &str) -> Option<i64> {
-    doc.get(table)
-        .and_then(|t| t.as_table())
-        .and_then(|t| t.get(key))
-        .and_then(|v| v.as_integer())
+    t_item(doc, table, key).and_then(|v| v.as_integer())
 }
 
 /// 读浮点（兼容 TOML 里写成整数 `16` 或浮点 `16.0` 两种形式）。
 fn t_float(doc: &DocumentMut, table: &str, key: &str) -> Option<f32> {
-    let v = doc
-        .get(table)
-        .and_then(|t| t.as_table())
-        .and_then(|t| t.get(key))?;
+    let v = t_item(doc, table, key)?;
     v.as_float()
         .map(|f| f as f32)
         .or_else(|| v.as_integer().map(|i| i as f32))
@@ -362,8 +358,9 @@ pub fn load_config(path: &Path) -> Result<AppConfig> {
     // 新键：theme-kind / theme-name / theme-dyn-mode / theme-light / theme-dark。
     // 旧键 `[global].theme = "X"`（单一主题名）向后兼容：非空 → 静态模式 + 该名字；
     // 空或缺省 → 默认（Dynamic + System）。
-    if let Some(v) = t_str(&doc, "global", "theme-kind") {
-        cfg.theme_pref.kind = ThemeKind::parse(&v);
+    let theme_kind = t_str(&doc, "global", "theme-kind");
+    if let Some(v) = &theme_kind {
+        cfg.theme_pref.kind = ThemeKind::parse(v);
     }
     if let Some(v) = t_str(&doc, "global", "theme-name") {
         cfg.theme_pref.static_name = v;
@@ -378,7 +375,7 @@ pub fn load_config(path: &Path) -> Result<AppConfig> {
         cfg.theme_pref.dyn_dark = v;
     }
     // 旧单主题键迁移：仅当新键 theme-kind 没写、且旧 theme 非空时，按静态模式接管。
-    if t_str(&doc, "global", "theme-kind").is_none() {
+    if theme_kind.is_none() {
         if let Some(v) = t_str(&doc, "global", "theme") {
             cfg.theme_pref = ThemePref {
                 kind: ThemeKind::Static,
@@ -479,29 +476,23 @@ pub fn save_config(path: &Path, cfg: &AppConfig) -> Result<()> {
     };
 
     // 写一行 (table, key, value)。`value()` 自动处理 toml 类型。
-    fn set_str(doc: &mut DocumentMut, table: &str, key: &str, v: &str) {
+    fn set_item(doc: &mut DocumentMut, table: &str, key: &str, v: impl Into<Item>) {
         let t = doc.entry(table).or_insert(Item::Table(Default::default()));
         if let Some(t) = t.as_table_mut() {
-            t[key] = value(v);
+            t[key] = v.into();
         }
+    }
+    fn set_str(doc: &mut DocumentMut, table: &str, key: &str, v: &str) {
+        set_item(doc, table, key, value(v));
     }
     fn set_bool(doc: &mut DocumentMut, table: &str, key: &str, v: bool) {
-        let t = doc.entry(table).or_insert(Item::Table(Default::default()));
-        if let Some(t) = t.as_table_mut() {
-            t[key] = value(v);
-        }
+        set_item(doc, table, key, value(v));
     }
     fn set_int(doc: &mut DocumentMut, table: &str, key: &str, v: i64) {
-        let t = doc.entry(table).or_insert(Item::Table(Default::default()));
-        if let Some(t) = t.as_table_mut() {
-            t[key] = value(v);
-        }
+        set_item(doc, table, key, value(v));
     }
     fn set_float(doc: &mut DocumentMut, table: &str, key: &str, v: f64) {
-        let t = doc.entry(table).or_insert(Item::Table(Default::default()));
-        if let Some(t) = t.as_table_mut() {
-            t[key] = value(v);
-        }
+        set_item(doc, table, key, value(v));
     }
     fn unset(doc: &mut DocumentMut, table: &str, key: &str) {
         if let Some(t) = doc.get_mut(table).and_then(|t| t.as_table_mut()) {

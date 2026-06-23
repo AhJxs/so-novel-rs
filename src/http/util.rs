@@ -116,24 +116,12 @@ pub fn clean_invisible_chars(s: &str) -> String {
                 return false;
             }
             // 显式黑名单：零宽空格、字节序标记、行/段分隔
-            matches!(
+            !matches!(
                 *c,
                 '\u{200B}' | '\u{200C}' | '\u{200D}' | '\u{2028}' | '\u{2029}' | '\u{FEFF}'
             )
-            .not_then()
         })
         .collect()
-}
-
-// 给 bool 一个语义化的"取反返回"小工具，让 filter 闭包更清楚。
-trait BoolExt {
-    fn not_then(self) -> bool;
-}
-impl BoolExt for bool {
-    #[inline]
-    fn not_then(self) -> bool {
-        !self
-    }
 }
 
 #[cfg(test)]

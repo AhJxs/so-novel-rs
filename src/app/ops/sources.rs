@@ -3,7 +3,6 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use crate::config::AppConfig;
 use crate::db::Db;
 use crate::http::HttpClients;
 use crate::models::Rule;
@@ -52,19 +51,11 @@ pub fn add_sources_from_file(
     let bytes = std::fs::read(path).map_err(|e| format!("读取文件失败: {e}"))?;
     let text = String::from_utf8_lossy(&bytes);
 
-    let rules_vec: Vec<Rule> = match serde_json::from_str::<Vec<Rule>>(&text) {
-        Ok(v) => v,
-        Err(_) => match serde_json::from_str::<Rule>(&text) {
-            Ok(one) => vec![one],
-            Err(_) => match json5::from_str::<Vec<Rule>>(&text) {
-                Ok(v) => v,
-                Err(_) => match json5::from_str::<Rule>(&text) {
-                    Ok(one) => vec![one],
-                    Err(e) => return Err(format!("解析失败: {e}")),
-                },
-            },
-        },
-    };
+    let rules_vec: Vec<Rule> = serde_json::from_str::<Vec<Rule>>(&text)
+        .or_else(|_| serde_json::from_str::<Rule>(&text).map(|r| vec![r]))
+        .or_else(|_| json5::from_str::<Vec<Rule>>(&text))
+        .or_else(|_| json5::from_str::<Rule>(&text).map(|r| vec![r]))
+        .map_err(|e| format!("解析失败: {e}"))?;
 
     if rules_vec.is_empty() {
         return Err("文件内容为空，未导入任何书源".to_string());
@@ -155,7 +146,6 @@ pub fn delete_source(
 /// 派一个连通性检测任务到后台。
 pub fn spawn_health_check(
     rules: &[Rule],
-    config: &AppConfig,
     http: Arc<HttpClients>,
     runtime: &tokio::runtime::Runtime,
     sources_state: &mut SourcesState,
@@ -175,10 +165,9 @@ pub fn spawn_health_check(
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
     sources_state.rx = Some(rx);
 
-    let cfg = Arc::new(config.clone());
     let http = Arc::clone(&http);
     let rules = rules.to_vec();
     runtime.spawn(async move {
-        crate::crawler::health::check_sources_health(cfg, http, rules, tx).await;
+        crate::crawler::health::check_sources_health(http, rules, tx).await;
     });
 }

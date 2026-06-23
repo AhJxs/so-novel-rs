@@ -70,10 +70,9 @@ pub async fn search(
         tokio::sync::mpsc::unbounded_channel::<crate::crawler::search::SourceSearchOutcome>();
 
     let http_clone = Arc::clone(&http);
-    let cfg_clone = config.clone();
     tokio::spawn(async move {
         crate::crawler::search::search_streaming(
-            &cfg_clone, http_clone, sources, keyword, limit, cf_bypass, tx,
+            http_clone, sources, keyword, limit, cf_bypass, tx,
         )
         .await;
     });

@@ -61,13 +61,16 @@ pub fn render_chapter(
 
     let body = match target {
         RenderTarget::Txt => render_txt(&filtered.title, &formatted_html),
-        RenderTarget::Html => render_html_template(&filtered.title, &formatted_html),
-        RenderTarget::Epub => render_epub_template(&filtered.title, &formatted_html),
-        RenderTarget::Pdf => {
-            // Pdf 模式：每章先用 Html 模板写到 chapters_dir，PdfExporter 后续读取
-            // 这些 HTML 合并成 PDF。无需单独的 Pdf 模板。
-            render_html_template(&filtered.title, &formatted_html)
-        }
+        RenderTarget::Html | RenderTarget::Pdf => render_template(
+            &filtered.title,
+            &formatted_html,
+            include_str!("../../assets/chapter_html.tmpl"),
+        ),
+        RenderTarget::Epub => render_template(
+            &filtered.title,
+            &formatted_html,
+            include_str!("../../assets/chapter_epub.tmpl"),
+        ),
     };
 
     maybe_convert_chinese(filtered.title, body, target, source_lang_raw, target_lang)
@@ -134,24 +137,9 @@ fn render_txt(title: &str, p_html: &str) -> String {
     sb
 }
 
-/// HTML 章节模板。等价 Java `templates/chapter_html.flt`：
-/// 一个完整 HTML 文档，含上一页/下一页按钮（按文件名前导零数字推断）。
-///
-/// 模板内嵌：见 `parser::formatter` 的相同理由——只两个占位，
-/// 拉 tinytemplate / handlebars 收益过低。
-fn render_html_template(title: &str, content_html: &str) -> String {
+/// 用给定模板渲染章节 HTML。两个模板（HTML / EPUB）仅文件不同，逻辑一致。
+fn render_template(title: &str, content_html: &str, template: &str) -> String {
     let title_esc = html_escape_attr(title);
-    let template = include_str!("../../assets/chapter_html.tmpl");
-    template
-        .replace("${title}", &title_esc)
-        .replace("${content}", content_html)
-}
-
-/// EPUB 章节模板。等价 Java `templates/chapter_epub.flt`：
-/// 一个 XHTML 章节文件（注意 doctype + xhtml namespace；Apple Books 较严格）。
-fn render_epub_template(title: &str, content_html: &str) -> String {
-    let title_esc = html_escape_attr(title);
-    let template = include_str!("../../assets/chapter_epub.tmpl");
     template
         .replace("${title}", &title_esc)
         .replace("${content}", content_html)

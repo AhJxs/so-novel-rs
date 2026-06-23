@@ -181,9 +181,7 @@ pub async fn download_book(
         return Err(CrawlerError::Cancelled);
     }
 
-    let out = download_chapters(cfg, client, source, book_url, &book, toc, opts).await;
-    // 终态日志已由 ops/download.rs 的 `下载任务终止` 覆盖（含 book、elapsed_ms、outcome）。
-    out
+    download_chapters(cfg, client, source, &book, toc, opts).await
 }
 
 /// 阶段一：获取书籍元信息 + 章节列表（不开始下载）。
@@ -321,7 +319,6 @@ pub async fn download_chapters(
     cfg: &AppConfig,
     client: &reqwest::Client,
     source: &Source,
-    _book_url: &str,
     book: &Book,
     chapters: Vec<Chapter>,
     opts: DownloadOptions,

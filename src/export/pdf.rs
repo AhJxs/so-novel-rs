@@ -30,7 +30,9 @@ use once_cell::sync::Lazy;
 use pdf_oxide::writer::{DocumentBuilder, DocumentMetadata, EmbeddedFont, PageSize};
 use regex::Regex;
 
-use crate::export::exporter::{ExportError, Exporter, sort_chapter_files, unique_path};
+use crate::export::exporter::{
+    ExportError, Exporter, sort_chapter_files, strip_html_tags, unique_path,
+};
 use crate::models::Book;
 use crate::util::fs::sanitize_filename;
 
@@ -97,7 +99,7 @@ impl Exporter for PdfExporter {
         let subject = book
             .intro
             .as_deref()
-            .map(strip_html_tags)
+            .map(|s| strip_html_tags(s).chars().take(200).collect::<String>())
             .unwrap_or_default();
         let metadata = DocumentMetadata::new()
             .title(book.book_name.clone())
@@ -540,17 +542,6 @@ fn find_cjk_font() -> Option<Vec<u8>> {
     None
 }
 
-/// 与 `txt` 导出同款 intro 清理：剥 HTML 标签 + 实体，截短到 200 字做 subject。
-fn strip_html_tags(s: &str) -> String {
-    static TAG_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?s)<[^>]+>").expect("strip tag re"));
-    static ENTITY_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"&[^;]+;").expect("strip entity re"));
-    static WS_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"\s+").expect("ws re"));
-    let no_tag = TAG_RE.replace_all(s, "").into_owned();
-    let no_ent = ENTITY_RE.replace_all(&no_tag, "").into_owned();
-    let collapsed = WS_RE.replace_all(&no_ent, " ").trim().to_string();
-    collapsed.chars().take(200).collect()
-}
-
 // DocumentBuilder::save / build 返回 pdf_oxide::error::Error，统一转 ExportError::Pdf。
 impl From<pdf_oxide::error::Error> for ExportError {
     fn from(e: pdf_oxide::error::Error) -> Self {
@@ -702,7 +693,10 @@ mod tests {
         let s = "<p>这是&nbsp;简介</p>";
         assert_eq!(strip_html_tags(s), "这是简介");
         let long: String = "中".repeat(500);
-        let truncated = strip_html_tags(&format!("<p>{long}</p>"));
+        let cleaned = strip_html_tags(&format!("<p>{long}</p>"));
+        assert_eq!(cleaned.chars().count(), 500);
+        // 截短到 200 字由调用方负责
+        let truncated: String = cleaned.chars().take(200).collect();
         assert_eq!(truncated.chars().count(), 200);
     }
 

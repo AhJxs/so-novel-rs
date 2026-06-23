@@ -38,7 +38,7 @@ impl Exporter for HtmlExporter {
         out_dir: &Path,
     ) -> Result<PathBuf, ExportError> {
         let files = sort_chapter_files(chapters_dir)?;
-        if files.iter().filter(|p| is_chapter_html(p)).count() == 0 {
+        if !files.iter().any(|p| is_chapter_html(p)) {
             return Err(ExportError::EmptyChaptersDir(chapters_dir.to_path_buf()));
         }
 

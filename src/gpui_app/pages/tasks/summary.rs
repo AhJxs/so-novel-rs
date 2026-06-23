@@ -130,16 +130,20 @@ pub fn task_is_cancelled(t: &DownloadTask) -> bool {
 
 /// 统计各状态数量（按钮 label 后缀用，顺序对齐 `TaskFilter::ALL`）。
 pub fn count_by_status(model: &AppModel) -> [usize; 5] {
-    let all = model.tasks.len();
-    let running = model.tasks.iter().filter(|t| t.is_running()).count();
-    let completed = model
-        .tasks
-        .iter()
-        .filter(|t| matches!(t.finished, Some(Ok(_))))
-        .count();
-    let failed = model.tasks.iter().filter(|t| t.is_failed()).count();
-    let cancelled = model.tasks.iter().filter(|t| t.is_cancelled()).count();
-    [all, running, completed, failed, cancelled]
+    let mut counts = [0usize; 5];
+    for t in &model.tasks {
+        counts[0] += 1;
+        if t.is_running() {
+            counts[1] += 1;
+        } else if matches!(t.finished, Some(Ok(_))) {
+            counts[2] += 1;
+        } else if t.is_failed() {
+            counts[3] += 1;
+        } else if t.is_cancelled() {
+            counts[4] += 1;
+        }
+    }
+    counts
 }
 
 /// 按过滤筛 + 排序（运行中在前；同组按时间倒序）。

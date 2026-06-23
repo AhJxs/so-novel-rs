@@ -15,10 +15,10 @@
 use std::path::{Path, PathBuf};
 
 use encoding_rs::{Encoding, UTF_8};
-use once_cell::sync::Lazy;
-use regex::Regex;
 
-use crate::export::exporter::{ExportError, Exporter, sort_chapter_files, unique_path};
+use crate::export::exporter::{
+    ExportError, Exporter, sort_chapter_files, strip_html_tags, unique_path,
+};
 use crate::models::Book;
 use crate::util::fs::sanitize_filename;
 
@@ -105,18 +105,6 @@ impl Exporter for TxtExporter {
         std::fs::write(&out_path, &*encoded)?;
         Ok(out_path)
     }
-}
-
-/// 极简 HTML 标签清理（仅用于 intro 文本）：删除 `<...>`、HTML 实体、多余空白。
-/// 不引入 ammonia / scraper（intro 一般几百字，正则足够）。
-fn strip_html_tags(s: &str) -> String {
-    static TAG_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?s)<[^>]+>").expect("strip tag re"));
-    static ENTITY_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"&[^;]+;").expect("strip entity re"));
-    static WS_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"\s+").expect("ws re"));
-
-    let no_tag = TAG_RE.replace_all(s, "").into_owned();
-    let no_ent = ENTITY_RE.replace_all(&no_tag, "").into_owned();
-    WS_RE.replace_all(&no_ent, " ").trim().to_string()
 }
 
 #[cfg(test)]

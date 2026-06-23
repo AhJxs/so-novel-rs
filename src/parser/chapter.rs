@@ -27,7 +27,7 @@ use scraper::Html;
 use scraper::Selector;
 use thiserror::Error;
 
-use crate::http::{FetchRequest, HttpMethod, abs_url, fetch, fetch_via_cf_bypass, has_cloudflare};
+use crate::http::abs_url;
 use crate::models::{Chapter, ContentType, Rule, RuleChapter};
 use crate::parser::dom::{SelectError, select_and_invoke_js};
 
@@ -272,46 +272,14 @@ async fn fetch_with_cf_fallback(
     timeout: Option<u32>,
     cf_bypass_base: Option<&str>,
 ) -> Result<String, ChapterError> {
-    let started = std::time::Instant::now();
-    let resp = fetch(
-        client,
-        &FetchRequest {
-            url,
-            method: HttpMethod::Get,
-            cookies: None,
-            timeout_secs: timeout,
-            referer: None,
-        },
-    )
-    .await
-    .map_err(|e| {
-        tracing::warn!(url = %url, elapsed_ms = started.elapsed().as_millis() as u64, error = %format!("{e:#}"), "fetch_with_cf_fallback: HTTP 失败");
-        ChapterError::Http(format!("{e:#}"))
-    })?;
-
-    if has_cloudflare(&resp.html) {
-        match cf_bypass_base.filter(|s| !s.trim().is_empty()) {
-            Some(base) => {
-                tracing::info!(url = %url, "章节页命中 Cloudflare，尝试 cf-bypass");
-                let bypass = fetch_via_cf_bypass(client, base, url).await;
-                match &bypass {
-                    Ok(_) => {
-                        tracing::info!(url = %url, elapsed_ms = started.elapsed().as_millis() as u64, "fetch_with_cf_fallback: cf-bypass 成功")
-                    }
-                    Err(e) => {
-                        tracing::warn!(url = %url, elapsed_ms = started.elapsed().as_millis() as u64, error = %format!("{e:#}"), "fetch_with_cf_fallback: cf-bypass 失败")
-                    }
-                }
-                bypass.map_err(|e| ChapterError::Http(format!("cf-bypass: {e:#}")))
+    crate::http::fetch_with_cf_fallback(client, url, timeout, cf_bypass_base)
+        .await
+        .map_err(|e| match e {
+            crate::http::CfFallbackError::Http(msg) => ChapterError::Http(msg),
+            crate::http::CfFallbackError::Cloudflare(final_url) => {
+                ChapterError::Cloudflare(final_url)
             }
-            None => {
-                tracing::warn!(url = %url, "章节页命中 Cloudflare 但未配置 cf-bypass");
-                Err(ChapterError::Cloudflare(resp.final_url))
-            }
-        }
-    } else {
-        Ok(resp.html)
-    }
+        })
 }
 
 #[cfg(test)]

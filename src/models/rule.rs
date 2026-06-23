@@ -48,11 +48,6 @@ fn lenient_bool<'de, D: Deserializer<'de>>(d: D) -> Result<bool, D::Error> {
     d.deserialize_any(V)
 }
 
-/// 与 `lenient_bool` 同义但通过包装一层 `Option` 来兼容 `#[serde(default)]`。
-fn lenient_bool_default<'de, D: Deserializer<'de>>(d: D) -> Result<bool, D::Error> {
-    lenient_bool(d)
-}
-
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Rule {
@@ -67,13 +62,13 @@ pub struct Rule {
     pub comment: String,
     #[serde(default)]
     pub language: String,
-    #[serde(default, deserialize_with = "lenient_bool_default")]
+    #[serde(default, deserialize_with = "lenient_bool")]
     pub need_proxy: bool,
-    #[serde(default, deserialize_with = "lenient_bool_default")]
+    #[serde(default, deserialize_with = "lenient_bool")]
     pub disabled: bool,
     /// rate-limit.json 中 0xs 书源出现，旧 Java 模型未声明但 JSON 中存在。
     /// 保留字段以避免反序列化丢失信息。
-    #[serde(default, deserialize_with = "lenient_bool_default")]
+    #[serde(default, deserialize_with = "lenient_bool")]
     pub ignore_ssl: bool,
 
     pub search: Option<RuleSearch>,
@@ -98,7 +93,7 @@ impl Rule {
 #[serde(rename_all = "camelCase")]
 pub struct RuleSearch {
     /// 是否纳入聚合搜索（true 表示禁用此书源的搜索）。
-    #[serde(default, deserialize_with = "lenient_bool_default")]
+    #[serde(default, deserialize_with = "lenient_bool")]
     pub disabled: bool,
     #[serde(default)]
     pub base_uri: String,
@@ -177,7 +172,7 @@ pub struct RuleToc {
     pub item: String,
     /// 是否倒序展示。注意 JSON 中字段名是 `isDesc`，
     /// 经 camelCase 反序列化后映射到本字段。
-    #[serde(rename = "isDesc", default, deserialize_with = "lenient_bool_default")]
+    #[serde(rename = "isDesc", default, deserialize_with = "lenient_bool")]
     pub is_desc: bool,
     #[serde(default)]
     pub next_page: String,
@@ -193,7 +188,7 @@ pub struct RuleChapter {
     pub title: String,
     #[serde(default)]
     pub content: String,
-    #[serde(default, deserialize_with = "lenient_bool_default")]
+    #[serde(default, deserialize_with = "lenient_bool")]
     pub paragraph_tag_closed: bool,
     #[serde(default)]
     pub paragraph_tag: String,

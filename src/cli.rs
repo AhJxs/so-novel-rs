@@ -166,7 +166,6 @@ fn run_search(
     let http = std::sync::Arc::new(crate::http::HttpClients::new(cfg)?);
 
     let outcomes = rt.block_on(crawler::search::search_aggregated(
-        cfg,
         http,
         target_sources,
         keyword.clone(),

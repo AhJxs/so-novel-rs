@@ -39,22 +39,21 @@ pub async fn index_page() -> Html<&'static str> {
     Html(render_index())
 }
 
-pub async fn favicon() -> Response<Body> {
+fn static_asset(content_type: &'static str, data: &'static [u8]) -> Response<Body> {
     Response::builder()
         .status(200)
-        .header(header::CONTENT_TYPE, "image/x-icon")
+        .header(header::CONTENT_TYPE, content_type)
         .header(header::CACHE_CONTROL, "public, max-age=86400")
-        .body(Body::from(FAVICON_ICO))
+        .body(Body::from(data))
         .unwrap()
 }
 
+pub async fn favicon() -> Response<Body> {
+    static_asset("image/x-icon", FAVICON_ICO)
+}
+
 pub async fn logo() -> Response<Body> {
-    Response::builder()
-        .status(200)
-        .header(header::CONTENT_TYPE, "image/png")
-        .header(header::CACHE_CONTROL, "public, max-age=86400")
-        .body(Body::from(LOGO_PNG))
-        .unwrap()
+    static_asset("image/png", LOGO_PNG)
 }
 
 pub async fn health() -> &'static str {

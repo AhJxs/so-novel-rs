@@ -158,7 +158,7 @@ fn strip_at_suffix(query: &str, ct: ContentType) -> (&str, ContentType) {
 }
 
 /// 拆 query 里 `<sel>@js:<body>` 这两段。
-fn split_js(query: &str) -> (&str, Option<&str>) {
+pub(crate) fn split_js(query: &str) -> (&str, Option<&str>) {
     if let Some(idx) = query.find("@js:") {
         (&query[..idx], Some(&query[idx + 4..]))
     } else {

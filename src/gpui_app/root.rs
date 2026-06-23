@@ -345,66 +345,24 @@ impl RootView {
     /// 8 个导航 action 的 listener 挂到传入的 div 上，返回挂好后的 div。
     /// 抽出到独立方法，避免 render 主体被 action 链淹没。
     fn bind_nav_actions(&self, root: gpui::Div, cx: &mut Context<Self>) -> gpui::Div {
-        root.on_action(cx.listener(Self::navigate_to::<ShowSearch>))
-            .on_action(cx.listener(Self::navigate_to::<ShowTasks>))
-            .on_action(cx.listener(Self::navigate_to::<ShowLibrary>))
-            .on_action(cx.listener(Self::navigate_to::<ShowSources>))
-            .on_action(cx.listener(Self::navigate_to::<ShowSettings>))
-            .on_action(cx.listener(Self::cycle_page::<NextPage>))
-            .on_action(cx.listener(Self::cycle_page::<PrevPage>))
-            .on_action(cx.listener(Self::toggle_sidebar_action))
-    }
-
-    /// `ToggleSidebar` action 入口。`on_click` 走 `toggle_sidebar` 直接调。
-    fn toggle_sidebar_action(
-        &mut self,
-        _action: &ToggleSidebar,
-        _window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.toggle_sidebar(cx);
-    }
-
-    /// 5 个 `ShowXxx` action → 跳到目标 page。
-    fn navigate_to<T: gpui::Action>(
-        &mut self,
-        _action: &T,
-        _window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let id = std::any::Any::type_id(_action);
-        let page = if id == std::any::TypeId::of::<ShowSearch>() {
-            NavPage::Search
-        } else if id == std::any::TypeId::of::<ShowTasks>() {
-            NavPage::Tasks
-        } else if id == std::any::TypeId::of::<ShowLibrary>() {
-            NavPage::Library
-        } else if id == std::any::TypeId::of::<ShowSources>() {
-            NavPage::Sources
-        } else if id == std::any::TypeId::of::<ShowSettings>() {
-            NavPage::Settings
-        } else {
-            return;
-        };
-        self.navigate(page, cx);
-    }
-
-    /// `NextPage` / `PrevPage` 共用 — direction +1 / -1。
-    fn cycle_page<T: gpui::Action>(
-        &mut self,
-        _action: &T,
-        _window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let id = std::any::Any::type_id(_action);
-        let next = if id == std::any::TypeId::of::<NextPage>() {
-            self.current_page.next()
-        } else if id == std::any::TypeId::of::<PrevPage>() {
-            self.current_page.prev()
-        } else {
-            return;
-        };
-        self.navigate(next, cx);
+        root.on_action(
+            cx.listener(|this, _: &ShowSearch, _, cx| this.navigate(NavPage::Search, cx)),
+        )
+        .on_action(cx.listener(|this, _: &ShowTasks, _, cx| this.navigate(NavPage::Tasks, cx)))
+        .on_action(cx.listener(|this, _: &ShowLibrary, _, cx| this.navigate(NavPage::Library, cx)))
+        .on_action(cx.listener(|this, _: &ShowSources, _, cx| this.navigate(NavPage::Sources, cx)))
+        .on_action(
+            cx.listener(|this, _: &ShowSettings, _, cx| this.navigate(NavPage::Settings, cx)),
+        )
+        .on_action(cx.listener(|this, _: &NextPage, _, cx| {
+            let next = this.current_page.next();
+            this.navigate(next, cx);
+        }))
+        .on_action(cx.listener(|this, _: &PrevPage, _, cx| {
+            let prev = this.current_page.prev();
+            this.navigate(prev, cx);
+        }))
+        .on_action(cx.listener(|this, _: &ToggleSidebar, _, cx| this.toggle_sidebar(cx)))
     }
 }
 

@@ -140,3 +140,51 @@ mod tests {
         };
     }
 }
+
+/// 带 CF 真人验证旁路的 GET 请求。
+///
+/// 先发普通请求；若命中 Cloudflare 验证页且 `cf_bypass_base` 非空，
+/// 则通过外部 bypass 服务重试。返回最终 HTML。
+///
+/// `chapter.rs` / `toc.rs` 各有一份几乎相同的实现；这里统一为
+/// `Result<String, CfFallbackError>`，调用方 `.map_err()` 转为自己的错误类型。
+pub async fn fetch_with_cf_fallback(
+    client: &reqwest::Client,
+    url: &str,
+    timeout: Option<u32>,
+    cf_bypass_base: Option<&str>,
+) -> Result<String, CfFallbackError> {
+    let resp = super::fetch(
+        client,
+        &FetchRequest {
+            url,
+            method: HttpMethod::Get,
+            cookies: None,
+            timeout_secs: timeout,
+            referer: None,
+        },
+    )
+    .await
+    .map_err(|e| CfFallbackError::Http(format!("{e:#}")))?;
+
+    if super::has_cloudflare(&resp.html) {
+        match cf_bypass_base.filter(|s| !s.trim().is_empty()) {
+            Some(base) => {
+                tracing::info!(url, "命中 Cloudflare，尝试 cf-bypass");
+                super::fetch_via_cf_bypass(client, base, url)
+                    .await
+                    .map_err(|e| CfFallbackError::Http(format!("cf-bypass: {e:#}")))
+            }
+            None => Err(CfFallbackError::Cloudflare(resp.final_url)),
+        }
+    } else {
+        Ok(resp.html)
+    }
+}
+
+/// `fetch_with_cf_fallback` 的错误类型。
+#[derive(Debug)]
+pub enum CfFallbackError {
+    Http(String),
+    Cloudflare(String),
+}
