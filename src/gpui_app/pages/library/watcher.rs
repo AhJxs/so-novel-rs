@@ -25,7 +25,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use gpui::{AsyncApp, Entity, WeakEntity};
-use notify::{RecommendedWatcher, RecursiveMode, Watcher};
+use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 
 use crate::app::AppModel;
 
@@ -62,7 +62,14 @@ pub(super) async fn run(
     // helper：arm 当前路径的 watcher。失败仅 warn，不 panic。
     let arm = |path: PathBuf, counter: Arc<AtomicU64>| -> Option<RecommendedWatcher> {
         let counter_for_cb = counter.clone();
-        let mut w = match notify::recommended_watcher(move |_res| {
+        let mut w = match notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
+            // 只对文件增删改计数，忽略 Access / Metadata / CloseWrite 等 inotify 噪音
+            if let Ok(event) = res {
+                match event.kind {
+                    EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_) => {}
+                    _ => return,
+                }
+            }
             counter_for_cb.fetch_add(1, Ordering::Relaxed);
         }) {
             Ok(w) => w,

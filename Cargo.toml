@@ -1,6 +1,6 @@
 [package]
 name = "so-novel-rs"
-version = "0.3.1"
+version = "0.3.2"
 edition = "2024"
 rust-version = "1.85"
 description = "So Novel — Rust desktop client (gpui + gpui-component)."
@@ -132,12 +132,9 @@ tower-http = { version = "0.6", features = ["cors"] }
 # background_executor）驱动。
 rfd = { version = "^0.17.2", default-features = false, features = ["xdg-portal"] }
 
-# 临时目录（测试用 — `ConfigPaths::discover` / `load_rules_from_db` 的单元测试
+# 临时目录（测试用 — `ConfigPaths::discover` 的单元测试
 # 通过 `tempfile::tempdir()` 把 `~/.sonovel` 重定向到临时目录避免污染用户主目录）。
 tempfile = "3"
-
-# SQLite — bundled 模式零系统依赖，单文件 DB 持久化下载任务记录（后续书源覆写也会走这个库）。
-rusqlite = { version = "0.40", features = ["bundled"] }
 
 # 读系统本地时区（UtcOffset::current_local_offset）。local-offset feature 在 Windows / macOS / Linux
 # 各自调 OS API（GetTimeZoneInformation / localtime_r / ...），跨平台用一个 API 拿偏移秒数。

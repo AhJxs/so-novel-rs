@@ -12,8 +12,6 @@
 //! `background_executor().timer()` / `update_entity` / `ctx.notify()`），
 //! 不属于"业务层与 UI 框架解耦"的 `crate::app`。
 
-use tracing::warn;
-
 use super::AppModel;
 use super::UpdateOutcome;
 
@@ -21,7 +19,7 @@ use super::UpdateOutcome;
 ///
 /// 副作用：
 /// - 更新 `search` / `tasks` / `sources_state` / `update_state` 的累积字段。
-/// - 完成的任务自动 `upsert` 到 SQLite（替代旧 `ui()` 里的同名逻辑）。
+/// - 完成的任务自动保存到文件。
 /// - 派发 `search.pending_cover_prefetch`（详情后端返回 cover_url 时挂的）。
 /// - `update_state` 完成时按结果推 `UIEvent`（成功 / 失败 / 新版本 / 已是最新），
 ///   推到 `model.pending_notifications` 由 `RootView::render` 翻译成
@@ -56,15 +54,13 @@ pub fn drain(model: &mut AppModel) -> bool {
     //    循环里借了 `&mut model.tasks`，不能再借 `&mut model` 调 push_*，
     //    所以先算出要推的 UIEvent，循环结束后统一 push。
     let mut finished_events: Vec<UIEvent> = Vec::new();
+    let mut need_save = false;
     for t in &mut model.tasks {
         let was_running = t.is_running();
         any |= t.drain();
         if was_running && !t.is_running() {
-            // 任务刚结束（完成 / 失败 / 取消）→ 持久化 + 提示。
-            let rec = t.to_record();
-            if let Err(e) = crate::db::tasks::upsert(model.db.conn(), &rec) {
-                warn!("save task on finish failed: {e:#}");
-            }
+            // 任务刚结束（完成 / 失败 / 取消）→ 标记需要保存 + 提示。
+            need_save = true;
             // 提示：书名优先用详情拉的（完整），fallback 搜索结果。truncate 防超长。
             let book_name = t
                 .book_meta
@@ -99,6 +95,10 @@ pub fn drain(model: &mut AppModel) -> bool {
             };
             finished_events.push(event);
         }
+    }
+    // 批量保存任务到文件
+    if need_save {
+        model.save_tasks_to_file();
     }
     for ev in finished_events {
         model.pending_notifications.push(ev);

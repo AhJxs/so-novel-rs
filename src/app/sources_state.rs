@@ -36,6 +36,15 @@ pub struct SourcesState {
 }
 
 impl SourcesState {
+    /// 清除所有测速状态（书源更新后调用）。
+    pub fn clear_health(&mut self) {
+        self.health.clear();
+        self.received = 0;
+        self.expected = 0;
+        self.running = false;
+        self.rx = None;
+    }
+
     /// 排空通道；返回是否产生过事件（触发 repaint）。
     pub fn drain(&mut self) -> bool {
         let Some(rx) = self.rx.as_mut() else {

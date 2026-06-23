@@ -12,7 +12,6 @@ use crate::crawler::{
     CancelToken, CrawlerError, DownloadOptions, Progress, download_book, download_chapters,
     resolve_book,
 };
-use crate::db::Db;
 use crate::http::HttpClients;
 use crate::models::{Book, Chapter, Rule, SearchResult};
 use crate::rules::Source;
@@ -306,21 +305,11 @@ pub fn spawn_download(
 }
 
 /// 清掉所有已结束的任务（完成 / 失败 / 取消）。运行中的任务保留。
-pub fn clear_finished_tasks(tasks: &mut Vec<DownloadTask>, db: &Db) {
+pub fn clear_finished_tasks(tasks: &mut Vec<DownloadTask>) {
     let before = tasks.len();
     tasks.retain(|t| t.is_running());
     let removed = before - tasks.len();
-    if let Err(e) = crate::db::tasks::delete_finished(db.conn()) {
-        tracing::warn!("clear_finished_tasks db delete failed: {e}");
-    } else if removed > 0 {
+    if removed > 0 {
         tracing::info!("已清除 {removed} 条任务");
-    }
-}
-
-/// 把单条任务 upsert 到 DB。
-pub fn save_task_to_db(db: &Db, task: &DownloadTask) {
-    let rec = task.to_record();
-    if let Err(e) = crate::db::tasks::upsert(db.conn(), &rec) {
-        tracing::warn!("save_task_to_db failed for id={}: {e}", task.id);
     }
 }

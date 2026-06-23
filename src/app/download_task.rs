@@ -4,8 +4,7 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 
 use crate::crawler::{CancelToken, Progress};
-use crate::db::tasks::{DownloadTaskRecord, FailureRecord, FinishedReason};
-use crate::models::{Book, SearchResult};
+use crate::models::{Book, DownloadTaskRecord, FailureRecord, FinishedReason, SearchResult};
 
 use super::now::now_unix_secs;
 

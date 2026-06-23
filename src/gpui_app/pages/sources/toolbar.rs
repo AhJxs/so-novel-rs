@@ -1,4 +1,4 @@
-//! Sources 页工具栏：名字过滤 Input + 3-Button 状态过滤组。
+//! Sources 页工具栏：名字过滤 Input + 活跃书源文件下拉 + 3-Button 状态过滤组。
 //!
 //! 状态过滤（全部 / 启用 / 禁用）：不走 SelectState（持有 options 翻译字段，切语言失效）。
 //! 改用 3 个 Button，label 在 render 里现取 `ts(...)`，切语言自动同步。
@@ -7,12 +7,13 @@
 //! 名字过滤：placeholder 在 InputState 上（gpui-component 0.5.1 API 限制），
 //! 切语言靠 `mod.rs` 顶部的 sentinel + `set_placeholder` 实时刷新。
 
-use gpui::{Context, Entity, IntoElement, ParentElement, Styled, px};
+use gpui::{Context, Entity, IntoElement, ParentElement, Styled, div, px};
 use gpui_component::{
     ActiveTheme as _, Icon, IconName, Selectable, Sizable,
     button::{Button, ButtonVariants as _},
     h_flex,
     input::{Input, InputState},
+    select::{SearchableVec, Select, SelectState},
 };
 
 use crate::app::SourcesFilterStatus;
@@ -20,9 +21,10 @@ use crate::i18n::ts;
 
 use super::SourcesPage;
 
-/// 输入行：文件名前缀 Search 图标 + Input + 3-Button 状态过滤组。
+/// 输入行：文件名前缀 Search 图标 + Input + 活跃书源文件下拉 + 3-Button 状态过滤组。
 pub(super) fn render(
     filter_input: &Entity<InputState>,
+    rule_file_select: &Entity<SelectState<SearchableVec<String>>>,
     current_status: SourcesFilterStatus,
     cx: &Context<'_, SourcesPage>,
 ) -> impl IntoElement {
@@ -35,6 +37,19 @@ pub(super) fn render(
                     .small()
                     .text_color(cx.theme().muted_foreground),
             ),
+        )
+        // 活跃书源文件下拉框
+        .child(
+            h_flex()
+                .gap_2()
+                .items_center()
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(ts("Sources.active_file.label")),
+                )
+                .child(Select::new(rule_file_select).w(px(200.0))),
         )
         .child(status_filter_buttons(current_status, cx))
 }

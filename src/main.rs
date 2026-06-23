@@ -63,18 +63,33 @@ fn parse_arg_value(args: &[String], key: &str) -> Option<String> {
 /// Web 服务模式：初始化共享资源并启动 axum 服务器。
 fn run_web(host: String, port: u16) -> Result<()> {
     use so_novel_rs::config::{ConfigPaths, load_config};
-    use so_novel_rs::db::Db;
     use so_novel_rs::http::HttpClients;
-    use so_novel_rs::rules::load_rules_from_db;
+    use so_novel_rs::persistent::{SourcesConfig, init_rules_dir, load_active_rules, load_tasks};
 
     let paths = ConfigPaths::discover();
     let config = load_config(&paths.config_file).unwrap_or_default();
 
-    let mut db = Db::open(&paths.db_file).or_else(|_| Db::open_in_memory())?;
-    let rules = load_rules_from_db(db.conn_mut()).unwrap_or_default();
+    // 初始化规则目录
+    if let Err(e) = init_rules_dir(&paths.rules_dir) {
+        tracing::warn!("规则目录初始化失败: {e:#}");
+    }
+
+    let sources_config = SourcesConfig::load(&paths.sources_config);
+    let rules = load_active_rules(&paths.rules_dir, &sources_config).unwrap_or_default();
     let http = HttpClients::new(&config)?;
 
-    so_novel_rs::web::run(config, http.into(), rules, db, host, port)
+    // 加载历史任务，从历史最大 ID + 1 开始分配新 ID
+    let task_history = load_tasks(&paths.tasks_file);
+    let next_task_id = task_history.iter().map(|t| t.id).max().unwrap_or(0) + 1;
+
+    let params = so_novel_rs::web::WebInitParams {
+        sources_config,
+        sources_config_path: paths.sources_config,
+        task_history,
+        tasks_file: paths.tasks_file,
+        next_task_id,
+    };
+    so_novel_rs::web::run(config, http.into(), rules, params, host, port)
 }
 
 /// 把当前进程附加到父进程的控制台（仅 Windows）。

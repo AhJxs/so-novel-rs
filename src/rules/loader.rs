@@ -3,6 +3,10 @@
 //! - 支持加载单个 `.json`/`.json5` 文件，或一个包含多个规则文件的目录；
 //! - 加载后填充默认值：baseUri、timeout、book.* 的 meta 后备查询；
 //! - 自增 ID（与 Java 端一致：从 1 开始）。
+//!
+//! 注意：`load_active_rules`、`init_rules_dir`、`list_rule_files` 已迁移到
+//! `crate::persistent::rules`，本模块保留 `load_rules_from_path` 和 `apply_default_rule`
+//! 供 parser 模块使用。
 
 use std::path::{Path, PathBuf};
 
@@ -67,22 +71,6 @@ pub fn load_rules_from_path(path: &Path) -> Result<Vec<Rule>, RulesError> {
         rule.id = (idx + 1) as i32;
     }
 
-    Ok(rules)
-}
-
-/// 从 SQLite 加载书源规则（合并 `source_overrides` 的禁用状态），并填充默认值。
-///
-/// 这是阶段二之后的主入口 — `app.rs` / `cli.rs` 都从这里拿规则。
-/// 表为空时会先 seed 默认 main.json（编译期嵌入），所以删 DB 重启依然能用。
-pub fn load_rules_from_db(conn: &mut rusqlite::Connection) -> anyhow::Result<Vec<Rule>> {
-    // seed 是幂等的：只有在 sources 表为空时才插。
-    crate::db::sources::seed_from_default(conn)?;
-    let mut rules = crate::db::sources::list_with_overrides(conn)?;
-
-    let lang = detect_system_lang();
-    for rule in rules.iter_mut() {
-        apply_default_rule(rule, lang);
-    }
     Ok(rules)
 }
 

@@ -128,7 +128,8 @@ pub fn run() -> Result<()> {
         use gpui::{px, size};
         let window_size = size(px(1200.0), px(800.0));
         let min_size = size(px(900.0), px(600.0));
-        let opts = WindowOptions {
+        #[allow(unused_mut)] // mut 仅 Linux cfg 块使用
+        let mut opts = WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
                 None,
                 window_size,
@@ -139,6 +140,14 @@ pub fn run() -> Result<()> {
             titlebar: Some(TitleBar::title_bar_options()),
             ..Default::default()
         };
+        // Linux WM 不会因 appears_transparent 自动隐藏原生标题栏，
+        // 需要 Client decorations 抑制；Windows 上此组合会破坏事件。
+        // 同时切 Transparent 背景，让 GPU shader 渲染的 CSD 圆角 alpha 能穿透
+        // （X11 仅在 background != Opaque 时启用 alpha blending）。
+        #[cfg(target_os = "linux")]
+        {
+            opts.window_decorations = Some(gpui::WindowDecorations::Client);
+        }
 
         // 7. Root 包装 RootView（持有 AppModel + sidebar + TitleBar）。
         cx.open_window(opts, |window, cx| {

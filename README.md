@@ -37,7 +37,7 @@
 | 🔍 **多源搜索** | 聚合多书源并发搜索、相似度过滤排序、quanben5 加密搜索、详情面板、封面预览、选章下载 |
 | 📥 **下载任务** | 并发抓取、失败重试、进度跟踪、取消、封面嵌入、持久化、章节范围、**简繁自动转换** |
 | 📚 **本地书库** | 扫描已下载书籍，按格式/日期/大小排序，删除二次确认（无空态闪烁） |
-| 🔌 **书源管理** | JSON 导入、启用/禁用、连通性测速、URL 一键跳转 |
+| 🔌 **书源管理** | 多规则文件切换、JSON 导入、启用/禁用、连通性测速 |
 | 📄 **多格式导出** | EPUB / TXT（多编码）/ HTML（zip 打包）/ **PDF**（DocumentBuilder 直接构建，CJK 字体嵌入） |
 | 🎨 **主题系统** | 38 个可用主题，文件 watcher 热重载，无需重启 |
 | 🌐 **多语言** | 简体中文 / 繁体中文 / English，UI 即时切换 |
@@ -53,7 +53,7 @@
 | 🌐 HTTP | [reqwest 0.13](https://docs.rs/reqwest) (rustls，无 OpenSSL) |
 | 🔍 HTML 解析 | scraper 0.27 + regex |
 | 📜 JS 引擎 | [boa_engine](https://github.com/boa-dev/boa)（书源规则 `@js:` 后处理 + 加密） |
-| 💾 数据库 | rusqlite（bundled SQLite） |
+| 💾 持久化 | JSON 文件（原子写入，零依赖） |
 | ⚙️ 配置 | [toml_edit](https://docs.rs/toml_edit)（保留注释与字段顺序） |
 | 🌏 国际化 | [rust-i18n](https://docs.rs/rust-i18n)（编译期嵌入） |
 | 🈶 简繁转换 | [zhconv](https://docs.rs/zhconv)（OpenCC + MediaWiki 词表，纯 Rust） |
@@ -64,37 +64,28 @@
 
 ```
 so-novel-rs/
-├── assets/                # logo（png/svg/ico）
-├── bundle/                # 打包资源：字体 / 默认书源 / 主题 / JS 脚本
-│   ├── fonts/             # Noto Sans SC 全字重
-│   ├── rules/             # 默认书源 JSON（首次启动 seed 到数据库）
-│   ├── themes/            # 内置主题（编译期嵌入）
-│   └── web/               # JS 脚本 + 封面占位图
-├── locales/               # i18n 翻译表（zh-CN / zh-HK / en，编译期嵌入）
-├── docs/                  # 用户文档（截图 / FAQ）
+├── assets/                # logo
+├── bundle/
+│   ├── rules/             # 默认书源 JSON（首次启动复制到 ~/.sonovel/rules/）
+│   └── web/               # Web 前端静态资源
+├── locales/app.yml        # i18n 翻译（zh-CN / zh-HK / en）
 └── src/
-    ├── main.rs            # 入口
-    ├── cli.rs             # clap CLI 子命令
-    ├── app/               # 业务容器（与 GUI 解耦）
-    │   ├── ops/           # download / search / sources / library / update / settings
-    │   └── *_state.rs     # 搜索 / 书库 / 书源 / 更新 状态
-    ├── config/            # config.toml 读写 + AppConfig
+    ├── main.rs            # 入口（GUI / CLI / Web）
+    ├── cli.rs             # CLI 子命令
+    ├── app/               # 业务层（与 GUI 解耦）
+    │   └── ops/           # download / search / sources / library / settings / update
+    ├── config/            # config.toml 读写
+    ├── persistent/        # JSON 持久化（tasks.json / sources_config.json / rules/）
+    ├── models/            # Rule / Book / Chapter / SearchResult / TaskRecord
+    ├── rules/             # 书源规则加载 + 默认值填充
     ├── crawler/           # 搜索 / 下载 / 重试 / 健康检测
-    ├── db/                # SQLite 表（书源 / 覆写 / 下载任务）
-    ├── export/            # EPUB / TXT / HTML / PDF 导出
-    ├── gpui_app/          # GUI 层
-    │   ├── root.rs        # RootView：TitleBar + Sidebar + 内容 + 覆盖层
-    │   ├── themes.rs      # 主题系统（内置 + 用户目录热重载）
-    │   ├── i18n.rs        # ts() 翻译函数
-    │   ├── components/    # 通用组件（页头 / 空态 / 状态标签 / 分页）
-    │   └── pages/         # 5 个一级页面：search / tasks / library / sources / settings
-    ├── http/              # reqwest 封装 / 代理 / 编码 / CF 旁路
-    ├── js/                # boa_engine 包装
-    ├── models/            # Rule / Book / Chapter / SearchResult
-    ├── parser/            # DOM / 搜索 / 详情 / 目录 / 章节 / 过滤
-    ├── rules/             # 从 DB 加载书源 + 用户覆写
-    ├── util/              # 文件名清洗 / 时间 / 语言检测 / 简繁转换
-    └── web/               # Web 服务（axum + SSE + 单页前端）
+    ├── parser/            # HTML 解析
+    ├── http/              # HTTP 客户端 / 代理 / CF 旁路
+    ├── export/            # EPUB / TXT / HTML / PDF
+    ├── js/                # boa_engine（@js: 后处理）
+    ├── gpui_app/          # GPUI 桌面 GUI（5 个页面）
+    ├── web/               # Web 服务（axum + SSE）
+    └── util/              # 工具函数
 ```
 
 ## 🚀 快速开始
@@ -113,9 +104,10 @@ cargo run
 | 路径 | 用途 |
 |------|------|
 | `config.toml` | 用户配置（保留注释） |
-| `sonovel.db` | SQLite（书源 + 下载任务 + 覆写） |
+| `rules/` | 书源规则文件（JSON，首次启动从 bundle 复制） |
+| `sources_config.json` | 书源配置（当前选中的规则文件 + 禁用列表） |
+| `tasks.json` | 下载任务记录（自动清理超额的已完成任务） |
 | `themes/` | 用户主题目录（JSON，热重载） |
-| `logs/` | tracing 日志（按天滚动） |
 
 ### 💻 CLI 用法
 
@@ -162,7 +154,7 @@ docker run -d -p 8080:8080 -v so-novel-data:/root/.sonovel --name so-novel so-no
 docker run -d -p 9000:8080 -e SO_NOVEL_WEB=1 so-novel
 ```
 
-`config.toml` 存放在 `/root/.sonovel/config.toml`（容器内），下载的文件在 `/root/.sonovel/downloads/`。
+`config.toml` 存放在 `/root/.sonovel/config.toml`（容器内），下载的文件在 `/root/Documents/Novel/`。
 
 ### 📦 打包
 
@@ -189,7 +181,7 @@ cargo build --release --target aarch64-unknown-linux-gnu    # Linux ARM64
 
 * 提交前跑 `cargo fmt` + `cargo clippy --all-targets -- -D warnings` + `cargo test --lib`
 * 新增 / 改动 UI 文案 → 同步 `locales/app.yml` 三语
-* 新增书源 → 走 `bundle/rules/` JSON，规则语法见 `docs/rules.md`（如存在）
+* 新增书源 → 走 `bundle/rules/` JSON，规则语法见 `rule-template.json5`（如存在）
 
 ## 🙏 致谢
 

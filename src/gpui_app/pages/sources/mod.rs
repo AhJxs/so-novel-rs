@@ -1,4 +1,4 @@
-//! Sources 页面：书源管理（导入 / 启用禁用 / 健康检查 / 删除）。
+//! Sources 页面：书源管理（导入 / 启用禁用 / 健康检查）。
 
 mod delegate;
 mod row;
@@ -6,17 +6,16 @@ mod toolbar;
 
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    App, AppContext, ClickEvent, Context, Entity, IntoElement, ParentElement, Render, SharedString,
-    Styled, Window, div, px,
+    AppContext, Context, Entity, IntoElement, ParentElement, Render, SharedString, Styled, Window,
+    div, px,
 };
-use gpui_component::button::ButtonVariant;
 use gpui_component::{
-    ActiveTheme as _, Disableable, Icon, IconName, Sizable, WindowExt,
+    ActiveTheme as _, Disableable, Icon, IconName, Sizable,
     button::Button,
-    dialog::{Dialog, DialogButtonProps},
     h_flex,
     input::{InputEvent, InputState},
     list::{List, ListState},
+    select::{SearchableVec, SelectEvent, SelectState},
     spinner::Spinner,
     tag::Tag,
     v_flex,
@@ -24,10 +23,9 @@ use gpui_component::{
 
 use crate::app::{AppModel, SourcesFilterStatus};
 use crate::gpui_app::components::{EmptyState, PageHeader, Pagination, compute_page_window};
-use crate::i18n::{ts, ts_fmt};
+use crate::i18n::ts;
 use crate::models::Rule;
-// `FluentBuilder` + `StyledExt` are `use ... as _;` because their methods (`.when()`,
-// `.h_flex()` 等) 由 derive 全局扩展；保留显式 import 让 IDE / rustfmt 不飘红。
+use crate::persistent::list_rule_files;
 
 use self::delegate::SourcesDelegate;
 
@@ -37,6 +35,9 @@ pub struct SourcesPage {
 
     /// 名字 / URL 关键字过滤 Input。struct 字段持有避免 click / focus 丢失
     filter_input: Entity<InputState>,
+
+    /// 选择活跃书源文件的下拉框。
+    rule_file_select: Entity<SelectState<SearchableVec<String>>>,
 
     /// gpui-component 虚拟列表。
     list_state: Entity<ListState<SourcesDelegate>>,
@@ -69,7 +70,28 @@ impl SourcesPage {
         })
         .detach();
 
-        // 2. List + Delegate。
+        // 2. 选择活跃书源文件的下拉框。items 首次为空：render 第一次跑时会从
+        // `rules_dir` 重建。这条路径处理用户手动添加/删除规则文件后的刷新。
+        let items: SearchableVec<String> = Vec::<String>::new().into();
+        let rule_file_select =
+            cx.new(|cx| SelectState::new(items, None, window, cx).searchable(false));
+        let model_for_select = model.clone();
+        cx.subscribe_in(
+            &rule_file_select,
+            window,
+            move |_this, _state, ev, _w, cx| {
+                if let SelectEvent::Confirm(Some(value)) = ev {
+                    let filename = value.to_string();
+                    model_for_select.update(cx, |m, _cx| {
+                        m.switch_active_file(&filename);
+                    });
+                    cx.notify();
+                }
+            },
+        )
+        .detach();
+
+        // 3. List + Delegate。
         let page_handle = cx.entity().clone();
         let delegate = SourcesDelegate::new(page_handle);
         let list_state = cx.new(|cx| ListState::new(delegate, window, cx));
@@ -77,46 +99,14 @@ impl SourcesPage {
         Self {
             model,
             filter_input,
+            rule_file_select,
             list_state,
             current_page: 0,
             last_seen_placeholder: initial_placeholder,
         }
     }
 
-    /// 点"删除"按钮 → 弹 Dialog 二次确认。
-    pub(super) fn prompt_delete(&mut self, source_id: i32, window: &mut Window, cx: &mut App) {
-        let model = self.model.clone();
-        let model_id = model.entity_id();
-
-        window.open_dialog(cx, move |dialog: Dialog, _window, _cx| {
-            let model_for_ok = model.clone();
-            let model_id_for_ok = model_id;
-            let source_id_for_ok = source_id;
-
-            dialog
-                .title(ts("Sources.delete_dialog.title"))
-                .child(div().child(ts_fmt(
-                    "Sources.delete_dialog.message",
-                    &[("source_id", &source_id_for_ok.to_string())],
-                )))
-                .button_props(
-                    DialogButtonProps::default()
-                        .ok_text(ts("Sources.delete_dialog.confirm"))
-                        .cancel_text(ts("Sources.delete_dialog.cancel"))
-                        .ok_variant(ButtonVariant::Danger),
-                )
-                .confirm()
-                .on_ok(move |_ev: &ClickEvent, _window, cx| {
-                    model_for_ok.update(cx, |m, _cx| {
-                        m.delete_source(source_id_for_ok);
-                    });
-                    cx.notify(model_id_for_ok);
-                    true
-                })
-        });
-    }
-
-    /// 调 `rfd` 文件选择器选 JSON 文件，调 `add_sources_from_file`。。
+    /// 调 `rfd` 文件选择器选 JSON 文件，调 `add_sources_from_file`。
     fn pick_and_add(&mut self, cx: &mut Context<Self>) {
         let model = self.model.clone();
         let page_handle = cx.entity().downgrade();
@@ -216,7 +206,24 @@ impl Render for SourcesPage {
         let health = model.sources_state.health.clone();
         let all_rules = model.rules.clone();
         let current_status = model.sources_state.filter_status;
+        let active_file = model.sources_config.active_file.clone();
+        let rules_dir = model.paths.rules_dir.clone();
         let _ = model;
+
+        // 同步活跃书源文件下拉框选项。
+        // 每次 render 都重新读取 rules_dir（用户可能手动添加/删除了文件）。
+        let rule_files = list_rule_files(&rules_dir);
+        let items: SearchableVec<String> = rule_files.clone().into();
+        let sel = active_file;
+        let pos = <SearchableVec<String> as gpui_component::select::SelectDelegate>::position(
+            &items, &sel,
+        );
+        self.rule_file_select.update(cx, |state, cx| {
+            state.set_items(items, window, cx);
+            if let Some(p) = pos {
+                state.set_selected_index(Some(p), window, cx);
+            }
+        });
 
         // 过滤后取当前页切片 —— 跟 library.rs 同模式（global 序号 + 切片 + 推给 delegate）。
         let filtered = self.model.read(cx).sources_state.filtered_rules(&all_rules);
@@ -269,13 +276,18 @@ impl Render for SourcesPage {
                             })),
                     ),
             )
-            // ---- toolbar: 名字过滤 + 状态过滤 ----
+            // ---- toolbar: 名字过滤 + 活跃书源文件选择 + 状态过滤 ----
             //
             // **状态过滤**用 3 个 Button 而不是 SelectState —— 原因：
             // SelectState 把 options 翻译字段冻在 state 里，切语言不会自动更新。
             // Button 组在 render 里现取 `ts(...)`，永远跟当前 locale 同步。状态
             // 用 `selected` style 标记，存的是 enum 不带翻译。
-            .child(toolbar::render(&self.filter_input, current_status, cx))
+            .child(toolbar::render(
+                &self.filter_input,
+                &self.rule_file_select,
+                current_status,
+                cx,
+            ))
             // ---- 统计 + 进度 ----
             .child(
                 h_flex()

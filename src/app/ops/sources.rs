@@ -3,144 +3,156 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use crate::db::Db;
 use crate::http::HttpClients;
 use crate::models::Rule;
-use crate::rules::SourceOverrides;
+use crate::persistent::SourcesConfig;
 
 use super::super::sources_state::SourcesState;
 
-/// 切换书源的禁用状态；立即持久化到 `sonovel.db` 的 `source_overrides` 表。
+/// 切换书源的禁用状态；立即持久化到 `sources_config.json`。
 pub fn toggle_source_disabled(
-    db: &Db,
-    source_overrides: &mut SourceOverrides,
+    sources_config: &mut SourcesConfig,
     rules: &mut [Rule],
-    source_id: i32,
+    source_url: &str,
 ) {
-    match crate::db::sources::toggle_disabled(db.conn(), source_id) {
-        Ok(now_disabled) => {
-            if now_disabled {
-                source_overrides.disabled.insert(source_id);
-            } else {
-                source_overrides.disabled.remove(&source_id);
-            }
-            if let Some(r) = rules.iter_mut().find(|r| r.id == source_id) {
-                r.disabled = now_disabled;
-            }
-        }
-        Err(e) => {
-            tracing::warn!("source_overrides toggle 失败: {e:#}");
-        }
+    let now_disabled = sources_config.toggle_disabled(source_url);
+    // 更新内存中的规则状态
+    let url_key = source_url.trim().to_lowercase();
+    if let Some(r) = rules
+        .iter_mut()
+        .find(|r| r.url.trim().to_lowercase() == url_key)
+    {
+        r.disabled = now_disabled;
     }
 }
 
-/// 从用户选中的 JSON 文件导入书源到 sonovel.db。
+/// 从用户选中的 JSON 文件导入书源到 `~/.sonovel/rules/`。
 ///
-/// **去重**：DB 中已存在的 `url`（忽略大小写、首尾空格）会被跳过，不重复插入。
-/// 返回 `ImportResult { inserted, skipped }` —— `skipped` 即被去重跳过的条数。
-/// 全部被跳过时返回 `Ok(ImportResult { inserted: 0, skipped: n })`（不视为错误，
-/// 调用方据此给用户一个 info 文案）。
+/// **去重**：文件名相同时 replace（覆盖）。
+/// 返回 `ImportResult { filename }`。
 ///
 /// 失败：返回 `Err(msg)`，msg 走 toast notification。
 pub fn add_sources_from_file(
-    db: &mut Db,
+    rules_dir: &Path,
+    sources_config: &mut SourcesConfig,
     rules: &mut Vec<Rule>,
     rule_load_error: &mut Option<String>,
-    path: &Path,
+    source_path: &Path,
 ) -> Result<ImportResult, String> {
-    let bytes = std::fs::read(path).map_err(|e| format!("读取文件失败: {e}"))?;
+    let filename = source_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(|| "无法获取文件名".to_string())?
+        .to_string();
+
+    // 验证文件内容是否有效
+    let bytes = std::fs::read(source_path).map_err(|e| format!("读取文件失败: {e}"))?;
     let text = String::from_utf8_lossy(&bytes);
 
-    let rules_vec: Vec<Rule> = serde_json::from_str::<Vec<Rule>>(&text)
+    let _: Vec<Rule> = serde_json::from_str::<Vec<Rule>>(&text)
         .or_else(|_| serde_json::from_str::<Rule>(&text).map(|r| vec![r]))
         .or_else(|_| json5::from_str::<Vec<Rule>>(&text))
         .or_else(|_| json5::from_str::<Rule>(&text).map(|r| vec![r]))
         .map_err(|e| format!("解析失败: {e}"))?;
 
-    if rules_vec.is_empty() {
-        return Err("文件内容为空，未导入任何书源".to_string());
-    }
+    // 复制文件到 rules 目录（重名则覆盖）
+    let dest = rules_dir.join(&filename);
+    std::fs::copy(source_path, &dest).map_err(|e| format!("复制文件失败: {e}"))?;
 
-    let valid_count = rules_vec
-        .iter()
-        .filter(|r| !r.url.trim().is_empty() || !r.name.trim().is_empty())
-        .count();
-    if valid_count == 0 {
-        return Err("文件中未找到有效的书源条目".to_string());
-    }
+    tracing::info!("已导入书源文件: {}", dest.display());
 
-    // **去重**：先查 DB 已有的 url 集合，过滤掉文件中 url 重复的条目。
-    //
-    // 用 lowercase 比较：https://Foo.com 和 https://foo.com 视为同一源。trim 头尾
-    // 空格后空字符串跳过（"占位规则"靠 name 唯一性区分，不靠 url）。
-    let existing_urls = crate::db::sources::list_existing_urls(db.conn())
-        .map_err(|e| format!("查询已有书源失败: {e}"))?;
-    let mut to_insert: Vec<Rule> = Vec::with_capacity(rules_vec.len());
-    let mut skipped: usize = 0;
-    for r in rules_vec {
-        let key = r.url.trim().to_lowercase();
-        if !key.is_empty() && existing_urls.contains(&key) {
-            skipped += 1;
-        } else {
-            to_insert.push(r);
+    // 如果导入的是当前活跃文件，重新加载规则
+    if filename == sources_config.active_file {
+        match crate::persistent::load_active_rules(rules_dir, sources_config) {
+            Ok(rs) => {
+                *rules = rs;
+                *rule_load_error = None;
+            }
+            Err(e) => {
+                tracing::warn!("导入成功但重载规则失败: {e:#}");
+            }
         }
     }
 
-    if to_insert.is_empty() {
-        // 全部 url 都已存在 —— 不写库，提示"全部已存在"。
-        return Ok(ImportResult {
-            inserted: 0,
-            skipped,
-        });
-    }
-
-    let n = crate::db::sources::insert_many(db.conn_mut(), &to_insert)
-        .map_err(|e| format!("导入失败: {e}"))?;
-
-    match crate::rules::load_rules_from_db(db.conn_mut()) {
-        Ok(rs) => {
-            *rules = rs;
-            *rule_load_error = None;
-        }
-        Err(e) => {
-            tracing::warn!("插入成功但重载规则失败: {e:#}");
-        }
-    }
-    Ok(ImportResult {
-        inserted: n,
-        skipped,
-    })
+    Ok(ImportResult { filename })
 }
 
-/// 导入文件的结果统计。`inserted` 实际写入 DB 的条数，`skipped` 因 url 重复被
-/// 去重跳过的条数。
-#[derive(Debug, Clone, Copy, Default)]
+/// 导入文件的结果统计。
+#[derive(Debug, Clone)]
 pub struct ImportResult {
-    pub inserted: usize,
-    pub skipped: usize,
+    pub filename: String,
 }
 
-/// 删除一条书源（DB + 内存中的 rules / overrides / health 都同步清掉）。
+/// 删除一条书源（从当前活跃文件中移除）。
 ///
 /// 返回 (是否真删了, 错误信息 toast 文本)
 pub fn delete_source(
-    db: &mut Db,
+    rules_dir: &Path,
+    sources_config: &SourcesConfig,
     rules: &mut Vec<Rule>,
-    source_overrides: &mut SourceOverrides,
     sources_state: &mut SourcesState,
-    source_id: i32,
+    source_url: &str,
 ) -> Result<bool, String> {
-    let deleted = crate::db::sources::delete_one(db.conn_mut(), source_id)
-        .map_err(|e| format!("删除失败: {e}"))?;
+    let url_key = source_url.trim().to_lowercase();
+
+    // 在 retain 之前捕获要删除的规则 ID（retain 后就找不到了）
+    let doomed_id = rules
+        .iter()
+        .find(|r| r.url.trim().to_lowercase() == url_key)
+        .map(|r| r.id);
+
+    // 从内存中移除
+    let before = rules.len();
+    rules.retain(|r| r.url.trim().to_lowercase() != url_key);
+    let deleted = rules.len() < before;
+
     if deleted {
-        rules.retain(|r| r.id != source_id);
-        source_overrides.disabled.remove(&source_id);
-        sources_state.health.remove(&source_id);
-    } else {
-        // id 已不在 DB；同步内存即可
-        rules.retain(|r| r.id != source_id);
+        // 从活跃文件中重新保存（原子写入，防止崩溃时损坏文件）
+        let file_path = rules_dir.join(&sources_config.active_file);
+        if file_path.exists() {
+            let content =
+                serde_json::to_string_pretty(rules).map_err(|e| format!("序列化失败: {e}"))?;
+            crate::persistent::write_atomically(&file_path, content.as_bytes())
+                .map_err(|e| format!("写入文件失败: {e}"))?;
+        }
+
+        // 清理健康检查状态
+        if let Some(id) = doomed_id {
+            sources_state.health.remove(&id);
+        }
     }
+
     Ok(deleted)
+}
+
+/// 切换活跃书源文件。
+///
+/// 返回切换后的规则列表。
+pub fn switch_active_file(
+    rules_dir: &Path,
+    sources_config: &mut SourcesConfig,
+    rules: &mut Vec<Rule>,
+    rule_load_error: &mut Option<String>,
+    filename: &str,
+) -> Result<(), String> {
+    let file_path = rules_dir.join(filename);
+    if !file_path.exists() {
+        return Err(format!("文件不存在: {filename}"));
+    }
+
+    sources_config.active_file = filename.to_string();
+
+    match crate::persistent::load_active_rules(rules_dir, sources_config) {
+        Ok(rs) => {
+            *rules = rs;
+            *rule_load_error = None;
+            Ok(())
+        }
+        Err(e) => {
+            *rule_load_error = Some(format!("{e:#}"));
+            Err(format!("加载规则失败: {e:#}"))
+        }
+    }
 }
 
 /// 派一个连通性检测任务到后台。

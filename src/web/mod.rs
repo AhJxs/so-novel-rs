@@ -17,22 +17,38 @@ use tokio::sync::broadcast;
 
 use crate::config::AppConfig;
 use crate::crawler::{CancelToken, Progress};
-use crate::db::Db;
 use crate::http::HttpClients;
-use crate::models::Rule;
+use crate::models::{DownloadTaskRecord, Rule};
+use crate::persistent::SourcesConfig;
+
+/// `WebState::new` / `web::run` 的额外初始化参数，避免参数过多。
+pub struct WebInitParams {
+    pub sources_config: SourcesConfig,
+    pub sources_config_path: PathBuf,
+    pub task_history: Vec<DownloadTaskRecord>,
+    pub tasks_file: PathBuf,
+    pub next_task_id: u64,
+}
 
 /// Web 服务共享状态。
 pub struct WebState {
     pub config: RwLock<AppConfig>,
     pub http: Arc<HttpClients>,
     pub rules: RwLock<Vec<Rule>>,
-    pub db: Mutex<Db>,
     pub download_path: PathBuf,
     /// 活跃的下载任务：task_id → (CancelToken, progress broadcast sender)。
     pub active_downloads: Mutex<HashMap<u64, ActiveDownload>>,
     pub next_task_id: Mutex<u64>,
     /// 访问码（仅存内存，启动时为空，用户通过 Web UI 设置）。
     pub access_code: Mutex<String>,
+    /// 书源配置（禁用列表等），toggle 时需要同步更新并持久化。
+    pub sources_config: RwLock<SourcesConfig>,
+    /// `sources_config.json` 磁盘路径。
+    pub sources_config_path: PathBuf,
+    /// 历史下载任务记录（持久化到 `tasks.json`）。
+    pub task_history: Mutex<Vec<DownloadTaskRecord>>,
+    /// `tasks.json` 磁盘路径。
+    pub tasks_file: PathBuf,
 }
 
 /// 任务状态。
@@ -59,17 +75,25 @@ pub struct ActiveDownload {
 pub type SharedState = Arc<WebState>;
 
 impl WebState {
-    pub fn new(config: AppConfig, http: Arc<HttpClients>, rules: Vec<Rule>, db: Db) -> Self {
+    pub fn new(
+        config: AppConfig,
+        http: Arc<HttpClients>,
+        rules: Vec<Rule>,
+        params: WebInitParams,
+    ) -> Self {
         let download_path = PathBuf::from(&config.download_path);
         Self {
             config: RwLock::new(config),
             http,
             rules: RwLock::new(rules),
-            db: Mutex::new(db),
             download_path,
             active_downloads: Mutex::new(HashMap::new()),
-            next_task_id: Mutex::new(1),
+            next_task_id: Mutex::new(params.next_task_id),
             access_code: Mutex::new(String::new()),
+            sources_config: RwLock::new(params.sources_config),
+            sources_config_path: params.sources_config_path,
+            task_history: Mutex::new(params.task_history),
+            tasks_file: params.tasks_file,
         }
     }
 }
@@ -79,11 +103,11 @@ pub fn run(
     config: AppConfig,
     http: Arc<HttpClients>,
     rules: Vec<Rule>,
-    db: Db,
+    params: WebInitParams,
     host: String,
     port: u16,
 ) -> Result<()> {
-    let state: SharedState = Arc::new(WebState::new(config, http, rules, db));
+    let state: SharedState = Arc::new(WebState::new(config, http, rules, params));
 
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()

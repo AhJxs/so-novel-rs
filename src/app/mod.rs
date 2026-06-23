@@ -3,7 +3,7 @@
 //! 拆分子模块：
 //! - `download_task`  / `search_state` / `library_state` / `sources_state` / `update_state` — 5 个状态结构体
 //! - `cover` — UI 辅助（封面字节解码 + URI 生成）
-//! - `now` / `runtime` / `tasks_db` — 自由辅助
+//! - `now` / `runtime` — 自由辅助
 //! - `crate::app::ops::download` / `crate::app::ops::search` / `crate::app::ops::sources` / `crate::app::ops::library` / `crate::app::ops::update` / `crate::app::ops::settings` — 业务方法
 //!
 //! 入口：`AppModel` 持有所有状态 struct 实例，UI 中立（不依赖任何 GUI 框架）。
@@ -18,7 +18,7 @@ mod runtime;
 mod search_state;
 mod sources_state;
 pub use sources_state::SourcesFilterStatus;
-mod tasks_db;
+mod tasks_init;
 pub(crate) mod trace;
 mod ui_event;
 mod update_state;
@@ -35,7 +35,7 @@ pub use search_state::{
     TocState,
 };
 pub use sources_state::SourcesState;
-pub use tasks_db::load_tasks_from_db;
+pub use tasks_init::load_tasks_from_file;
 pub use ui_event::UIEvent;
 pub use update_state::{
     UpdateCheckResult, UpdateOutcome, UpdateState, check_github_latest_release,
@@ -43,19 +43,18 @@ pub use update_state::{
 
 use std::sync::Arc;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use tokio::runtime::Runtime;
 
 use crate::config::{AppConfig, ConfigPaths, load_config};
-use crate::db::Db;
 use crate::http::HttpClients;
 use crate::i18n::{ts, ts_fmt};
 use crate::models::{Book, Chapter, Rule, SearchResult};
-use crate::rules::SourceOverrides;
+use crate::persistent::SourcesConfig;
 use ops::{
     OpsCtx, add_sources_from_file, clear_finished_tasks, delete_library_entry, delete_source,
-    persist_settings, refresh_library, save_task_to_db, select_search_result, spawn_download,
-    spawn_download_range, spawn_health_check, spawn_resolve_toc, spawn_search, spawn_update_check,
+    persist_settings, refresh_library, select_search_result, spawn_download, spawn_download_range,
+    spawn_health_check, spawn_resolve_toc, spawn_search, spawn_update_check, switch_active_file,
     toggle_source_disabled,
 };
 
@@ -67,12 +66,8 @@ pub struct AppModel {
     pub rule_load_error: Option<String>,
     pub config_load_error: Option<String>,
 
-    /// 用户对书源的禁用 / 启用覆写。toggle 后立即写 `sonovel.db`
-    /// 的 `source_overrides` 表；UI 这里持有的副本仅用于显示状态。
-    pub source_overrides: SourceOverrides,
-
-    /// 持久化层（SQLite）。下载任务记录全走这里。
-    pub db: Db,
+    /// 书源配置：活跃文件选择 + 禁用列表。
+    pub sources_config: SourcesConfig,
 
     /// 后台任务运行时。所有 spawn 都走它。
     /// 通过 `Box::leak` 得到 `&'static Runtime`，永不 drop ——
@@ -116,8 +111,7 @@ pub struct AppModel {
 impl AppModel {
     /// UI 中立的构造函数。
     ///
-    /// 返回 `Result`：磁盘 DB 与内存 DB 都打不开时（极少见，通常是磁盘权限或
-    /// sqlite 损坏到连 in-memory 都建不出来），调用方应捕获并向用户展示
+    /// 返回 `Result`：初始化失败时（极少见），调用方应捕获并向用户展示
     /// 致命错误（如 `rfd::MessageDialog`），不要 panic。
     pub fn new() -> Result<Self> {
         let paths = ConfigPaths::discover();
@@ -138,31 +132,32 @@ impl AppModel {
             }
         }
 
+        // 初始化规则目录（首次启动时复制默认规则文件）
+        if let Err(e) = crate::persistent::init_rules_dir(&paths.rules_dir) {
+            tracing::warn!("规则目录初始化失败: {e:#}");
+        }
+
+        // 加载书源配置
+        let sources_config = crate::persistent::SourcesConfig::load(&paths.sources_config);
+        if !paths.sources_config.exists() {
+            if let Err(e) = sources_config.save(&paths.sources_config) {
+                tracing::warn!("写入默认 sources_config.json 失败: {e:#}");
+            }
+        }
+
         let runtime = build_shared_runtime()?;
 
-        let mut db = match Db::open(&paths.db_file) {
-            Ok(db) => db,
-            Err(e) => {
-                tracing::warn!("sonovel.db 打开失败，回退到内存 DB（重启会丢失任务记录）: {e:#}");
-                // in-memory DB 创建在标准 rusqlite 几乎不会失败；如果失败，
-                // 把错误向上抛，让 gpui_app 入口弹致命错误对话框。
-                Db::open_in_memory().with_context(|| {
-                    format!("无法初始化持久化数据库：磁盘 DB 打开失败，且内存 DB 也建不出来：{e:#}")
-                })?
-            }
-        };
+        let (rules, rule_load_error) =
+            match crate::persistent::load_active_rules(&paths.rules_dir, &sources_config) {
+                Ok(rs) => (rs, None),
+                Err(e) => {
+                    tracing::warn!("rules load failed: {e:#}");
+                    (Vec::new(), Some(format!("{e:#}")))
+                }
+            };
 
-        let (rules, rule_load_error) = match crate::rules::load_rules_from_db(db.conn_mut()) {
-            Ok(rs) => (rs, None),
-            Err(e) => {
-                tracing::warn!("rules load failed: {e:#}");
-                (Vec::new(), Some(format!("{e:#}")))
-            }
-        };
-        let source_overrides = SourceOverrides::load_from_db(db.conn());
-
-        let (tasks, next_task_id) = load_tasks_from_db(&db);
-        tracing::info!("从 DB 加载 {} 个历史下载任务", tasks.len());
+        let (tasks, next_task_id) = load_tasks_from_file(&paths.tasks_file);
+        tracing::info!("从文件加载 {} 个历史下载任务", tasks.len());
 
         let search = SearchState::default();
 
@@ -176,8 +171,7 @@ impl AppModel {
             rules,
             rule_load_error,
             config_load_error,
-            source_overrides,
-            db,
+            sources_config,
             runtime,
             http,
             search,
@@ -234,13 +228,37 @@ impl AppModel {
         }
     }
 
+    /// 保存所有任务到文件，并自动清理超额的已完成任务。
+    pub fn save_tasks_to_file(&mut self) {
+        let mut records: Vec<_> = self.tasks.iter().map(|t| t.to_record()).collect();
+        if let Err(e) = crate::persistent::save_with_trim(&self.paths.tasks_file, &mut records) {
+            tracing::warn!("保存任务到文件失败: {e:#}");
+            return;
+        }
+        // 如果 trim 删除了一些记录，同步清理运行时的 tasks Vec
+        let record_ids: std::collections::HashSet<u64> = records.iter().map(|r| r.id).collect();
+        let before = self.tasks.len();
+        self.tasks.retain(|t| record_ids.contains(&t.id));
+        let removed = before - self.tasks.len();
+        if removed > 0 {
+            tracing::info!("同步清理了 {removed} 条运行时任务");
+        }
+    }
+
+    /// 保存书源配置到文件。
+    pub fn save_sources_config(&self) {
+        if let Err(e) = self.sources_config.save(&self.paths.sources_config) {
+            tracing::warn!("保存书源配置失败: {e:#}");
+        }
+    }
+
     /// 派一个新的下载任务。返回新任务 id。
     pub fn spawn_download(&mut self, target: SearchResult) -> u64 {
         let ctx = self.ops_ctx();
         let (id, task) = spawn_download(&ctx, self.next_task_id, target);
         self.next_task_id += 1;
-        save_task_to_db(&self.db, &task);
         self.tasks.push(task);
+        self.save_tasks_to_file();
         id
     }
 
@@ -262,8 +280,8 @@ impl AppModel {
         let ctx = self.ops_ctx();
         let (id, task) = spawn_download_range(&ctx, self.next_task_id, target, book, chapters);
         self.next_task_id += 1;
-        save_task_to_db(&self.db, &task);
         self.tasks.push(task);
+        self.save_tasks_to_file();
         id
     }
 
@@ -291,42 +309,31 @@ impl AppModel {
     }
 
     /// 切换书源禁用状态。
-    pub fn toggle_source_disabled(&mut self, source_id: i32) {
-        toggle_source_disabled(
-            &self.db,
-            &mut self.source_overrides,
-            &mut self.rules,
-            source_id,
-        );
+    pub fn toggle_source_disabled(&mut self, source_url: &str) {
+        toggle_source_disabled(&mut self.sources_config, &mut self.rules, source_url);
+        self.sources_state.clear_health();
+        self.save_sources_config();
     }
 
     /// 从 JSON 文件导入书源。
     ///
-    /// 自动按 `url` 去重 —— DB 已有的 url（忽略大小写、首尾空格）跳过，不重复插入。
-    /// 反馈给用户的 toast 同时显示"导入 X / 跳过 Y"。
+    /// 自动复制文件到 `~/.sonovel/rules/`，重名则覆盖。
+    /// 反馈给用户的 toast 显示导入的文件名。
     pub fn add_sources_from_file(&mut self, path: &std::path::Path) {
         match add_sources_from_file(
-            &mut self.db,
+            &self.paths.rules_dir,
+            &mut self.sources_config,
             &mut self.rules,
             &mut self.rule_load_error,
             path,
         ) {
             Ok(result) => {
-                // i18n 模板：`"Imported {inserted}, skipped {skipped} duplicates"`
-                // 全部重复（inserted=0）降级为 warning，否则 success。
-                let msg = crate::i18n::ts_fmt(
-                    "Sources.import.result",
-                    &[
-                        ("inserted", &result.inserted.to_string()),
-                        ("skipped", &result.skipped.to_string()),
-                    ],
-                )
-                .to_string();
-                if result.inserted == 0 && result.skipped > 0 {
-                    self.push_warning(msg);
-                } else {
-                    self.push_success(msg);
-                }
+                let msg =
+                    crate::i18n::ts_fmt("Sources.import.result", &[("filename", &result.filename)])
+                        .to_string();
+                self.sources_state.clear_health();
+                self.push_success(msg);
+                self.save_sources_config();
             }
             Err(msg) => {
                 if msg.starts_with("文件内容为空") || msg.starts_with("文件中未找到有效")
@@ -340,19 +347,39 @@ impl AppModel {
     }
 
     /// 删除一条书源。
-    pub fn delete_source(&mut self, source_id: i32) {
+    pub fn delete_source(&mut self, source_url: &str) {
         match delete_source(
-            &mut self.db,
+            &self.paths.rules_dir,
+            &self.sources_config,
             &mut self.rules,
-            &mut self.source_overrides,
             &mut self.sources_state,
-            source_id,
+            source_url,
         ) {
-            Ok(true) => self.push_success(ts_fmt(
-                "Toasts.delete_source_ok",
-                &[("id", &source_id.to_string())],
-            )),
+            Ok(true) => {
+                self.push_success(ts_fmt("Toasts.delete_source_ok", &[("url", source_url)]))
+            }
             Ok(false) => self.push_warning(ts("Toasts.delete_source_missing")),
+            Err(msg) => self.push_error(msg),
+        }
+    }
+
+    /// 切换活跃书源文件。
+    pub fn switch_active_file(&mut self, filename: &str) {
+        match switch_active_file(
+            &self.paths.rules_dir,
+            &mut self.sources_config,
+            &mut self.rules,
+            &mut self.rule_load_error,
+            filename,
+        ) {
+            Ok(()) => {
+                self.sources_state.clear_health();
+                self.push_success(ts_fmt(
+                    "Toasts.switch_source_file_ok",
+                    &[("filename", filename)],
+                ));
+                self.save_sources_config();
+            }
             Err(msg) => self.push_error(msg),
         }
     }
@@ -484,9 +511,10 @@ impl AppModel {
     /// 清掉所有已结束的任务。
     pub fn clear_finished_tasks(&mut self) {
         let before = self.tasks.len();
-        clear_finished_tasks(&mut self.tasks, &self.db);
+        clear_finished_tasks(&mut self.tasks);
         let removed = before - self.tasks.len();
         if removed > 0 {
+            self.save_tasks_to_file();
             self.push_success(ts_fmt(
                 "Toasts.clear_tasks_ok",
                 &[("n", &removed.to_string())],
@@ -496,7 +524,7 @@ impl AppModel {
 
     /// 删除单条任务记录（仅已结束的，运行中跳过）。
     ///
-    /// 内存 `tasks` retain 移除 + DB `delete_one`。运行中的任务不能删（会留下孤儿后台
+    /// 内存 `tasks` retain 移除 + 文件保存。运行中的任务不能删（会留下孤儿后台
     /// 任务 + cancel token 丢失），调用方（UI）本就只对已结束任务显示删除按钮，这里再兜底。
     /// 返回是否真的删了（false = 任务还在跑或不存在）。
     pub fn delete_task(&mut self, id: u64) -> bool {
@@ -508,14 +536,7 @@ impl AppModel {
             return false;
         }
         self.tasks.retain(|t| t.id != id);
-        if let Err(e) = crate::db::tasks::delete_one(self.db.conn(), id) {
-            tracing::warn!("delete_task db delete_one failed for id={id}: {e:#}");
-        }
+        self.save_tasks_to_file();
         true
-    }
-
-    /// 把单条任务 upsert 到 DB。
-    pub fn save_task_to_db(&self, task: &DownloadTask) {
-        save_task_to_db(&self.db, task);
     }
 }

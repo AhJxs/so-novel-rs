@@ -86,26 +86,47 @@ pub async fn source_toggle(
     State(state): State<SharedState>,
     axum::extract::Path(id): axum::extract::Path<i32>,
 ) -> Result<Json<SourceInfo>, (StatusCode, String)> {
-    let now_disabled = {
-        let db = state.db.lock().unwrap();
-        crate::db::sources::toggle_disabled(db.conn(), id)
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:#}")))?
+    // 1. 先从 rules 中取到目标书源的 URL（短锁，取完即放）。
+    let url = {
+        let rules = state.rules.read().unwrap();
+        rules
+            .iter()
+            .find(|r| r.id == id)
+            .map(|r| r.url.clone())
+            .ok_or_else(|| (StatusCode::NOT_FOUND, "书源未找到".to_string()))?
     };
-    // 同步到内存中的 rules
-    let mut rules = state.rules.write().unwrap();
-    if let Some(r) = rules.iter_mut().find(|r| r.id == id) {
-        r.disabled = now_disabled;
+
+    // 2. 切换 SourcesConfig 并持久化到磁盘。
+    let now_disabled = {
+        let mut sc = state.sources_config.write().unwrap();
+        let d = sc.toggle_disabled(&url);
+        if let Err(e) = sc.save(&state.sources_config_path) {
+            tracing::warn!("保存 sources_config.json 失败: {e}");
+        }
+        d
+    };
+
+    // 3. 同步更新内存中的 Rule.disabled。
+    {
+        let mut rules = state.rules.write().unwrap();
+        if let Some(r) = rules.iter_mut().find(|r| r.id == id) {
+            r.disabled = now_disabled;
+        }
     }
-    let r = rules
-        .iter()
-        .find(|r| r.id == id)
-        .ok_or_else(|| (StatusCode::NOT_FOUND, "书源未找到".to_string()))?;
-    Ok(Json(SourceInfo {
+
+    // 4. 返回更新后的信息。
+    let rules = state.rules.read().unwrap();
+    let r = rules.iter().find(|r| r.id == id).unwrap();
+    let info = SourceInfo {
         id: r.id,
         name: r.name.clone(),
         url: r.url.clone(),
         enabled: !r.disabled,
-    }))
+    };
+    drop(rules);
+
+    tracing::info!("书源 #{id} 切换禁用状态: {now_disabled}");
+    Ok(Json(info))
 }
 
 #[derive(Serialize)]

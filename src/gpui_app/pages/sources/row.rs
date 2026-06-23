@@ -1,18 +1,10 @@
-//! 单条书源行渲染（5 列：序号 / name + lang tag / URL / 健康状态 / Switch / Delete）。
+//! 单条书源行渲染（4 列：序号 / name + lang tag / URL / 健康状态 / Switch）。
 //!
 //! 跟 library.rs::render_row 同模式：固定宽 + flex_1 撑满剩余的列布局。
-//! 宽度总和（不含 flex_1 的 book/url）：48 + 80 + 90 + 100 + 4×gap ≈ 360 + gap。
-//! 1200px 窗口下 book + url 拿到 ~800px，足够显示大多数 URL。
 
 use gpui::prelude::FluentBuilder as _;
-use gpui::{App, Entity, IntoElement, ParentElement, SharedString, Styled, Window, div, px};
-use gpui_component::{
-    ActiveTheme as _, Icon, IconName, Sizable, StyledExt,
-    button::{Button, ButtonVariants as _},
-    h_flex,
-    switch::Switch,
-    tag::Tag,
-};
+use gpui::{App, Entity, IntoElement, ParentElement, SharedString, Styled, div, px};
+use gpui_component::{ActiveTheme as _, Sizable, StyledExt, h_flex, switch::Switch, tag::Tag};
 
 use crate::crawler::health::{HealthStatus, SourceHealth};
 use crate::gpui_app::components::{StatusBadge, StatusKind, truncate};
@@ -100,7 +92,7 @@ pub(super) fn render(
         // ---- 启用开关 ----
         .child({
             let page_for_switch = page.clone();
-            let rule_id = rule.id;
+            let rule_url = rule.url.clone();
             Switch::new(("src-switch", index as u64))
                 .checked(!rule.disabled)
                 .on_click(move |checked, _window, cx| {
@@ -108,27 +100,12 @@ pub(super) fn render(
                     page_for_switch.update(cx, |p, cx| {
                         p.model.update(cx, |m, _cx| {
                             // 只在 model 当前状态与 UI 期望不一致时才 toggle（避免重复触发）。
-                            if m.rules.iter().find(|r| r.id == rule_id).map(|r| r.disabled)
+                            if m.rules.iter().find(|r| r.url == rule_url).map(|r| r.disabled)
                                 != Some(want_disabled)
                             {
-                                m.toggle_source_disabled(rule_id);
+                                m.toggle_source_disabled(&rule_url);
                             }
                         });
-                    });
-                })
-        })
-        // ---- 删除按钮（点一次弹 Dialog 二次确认 —— 跟 library.rs `prompt_delete` 同模式）----
-        .child({
-            let page_for_del = page.clone();
-            let rule_id = rule.id;
-            Button::new(("src-del", index as u64))
-                .small()
-                .danger()
-                .icon(Icon::new(IconName::Delete))
-                .label(ts("Sources.action.delete"))
-                .on_click(move |_, window: &mut Window, cx| {
-                    page_for_del.update(cx, |p, cx| {
-                        p.prompt_delete(rule_id, window, cx);
                     });
                 })
         })

@@ -47,6 +47,10 @@ Toasts:
     en: "Source no longer exists"
     zh-CN: 书源已不存在
     zh-HK: 書源已不存在
+  switch_source_file_ok:
+    en: "Switched to rule file: {filename}"
+    zh-CN: "已切换到书源文件: {filename}"
+    zh-HK: "已切換到書源檔案: {filename}"
   no_sources_detected:
     en: "No sources detected"
     zh-CN: 没有可检测的书源
@@ -778,6 +782,11 @@ Sources:
     en: "Enable / disable, connectivity check, JSON import"
     zh-CN: 启用/禁用、连通性检测、JSON 导入
     zh-HK: 啟用/停用、連通性偵測、JSON 匯入
+  active_file:
+    label:
+      en: "Rule file"
+      zh-CN: "书源文件"
+      zh-HK: "書源檔案"
   filter:
     placeholder:
       en: "Filter by name or URL…"
@@ -882,11 +891,11 @@ Sources:
       en: "Confirm delete"
       zh-CN: 确认删除书源
       zh-HK: 確認刪除書源
-    # {source_id} —— rule 的自增主键（用户看到的是 id，不是规则名；规则名可能为空）。
+    # {source_url} —— 书源的 URL（唯一标识）。
     message:
-      en: "Are you sure you want to delete source #{source_id}? This action cannot be undone."
-      zh-CN: "确定要删除书源 #{source_id} 吗？此操作无法撤销。"
-      zh-HK: "確定要刪除書源 #{source_id} 嗎？此操作無法撤銷。"
+      en: "Are you sure you want to delete this source? This action cannot be undone."
+      zh-CN: "确定要删除此书源吗？此操作无法撤销。"
+      zh-HK: "確定要刪除此書源嗎？此操作無法撤銷。"
     confirm:
       en: Delete
       zh-CN: 删除
@@ -896,14 +905,12 @@ Sources:
       zh-CN: 取消
       zh-HK: 取消
   # 导入 JSON 后的反馈 toast。
-  # {inserted} 实际写入条数 / {skipped} 因 url 重复被去重跳过的条数。
-  # inserted=0 + skipped>0 → 全部已存在（warning 级别），
-  # 否则 success 级别。
+  # {filename} 导入的文件名。
   import:
     result:
-      en: "Imported {inserted}, skipped {skipped} duplicate(s)"
-      zh-CN: "已导入 {inserted} 个，跳过 {skipped} 个重复"
-      zh-HK: "已匯入 {inserted} 個，跳過 {skipped} 個重複"
+      en: "Imported source file: {filename}"
+      zh-CN: "已导入书源文件: {filename}"
+      zh-HK: "已匯入書源檔案: {filename}"
   # 「添加」按钮弹出的 rfd 文件选择器文案。
   add_source:
     dialog_title:

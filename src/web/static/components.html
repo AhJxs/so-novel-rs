@@ -321,6 +321,11 @@
                        :style="'width:' + (t.total_chapters > 0 ? Math.round(t.current_chapter / t.total_chapters * 100) : 0) + '%'"></div>
                 </div>
               </div>
+              <!-- 时间信息 -->
+              <div class="flex items-center gap-3 mt-1.5 text-xs text-gray-400" x-show="t.started_at_unix > 0">
+                <span x-text="'开始: ' + formatDate(t.started_at_unix)"></span>
+                <span x-show="t.finished_at_unix" x-text="'结束: ' + formatDate(t.finished_at_unix)"></span>
+              </div>
               <!-- 完成：文件名 + 下载按钮 -->
               <div x-show="t.status === 'Finished' && t.filename" class="flex items-center justify-between gap-2 mt-1">
                 <span class="text-xs text-gray-400 truncate" x-text="t.filename"></span>

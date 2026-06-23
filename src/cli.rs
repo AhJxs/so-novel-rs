@@ -13,9 +13,9 @@ use clap::{Parser, Subcommand};
 
 use crate::config::{AppConfig, ConfigPaths, ExportFormat, load_config};
 use crate::crawler::{self, CancelToken, Progress};
-use crate::db::Db;
 use crate::models::{Rule, SearchResult};
-use crate::rules::{Source, load_rules_from_db};
+use crate::persistent::{SourcesConfig, init_rules_dir, load_active_rules};
+use crate::rules::Source;
 use crate::util::system::open_path;
 
 /// so-novel-rs — 小说下载器（CLI）。
@@ -85,6 +85,11 @@ pub fn run() -> Result<()> {
         }
     }
 
+    // 初始化规则目录
+    if let Err(e) = init_rules_dir(&paths.rules_dir) {
+        tracing::warn!("规则目录初始化失败: {e:#}");
+    }
+
     match cli.command {
         Cmd::Search {
             keyword,
@@ -113,9 +118,8 @@ fn effective_cfg(mut cfg: AppConfig, output: Option<String>, format: Option<Stri
 }
 
 fn load_active_sources(cfg: &AppConfig, paths: &ConfigPaths) -> Result<Vec<Source>> {
-    let mut db = Db::open(&paths.db_file)
-        .with_context(|| format!("打开 sonovel.db 失败: {}", paths.db_file.display()))?;
-    let rules = load_rules_from_db(db.conn_mut()).context("加载规则失败")?;
+    let sources_config = SourcesConfig::load(&paths.sources_config);
+    let rules = load_active_rules(&paths.rules_dir, &sources_config).context("加载规则失败")?;
     Ok(rules
         .into_iter()
         .filter(|r| !r.disabled)
@@ -138,7 +142,7 @@ fn run_search(
         sources
     };
     if target_sources.is_empty() {
-        anyhow::bail!("没有可用的书源（检查 config.toml / sonovel.db）");
+        anyhow::bail!("没有可用的书源（检查 config.toml / rules 目录）");
     }
 
     let cf_bypass = if cfg.cf_bypass.trim().is_empty() {
@@ -342,9 +346,9 @@ fn run_download(
 
 fn run_sources(cfg: &AppConfig, paths: &ConfigPaths, json: bool) -> Result<()> {
     let _ = cfg; // 当前未用到 cfg 字段，保留参数为未来扩展（按 lang 过滤等）
-    let mut db = Db::open(&paths.db_file)
-        .with_context(|| format!("打开 sonovel.db 失败: {}", paths.db_file.display()))?;
-    let rules: Vec<Rule> = load_rules_from_db(db.conn_mut()).context("加载规则失败")?;
+    let sources_config = SourcesConfig::load(&paths.sources_config);
+    let rules: Vec<Rule> =
+        load_active_rules(&paths.rules_dir, &sources_config).context("加载规则失败")?;
 
     if json {
         // 机器可读：Rule 已 derive(Serialize)。
@@ -355,8 +359,8 @@ fn run_sources(cfg: &AppConfig, paths: &ConfigPaths, json: bool) -> Result<()> {
     let enabled = rules.iter().filter(|r| !r.disabled).count();
     let disabled = rules.iter().filter(|r| r.disabled).count();
     println!(
-        "书源数据库: {}（启用 {} / 禁用 {}）",
-        paths.db_file.display(),
+        "书源文件: {}（启用 {} / 禁用 {}）",
+        paths.rules_dir.join(&sources_config.active_file).display(),
         enabled,
         disabled
     );

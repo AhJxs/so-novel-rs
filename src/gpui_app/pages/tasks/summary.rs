@@ -7,7 +7,7 @@
 use std::path::PathBuf;
 
 use crate::app::{AppModel, DownloadTask};
-use crate::models::{Book, SearchResult};
+use crate::models::{Book, FinishedReason, SearchResult};
 
 /// `DownloadTask` 的轻量 Clone 视图 —— 给 List delegate 用。
 #[derive(Clone)]
@@ -22,7 +22,7 @@ pub struct TaskSummary {
     pub completed: u32,
     pub failed: u32,
     /// 跟 `DownloadTask::finished` 同型 —— 成功 = Ok(path)；结束原因见 `FinishedReason`。
-    pub finished: Option<Result<PathBuf, crate::db::tasks::FinishedReason>>,
+    pub finished: Option<Result<PathBuf, FinishedReason>>,
     pub failures: Vec<(u32, String, String)>,
     pub cancelling: bool,
 }
@@ -44,7 +44,7 @@ impl TaskSummary {
     fn is_finished_with_err_failed(&self) -> bool {
         matches!(
             self.finished.as_ref(),
-            Some(Err(crate::db::tasks::FinishedReason::Failed { .. }))
+            Some(Err(FinishedReason::Failed { .. }))
         )
     }
     pub fn book_name(&self) -> &str {

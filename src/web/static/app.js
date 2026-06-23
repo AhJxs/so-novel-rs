@@ -320,7 +320,10 @@ function app() {
     async loadTasks() {
       try {
         const resp = await fetch('/api/tasks');
-        if (resp.ok) { this.tasks = await resp.json(); this.activeTasks = this.tasks.length; }
+        if (resp.ok) {
+          this.tasks = await resp.json();
+          this.activeTasks = this.tasks.filter(t => t.status === 'Downloading').length;
+        }
       } catch {}
     },
 
@@ -422,7 +425,7 @@ function app() {
 
     formatDate(ts) {
       if (!ts) return '';
-      return new Date(ts * 1000).toLocaleDateString('zh-CN');
+      return new Date(ts * 1000).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
     },
   };
 }
