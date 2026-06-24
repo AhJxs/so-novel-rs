@@ -31,4 +31,14 @@ mod tests {
 
         tracing::info!("smoke test");
     }
+
+    /// 静默模式：init 后 `tracing::info!` 不应 panic，也不应有 fmt 副作用。
+    #[test]
+    fn init_tracing_silent_does_not_panic() {
+        use tracing_subscriber::prelude::*;
+        let _guard = tracing_subscriber::registry()
+            .with(tracing_subscriber::EnvFilter::new("off"))
+            .set_default();
+        tracing::info!("should be dropped silently");
+    }
 }

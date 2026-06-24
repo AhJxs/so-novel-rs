@@ -11,7 +11,7 @@
 use anyhow::Result;
 
 /// Web 服务默认配置。
-const DEFAULT_WEB_HOST: &str = "0.0.0.0";
+const DEFAULT_WEB_HOST: &str = "127.0.0.1";
 const DEFAULT_WEB_PORT: u16 = 8080;
 
 fn main() -> Result<()> {
@@ -31,7 +31,11 @@ fn main() -> Result<()> {
         attach_parent_console();
     }
 
-    so_novel_rs::logging::init_tracing();
+    if is_cli {
+        return so_novel_rs::cli::run();
+    } else {
+        so_novel_rs::logging::init_tracing();
+    }
 
     if is_web {
         let host = parse_arg_value(&args, "--host").unwrap_or_else(|| DEFAULT_WEB_HOST.to_string());
@@ -39,10 +43,6 @@ fn main() -> Result<()> {
             .and_then(|v| v.parse::<u16>().ok())
             .unwrap_or(DEFAULT_WEB_PORT);
         return run_web(host, port);
-    }
-
-    if is_cli {
-        return so_novel_rs::cli::run();
     }
 
     // 启动 GPUI + gpui-component GUI。

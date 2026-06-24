@@ -27,6 +27,10 @@ use crate::util::system::open_path;
     version
 )]
 struct Cli {
+    /// 显示内部日志（默认静默，避免污染 --json 等机器可读输出）
+    #[arg(long, short = 'v', global = true)]
+    verbose: bool,
+
     #[command(subcommand)]
     command: Cmd,
 }
@@ -72,6 +76,13 @@ enum Cmd {
 /// CLI 入口。被 `main.rs` 在检测到子命令时调用。
 pub fn run() -> Result<()> {
     let cli = Cli::parse();
+
+    // 默认静默 tracing：--verbose 才会把内部日志打到 stdout。
+    // 注：此时还没有 subscriber，要等 --verbose 才 init；这样不开启时
+    // tracing::info!/warn! 调用完全不会有任何输出。
+    if cli.verbose {
+        crate::logging::init_tracing();
+    }
     let paths = ConfigPaths::discover();
     let cfg = load_config(&paths.config_file).context("加载 config.toml 失败")?;
 
