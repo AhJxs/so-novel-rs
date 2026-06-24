@@ -62,25 +62,32 @@ pub fn add_sources_from_file(
     tracing::info!("已导入书源文件: {}", dest.display());
 
     // 如果导入的是当前活跃文件，重新加载规则
+    let mut reloaded_active = false;
     if filename == sources_config.active_file {
         match crate::persistent::load_active_rules(rules_dir, sources_config) {
             Ok(rs) => {
                 *rules = rs;
                 *rule_load_error = None;
+                reloaded_active = true;
             }
-            Err(e) => {
-                tracing::warn!("导入成功但重载规则失败: {e:#}");
-            }
+            Err(e) => tracing::warn!("导入成功但重载规则失败: {e:#}"),
         }
     }
 
-    Ok(ImportResult { filename })
+    Ok(ImportResult {
+        filename,
+        reloaded_active,
+    })
 }
 
 /// 导入文件的结果统计。
 #[derive(Debug, Clone)]
 pub struct ImportResult {
     pub filename: String,
+    /// true = 这条导入触发了 `active_file` 重载（rule 集合变了）；false = 只是
+    /// 追加了一个非活跃文件。调用方据此决定是否清空搜索状态（旧 results 的
+    /// `source_id` 在新 rule 集合里可能指向错源）。
+    pub reloaded_active: bool,
 }
 
 /// 删除一条书源（从当前活跃文件中移除）。

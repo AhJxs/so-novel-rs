@@ -332,6 +332,12 @@ impl AppModel {
                     crate::i18n::ts_fmt("Sources.import.result", &[("filename", &result.filename)])
                         .to_string();
                 self.sources_state.clear_health();
+                // 如果导入的就是当前活跃文件，rule 集合已被重载：旧搜索结果的
+                // `source_id` 在新 rule 里可能指向错源（详见 `switch_active_file`
+                // 同款注释）。只清这一种情况 —— 导入非活跃文件不影响 rule 集合。
+                if result.reloaded_active {
+                    self.search.clear_results_and_caches();
+                }
                 self.push_success(msg);
                 self.save_sources_config();
             }
@@ -374,6 +380,10 @@ impl AppModel {
         ) {
             Ok(()) => {
                 self.sources_state.clear_health();
+                // rule 集合整体替换 → 旧搜索结果的 `source_id` 在新 rule 里
+                // 可能指向完全不同的源（数值 ID 在不同文件里不复用）。直接清空
+                // 避免用户点了旧结果去下载，结果跑到错源上。
+                self.search.clear_results_and_caches();
                 self.push_success(ts_fmt(
                     "Toasts.switch_source_file_ok",
                     &[("filename", filename)],

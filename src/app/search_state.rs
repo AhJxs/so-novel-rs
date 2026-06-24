@@ -135,6 +135,16 @@ pub struct SourceSearchEvent {
 }
 
 impl SearchState {
+    /// rule 集合整体变化时（切活跃书源文件 / 导入触发 active 重载）调用。
+    /// `SearchResult.source_id: i32` 是数值弱匹配 —— 同一 id 在新文件里可能
+    /// 指向完全不同的源，留着旧 results 会让用户点到错源下载，所以整体退到
+    /// `Default`；`keyword` 是用户连续输入，必须保留。
+    pub fn clear_results_and_caches(&mut self) {
+        let keyword = std::mem::take(&mut self.keyword);
+        *self = Self::default();
+        self.keyword = keyword;
+    }
+
     /// 排空通道；返回是否有事件（触发 repaint）。
     pub fn drain(&mut self) -> bool {
         let mut any = false;
@@ -444,5 +454,53 @@ mod search_state_tests {
         s.spawn_cover_download(1, "https://example.com/cover.png", &client, &rt);
         std::thread::sleep(std::time::Duration::from_millis(500));
         drop(rt);
+    }
+
+    /// 回归测试：切活跃书源文件后，旧 results / 缓存 全部清空，但用户输入
+    /// 的 `keyword` 保留（用户连续输入不应被打断）。`source_id` 重置为 `None`，
+    /// 避免 dropdown 指着新文件里不存在的 id 让下一次搜索派空。
+    ///
+    /// 场景对应：`SearchResult.source_id: i32` 弱匹配，切文件后旧 id 可能指向
+    /// 完全不同的 rule —— 直接清空比"保留 + 静默错源下载"安全得多。
+    #[test]
+    fn clear_results_and_caches_resets_rule_bound_state() {
+        let mut s = SearchState {
+            keyword: "校花".to_string(),
+            ..Default::default()
+        };
+        // 模拟"已搜过一轮"：往每个 rule-bound 容器里塞一条样本
+        s.source_id = Some(3);
+        s.last_keyword = Some("校花".to_string());
+        s.results.push(SearchResult {
+            source_id: 3,
+            source_name: "梦书中文".to_string(),
+            url: "http://www.mcxs.la/148_148487/".to_string(),
+            book_name: "校花别追了".to_string(),
+            ..Default::default()
+        });
+        s.detail_cache.insert(
+            (3, "http://www.mcxs.la/148_148487/".to_string()),
+            DetailState::Loaded(Box::default()),
+        );
+        s.toc_cache.insert(
+            (3, "http://www.mcxs.la/148_148487/".to_string()),
+            TocState::Loaded(Box::default(), vec![]),
+        );
+        s.cover_cache.insert(
+            (3, "http://example.com/c.jpg".to_string()),
+            CoverEntry::Failed("test".to_string()),
+        );
+
+        s.clear_results_and_caches();
+        // 二次 clear 在 default 状态上不应 panic
+        s.clear_results_and_caches();
+
+        // keyword 保留 —— 其他字段都回到 Default，靠类型系统保证
+        assert_eq!(s.keyword, "校花");
+        assert!(s.source_id.is_none(), "source_id 应重置为 None");
+        assert!(s.results.is_empty(), "results 应清空");
+        assert!(s.detail_cache.is_empty(), "detail_cache 应清空");
+        assert!(s.toc_cache.is_empty(), "toc_cache 应清空");
+        assert!(s.cover_cache.is_empty(), "cover_cache 应清空");
     }
 }
