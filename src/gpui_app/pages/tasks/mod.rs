@@ -229,6 +229,14 @@ impl Render for TasksPage {
         let summaries = build_summaries(self.model.read(cx), &indices);
         let total = summaries.len();
 
+        // TODO：接入 list_cache。当前每帧 3 个 &AppModel 借用的 helper
+        // 单独跑（count_by_status / filter_and_sort_indices /
+        // build_summaries），结果没共享。Tasks 任务数少（通常 < 100），
+        // TaskSummary 已是"已重"克隆，list_cache 收益小（最多 1ms → 0）；
+        // 改造需把这 3 个 helper 改成"拿 &mut AppModel 一站式算"，改动
+        // 风险 vs 收益不划算，故暂不接入。详见 git history 'list_cache
+        // 接入' commit 后续。
+
         // ---- 4. 分页切片 + 兜底（过滤后 current_page 越界 → 回卷）----
         let w = compute_page_window(total, &mut self.current_page);
         let page_items: Vec<TaskSummary> = if !w.is_empty() {

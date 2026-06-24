@@ -37,11 +37,11 @@ use crate::export::{
     ExportError, RenderTarget, RenderedChapter, build_book_dir_name, exporter_for,
     write_chapter_files,
 };
+use crate::models::Source;
 use crate::models::{Book, Chapter};
 use crate::parser::{
     BookError, ChapterError, SelectError, TocError, parse_book_detail, parse_chapter, parse_toc,
 };
-use crate::rules::Source;
 use crate::util::zhconv::convert_book_meta;
 use retry::retry_with_backoff;
 

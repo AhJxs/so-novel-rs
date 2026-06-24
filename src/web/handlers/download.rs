@@ -11,8 +11,8 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
 
 use crate::crawler::{self, CancelToken, DownloadOptions, Progress};
+use crate::models::Source;
 use crate::models::{Chapter, DownloadTaskRecord, FailureRecord, FinishedReason};
-use crate::rules::Source;
 
 use super::super::{ActiveDownload, SharedState, TaskStatus};
 

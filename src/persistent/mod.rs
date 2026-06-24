@@ -3,13 +3,18 @@
 //! 子模块：
 //! - `tasks` — 下载任务 `tasks.json` 的 CRUD
 //! - `sources_config` — 书源配置 `sources_config.json` 的读写
-//! - `rules` — 规则目录 `rules/` 的初始化与加载
+//! - `rules` — 规则目录 `rules/` 的初始化与加载（也含 `META_*` 常量、
+//!   `load_rules_from_path` / `apply_default_rule` / `RulesError` 等底层解析）
 
 mod rules;
 mod sources_config;
 mod tasks;
 
-pub use rules::{init_rules_dir, list_rule_files, load_active_rules};
+pub use rules::{
+    META_AUTHOR, META_BOOK_NAME, META_CATEGORY, META_COVER_URL, META_INTRO, META_LAST_UPDATE_TIME,
+    META_LATEST_CHAPTER, META_LATEST_CHAPTER_URL, META_STATUS, RulesError, apply_default_rule,
+    init_rules_dir, list_rule_files, load_active_rules, load_rules_from_path,
+};
 pub use sources_config::SourcesConfig;
 pub use tasks::{load as load_tasks, save as save_tasks, save_with_trim};
 

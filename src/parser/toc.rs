@@ -388,7 +388,7 @@ fn resolve_base_for_join(toc_base_uri: &str, current_page_url: &str) -> String {
 mod tests {
     use super::*;
     use crate::config::LangType;
-    use crate::rules::apply_default_rule;
+    use crate::persistent::apply_default_rule;
 
     /// 笔趣阁22 toc 规则：单页 / option 下拉分页（`#indexselect > option`）。
     fn rule_22biqu() -> Rule {

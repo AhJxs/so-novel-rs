@@ -21,6 +21,9 @@ pub type LibraryScanEvent = Result<Vec<LibraryEntry>, String>;
 pub struct LibraryState {
     /// 当前扫描结果（已按修改时间倒序）。
     pub entries: Vec<LibraryEntry>,
+    /// `entries` 改动的单调递增版本号。`drain_scan` 写入新结果时 +1，
+    /// UI 渲染用 `(entries_version, filter_hash, page_index)` 缓存过滤/分页结果。
+    pub entries_version: u64,
     /// 用户输入的搜索关键字（按文件名过滤）。
     pub filter_text: String,
     /// 用户选的格式过滤（None = 全部）。
@@ -104,6 +107,7 @@ impl LibraryState {
                         Ok(mut entries) => {
                             entries.sort_by_key(|b| std::cmp::Reverse(b.modified_unix_secs));
                             self.entries = entries;
+                            self.entries_version = self.entries_version.wrapping_add(1);
                             self.last_error = None;
                         }
                         Err(msg) => {

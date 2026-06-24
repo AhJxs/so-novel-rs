@@ -306,11 +306,11 @@ fn render_detail_cover(
                     .read(cx)
                     .search
                     .cover_cache
-                    .get(&(source_id, cover_url.to_string()));
+                    .peek(&(source_id, cover_url.to_string()));
                 match cover {
                     Some(CoverEntry::Ready { bytes, uri }) => {
                         // 命中本页解码缓存就复用；否则解码 + 写缓存。
-                        if let Some(cached) = p.cover_images.get(uri).cloned() {
+                        if let Some(cached) = p.cover_images.get(uri.as_str()).cloned() {
                             match cached {
                                 Some(img) => CoverView::Image(img),
                                 None => CoverView::Failed,
@@ -318,11 +318,11 @@ fn render_detail_cover(
                         } else {
                             match decode_cover_image(bytes) {
                                 Some(img) => {
-                                    p.cover_images.insert(uri.clone(), Some(img.clone()));
+                                    p.cover_images.put(uri.clone(), Some(img.clone()));
                                     CoverView::Image(img)
                                 }
                                 None => {
-                                    p.cover_images.insert(uri.clone(), None);
+                                    p.cover_images.put(uri.clone(), None);
                                     CoverView::Failed
                                 }
                             }

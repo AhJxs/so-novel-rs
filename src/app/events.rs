@@ -15,6 +15,47 @@
 use super::AppModel;
 use super::UpdateOutcome;
 
+/// 唤醒信号 handle。**仅在 GPUI/smol executor 上使用** —— gpui 的 `cx.spawn`
+/// 跑在 smol 之上，smol 的 channel 在该 executor 上原生工作，**不**触碰
+/// tokio runtime（避免跨 executor 复杂度）。
+///
+/// `bounded(1)`：高频唤醒（如下载进度每章一次）只会保留最新一个待处理信号，
+/// 多余的被覆盖 —— `drain` 是按需排空所有 channel 数据的，丢一两个唤醒信号
+/// 只会让响应延后 100ms 兜底，**不会丢数据**。
+#[derive(Clone)]
+pub struct WakeupHandle {
+    tx: smol::channel::Sender<()>,
+}
+
+/// 接收端。在 `drain_loop` 持有。`try_recv` 非阻塞。
+pub struct WakeupReceiver {
+    rx: smol::channel::Receiver<()>,
+}
+
+impl WakeupHandle {
+    /// 非阻塞发一个唤醒信号。已有未读信号时直接覆盖（bounded 容量 1）。
+    /// 不会失败 —— receiver drop 后 `send` 是 no-op。
+    pub fn notify(&self) {
+        let _ = self.tx.try_send(());
+    }
+}
+
+impl WakeupReceiver {
+    /// 非阻塞尝试拿一个信号。无信号时立刻返回 `None`，不阻塞 drain_loop。
+    pub fn try_recv(&mut self) -> Option<()> {
+        match self.rx.try_recv() {
+            Ok(()) => Some(()),
+            Err(_) => None,
+        }
+    }
+}
+
+/// 在 `AppModel::new` 里调一次，建 `(WakeupHandle, WakeupReceiver)`。
+pub fn new_wakeup() -> (WakeupHandle, WakeupReceiver) {
+    let (tx, rx) = smol::channel::bounded::<()>(1);
+    (WakeupHandle { tx }, WakeupReceiver { rx })
+}
+
 /// 排空 `AppModel` 中所有后台通道。返回是否产生过事件。
 ///
 /// 副作用：

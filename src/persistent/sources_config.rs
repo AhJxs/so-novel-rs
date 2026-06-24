@@ -109,8 +109,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("sources_config.json");
 
-        let mut cfg = SourcesConfig::default();
-        cfg.active_file = "cloudflare.json".to_string();
+        let mut cfg = SourcesConfig {
+            active_file: "cloudflare.json".to_string(),
+            ..Default::default()
+        };
         cfg.disabled_urls.insert("https://a.com".to_string());
         cfg.disabled_urls.insert("https://b.com".to_string());
 

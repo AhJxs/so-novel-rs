@@ -3,7 +3,7 @@
 //! 模块划分：
 //! - `gpui_app` — 新 GPUI GUI 入口（Stage 1+）。
 //! - `app` / `db` / `crawler` / `config` / `models` / `parser` / `export` /
-//!   `http` / `js` / `rules` / `util` / `cli` — 业务 + 数据层（GUI 解耦）。
+//!   `http` / `js` / `util` / `cli` — 业务 + 数据层（GUI 解耦）。
 
 // `rust_i18n::i18n!` 必须在 crate root 调一次 —— 它在 crate root 生成 `_rust_i18n_t`
 // 函数 + locale 表，`t!` 宏和 `rust_i18n::set_locale` 都依赖它。
@@ -29,6 +29,5 @@ pub mod logging;
 pub mod models;
 pub mod parser;
 pub mod persistent;
-pub mod rules;
 pub mod util;
 pub mod web;

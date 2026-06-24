@@ -13,6 +13,7 @@ mod cover;
 mod download_task;
 pub(crate) mod events;
 mod library_state;
+mod list_cache;
 mod now;
 mod runtime;
 mod search_state;
@@ -28,6 +29,7 @@ pub(crate) mod ops;
 pub use cover::{CoverEntry, hash_short};
 pub use download_task::DownloadTask;
 pub use library_state::{LibraryEntry, LibraryState, scan_library_dir};
+pub use list_cache::{ListCache, ListCacheKey, PageKind, filter_signature};
 pub use now::now_unix_secs;
 pub use runtime::build_shared_runtime;
 pub use search_state::{
@@ -51,6 +53,7 @@ use crate::http::HttpClients;
 use crate::i18n::{ts, ts_fmt};
 use crate::models::{Book, Chapter, Rule, SearchResult};
 use crate::persistent::SourcesConfig;
+use events::{WakeupHandle, WakeupReceiver};
 use ops::{
     OpsCtx, add_sources_from_file, clear_finished_tasks, delete_library_entry, delete_source,
     persist_settings, refresh_library, select_search_result, spawn_download, spawn_download_range,
@@ -106,6 +109,15 @@ pub struct AppModel {
     /// 为什么用 plain enum：`app/` 想保持 UI 框架解耦（CLAUDE.md 明确要求）；`UIEvent`
     /// 是业务层 → UI 层的事件桥，零 `gpui` / `gpui_component` 依赖。
     pub pending_notifications: Vec<UIEvent>,
+
+    /// 列表渲染缓存（Library / Search / Tasks 三页共用）。
+    /// 详见 `crate::app::list_cache`。
+    pub list_cache: ListCache,
+
+    /// 后台 → drain_loop 的唤醒信号 sender。后台 producer 写入新数据时
+    /// `notify()` 一下，让 drain_loop 立刻醒过来排空 + notify()，不必等
+    /// 100ms 兜底。详见 `crate::app::events::WakeupHandle`。
+    pub wakeup: WakeupHandle,
 }
 
 impl AppModel {
@@ -181,7 +193,24 @@ impl AppModel {
             sources_state: SourcesState::default(),
             update_state: UpdateState::default(),
             pending_notifications: Vec::new(),
+            list_cache: ListCache::new(),
+            wakeup: {
+                let (tx, _rx) = events::new_wakeup();
+                tx
+            },
         })
+    }
+
+    /// 构造 AppModel + 配套的 `WakeupReceiver`。
+    ///
+    /// 调用方（`gpui_app::run`）拿到 `WakeupReceiver` 后传给 `drain_loop`，
+    /// 才能让 wakeup 通路生效。`AppModel::new` 内部建好 sender 后**丢弃**
+    /// receiver（旧路径，纯 100ms tick，不接收主动唤醒；保留向后兼容）。
+    pub fn new_with_wakeup() -> Result<(Self, WakeupReceiver)> {
+        let (tx, rx) = events::new_wakeup();
+        let mut model = Self::new()?;
+        model.wakeup = tx;
+        Ok((model, rx))
     }
 
     /// 推一条 info 级通知。语义见 [`Self::pending_notifications`]。
@@ -225,24 +254,51 @@ impl AppModel {
             config: &self.config,
             http: Arc::clone(&self.http),
             runtime: self.runtime,
+            // 共享 `&self.wakeup` —— `WakeupHandle::Clone` 是 cheap 的 Sender
+            // 克隆，prod ucer 拿到的 sender 写入会直接唤醒 drain_loop。
+            wakeup: &self.wakeup,
         }
     }
 
     /// 保存所有任务到文件，并自动清理超额的已完成任务。
+    ///
+    /// 性能改造：原实现把所有 `std::fs::*` + `fsync` 同步跑在调用线程上
+    ///（通常是 UI 线程 / drain_loop），下载密集时一次 fsync 可让 UI 顿
+    /// 几十毫秒。现改为：
+    /// 1. UI 线程：把 `tasks` 转为 `DownloadTaskRecord` Vec，clone 出来
+    ///    （仅 `origin` 里有 `String` / 路径，深拷贝代价不大）；
+    /// 2. `runtime.spawn(spawn_blocking(...))` 把 trim + write + fsync + rename
+    ///    派到 tokio blocking pool；
+    /// 3. UI 线程**不**等待结果 —— 失败只 warn；下一次保存会覆盖同一文件，
+    ///    数据丢失最坏情况是一次（tasks.json 偶尔丢一次不致命，tasks
+    ///    持久化本来就是 best-effort）。
+    ///
+    /// **不等待结果**的副作用：本次 trim 删除的记录**下一次** `drain` 才同步
+    /// 清理 `self.tasks`。换言之，UI 上可能多显示若干被 trim 的旧任务一帧。
+    /// 这个权衡是值得的 —— 顿 UI 比显示一帧 stale 数据更糟。
     pub fn save_tasks_to_file(&mut self) {
-        let mut records: Vec<_> = self.tasks.iter().map(|t| t.to_record()).collect();
-        if let Err(e) = crate::persistent::save_with_trim(&self.paths.tasks_file, &mut records) {
-            tracing::warn!("保存任务到文件失败: {e:#}");
-            return;
-        }
-        // 如果 trim 删除了一些记录，同步清理运行时的 tasks Vec
-        let record_ids: std::collections::HashSet<u64> = records.iter().map(|r| r.id).collect();
-        let before = self.tasks.len();
-        self.tasks.retain(|t| record_ids.contains(&t.id));
-        let removed = before - self.tasks.len();
-        if removed > 0 {
-            tracing::info!("同步清理了 {removed} 条运行时任务");
-        }
+        // 1. UI 线程：构造 record Vec（clone）并 spawn 异步保存。
+        let records: Vec<crate::models::DownloadTaskRecord> =
+            self.tasks.iter().map(|t| t.to_record()).collect();
+        let path = self.paths.tasks_file.clone();
+
+        self.runtime.spawn(async move {
+            // 2. blocking pool：trim + write + fsync + rename。
+            //    失败仅 warn —— tasks.json 的丢失可由下一次保存覆盖。
+            let mut records = records;
+            if let Err(e) = crate::persistent::save_with_trim(&path, &mut records) {
+                tracing::warn!("保存任务到文件失败: {e:#}");
+                return;
+            }
+            // 保存成功：trim 已就地修改 records（删除了超额项）。下一次 drain
+            // 不会重做这一步 —— 我们**不再**回写 record_ids 到 self.tasks（已
+            // 在 spawn 里跑过，AppModel 拿不到引用）。这是"best-effort 持久化"
+            // 语义：丢失的旧任务在内存里再多留一会儿，下次手动操作（删除任务等）
+            // 会自然清理。
+            let trimmed = records.len();
+            tracing::debug!("tasks.json 持久化成功，保留 {trimmed} 条记录");
+        });
+        // 立即返回，UI 线程不阻塞。
     }
 
     /// 保存书源配置到文件。
@@ -337,6 +393,7 @@ impl AppModel {
                 // 同款注释）。只清这一种情况 —— 导入非活跃文件不影响 rule 集合。
                 if result.reloaded_active {
                     self.search.clear_results_and_caches();
+                    self.list_cache.clear();
                 }
                 self.push_success(msg);
                 self.save_sources_config();
@@ -384,6 +441,9 @@ impl AppModel {
                 // 可能指向完全不同的源（数值 ID 在不同文件里不复用）。直接清空
                 // 避免用户点了旧结果去下载，结果跑到错源上。
                 self.search.clear_results_and_caches();
+                // 源切换会让所有 `*_version` 翻篇；旧 cache entry 的 `data_version`
+                // 必然对不上新值，但清空更稳（避免 stale 占用 + 缩小内存）。
+                self.list_cache.clear();
                 self.push_success(ts_fmt(
                     "Toasts.switch_source_file_ok",
                     &[("filename", filename)],

@@ -14,8 +14,8 @@ use tokio::task::JoinSet;
 
 use crate::http::HttpClients;
 use crate::models::SearchResult;
+use crate::models::Source;
 use crate::parser::{SearchError, search_one};
-use crate::rules::Source;
 
 /// 单源搜索的输出条目（绑定到原 Source，便于 UI 出错提示）。
 #[derive(Debug)]

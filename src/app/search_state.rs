@@ -1,12 +1,26 @@
 //! 搜索状态：搜索页的全部状态 + 后台通信。
 
 use std::collections::{HashMap, HashSet};
+use std::num::NonZeroUsize;
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
+
+use lru::LruCache;
 
 use crate::models::{Book, Chapter, SearchResult};
 
 use super::cover::{CoverEntry, cover_entry_from_bytes};
+
+/// 封面结果缓存最大条目数。
+///
+/// 旧实现是 `HashMap` 无上限，长会话累积所有查看过的封面。
+/// 64 条覆盖了搜索页通常浏览的"当前结果集 + 最近历史"。
+/// `SearchResult` 单条 cover 字节一般 50KB-200KB，64 条上限 ≈ 5-10MB，
+/// 与原"无上限"相比稳态内存有界。
+const COVER_CACHE_CAPACITY: NonZeroUsize = match NonZeroUsize::new(64) {
+    Some(n) => n,
+    None => unreachable!(),
+};
 
 /// TOC 预取加载状态。
 #[derive(Debug, Clone)]
@@ -25,7 +39,6 @@ pub struct TocEvent {
 }
 
 /// 搜索状态（搜索下载页用）。
-#[derive(Default)]
 pub struct SearchState {
     /// 用户输入。
     pub keyword: String,
@@ -36,6 +49,10 @@ pub struct SearchState {
     pub last_keyword: Option<String>,
     /// 已收到的结果（按 source_id 升序）。
     pub results: Vec<SearchResult>,
+    /// `results` 改动的单调递增版本号：`drain` 写入新结果时 +1。
+    /// UI 渲染用 `(results_version, filter_hash, page_index)` 缓存过滤/排序结果，
+    /// 避免每帧重算 + clone —— 详见 `crate::app::list_cache`。
+    pub results_version: u64,
     /// 各源的搜索状态：true = 跑完，false = 还在跑。
     /// 用 (source_id, source_name, status) 让 UI 显示哪个源还在等。
     pub source_status: Vec<(i32, String, SourceStatus)>,
@@ -76,11 +93,46 @@ pub struct SearchState {
     /// 封面下载完成通道的接收端。
     pub cover_rx: Option<mpsc::UnboundedReceiver<CoverEvent>>,
     /// 封面结果缓存：(source_id, cover_url) → CoverEntry。
-    pub cover_cache: HashMap<(i32, String), CoverEntry>,
+    ///
+    /// **LRU 上限 `COVER_CACHE_CAPACITY`（64）**：长会话累积所有查看过的
+    /// 封面的旧实现（`HashMap` 无界）会被这个 LRU 取代，超额自动驱逐。
+    /// 切换 active rule 文件时 `clear()` 整表（避免 stale 占用）。
+    pub cover_cache: LruCache<(i32, String), CoverEntry>,
     /// 正在下载中的封面 URL；防止重复 spawn。
     pub cover_in_flight: HashSet<(i32, String)>,
     /// drain_detail 期间收集到的待 prefetch 封面 URL，drain 后由 AppModel 取出统一派发。
     pub pending_cover_prefetch: Vec<(i32, String)>,
+}
+
+impl Default for SearchState {
+    fn default() -> Self {
+        Self {
+            keyword: String::new(),
+            source_id: None,
+            last_keyword: None,
+            results: Vec::new(),
+            results_version: 0,
+            source_status: Vec::new(),
+            running: false,
+            last_error: None,
+            rx: None,
+            expected: 0,
+            received: 0,
+            selected: None,
+            detail_cache: HashMap::new(),
+            detail_rx: None,
+            filter_after_done: false,
+            toc_cache: HashMap::new(),
+            toc_rx: None,
+            chapter_range_start: 0,
+            chapter_range_end: 0,
+            cover_tx: None,
+            cover_rx: None,
+            cover_cache: LruCache::new(COVER_CACHE_CAPACITY),
+            cover_in_flight: HashSet::new(),
+            pending_cover_prefetch: Vec::new(),
+        }
+    }
 }
 
 /// 详情面板加载状态。
@@ -197,9 +249,16 @@ impl SearchState {
             }
         }
 
-        any |= self.drain_detail();
-        any |= self.drain_cover();
-        any |= self.drain_toc();
+        let detail_changed = self.drain_detail();
+        let cover_changed = self.drain_cover();
+        let toc_changed = self.drain_toc();
+        any |= detail_changed || cover_changed || toc_changed;
+
+        // results 实际内容有变时 bump 一档（cache key 含 results_version，
+        // 任何变化一次 bump 即失效，无需重复 +1）。
+        if any {
+            self.results_version = self.results_version.wrapping_add(1);
+        }
         any
     }
 
@@ -248,7 +307,7 @@ impl SearchState {
                     any = true;
                     self.cover_in_flight.remove(&(ev.source_id, ev.url.clone()));
                     let entry = cover_entry_from_bytes(ev.source_id, &ev.url, ev.bytes);
-                    self.cover_cache.insert((ev.source_id, ev.url), entry);
+                    self.cover_cache.put((ev.source_id, ev.url), entry);
                 }
                 Err(mpsc::error::TryRecvError::Empty) => break,
                 Err(mpsc::error::TryRecvError::Disconnected) => {
@@ -305,7 +364,9 @@ impl SearchState {
             return;
         }
         let key = (source_id, url.to_string());
-        if self.cover_cache.contains_key(&key) || self.cover_in_flight.contains(&key) {
+        // 用 `peek` 而非 `contains`：`contains` 在 lru 0.12 同样要 &mut。
+        // 这里只判断"是否要发请求"，不需要 promote 顺序（已存在 = 直接命中）。
+        if self.cover_cache.peek(&key).is_some() || self.cover_in_flight.contains(&key) {
             return;
         }
         self.cover_in_flight.insert(key.clone());
@@ -486,7 +547,7 @@ mod search_state_tests {
             (3, "http://www.mcxs.la/148_148487/".to_string()),
             TocState::Loaded(Box::default(), vec![]),
         );
-        s.cover_cache.insert(
+        s.cover_cache.put(
             (3, "http://example.com/c.jpg".to_string()),
             CoverEntry::Failed("test".to_string()),
         );

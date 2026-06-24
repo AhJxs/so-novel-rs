@@ -77,7 +77,6 @@ so-novel-rs/
     ├── config/            # config.toml 读写
     ├── persistent/        # JSON 持久化（tasks.json / sources_config.json / rules/）
     ├── models/            # Rule / Book / Chapter / SearchResult / TaskRecord
-    ├── rules/             # 书源规则加载 + 默认值填充
     ├── crawler/           # 搜索 / 下载 / 重试 / 健康检测
     ├── parser/            # HTML 解析
     ├── http/              # HTTP 客户端 / 代理 / CF 旁路
@@ -140,6 +139,9 @@ SO_NOVEL_WEB=1 so-novel-rs
 ```
 
 浏览器打开 `http://localhost:8080` 即可使用。支持手机、平板、桌面多端响应式。
+
+> **默认绑定 `127.0.0.1:8080`，仅本机访问。** 如果需要在局域网或 Docker
+> 容器中对外服务，显式传 `--host 0.0.0.0`。
 
 ### 🐳 Docker 部署
 

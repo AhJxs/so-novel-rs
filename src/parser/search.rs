@@ -274,7 +274,7 @@ fn optional_field(el: scraper::ElementRef<'_>, query: &str) -> Option<String> {
 mod tests {
     use super::*;
     use crate::config::LangType;
-    use crate::rules::apply_default_rule;
+    use crate::persistent::apply_default_rule;
 
     /// 用 main.json 中"笔趣阁22"的真实搜索规则构造一条 Rule。
     fn rule_22biqu() -> Rule {

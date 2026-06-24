@@ -9,7 +9,7 @@ use futures::stream::Stream;
 use serde::{Deserialize, Serialize};
 
 use crate::models::SearchResult;
-use crate::rules::Source;
+use crate::models::Source;
 
 use super::super::SharedState;
 

@@ -7,9 +7,9 @@ use serde::Deserialize;
 
 use crate::config::AppConfig;
 use crate::crawler::{self, CancelToken};
+use crate::models::Source;
 use crate::models::{Book, Rule};
 use crate::parser;
-use crate::rules::Source;
 
 use super::super::SharedState;
 

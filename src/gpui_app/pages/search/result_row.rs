@@ -17,7 +17,7 @@ use gpui_component::{
 };
 
 use crate::gpui_app::components::truncate;
-use crate::i18n::ts;
+use crate::i18n::ts_cached;
 use crate::models::SearchResult;
 
 use super::SearchPage;
@@ -34,14 +34,14 @@ pub(super) fn render(
     let author_display = r
         .author
         .clone()
-        .unwrap_or_else(|| ts("Search.result.unknown_author").to_string());
+        .unwrap_or_else(|| ts_cached("Search.result.unknown_author").to_string());
     let latest_display = r
         .latest_chapter
         .clone()
-        .unwrap_or_else(|| ts("Search.result.no_latest").to_string());
+        .unwrap_or_else(|| ts_cached("Search.result.no_latest").to_string());
     // 书源名称：直接用结果自带的 source_name（不再显示 #id）。
     let source_name_display = if r.source_name.is_empty() {
-        ts("Search.result.unknown_source").to_string()
+        ts_cached("Search.result.unknown_source").to_string()
     } else {
         truncate(&r.source_name, 20).to_string()
     };
@@ -139,7 +139,7 @@ pub(super) fn render(
                 .small()
                 .outline()
                 .icon(Icon::new(IconName::Info))
-                .label(ts("Search.detail.action"))
+                .label(ts_cached("Search.detail.action"))
                 .on_click(move |_, window, cx| {
                     // 1) 拉详情（幂等：detail_cache 命中直接返回）。详情后端返回 cover_url
                     //    后，drain loop 自动派发封面下载（见 app/events.rs L43-50）。
@@ -164,7 +164,7 @@ pub(super) fn render(
                         let page = page.clone();
                         let url = url.clone();
                         dialog
-                            .title(ts("Search.detail.title"))
+                            .title(ts_cached("Search.detail.title"))
                             .w(px(640.))
                             .child(detail_dialog::content(
                                 r,
@@ -182,7 +182,7 @@ pub(super) fn render(
                 .small()
                 .outline()
                 .icon(Icon::new(IconName::ChevronRight))
-                .label(ts("Search.action.select_chapters"))
+                .label(ts_cached("Search.action.select_chapters"))
                 .on_click(move |_, window, cx| {
                     // on_click 是 Fn → 每次重新 clone 一份 result 喂给 open_range_dialog。
                     let r = result_for_range.clone();
@@ -195,7 +195,7 @@ pub(super) fn render(
                 .small()
                 .outline()
                 .icon(Icon::new(IconName::BookOpen))
-                .label(ts("Search.action.download_whole"))
+                .label(ts_cached("Search.action.download_whole"))
                 .on_click(move |_, window, cx| {
                     // on_click 是 Fn（点击可多次触发），所以 on_click 内不能 move
                     // result_for_whole 多次 — 每次重新 clone 一份。
@@ -210,7 +210,7 @@ pub(super) fn render(
                     // 提示带书名（不用任务 id —— id 对用户无意义）。truncate 防超长书名撑爆 toast。
                     window.push_notification(
                         Notification::new()
-                            .title(ts("Search.action.download_started"))
+                            .title(ts_cached("Search.action.download_started"))
                             .message(truncate(&result_for_whole.book_name, 50).to_string())
                             .with_type(NotificationType::Success)
                             .autohide(true),

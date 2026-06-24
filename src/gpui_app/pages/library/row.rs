@@ -14,7 +14,7 @@ use gpui_component::{
 
 use crate::app::LibraryEntry;
 use crate::gpui_app::components::truncate;
-use crate::i18n::ts;
+use crate::i18n::ts_cached;
 use crate::util::system::{open_path, reveal_in_folder};
 
 use super::LibraryPage;
@@ -142,7 +142,7 @@ pub(super) fn render_row(
                         .small()
                         .outline()
                         .icon(Icon::new(IconName::ExternalLink))
-                        .label(ts("Library.action_open"))
+                        .label(ts_cached("Library.action_open"))
                         // 「打开」按钮：用系统默认程序打开文件本身（如 .epub → ebook reader）。
                         // 对应 `util/system.rs::open_path(path)`。
                         .on_click(move |_, _window, _cx| {
@@ -156,7 +156,7 @@ pub(super) fn render_row(
                         .small()
                         .outline()
                         .icon(Icon::new(IconName::Folder))
-                        .label(ts("Library.action_reveal"))
+                        .label(ts_cached("Library.action_reveal"))
                         // 「位置」按钮：OS 文件管理器打开文件**所在目录**，
                         // 高亮显示该文件（Windows `explorer /select,<file>` /
                         // macOS Finder reveal / Linux fallback 到打开父目录 —— 见 util/system.rs）。
@@ -171,7 +171,7 @@ pub(super) fn render_row(
                         .small()
                         .danger()
                         .icon(Icon::new(IconName::Delete))
-                        .label(ts("Library.action_delete"))
+                        .label(ts_cached("Library.action_delete"))
                         .on_click(move |_, window, cx| {
                             // `Button::on_click` 的 handler 是 `Fn`（点击可多次触发），所以
                             // 外层 closure 不能 move `path_del` 进内层 closure。每次点击

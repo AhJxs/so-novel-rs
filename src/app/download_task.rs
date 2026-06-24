@@ -29,6 +29,8 @@ impl Clone for DownloadTask {
             last_chapter_title: self.last_chapter_title.clone(),
             finished: self.finished.clone(),
             failures: self.failures.clone(),
+            // version 不进 Clone —— 调用方拿到的本就是同一逻辑任务，无需 +1。
+            version: 0,
         }
     }
 }
@@ -66,6 +68,11 @@ pub struct DownloadTask {
     pub finished: Option<Result<std::path::PathBuf, FinishedReason>>,
     /// 失败章节明细（用于任务页详情显示）。持久化时通过 `FailureRecord` 转换。
     pub failures: Vec<(u32, String, String)>,
+
+    /// 任务自身状态变更版本号：每帧 `drain` 收到事件 +1。
+    /// UI 渲染时配合 `AppModel::tasks_version` 使用，作为列表 cache 的 key 一部分。
+    /// **不**进 Clone（Clone 出来的是逻辑上同一任务，外层不会同时两份）。
+    pub version: u64,
 }
 
 impl DownloadTask {
@@ -128,6 +135,9 @@ impl DownloadTask {
         }
         if was_running && self.finished.is_some() && self.finished_at_unix.is_none() {
             self.finished_at_unix = Some(now_unix_secs());
+        }
+        if any {
+            self.version = self.version.wrapping_add(1);
         }
         any
     }
@@ -221,6 +231,7 @@ impl DownloadTask {
                 .into_iter()
                 .map(|f| (f.index, f.title, f.reason))
                 .collect(),
+            version: 0,
         }
     }
 }

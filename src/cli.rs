@@ -13,9 +13,9 @@ use clap::{Parser, Subcommand};
 
 use crate::config::{AppConfig, ConfigPaths, ExportFormat, load_config};
 use crate::crawler::{self, CancelToken, Progress};
+use crate::models::Source;
 use crate::models::{Rule, SearchResult};
 use crate::persistent::{SourcesConfig, init_rules_dir, load_active_rules};
-use crate::rules::Source;
 use crate::util::system::open_path;
 
 /// so-novel-rs — 小说下载器（CLI）。

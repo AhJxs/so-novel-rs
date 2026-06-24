@@ -9,9 +9,7 @@
 //! 本模块仅依赖 GPUI + gpui-component + 业务模块（`crate::app`）。
 
 use anyhow::Result;
-use gpui::{
-    App, AppContext, Bounds, Entity, WindowBackgroundAppearance, WindowBounds, WindowOptions,
-};
+use gpui::{App, AppContext, Bounds, WindowBackgroundAppearance, WindowBounds, WindowOptions};
 use gpui_component::{Root, TitleBar};
 
 use crate::app::AppModel;
@@ -84,8 +82,12 @@ pub fn run() -> Result<()> {
         // 1. 创建 AppModel。
         //    启动期致命错误（如持久化数据库磁盘 + 内存都打不开）→ 弹原生
         //    错误对话框后直接退出 GPUI 循环，不开任何窗口。
-        let model: Entity<AppModel> = match AppModel::new() {
-            Ok(m) => cx.new(|_cx| m),
+        //
+        //    用 `new_with_wakeup` 而非 `new` —— drain_loop 需要 receiver
+        //    才能接收后台 sender 发来的主动唤醒信号，下载/搜索进度到达
+        //    时不必等 100ms 兜底就能立即排空。
+        let (model, wakeup_rx) = match AppModel::new_with_wakeup() {
+            Ok((m, rx)) => (cx.new(|_cx| m), rx),
             Err(e) => {
                 tracing::error!("AppModel 初始化失败: {e:#}");
                 rfd::MessageDialog::new()
@@ -102,8 +104,8 @@ pub fn run() -> Result<()> {
         // 2. 注册快捷键。
         root::register_key_bindings(cx);
 
-        // 3. 启动 drain 循环（内部 detach）。
-        drain_loop::spawn_drain_loop(model.clone(), cx);
+        // 3. 启动 drain 循环（内部 detach），100ms 兜底 + wakeup 主动唤醒。
+        drain_loop::spawn_drain_loop(model.clone(), wakeup_rx, cx);
 
         // 4. 加载 themes/*.json 到 ThemeRegistry（on_load 里 apply + refresh）。
         //    themes 目录 = `~/.sonovel/themes/`（首次启动写入 21 个 embed，

@@ -5,7 +5,7 @@ use rand::RngExt;
 use regex::Regex;
 
 use crate::config::AppConfig;
-use crate::rules::EffectiveCrawl;
+use crate::models::EffectiveCrawl;
 
 /// 解析 hutool 风格的"宽松 JSON"字符串到键值对列表。
 ///

@@ -7,8 +7,8 @@ use tracing::Instrument;
 
 use crate::config::AppConfig;
 use crate::http::HttpClients;
+use crate::models::Source;
 use crate::models::{Book, Rule};
-use crate::rules::Source;
 
 use super::super::search_state::{DetailEvent, DetailState, SourceSearchEvent, SourceStatus};
 use super::super::trace::{TraceId, sub};

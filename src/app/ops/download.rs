@@ -13,10 +13,11 @@ use crate::crawler::{
     resolve_book,
 };
 use crate::http::HttpClients;
+use crate::models::Source;
 use crate::models::{Book, Chapter, Rule, SearchResult};
-use crate::rules::Source;
 
 use super::super::download_task::DownloadTask;
+use super::super::events::WakeupHandle;
 use super::super::now::now_unix_secs;
 use super::super::search_state::TocEvent;
 use super::super::trace::{TraceId, sub};
@@ -28,6 +29,9 @@ pub(crate) struct OpsCtx<'a> {
     pub config: &'a AppConfig,
     pub http: Arc<HttpClients>,
     pub runtime: &'a tokio::runtime::Runtime,
+    /// 唤醒信号 sender：producer 写入 mpsc 后调 `notify()` 让 drain_loop
+    /// 立即排空，不必等 100ms 兜底。详见 `crate::app::events::WakeupHandle`。
+    pub wakeup: &'a WakeupHandle,
 }
 
 /// 派一个 TOC 预取任务（获取元数据 + 章节列表，不开始下载）。
@@ -222,6 +226,7 @@ pub fn spawn_download_range(
         last_chapter_title: String::new(),
         finished: None,
         failures: Vec::new(),
+        version: 0,
     };
     (id, task)
 }
@@ -242,6 +247,11 @@ pub fn spawn_download(
     let book_url = target.url.clone();
     let cancel_for_task = cancel.clone();
     let tx_for_task = tx.clone();
+    // WakeupHandle：基础设施已就位（`OpsCtx` 持有），未来接入 producer 的
+    // 方式：在每次 `tx.send(Progress::*)` 后调 `ctx.wakeup.notify()`。当前
+    // `drain_loop` 100ms tick 已足够感知每章完成，暂不接入避免触碰
+    // `crawler::DownloadOptions::progress` 严格类型。详见 git history。
+    let _wakeup = ctx.wakeup.clone();
 
     // 顶层 trace_id：一次下载 = 一个 trace_id；后续所有阶段共享。
     let trace_id = TraceId::mint();
@@ -300,6 +310,7 @@ pub fn spawn_download(
         last_chapter_title: String::new(),
         finished: None,
         failures: Vec::new(),
+        version: 0,
     };
     (id, task)
 }

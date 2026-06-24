@@ -16,9 +16,18 @@
 //!    内 `document.select(&*arc)` 借用一次即可，**不**跨线程共享 `&Selector`。
 //! 5. **不加新依赖**：`regex = "1"`、`scraper = "0.27"` 已在树；`std::sync::Mutex` +
 //!    `std::collections::HashMap` 已足够。
+//!
+//! 健壮性细节：
+//! - 读路径用 `try_lock` + `Arc::clone` 失败的 `match` 兜底：极端情况下（锁中毒
+//!   或被另一个慢解析方持锁）退回未缓存路径，**不**因 `.unwrap()` 把整个调用栈炸掉。
+//! - 写路径用 `lock().unwrap_or_else(|e| e.into_inner())`：标准库 `PoisonError` 自带
+//!   恢复机制，调用方 panic 中毒后下一次写入仍能继续（内容已由我们重新填入）。
+//! - `Selector::parse` / `Regex::new` 用 `AssertUnwindSafe` 包裹 `catch_unwind`，
+//!   panic 时不污染整个缓存表。
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
 use regex::Regex;
 use scraper::Selector;
@@ -28,38 +37,77 @@ use crate::parser::dom::SelectError;
 static SELECTOR_CACHE: OnceLock<Mutex<HashMap<String, Arc<Selector>>>> = OnceLock::new();
 static REGEX_CACHE: OnceLock<Mutex<HashMap<String, Arc<Regex>>>> = OnceLock::new();
 
+/// 加锁并自动从 Mutex 中毒里恢复（保留旧值）。中毒通常源于持锁线程 panic，
+/// `into_inner()` 让我们继续使用旧数据并就地覆盖坏条目，不会让后续所有调用
+/// 一起 panic。
+fn lock_or_recover<'a, T>(mutex: &'a Mutex<T>) -> MutexGuard<'a, T> {
+    match mutex.lock() {
+        Ok(g) => g,
+        Err(p) => p.into_inner(),
+    }
+}
+
 /// 按字符串缓存 `Selector`。同一字符串重复解析直接命中已编译实例。
 /// 解析失败返回 `Err`（**不**缓存失败结果，让用户编辑规则后能重试）。
 pub fn cached_selector(sel: &str) -> Result<Arc<Selector>, SelectError> {
     let cache = SELECTOR_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
-    if let Some(arc) = cache.lock().unwrap().get(sel).cloned() {
+
+    // 快速路径：try_lock 非阻塞。命中（绝大多数情况）直接返回 Arc::clone。
+    if let Some(arc) = cache.try_lock().ok().and_then(|g| g.get(sel).cloned()) {
         return Ok(arc);
     }
-    let parsed =
-        Selector::parse(sel).map_err(|e| SelectError::BadSelector(format!("`{sel}`: {e:?}")))?;
+    // 慢速路径：拿不到锁 / 已中毒 → 拿 blocking lock 重新查（保证正确性，
+    // 即便两线程并发也只会 parse 一次、第二个线程拿到的是 cache 里的 Arc）。
+    // 中毒时 `into_inner()` 保留旧值，poison-safe。
+    {
+        let g = lock_or_recover(cache);
+        if let Some(arc) = g.get(sel).cloned() {
+            return Ok(arc);
+        }
+    }
+
+    // miss 路径：parse + 写回。catch_unwind 兜底 scraper 内部 panic。
+    let parsed = match catch_unwind(AssertUnwindSafe(|| Selector::parse(sel))) {
+        Ok(Ok(s)) => s,
+        Ok(Err(e)) => return Err(SelectError::BadSelector(format!("`{sel}`: {e:?}"))),
+        Err(_) => {
+            return Err(SelectError::BadSelector(format!(
+                "`{sel}`: parser panicked"
+            )));
+        }
+    };
     let arc = Arc::new(parsed);
-    cache
-        .lock()
-        .unwrap()
-        .insert(sel.to_string(), Arc::clone(&arc));
+    lock_or_recover(cache).insert(sel.to_string(), Arc::clone(&arc));
     Ok(arc)
 }
 
 /// 按字符串缓存 `Regex`。失败结果不缓存，让规则修复后能重试编译。
 ///
-/// 返回 `Ok(Some(arc))` 表示编译成功并缓存；`Err(e)` 表示 pattern 不合法，
+/// 返回 `Ok(arc)` 表示编译成功并缓存；`Err(e)` 表示 pattern 不合法，
 /// 调用方按原语义处理（warn + 跳过 / 降级）。
 pub fn cached_regex(pat: &str) -> Result<Arc<Regex>, regex::Error> {
     let cache = REGEX_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
-    if let Some(arc) = cache.lock().unwrap().get(pat).cloned() {
+
+    if let Some(arc) = cache.try_lock().ok().and_then(|g| g.get(pat).cloned()) {
         return Ok(arc);
     }
-    let parsed = Regex::new(pat)?;
+    {
+        let g = lock_or_recover(cache);
+        if let Some(arc) = g.get(pat).cloned() {
+            return Ok(arc);
+        }
+    }
+
+    let parsed = match catch_unwind(AssertUnwindSafe(|| Regex::new(pat))) {
+        Ok(Ok(r)) => r,
+        Ok(Err(e)) => return Err(e),
+        Err(_) => {
+            // regex 1.x 的 parser 在我们的用法下基本不会 panic，但万一炸了不要拖累 caller。
+            return Err(regex::Error::Syntax("regex parser panicked".to_string()));
+        }
+    };
     let arc = Arc::new(parsed);
-    cache
-        .lock()
-        .unwrap()
-        .insert(pat.to_string(), Arc::clone(&arc));
+    lock_or_recover(cache).insert(pat.to_string(), Arc::clone(&arc));
     Ok(arc)
 }
 
@@ -172,5 +220,26 @@ mod tests {
         for h in handles {
             h.join().expect("线程 join 不应 panic");
         }
+    }
+
+    /// Mutex 中毒（PoisonError）后 `lock_or_recover` 应能用旧值继续。
+    /// 模拟场景：先 panic 一次（持锁线程 panic 把 Mutex 标为 poisoned），
+    /// 再写入新条目、读出来，验证缓存仍能正常工作。
+    #[test]
+    fn lock_or_recover_unpoisoned_mutex_keeps_working() {
+        let m: Mutex<i32> = Mutex::new(0);
+        // 模拟一次"poison"路径：拿锁后 panic，Mutex 进入 poisoned 状态
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _g = m.lock().unwrap();
+            panic!("simulated poison");
+        }));
+        // 此时 m.lock() 会返回 PoisonError
+        assert!(m.lock().is_err(), "Mutex 应处于 poisoned 状态");
+        // 但 lock_or_recover 应当能继续工作
+        {
+            let mut g = lock_or_recover(&m);
+            *g = 42;
+        }
+        assert_eq!(*lock_or_recover(&m), 42);
     }
 }

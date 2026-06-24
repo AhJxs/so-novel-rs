@@ -196,8 +196,16 @@ fn xpath_to_css(s: &str) -> Option<String> {
     let s = s.trim();
 
     if let Some(cap) = RE.captures(s) {
-        let id = cap.get(1).unwrap().as_str();
-        let tag = cap.get(2).unwrap().as_str();
+        // 该 regex 是 `^...$` 锚定的字面量：match 成功时 group 1/2/3 一定存在。
+        // 用 `expect` 而非 `unwrap` 让 panic 信息对未来 regex 改动友好。
+        let id = cap
+            .get(1)
+            .expect("XPATH_RE group 1 (id) — 修改上方 regex 时必须保留")
+            .as_str();
+        let tag = cap
+            .get(2)
+            .expect("XPATH_RE group 2 (tag) — 修改上方 regex 时必须保留")
+            .as_str();
         let nth = cap.get(3).map(|m| m.as_str());
         return Some(match nth {
             Some(n) => format!("#{id} > {tag}:nth-of-type({n})"),
@@ -257,8 +265,13 @@ pub fn clear_all_attributes(html: &str) -> String {
 
     OPEN_TAG
         .replace_all(html, |caps: &regex::Captures<'_>| {
-            let name = &caps[1];
-            let slash = &caps[2];
+            // OPEN_TAG regex `<([A-Za-z][A-Za-z0-9]*)\b[^>]*?(/?)>` 固定两个 group。
+            // 改 regex 时必须保持 2 个 group，否则 `expect` 会 panic 并暴露行号。
+            let name = caps.get(1).expect("OPEN_TAG group 1 (tag name)").as_str();
+            let slash = caps
+                .get(2)
+                .expect("OPEN_TAG group 2 (self-close slash)")
+                .as_str();
             format!("<{name}{slash}>")
         })
         .into_owned()

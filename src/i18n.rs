@@ -30,7 +30,33 @@
 //! `ops::library`）也要调用 `ts()` 翻译错误信息，跨层依赖很别扭。挪到 crate root
 //! 后 `crate::i18n::ts()` 是中性 API，`app/` 和 `gpui_app/` 都可以自然使用。
 
+use std::sync::OnceLock;
+
 use gpui::SharedString;
+
+/// 全局 SharedString 缓存：key → 已翻译的 SharedString。
+///
+/// **仅缓存无变量 key（`ts`）的结果**。`ts_fmt` 因 value 不可预测不进缓存。
+/// locale 变化（`set_locale`）时清空 —— 通过 `invalidate_cache` 在 `set_locale`
+/// 调用方手动触发。`rust_i18n::set_locale` 本身没有 hook 给我们挂，
+/// 但本项目切语言**走重启流程**（见模块顶部注释），所以实际场景里这个缓存
+/// 整进程有效，命中率很高。
+static TS_CACHE: OnceLock<
+    std::sync::Mutex<Option<std::collections::HashMap<&'static str, SharedString>>>,
+> = OnceLock::new();
+
+fn ts_cache()
+-> &'static std::sync::Mutex<Option<std::collections::HashMap<&'static str, SharedString>>> {
+    TS_CACHE.get_or_init(|| std::sync::Mutex::new(None))
+}
+
+/// 清空 `ts` 缓存。切 locale 时调用 —— 本项目暂不主动调（切语言走重启），
+/// 但保留 API 以备未来运行时切换场景。
+pub fn invalidate_cache() {
+    if let Ok(mut g) = ts_cache().lock() {
+        *g = None;
+    }
+}
 
 /// 翻译查找 — `Cow<'_, str>` → `SharedString` 转换。
 ///
@@ -48,6 +74,33 @@ pub fn ts(key: &'static str) -> SharedString {
     crate::_rust_i18n_try_translate(&locale, key)
         .map(|cow| SharedString::from(cow.into_owned()))
         .unwrap_or_else(|| SharedString::from(key))
+}
+
+/// 翻译查找的缓存版本。热路径（行 builder 每次 render 调）走这个：
+/// - 首次访问时查 rust_i18n，写入 `TS_CACHE`（全局 `OnceLock<Mutex<HashMap>>`）。
+/// - 后续访问直接 clone 共享的 `SharedString`（`SharedString` 内部 `Arc<str>`，
+///   clone 只增引用计数，无 alloc）。
+///
+/// 与 `ts` 的唯一区别就是缓存层。语义完全一致（key 找不到返回 key 本身）。
+pub fn ts_cached(key: &'static str) -> SharedString {
+    // 读路径走 Mutex 而非 RwLock：① 全局只一个 key-value 写者（第一次访问），
+    // ② SharedString clone 很轻，无锁阻塞竞争更友好。读侧用 `try_lock` 退路：
+    // 万一锁被持有（极罕见）退到非缓存路径，绝不阻塞调用方。
+    if let Ok(g) = ts_cache().lock() {
+        if let Some(map) = g.as_ref() {
+            if let Some(cached) = map.get(key) {
+                return cached.clone();
+            }
+        }
+    }
+    // miss：调底层查 + 写回缓存。
+    let v = ts(key);
+    if let Ok(mut g) = ts_cache().lock() {
+        let map = g.get_or_insert_with(std::collections::HashMap::new);
+        // 同 key 的并发写以最后一个写者为准（覆盖语义，无害）。
+        map.insert(key, v.clone());
+    }
+    v
 }
 
 /// 翻译查找 + 简单变量替换 —— `ts()` 的扩展，handle `{var}` 占位符。
@@ -72,6 +125,55 @@ pub fn ts_fmt(key: &'static str, vars: &[(&str, &str)]) -> SharedString {
     let mut result = crate::_rust_i18n_try_translate(&locale, key)
         .map(|cow| cow.into_owned())
         .unwrap_or_else(|| key.to_string());
+    for (name, value) in vars {
+        // 占位符形式 `{name}` —— `format!("{{{}}}", name)` 转义出字面 `{name}`。
+        result = result.replace(&format!("{{{name}}}"), value);
+    }
+    SharedString::from(result)
+}
+
+/// `ts_fmt` 的缓存版本。**只缓存"模板字符串"**（带 `{var}` 占位符的原文），
+/// 不缓存"模板+变量组合" —— 后者组合数太大，命中率低。模板命中后仍要做
+/// `replace`（必 alloc），但**跳过了 `rust_i18n` 的 yaml 解析 / map lookup**，
+/// 热路径上节省主要来自这里。
+///
+/// 模板用 `Option<String>` 区分"未缓存"（None）和"已缓存且 key 不存在"（Some("")）。
+/// 实际不存在时 `Some(key.to_string())` 走 fallback，避免反复调用底层。
+pub fn ts_fmt_cached(key: &'static str, vars: &[(&str, &str)]) -> SharedString {
+    use std::collections::HashMap;
+    use std::sync::Mutex;
+    use std::sync::OnceLock;
+
+    static TPL_CACHE: OnceLock<Mutex<HashMap<&'static str, String>>> = OnceLock::new();
+    let cache = TPL_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+
+    // 拿模板（缓存 miss 时回退到直接调 ts_fmt + 写回）
+    let template = if let Ok(g) = cache.lock() {
+        g.get(key).cloned()
+    } else {
+        None
+    };
+    let template = match template {
+        Some(t) => t,
+        None => {
+            // miss：复用 ts_fmt 算出一次完整结果作为模板（变量无关部分是模板本体）。
+            // 但 ts_fmt 已经替了占位符，这里手动走底层拿"未替"版本。
+            let locale = rust_i18n::locale();
+            let raw = crate::_rust_i18n_try_translate(&locale, key)
+                .map(|cow| cow.into_owned())
+                .unwrap_or_else(|| key.to_string());
+            if let Ok(mut g) = cache.lock() {
+                g.insert(key, raw.clone());
+            }
+            raw
+        }
+    };
+
+    if vars.is_empty() {
+        // 常见 case：UI 上很多 "已翻译" 标签走 `ts_fmt(key, &[])` —— 实际等于 `ts_cached`。
+        return SharedString::from(template);
+    }
+    let mut result = template;
     for (name, value) in vars {
         // 占位符形式 `{name}` —— `format!("{{{}}}", name)` 转义出字面 `{name}`。
         result = result.replace(&format!("{{{name}}}"), value);

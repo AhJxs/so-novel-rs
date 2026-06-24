@@ -10,8 +10,18 @@
 //!
 //! 布局：PageHeader（无 action）→ Toolbar → SourceStatusBar → ResultList → Pagination。
 
-use std::collections::HashMap;
+use std::num::NonZeroUsize;
 use std::sync::Arc;
+
+use lru::LruCache;
+
+/// 详情面板"已解码封面"缓存最大条目数。
+///
+/// 32 条够当前详情面板浏览；超额 LRU 自动驱逐最久未访问。
+const COVER_IMAGES_CAPACITY: NonZeroUsize = match NonZeroUsize::new(32) {
+    Some(n) => n,
+    None => unreachable!(),
+};
 
 use gpui::{
     App, AppContext, Context, Entity, IntoElement, ParentElement, Render, RenderImage,
@@ -72,7 +82,11 @@ pub struct SearchPage {
     /// 按 `uri`（稳定去重 key）缓存 `Arc<RenderImage>` —— Dialog 每帧重渲时
     /// 避免重复解码 + 重传纹理（`RenderImage::new` 每次新 id，不缓存让 gpui 每帧
     /// 重传）。`None` = 解码失败，缓存负面结果避免反复重试。
-    cover_images: HashMap<String, Option<Arc<RenderImage>>>,
+    ///
+    /// **LRU 上限 `COVER_IMAGES_CAPACITY`（32）**：旧 `HashMap` 无界，长会话
+    /// 累积所有查看过的封面（`Arc<RenderImage>` 含完整像素）。32 条足够覆盖
+    /// 当前详情面板的常规浏览；超额自动驱逐最久未访问。
+    cover_images: LruCache<String, Option<Arc<RenderImage>>>,
 
     /// 选章下载 Dialog 的状态（起止输入框 + 当前 target + 初始化标志）。
     ///
@@ -238,7 +252,7 @@ impl SearchPage {
             list_state,
             current_page: 0,
             last_source_items: Vec::new(),
-            cover_images: HashMap::new(),
+            cover_images: LruCache::new(COVER_IMAGES_CAPACITY),
             range_start_input,
             range_end_input,
             range_target: None,
@@ -494,14 +508,36 @@ impl Render for SearchPage {
         // 差量同步书源下拉：先于其他读 model 的代码，因为这里要 &mut Window。
         self.sync_source_items(window, cx);
 
-        let model = self.model.read(cx);
-        let results = model.search.results.clone();
-        let running = model.search.running;
-        let expected = model.search.expected;
-        let received = model.search.received;
-        let source_status = model.search.source_status.clone();
-        // 提前 drop model 的不可变借用 —— list_state.update / Pagination 闭包要 `&mut App`。
-        let _ = model;
+        // 走 list_cache：search.results 经常被 drain 更新，filter_sort 也
+        // 会原地替换 results。data_version 字段保证 search.drain 末尾版本号
+        // +1，下次 render 立即 miss → 重算 + 写回。
+        // filter signature 此处只有 `last_keyword` 一项（搜索页无文本/扩
+        // 展名过滤控件）；切 keyword 时旧 key 失效。
+        let (results, running, expected, received, source_status) =
+            self.model.update(cx, |model, _cx| {
+                let filter_sig = crate::app::filter_signature(&[model
+                    .search
+                    .last_keyword
+                    .as_deref()
+                    .unwrap_or("")]);
+                let key = crate::app::ListCacheKey {
+                    page: crate::app::PageKind::Search,
+                    data_version: model.search.results_version,
+                    filter_sig,
+                    page_index: 0, // 缓存"全表 results"；分页在 Render 末尾 slice
+                    elem_type: std::any::TypeId::of::<SearchResult>(),
+                };
+                let results = if let Some(arc) = model.list_cache.get::<SearchResult>(key) {
+                    arc
+                } else {
+                    model.list_cache.insert(key, model.search.results.clone())
+                };
+                let running = model.search.running;
+                let expected = model.search.expected;
+                let received = model.search.received;
+                let source_status = model.search.source_status.clone();
+                (results, running, expected, received, source_status)
+            });
 
         let total = results.len();
         let w = compute_page_window(total, &mut self.current_page);

@@ -13,7 +13,7 @@ use gpui_component::{
 };
 
 use crate::gpui_app::components::{StatusBadge, StatusKind, truncate};
-use crate::i18n::{ts, ts_fmt};
+use crate::i18n::{ts_cached, ts_fmt};
 use crate::util::system::{open_path, reveal_in_folder};
 
 use super::TasksPage;
@@ -68,7 +68,7 @@ pub(super) fn render(task: TaskSummary, page: Entity<TasksPage>, cx: &mut App) -
     } else {
         "Tasks.card.status.unknown"
     };
-    let status_label: SharedString = ts(status_key);
+    let status_label: SharedString = ts_cached(status_key);
 
     // 作者：优先详情拉的 book_meta.author（完整），否则 origin.author；空走 fallback。
     let author_display: SharedString = {
@@ -81,12 +81,12 @@ pub(super) fn render(task: TaskSummary, page: Entity<TasksPage>, cx: &mut App) -
         });
         match raw {
             Some(s) => SharedString::from(truncate(s, 30).to_string()),
-            None => ts("Tasks.fallback_unknown_author"),
+            None => ts_cached("Tasks.fallback_unknown_author"),
         }
     };
     // 书源名：直接用结果自带的 source_name（数据，不译），空走 fallback。
     let source_name_display: SharedString = if task.origin.source_name.trim().is_empty() {
-        ts("Tasks.fallback_unknown_book")
+        ts_cached("Tasks.fallback_unknown_book")
     } else {
         SharedString::from(truncate(&task.origin.source_name, 20).to_string())
     };
@@ -201,7 +201,7 @@ pub(super) fn render(task: TaskSummary, page: Entity<TasksPage>, cx: &mut App) -
                                         .text_color(cx.theme().muted_foreground)
                                         .child(format!(
                                             "{} {}",
-                                            ts("Tasks.card.meta.started"),
+                                            ts_cached("Tasks.card.meta.started"),
                                             started_display
                                         )),
                                 ),
@@ -228,9 +228,9 @@ pub(super) fn render(task: TaskSummary, page: Entity<TasksPage>, cx: &mut App) -
                                     let task_id = task.id;
                                     let cancelling = task.cancelling;
                                     let label = if cancelling {
-                                        ts("Tasks.card.action.cancelling")
+                                        ts_cached("Tasks.card.action.cancelling")
                                     } else {
-                                        ts("Tasks.card.action.cancel")
+                                        ts_cached("Tasks.card.action.cancel")
                                     };
                                     this.child(
                                         Button::new(("task-cancel", task_id))
@@ -255,7 +255,7 @@ pub(super) fn render(task: TaskSummary, page: Entity<TasksPage>, cx: &mut App) -
                                             .small()
                                             .outline()
                                             .icon(Icon::new(IconName::Loader))
-                                            .label(ts("Tasks.card.action.retry"))
+                                            .label(ts_cached("Tasks.card.action.retry"))
                                             .on_click(move |_, _window, cx| {
                                                 page_for_retry.update(cx, |p, cx| {
                                                     p.retry(task_id, cx);
@@ -300,7 +300,7 @@ pub(super) fn render(task: TaskSummary, page: Entity<TasksPage>, cx: &mut App) -
                                             .small()
                                             .outline()
                                             .icon(Icon::new(IconName::ExternalLink))
-                                            .label(ts("Tasks.card.action.open"))
+                                            .label(ts_cached("Tasks.card.action.open"))
                                             .on_click(move |_, _window, _cx| {
                                                 if let Err(e) = open_path(&path_open) {
                                                     tracing::warn!("open_path failed: {e:#}");
@@ -312,7 +312,7 @@ pub(super) fn render(task: TaskSummary, page: Entity<TasksPage>, cx: &mut App) -
                                             .small()
                                             .outline()
                                             .icon(Icon::new(IconName::Folder))
-                                            .label(ts("Tasks.card.action.reveal"))
+                                            .label(ts_cached("Tasks.card.action.reveal"))
                                             .on_click(move |_, _window, _cx| {
                                                 if let Err(e) = reveal_in_folder(&path_reveal) {
                                                     tracing::warn!(
@@ -330,7 +330,7 @@ pub(super) fn render(task: TaskSummary, page: Entity<TasksPage>, cx: &mut App) -
                                             .small()
                                             .danger()
                                             .icon(Icon::new(IconName::Delete))
-                                            .label(ts("Tasks.card.action.delete"))
+                                            .label(ts_cached("Tasks.card.action.delete"))
                                             .on_click(move |_, window: &mut Window, cx| {
                                                 // prompt_delete 要 &self + &mut Window + &mut App：
                                                 // page.update 闭包内 cx 是 Context<TasksPage>（无 window），

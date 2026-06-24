@@ -188,31 +188,6 @@ impl LibraryPage {
                 })
         });
     }
-
-    /// 过滤 + 排序后的 entry 列表（按修改时间倒序）。
-    fn filtered_entries(model: &AppModel) -> Vec<LibraryEntry> {
-        let mut v: Vec<LibraryEntry> = model
-            .library
-            .entries
-            .iter()
-            .filter(|e| {
-                if let Some(ext) = &model.library.filter_ext {
-                    if &e.ext != ext {
-                        return false;
-                    }
-                }
-                let kw = model.library.filter_text.trim();
-                if kw.is_empty() {
-                    return true;
-                }
-                let kw = kw.to_lowercase();
-                e.file_name.to_lowercase().contains(&kw)
-            })
-            .cloned()
-            .collect();
-        v.sort_by_key(|e| std::cmp::Reverse(e.modified_unix_secs));
-        v
-    }
 }
 
 impl Render for LibraryPage {
@@ -222,16 +197,59 @@ impl Render for LibraryPage {
         // placeholder 在 `new()` 一次性设好；language setter 切语言走"重启进程"
         // 路径，新进程重建 InputState 时自然拿到新 locale，无需 render 差量刷新。
 
-        let model = self.model.read(cx);
-        let entries = Self::filtered_entries(model);
-        let total = entries.len();
-        let scan_err = model.library.last_error.clone();
-        let download_path = model.config.download_path.clone();
-        let current_ext = model.library.filter_ext.clone();
-        // 提前释放 `model` 的不可变借用：后面 `list_state.update` / `cx.listener`
-        // 要 `&mut App`，borrow checker 会把 `model` 留到 EOF 才 drop，引发冲突。
-        // `let _ = model` 是惯用显式 drop 锚点（`drop(&model)` 对引用是 no-op）。
-        let _ = model;
+        // 1) 通过 `model.update` 拿 `&mut AppModel` —— list_cache 写入需要可
+        //    变借用，而 `model.read(cx)` 只能拿 `&AppModel`。闭包内：(a) 算
+        //    filter signature；(b) 查 list_cache 命中则 clone Arc、未命中则
+        //    走 filtered_entries 后写回；(c) 取出展示数据。闭包返回
+        //    `(Arc<Vec<LibraryEntry>>, usize, Option<String>, String, Option<String>)`。
+        let (entries_arc, total, scan_err, download_path, current_ext) =
+            self.model.update(cx, |model, _cx| {
+                // 命中 cache = Arc::clone（只增引用计数，零 alloc）；未命中 = 走
+                // 完整 filter+sort 然后写回。cache key 包含 (entries_version,
+                // filter_sig)，filter_text / filter_ext 变 → signature 变 → 失效。
+                let filter_sig = crate::app::filter_signature(&[
+                    model.library.filter_text.as_str(),
+                    model.library.filter_ext.as_deref().unwrap_or(""),
+                ]);
+                let key = crate::app::ListCacheKey {
+                    page: crate::app::PageKind::Library,
+                    data_version: model.library.entries_version,
+                    filter_sig,
+                    page_index: 0, // 缓存"全表过滤+排序"结果；分页在 Render 末尾 slice
+                    elem_type: std::any::TypeId::of::<LibraryEntry>(),
+                };
+                let entries_arc = if let Some(arc) = model.list_cache.get::<LibraryEntry>(key) {
+                    arc
+                } else {
+                    // miss：跑一遍 filter+sort，写回。
+                    let mut v: Vec<LibraryEntry> = model
+                        .library
+                        .entries
+                        .iter()
+                        .filter(|e| {
+                            if let Some(ext) = &model.library.filter_ext {
+                                if &e.ext != ext {
+                                    return false;
+                                }
+                            }
+                            let kw = model.library.filter_text.trim();
+                            if kw.is_empty() {
+                                return true;
+                            }
+                            let kw = kw.to_lowercase();
+                            e.file_name.to_lowercase().contains(&kw)
+                        })
+                        .cloned()
+                        .collect();
+                    v.sort_by_key(|e| std::cmp::Reverse(e.modified_unix_secs));
+                    model.list_cache.insert(key, v)
+                };
+                let total = entries_arc.len();
+                let scan_err = model.library.last_error.clone();
+                let download_path = model.config.download_path.clone();
+                let current_ext = model.library.filter_ext.clone();
+                (entries_arc, total, scan_err, download_path, current_ext)
+            });
 
         let w = compute_page_window(total, &mut self.current_page);
         // 每条带"全局序号" = 在完整 filtered 列表里的位置（0-based，跨分页连续）。
@@ -239,7 +257,7 @@ impl Render for LibraryPage {
         let page_items: Vec<(usize, LibraryEntry)> = if total == 0 {
             Vec::new()
         } else {
-            entries[w.start..w.end]
+            entries_arc[w.start..w.end]
                 .iter()
                 .enumerate()
                 .map(|(local_ix, e)| (w.start + local_ix, e.clone()))

@@ -60,8 +60,8 @@ directories = "6"
 # 文件系统监听（本地书库实时刷新）。gpui-component 0.5.1 内部也用 7.0.0，
 # default-features 在三大平台都给出可用后端（Windows ReadDirectoryChangesW /
 # macOS FSEvents / Linux inotify）。debounce 由 LibraryPage 的 watcher 任务
-# 内部用 tokio::time::sleep + AtomicU64 计数器自行实现，不再引入
-# notify-debouncer-mini 增加编译时间和依赖图复杂度。
+# 内部用 `background_executor().timer(...)`（gpui/smol timer）+ AtomicU64
+# 计数器自行实现，不再引入 notify-debouncer-mini 增加编译时间和依赖图复杂度。
 notify = "8.2"
 
 # HTTP client (rustls 避免 OpenSSL 依赖；cookies 用于规则中的 Cookie 头注入；
@@ -118,7 +118,7 @@ axum = { version = "0.8", features = ["macros"] }
 axum_session = "0.20"
 async-stream = "0.3"
 futures = "0.3"
-tower-http = { version = "0.6", features = ["cors"] }
+tower-http = { version = "0.7", features = ["cors"] }
 
 
 # 原生文件选择对话框（书源管理「添加」按钮：选 JSON 文件导入）。
@@ -132,15 +132,18 @@ tower-http = { version = "0.6", features = ["cors"] }
 # background_executor）驱动。
 rfd = { version = "^0.17.2", default-features = false, features = ["xdg-portal"] }
 
-# 临时目录（测试用 — `ConfigPaths::discover` 的单元测试
-# 通过 `tempfile::tempdir()` 把 `~/.sonovel` 重定向到临时目录避免污染用户主目录）。
-tempfile = "3"
-
 # 读系统本地时区（UtcOffset::current_local_offset）。local-offset feature 在 Windows / macOS / Linux
 # 各自调 OS API（GetTimeZoneInformation / localtime_r / ...），跨平台用一个 API 拿偏移秒数。
 time = { version = "0.3", default-features = false, features = ["local-offset"] }
 zhconv = "0.4.1"
-pdf_oxide = { version = "0.3.66", features = ["rendering"] }
+# 不启用 `rendering` feature：项目只用 `pdf_oxide::writer::{DocumentBuilder, ...}` 直接拼文本
+# （详见 `src/export/pdf.rs:6-7` 注释，不走 `from_html_css` 渲染流水线）。`rendering` 会拉入
+# 一整套 HTML/CSS 解析依赖，编译时间显著增加而无功能收益。
+pdf_oxide = { version = "0.3.68" }
+
+# LRU 缓存（`SearchState::cover_cache` 走有界 LRU 替代无界 HashMap，
+# 避免长会话累积所有查看过的封面字节）。
+lru = "0.18"
 
 # Windows DWM 圆角 / 暗色标题栏暂未在 GPUI 路径启用（Stage 12 决定）。
 # 当前只保留 CLI 模式需要的 console attach 那一部分 feature。
