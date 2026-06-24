@@ -4,7 +4,9 @@
 
 use gpui::prelude::FluentBuilder as _;
 use gpui::{App, Entity, IntoElement, ParentElement, SharedString, Styled, div, px};
-use gpui_component::{ActiveTheme as _, Sizable, StyledExt, h_flex, switch::Switch, tag::Tag};
+use gpui_component::{
+    ActiveTheme as _, Sizable, StyledExt, h_flex, link::Link, switch::Switch, tag::Tag,
+};
 
 use crate::crawler::health::{HealthStatus, SourceHealth};
 use crate::gpui_app::components::{StatusBadge, StatusKind, truncate};
@@ -73,13 +75,19 @@ pub(super) fn render(
                         ),
                 ),
         )
-        // ---- URL（可点击跳浏览器；Link 内置 link 色 + 下划线 + hover 反馈）----
         .child(
+            // URL 列：可点击 Link，点击 → 浏览器打开对应书源首页。
+            // `Link::new().href(...)` 内置 on_click 调 cx.open_url，跟 detail_dialog.rs 同模式。
+            // Link 不实现 Sizable，按项目惯例把字号挂在**外层 div** 上（text_xs 等价于"small"）。
             div()
                 .w(px(250.))
                 .text_xs()
                 .overflow_x_hidden()
-                .child(truncate(&rule.url, 60)),
+                .child(
+                    Link::new(("src-url", index as u64))
+                        .href(rule.url.clone())
+                        .child(truncate(&rule.url, 60)),
+                ),
         )
         // ---- 健康状态 Badge ----
         .child(div().w(px(150.)).justify_end().child({
