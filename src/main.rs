@@ -1,8 +1,7 @@
 // Windows release 下走 GUI subsystem，避免 GUI 启动时弹出控制台黑窗。
-// debug 仍保留 console subsystem，方便开发时直接看 tracing 输出 + panic backtrace。
-//
-// 注意：CLI 模式下 stdout/stderr 在 GUI subsystem 里是 invalid handle —
-// 见下方 `attach_parent_console` 的处理。
+// CLI/Web 模式通过 `attach_parent_console` 挂载到父进程控制台；
+// 若没有父控制台（如从 Explorer 启动），则自行 `AllocConsole` 分配一个新控制台，
+// 确保 stdout/stderr 始终有效。
 #![cfg_attr(
     all(target_os = "windows", not(debug_assertions)),
     windows_subsystem = "windows"
@@ -92,19 +91,25 @@ fn run_web(host: String, port: u16) -> Result<()> {
     so_novel_rs::web::run(config, http.into(), rules, params, host, port)
 }
 
-/// 把当前进程附加到父进程的控制台（仅 Windows）。
+/// 把当前进程附加到父进程的控制台（仅 Windows），失败时自行分配。
 ///
 /// `AttachConsole(ATTACH_PARENT_PROCESS)`：
 /// - 从 cmd/PowerShell 跑时成功，stdout/stderr 直通父终端；
-/// - 双击 / GUI shell 启动时父进程没有控制台，调用失败 — 静默忽略，stdio 仍是空。
+/// - 双击 / GUI shell 启动时父进程没有控制台，调用失败 →
+///   回退 `AllocConsole()`` 分配一个新控制台窗口，确保 CLI/Web 仍有 stdio。
 ///
-/// debug build 是 console subsystem，本来就有自己的窗口，调用此函数会失败但无害。
+/// debug build 是 console subsystem，本来就有自己的窗口，此函数静默成功。
 #[cfg(target_os = "windows")]
 fn attach_parent_console() {
-    // SAFETY: 单纯调 Win32 API；失败用返回值判断，不依赖 GetLastError 也能容错。
     unsafe {
-        use windows_sys::Win32::System::Console::{ATTACH_PARENT_PROCESS, AttachConsole};
-        AttachConsole(ATTACH_PARENT_PROCESS);
+        use windows_sys::Win32::System::Console::{
+            ATTACH_PARENT_PROCESS, AllocConsole, AttachConsole,
+        };
+        // 先尝试挂载到父进程控制台
+        if AttachConsole(ATTACH_PARENT_PROCESS) == 0 {
+            // 没有父控制台（如从 Explorer 启动），自行分配一个
+            AllocConsole();
+        }
     }
 }
 

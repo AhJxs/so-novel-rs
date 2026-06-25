@@ -171,6 +171,10 @@ impl SearchPage {
                 InputEvent::Change => {
                     let cur = this.range_start_input.read(cx).value().to_string();
                     let v = clamp_range_value(this, cur.clone().into(), cx);
+                    if v == 0 {
+                        // 空字符串 → 用户正在清空输入框，不要重置。
+                        return;
+                    }
                     let want = v.to_string();
                     if want != cur {
                         this.range_start_input
@@ -190,6 +194,10 @@ impl SearchPage {
                 InputEvent::Change => {
                     let cur = this.range_end_input.read(cx).value().to_string();
                     let v = clamp_range_value(this, cur.clone().into(), cx);
+                    if v == 0 {
+                        // 空字符串 → 用户正在清空输入框，不要重置。
+                        return;
+                    }
                     let want = v.to_string();
                     if want != cur {
                         this.range_end_input
@@ -450,6 +458,8 @@ impl SearchPage {
         };
 
         let n = chapters.len();
+        // 空值/无效值 → start 默认 1，end 默认 n。这样用户删空 start=从头开始，
+        // 删空 end=下载到末尾，无需先选中数字再覆盖。
         let start = self
             .range_start_input
             .read(cx)
@@ -457,7 +467,8 @@ impl SearchPage {
             .trim()
             .parse::<usize>()
             .ok()
-            .filter(|&v| v >= 1 && v <= n);
+            .filter(|&v| v >= 1 && v <= n)
+            .unwrap_or(1);
         let end = self
             .range_end_input
             .read(cx)
@@ -465,10 +476,10 @@ impl SearchPage {
             .trim()
             .parse::<usize>()
             .ok()
-            .filter(|&v| v >= 1 && v <= n);
-        let (Some(start), Some(end)) = (start, end) else {
-            return RangeOutcome::Invalid;
-        };
+            .filter(|&v| v >= 1 && v <= n)
+            .unwrap_or(n);
+        // 即使有默认值兜底，start > end 仍然不可能（end 至少等于 n ≥ start），
+        // 但保留防御性检查。
         if start > end {
             return RangeOutcome::Invalid;
         }

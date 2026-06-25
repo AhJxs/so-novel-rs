@@ -85,6 +85,9 @@ pub enum CrawlerError {
     Export(#[from] ExportError),
     #[error("用户取消")]
     Cancelled,
+    /// 调用方传入的章节范围（--from / --to）非法
+    #[error("章节范围非法: {0}")]
+    InvalidRange(String),
 }
 
 /// 取消令牌：在 UI / CLI 侧 clone 一份，set 后下一次检查点会停止。

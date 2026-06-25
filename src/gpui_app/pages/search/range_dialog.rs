@@ -200,12 +200,17 @@ fn chapter_title_display(chapters: &[Chapter], n: usize) -> SharedString {
 /// 把输入框原始值规整到 `[1, N]`：N 取当前选章 Dialog 的 toc_cache Loaded 章节数。
 /// 非数字 / 越界 → 1。N 取不到（TOC 没回来）时按 `[1, u32::MAX]`（任意正整数）。
 ///
-/// 自由函数（不是闭包）—— 订阅闭包要 `'static`，自由函数无捕获，4 个订阅共用它无需 clone。
+/// **空字符串返回 0**（sentinel，Change handler 据此识别"用户正在清空输入框，不要重置"）。
+/// free fn —— 4 个订阅共用它无需 clone。
 pub(super) fn clamp_range_value(this: &SearchPage, raw: SharedString, cx: &App) -> u32 {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return 0;
+    }
     let n = this
         .current_range_chapters_len(cx)
         .unwrap_or(u32::MAX)
         .max(1);
-    let v = raw.trim().parse::<u32>().unwrap_or(1);
+    let v = trimmed.parse::<u32>().unwrap_or(1);
     v.clamp(1, n)
 }

@@ -1,0 +1,129 @@
+name: docker-release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ahjxs/so-novel-rs
+
+jobs:
+  build:
+    name: build & push (${{ matrix.arch }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            arch: amd64
+            platform: linux/amd64
+          - os: ubuntu-24.04-arm
+            arch: arm64
+            platform: linux/arm64/v8
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to ${{ env.REGISTRY }}
+        # 只有在需要 Push 的 Release 流程下才登录
+        if: github.event_name == 'push'
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract version
+        id: version
+        shell: bash
+        run: |
+          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+            v="${GITHUB_REF_NAME#v}"
+          else
+            v="${GITHUB_SHA::7}-dev"
+          fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "is_release=$([[ "${{ github.ref_type }}" == "tag" ]] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
+      - name: Compute tags
+        id: tags
+        shell: bash
+        run: |
+          version="${{ steps.version.outputs.version }}"
+          is_release="${{ steps.version.outputs.is_release }}"
+          
+          # 矩阵内部构建时，【只】推送带独立架构后缀的 tag，避免并行构建时相互覆盖。
+          # 顶级的全局 tag (如 :latest 和 :0.3.2) 统一由后面的 manifest job 合并生成。
+          if [[ "$is_release" == "true" ]]; then
+            tags=( "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${version}-${{ matrix.arch }}" )
+          else
+            # 手动触发时，仅打一个本地/非覆盖性的 dev-arch tag 用于辨识
+            tags=( "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${version}-${{ matrix.arch }}" )
+          fi
+          
+          joined=$(IFS=,; echo "${tags[*]}")
+          echo "tags=${joined}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: ${{ matrix.platform }}
+          tags: ${{ steps.tags.outputs.tags }}
+          # ⚡ 修正：仅在 push tag (Release) 时才真正 push。workflow_dispatch 时只 build 留在本地缓存，不 push
+          push: ${{ github.event_name == 'push' }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: false
+          sbom: false
+
+  manifest:
+    name: merge multi-arch manifest
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Log in to ${{ env.REGISTRY }}
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract version
+        id: version
+        shell: bash
+        run: v="${GITHUB_REF_NAME#v}" && echo "version=$v" >> "$GITHUB_OUTPUT"
+
+      - name: Create multi-arch manifest
+        run: |
+          version="${{ steps.version.outputs.version }}"
+          
+          # 1. 创建带版本的 OCI Multi-Arch Manifest（此时把 -amd64 和 -arm64 聚合，并正式赋予顶级版本号）
+          docker buildx imagetools create \
+            --tag "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${version}" \
+            "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${version}-amd64" \
+            "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${version}-arm64"
+          
+          # 2. 如果是 stable 版（不带预发布连字符），则再合并一个 :latest
+          if [[ "${version}" != *-* ]]; then
+            docker buildx imagetools create \
+              --tag "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest" \
+              "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${version}-amd64" \
+              "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${version}-arm64"
+          fi

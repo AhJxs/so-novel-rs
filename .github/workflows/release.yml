@@ -13,6 +13,9 @@
 #
 # 产物命名：so-novel-rs-<version>-<os>-<arch>.<ext>，发 Release 时按名上传。
 #
+# Release notes：`docs/CHANGELOG.md` 作为 release 主体 + asset 一同上传。
+# 维护者打 tag 前把"\[Unreleased\]"段改名为"\[X.Y.Z\] - YYYY-MM-DD"即可。
+#
 # GPUI 0.2.2 Linux 编译依赖（apt dev 包）：xkbcommon / xkbcommon-x11 / fontconfig /
 # xcb / wayland / gl / egl + Vulkan headers（blade-graphics）。
 # macOS / Windows 用系统 framework，无需额外包。
@@ -161,8 +164,11 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
         with:
+          # 把维护者写好的 CHANGELOG.md 作为 release 主体（替代 auto-generated notes）
+          # 同时作为 asset 附带在 release 里供下载。完整 git log 见 CHANGELOG_ALL.md。
+          body_path: docs/CHANGELOG.md
           files: |
             dist/*.tar.gz
             dist/*.zip
-          generate_release_notes: true
+            docs/CHANGELOG.md
           fail_on_unmatched_files: true

@@ -1,6 +1,6 @@
 [package]
 name = "so-novel-rs"
-version = "0.3.2"
+version = "0.3.3"
 edition = "2024"
 rust-version = "1.85"
 description = "So Novel — Rust desktop client (gpui + gpui-component)."
@@ -25,7 +25,7 @@ gpui-component-assets = "0.5.1"
 rust-i18n = "3"
 
 # Async runtime (kept lean — used in later stages; pulled now so tests/integration are stable)
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "fs"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "fs", "signal"] }
 
 # smol：gpui 0.2.2 的 `cx.spawn` 用的是 smol executor（在 smol 之上封了一层），
 # 不是 tokio。在 cx.spawn 的 future 内部**不能**用 `tokio::time::sleep` /

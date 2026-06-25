@@ -125,6 +125,26 @@ so-novel-rs download "https://example.com/book/123" --output D:\novels --format 
 so-novel-rs sources --json
 ```
 
+📖 完整 CLI 用法、子命令参数、注意事项、故障排查见 [docs/CLI.md](./docs/CLI.md)。
+
+### 📚 书源
+
+仓库自带 6 套书源规则（位于 `bundle/rules/`，首次运行复制到 `~/.sonovel/rules/`）：
+
+- `main.json` — 默认书源（12 个，均支持搜索、大陆 IP）
+- `proxy-required.json` — 需要代理的书源（4 个，非大陆 IP）
+- `rate-limit.json` — 下载限流的源（4 个）
+- `no-search.json` — 不支持搜索的源（2 个）
+- `cloudflare.json` — 有 Cloudflare 保护的源（3 个）
+- `rule-template.json5` — 自定义书源模板
+
+切换书源集：在 `config.toml` 改 `active-rules` 字段；Cloudflare 保护的书源需要
+部署 [CloudflareBypassForScraping](https://github.com/sarperavci/CloudflareBypassForScraping)
+反代并设置 `cf-bypass`。
+
+📖 完整书源表（IP 要求 / 注意事项）、CF 绕过部署步骤、排查指引见
+[docs/BOOK_SOURCES.md](./docs/BOOK_SOURCES.md)。
+
 ### 🌐 Web 模式
 
 启动 Web 服务器，通过浏览器访问：
