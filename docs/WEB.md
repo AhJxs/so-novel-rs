@@ -248,11 +248,13 @@ volumes:
 ### 镜像体积 / 构建时间
 
 `Dockerfile` 是标准多阶段：
-- 阶段 1：`rust:1.85-slim` + 编译 release（~2-5 GB 中间产物）
-- 阶段 2：`debian:bookworm-slim` + 二进制（最终 ~80-150 MB）
+	- 阶段 1：`rust:1-slim` + 编译 release（~2-5 GB 中间产物）
+- 阶段 2：`debian:stable-slim` + 二进制（最终 ~80-150 MB）
 
-> **不**用 `rust:1.85-slim-bookworm` 是为了 cargo 缓存 / 工具链
-> 标准化。生产优化（如 distroless、scratch、UPX）可以单独做，
+> 构建阶段用 `rust:1-slim`（随 Rust / Debian 最新 stable），
+> 运行阶段用 `debian:stable-slim` 与之对齐，避免 GLIBC 版本不匹配
+> （`rust:1-slim` 基于最新 Debian stable slim，两者必须同版本）。
+> 生产优化（如 distroless、scratch、UPX）可以单独做，
 > 但要权衡 `ca-certificates` / `glibc` 依赖。
 
 ---

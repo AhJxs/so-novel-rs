@@ -50,7 +50,7 @@ RUN cargo build --release
 # error while loading shared libraries 启动失败。
 # 这里仅安装运行时 .so（不带 -dev），体积增量约 30-40 MB。
 # 行列与 builder 阶段对齐，方便 review 时对比。
-FROM debian:bookworm-slim
+FROM debian:stable-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates tini \
     libxkbcommon0 libxkbcommon-x11-0 libfontconfig1 \
