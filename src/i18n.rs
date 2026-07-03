@@ -32,21 +32,25 @@
 
 use std::sync::OnceLock;
 
-use gpui::SharedString;
+/// 翻译返回类型别名：gui feature 开启时为 `gpui::SharedString`（`Arc<str>` 语义，clone 零 alloc）；
+/// 非 gui 构建（如 web-only Docker）时为 `String`。
+/// 调用方在两种构建下均可直接 `.into()` 得到目标类型。
+#[cfg(feature = "gui")]
+pub type TStr = gpui::SharedString;
+#[cfg(not(feature = "gui"))]
+pub type TStr = String;
 
-/// 全局 SharedString 缓存：key → 已翻译的 SharedString。
+/// 全局 TStr 缓存：key → 已翻译的 TStr。
 ///
 /// **仅缓存无变量 key（`ts`）的结果**。`ts_fmt` 因 value 不可预测不进缓存。
 /// locale 变化（`set_locale`）时清空 —— 通过 `invalidate_cache` 在 `set_locale`
 /// 调用方手动触发。`rust_i18n::set_locale` 本身没有 hook 给我们挂，
 /// 但本项目切语言**走重启流程**（见模块顶部注释），所以实际场景里这个缓存
 /// 整进程有效，命中率很高。
-static TS_CACHE: OnceLock<
-    std::sync::Mutex<Option<std::collections::HashMap<&'static str, SharedString>>>,
-> = OnceLock::new();
+static TS_CACHE: OnceLock<std::sync::Mutex<Option<std::collections::HashMap<&'static str, TStr>>>> =
+    OnceLock::new();
 
-fn ts_cache()
--> &'static std::sync::Mutex<Option<std::collections::HashMap<&'static str, SharedString>>> {
+fn ts_cache() -> &'static std::sync::Mutex<Option<std::collections::HashMap<&'static str, TStr>>> {
     TS_CACHE.get_or_init(|| std::sync::Mutex::new(None))
 }
 
@@ -69,11 +73,11 @@ pub fn invalidate_cache() {
 ///
 /// 注：`rust_i18n::i18n!("locales")` 必须在 crate root 调一次（见 `src/lib.rs`），
 /// 生成的 `_rust_i18n_try_translate` 才是真正的翻译查找后端。
-pub fn ts(key: &'static str) -> SharedString {
+pub fn ts(key: &'static str) -> TStr {
     let locale = rust_i18n::locale();
     crate::_rust_i18n_try_translate(&locale, key)
-        .map(|cow| SharedString::from(cow.into_owned()))
-        .unwrap_or_else(|| SharedString::from(key))
+        .map(|cow| TStr::from(cow.into_owned()))
+        .unwrap_or_else(|| TStr::from(key))
 }
 
 /// 翻译查找的缓存版本。热路径（行 builder 每次 render 调）走这个：
@@ -82,7 +86,7 @@ pub fn ts(key: &'static str) -> SharedString {
 ///   clone 只增引用计数，无 alloc）。
 ///
 /// 与 `ts` 的唯一区别就是缓存层。语义完全一致（key 找不到返回 key 本身）。
-pub fn ts_cached(key: &'static str) -> SharedString {
+pub fn ts_cached(key: &'static str) -> TStr {
     // 读路径走 Mutex 而非 RwLock：① 全局只一个 key-value 写者（第一次访问），
     // ② SharedString clone 很轻，无锁阻塞竞争更友好。读侧用 `try_lock` 退路：
     // 万一锁被持有（极罕见）退到非缓存路径，绝不阻塞调用方。
@@ -120,7 +124,7 @@ pub fn ts_cached(key: &'static str) -> SharedString {
 /// 安全前提：替换的 value 不能包含 `{` 或 `}` 字面字符 —— 否则会误替换或注入
 /// 新的占位符。所有 caller 的 value 都是内部数据（PathBuf 转 String、enum 名等），
 /// 不会带花括号。如果未来 value 可能包含用户输入，需要 escape。
-pub fn ts_fmt(key: &'static str, vars: &[(&str, &str)]) -> SharedString {
+pub fn ts_fmt(key: &'static str, vars: &[(&str, &str)]) -> TStr {
     let locale = rust_i18n::locale();
     let mut result = crate::_rust_i18n_try_translate(&locale, key)
         .map(|cow| cow.into_owned())
@@ -129,7 +133,7 @@ pub fn ts_fmt(key: &'static str, vars: &[(&str, &str)]) -> SharedString {
         // 占位符形式 `{name}` —— `format!("{{{}}}", name)` 转义出字面 `{name}`。
         result = result.replace(&format!("{{{name}}}"), value);
     }
-    SharedString::from(result)
+    TStr::from(result)
 }
 
 /// `ts_fmt` 的缓存版本。**只缓存"模板字符串"**（带 `{var}` 占位符的原文），
@@ -139,7 +143,7 @@ pub fn ts_fmt(key: &'static str, vars: &[(&str, &str)]) -> SharedString {
 ///
 /// 模板用 `Option<String>` 区分"未缓存"（None）和"已缓存且 key 不存在"（Some("")）。
 /// 实际不存在时 `Some(key.to_string())` 走 fallback，避免反复调用底层。
-pub fn ts_fmt_cached(key: &'static str, vars: &[(&str, &str)]) -> SharedString {
+pub fn ts_fmt_cached(key: &'static str, vars: &[(&str, &str)]) -> TStr {
     use std::collections::HashMap;
     use std::sync::Mutex;
     use std::sync::OnceLock;
@@ -171,14 +175,14 @@ pub fn ts_fmt_cached(key: &'static str, vars: &[(&str, &str)]) -> SharedString {
 
     if vars.is_empty() {
         // 常见 case：UI 上很多 "已翻译" 标签走 `ts_fmt(key, &[])` —— 实际等于 `ts_cached`。
-        return SharedString::from(template);
+        return TStr::from(template);
     }
     let mut result = template;
     for (name, value) in vars {
         // 占位符形式 `{name}` —— `format!("{{{}}}", name)` 转义出字面 `{name}`。
         result = result.replace(&format!("{{{name}}}"), value);
     }
-    SharedString::from(result)
+    TStr::from(result)
 }
 
 #[cfg(test)]

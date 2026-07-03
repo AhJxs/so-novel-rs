@@ -3,7 +3,7 @@
 // 若没有父控制台（如从 Explorer 启动），则自行 `AllocConsole` 分配一个新控制台，
 // 确保 stdout/stderr 始终有效。
 #![cfg_attr(
-    all(target_os = "windows", not(debug_assertions)),
+    all(target_os = "windows", not(debug_assertions), feature = "gui"),
     windows_subsystem = "windows"
 )]
 
@@ -41,11 +41,20 @@ fn main() -> Result<()> {
         let port = parse_arg_value(&args, "--port")
             .and_then(|v| v.parse::<u16>().ok())
             .unwrap_or(DEFAULT_WEB_PORT);
+        #[cfg(feature = "web")]
         return run_web(host, port);
+        #[cfg(not(feature = "web"))]
+        {
+            let _ = (host, port);
+            anyhow::bail!("当前构建不含 Web 功能（需 --features web）");
+        }
     }
 
     // 启动 GPUI + gpui-component GUI。
-    so_novel_rs::gpui_app::run()
+    #[cfg(feature = "gui")]
+    return so_novel_rs::gpui_app::run();
+    #[cfg(not(feature = "gui"))]
+    anyhow::bail!("当前构建不含 GUI（需 --features gui），请使用 --web 或 --host/--port 模式")
 }
 
 /// 从命令行参数中提取 `--key value` 形式的值。
@@ -60,6 +69,7 @@ fn parse_arg_value(args: &[String], key: &str) -> Option<String> {
 }
 
 /// Web 服务模式：初始化共享资源并启动 axum 服务器。
+#[cfg(feature = "web")]
 fn run_web(host: String, port: u16) -> Result<()> {
     use so_novel_rs::config::{ConfigPaths, load_config};
     use so_novel_rs::http::HttpClients;

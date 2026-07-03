@@ -170,13 +170,13 @@ SO_NOVEL_WEB=1 so-novel-rs
 docker build -t so-novel .
 
 # 运行（挂载数据目录）
-docker run -d -p 8080:8080 -v so-novel-data:/root/.sonovel --name so-novel so-novel
+docker run -d -p 8080:8080 -v so-novel-data:/home/so-novel/.sonovel --name so-novel so-novel
 
 # 自定义端口
 docker run -d -p 9000:8080 -e SO_NOVEL_WEB=1 so-novel
 ```
 
-`config.toml` 存放在 `/root/.sonovel/config.toml`（容器内），下载的文件在 `/root/Documents/Novel/`。
+`config.toml` 存放在 `/home/so-novel/.sonovel/config.toml`（容器内），数据目录与 Dockerfile 的非 root 用户保持一致。
 
 ### 📦 打包
 

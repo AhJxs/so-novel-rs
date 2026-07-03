@@ -11,12 +11,34 @@ publish = false
 name = "so-novel-rs"
 path = "src/main.rs"
 
+[features]
+default = ["gui", "web"]
+# GUI 桌面特性：拉入 GPUI 栈 + 文件对话框 + 文件监听 + LRU 封面缓存。
+# `cargo build --no-default-features --features gui` 得到仅含 GUI 的二进制。
+gui = [
+    "dep:gpui",
+    "dep:gpui-component",
+    "dep:gpui-component-assets",
+    "dep:rfd",
+    "dep:notify",
+]
+# Web 服务特性：拉入 axum 栈 + SSE 流工具。
+# `cargo build --no-default-features --features web` 得到不含任何 GPUI 系统库链接的 Web 二进制
+# （Dockerfile 用这个路径，去掉所有 xcb/xkbcommon/wayland/egl/mesa/vulkan 依赖）。
+web = [
+    "dep:axum",
+    "dep:axum_session",
+    "dep:tower-http",
+    "dep:async-stream",
+    "dep:futures",
+]
+
 [dependencies]
-# UI — GPUI 栈
-gpui = "0.2.2"
-gpui-component = "0.5.1"
+# UI — GPUI 栈（gui feature 专属）
+gpui = { version = "0.2.2", optional = true }
+gpui-component = { version = "0.5.1", optional = true }
 # gpui-component-assets 提供内置 icon 资源；可选，但启用后可避免自己 embed 图标字体
-gpui-component-assets = "0.5.1"
+gpui-component-assets = { version = "0.5.1", optional = true }
 # 国际化 —— rust-i18n（同 gpui-component 内部用的库），我们直接复用框架机制：
 # - `locales/app.yml` 装翻译表（编译期嵌入）
 # - `rust_i18n::i18n!("locales", fallback = "en")` 初始化
@@ -62,7 +84,7 @@ directories = "6"
 # macOS FSEvents / Linux inotify）。debounce 由 LibraryPage 的 watcher 任务
 # 内部用 `background_executor().timer(...)`（gpui/smol timer）+ AtomicU64
 # 计数器自行实现，不再引入 notify-debouncer-mini 增加编译时间和依赖图复杂度。
-notify = "8.2"
+notify = { version = "8.2", optional = true }
 
 # HTTP client (rustls 避免 OpenSSL 依赖；cookies 用于规则中的 Cookie 头注入；
 # gzip/brotli 解压由 reqwest 透明处理)。
@@ -113,12 +135,12 @@ zip = { version = "8", default-features = false, features = ["deflate-flate2"] }
 # CLI 子命令（5c）。
 clap = { version = "4", features = ["derive"] }
 
-# Web 服务：axum（tokio 原生 HTTP 框架）+ tower-http（CORS 中间件）。
-axum = { version = "0.8", features = ["macros"] }
-axum_session = "0.20"
-async-stream = "0.3"
-futures = "0.3"
-tower-http = { version = "0.7", features = ["cors"] }
+# Web 服务：axum（tokio 原生 HTTP 框架）+ tower-http（CORS 中间件）。（web feature 专属）
+axum = { version = "0.8", features = ["macros"], optional = true }
+axum_session = { version = "0.20", optional = true }
+async-stream = { version = "0.3", optional = true }
+futures = { version = "0.3", optional = true }
+tower-http = { version = "0.7", features = ["cors"], optional = true }
 
 
 # 原生文件选择对话框（书源管理「添加」按钮：选 JSON 文件导入）。
@@ -130,7 +152,7 @@ tower-http = { version = "0.7", features = ["cors"] }
 # 默认启 ashpd async-std、rfd 再启 tokio 触发 ashpd compile_error」的旧冲突。
 # AsyncFileDialog API 不变，仍返回 impl Future，由调用方的 executor（gpui 的
 # background_executor）驱动。
-rfd = { version = "^0.17.2", default-features = false, features = ["xdg-portal"] }
+rfd = { version = "^0.17.2", default-features = false, features = ["xdg-portal"], optional = true }
 
 # 读系统本地时区（UtcOffset::current_local_offset）。local-offset feature 在 Windows / macOS / Linux
 # 各自调 OS API（GetTimeZoneInformation / localtime_r / ...），跨平台用一个 API 拿偏移秒数。
@@ -163,3 +185,8 @@ image = "0.25"
 # build.rs 调用，仅 Windows target 需要。
 [target.'cfg(target_os = "windows")'.build-dependencies]
 winres = "0.1"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"

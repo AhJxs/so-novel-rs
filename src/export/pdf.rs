@@ -23,6 +23,8 @@
 //! - 无 CJK 字体时中文是 tofu（建议安装 Noto Sans CJK）。
 //! - CJK 粗体需第二个字体文件，当前只用常规体；章节标题靠加大字号 + 居中区分。
 
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -83,10 +85,13 @@ impl Exporter for PdfExporter {
         // 不注册字体（中文 tofu 但排版照常）。
         let font_bytes = find_cjk_font();
         let measurer = match &font_bytes {
-            Some(b) => Measurer::Embedded(Box::new(
-                EmbeddedFont::from_data(Some(CJK_FONT.into()), b.clone())
-                    .map_err(|e| ExportError::Pdf(format!("font parse: {e}")))?,
-            )),
+            Some(b) => Measurer::Embedded {
+                font: Box::new(
+                    EmbeddedFont::from_data(Some(CJK_FONT.into()), b.clone())
+                        .map_err(|e| ExportError::Pdf(format!("font parse: {e}")))?,
+                ),
+                width_cache: RefCell::new(HashMap::new()),
+            },
             None => {
                 tracing::warn!(
                     "未找到系统 CJK 字体（C:\\Windows\\Fonts\\msyh.ttc / NotoSansCJK / \
@@ -173,14 +178,25 @@ struct Run {
 /// - `Embedded`：用真实 CJK 字体字形度量（精确，CJK 路径）。
 /// - `Heuristic`：CJK=1em、ASCII=0.55em、空格=0.3em 的近似（无字体降级路径）。
 enum Measurer {
-    Embedded(Box<EmbeddedFont>),
+    Embedded {
+        font: Box<EmbeddedFont>,
+        width_cache: RefCell<HashMap<u32, f32>>,
+    },
     Heuristic,
 }
 
 impl Measurer {
     fn char_w(&self, ch: char, size: f32) -> f32 {
         match self {
-            Measurer::Embedded(f) => f.char_width(ch as u32) as f32 * size / 1000.0,
+            Measurer::Embedded { font, width_cache } => {
+                let cp = ch as u32;
+                // 字形原始宽度（0–1000 units），与 size 无关，缓存 u32 键。
+                let raw = *width_cache
+                    .borrow_mut()
+                    .entry(cp)
+                    .or_insert_with(|| font.char_width(cp) as f32);
+                raw * size / 1000.0
+            }
             Measurer::Heuristic => {
                 if ch == ' ' {
                     0.3 * size

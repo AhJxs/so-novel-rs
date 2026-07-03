@@ -21,6 +21,7 @@ pub mod cli;
 pub mod config;
 pub mod crawler;
 pub mod export;
+#[cfg(feature = "gui")]
 pub mod gpui_app;
 pub mod http;
 pub mod i18n;
@@ -30,4 +31,5 @@ pub mod models;
 pub mod parser;
 pub mod persistent;
 pub mod util;
+#[cfg(feature = "web")]
 pub mod web;

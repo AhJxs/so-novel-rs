@@ -9,13 +9,19 @@
 
 use std::sync::Arc;
 
-use tokio::sync::mpsc;
+use tokio::sync::{Semaphore, mpsc};
 use tokio::task::JoinSet;
 
 use crate::http::HttpClients;
 use crate::models::SearchResult;
 use crate::models::Source;
 use crate::parser::{SearchError, search_one};
+
+const DEFAULT_SEARCH_CONCURRENCY: usize = 8;
+
+fn compute_search_concurrency(source_count: usize) -> usize {
+    source_count.clamp(1, DEFAULT_SEARCH_CONCURRENCY)
+}
 
 /// 单源搜索的输出条目（绑定到原 Source，便于 UI 出错提示）。
 #[derive(Debug)]
@@ -93,20 +99,35 @@ fn spawn_search_tasks(
 ) -> JoinSet<SourceSearchOutcome> {
     let mut set: JoinSet<SourceSearchOutcome> = JoinSet::new();
 
+    let concurrency = compute_search_concurrency(sources.len());
     let http = Arc::clone(&http);
     let kw = Arc::new(keyword);
     let cf = Arc::new(cf_bypass_base);
+    let semaphore = Arc::new(Semaphore::new(concurrency));
 
     for src in sources {
         let http = Arc::clone(&http);
         let kw = Arc::clone(&kw);
         let cf = Arc::clone(&cf);
+        let semaphore = Arc::clone(&semaphore);
         set.spawn(async move {
             let source_id = src.rule.id;
             let source_name = src.rule.name.clone();
+            let permit = match semaphore.acquire_owned().await {
+                Ok(p) => p,
+                Err(e) => {
+                    tracing::warn!(source_id, source_name = %source_name, "聚合搜索并发许可获取失败: {e}");
+                    return SourceSearchOutcome {
+                        source_id,
+                        source_name,
+                        result: Err(SearchError::Http(e.to_string())),
+                    };
+                }
+            };
             let client = http.for_rule(&src.rule);
             let cf_borrow: Option<&str> = cf.as_ref().as_ref().map(|s| s.as_str());
             let result = search_one(&client, &src.rule, kw.as_str(), limit, cf_borrow).await;
+            drop(permit);
             SourceSearchOutcome {
                 source_id,
                 source_name,
@@ -133,6 +154,24 @@ mod tests {
         };
         let cfg = AppConfig::default();
         Source::from(rule, &cfg)
+    }
+
+    #[test]
+    fn search_concurrency_never_returns_zero() {
+        assert_eq!(compute_search_concurrency(0), 1);
+    }
+
+    #[test]
+    fn search_concurrency_uses_source_count_when_small() {
+        assert_eq!(compute_search_concurrency(3), 3);
+    }
+
+    #[test]
+    fn search_concurrency_caps_large_source_sets() {
+        assert_eq!(
+            compute_search_concurrency(DEFAULT_SEARCH_CONCURRENCY + 10),
+            DEFAULT_SEARCH_CONCURRENCY
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]

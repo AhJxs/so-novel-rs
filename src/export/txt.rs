@@ -7,11 +7,12 @@
 //!   底层用 `encoding_rs` 转码；目标编码不可识别时降级 UTF-8 + warn。
 //!
 //! 与 Java 端的差异：
-//! - Java 用 hutool `FileAppender` 一次次 append；Rust 这里直接拼到一个 String 再
-//!   写入，章节数超大时也只是几 MB 量级，内存可接受，且代码更简单。
+//! - Java 用 hutool `FileAppender` 一次次 append；Rust 这里用 `BufWriter` 按片段
+//!   编码写入，避免超长小说整本内容同时驻留内存。
 //! - Java 用 `HtmlUtil.cleanHtmlTag(intro)` 去 HTML 标签；
 //!   Rust 用一个简单正则去标签 + 去掉 HTML 实体（`&xxx;`），与 ChapterFilter 用法一致。
 
+use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 
 use encoding_rs::{Encoding, UTF_8};
@@ -21,6 +22,44 @@ use crate::export::exporter::{
 };
 use crate::models::Book;
 use crate::util::fs::sanitize_filename;
+
+/// 流式转码写入器：将 UTF-8 `&str` 片段即时转码为目标编码写入底层 writer，
+/// 避免整本小说先拼成一个大 `String` 再统一编码。
+struct TxtEncodedWriter<W: Write> {
+    inner: W,
+    encoding: &'static Encoding,
+    encoding_label: String,
+    had_errors: bool,
+}
+
+impl<W: Write> TxtEncodedWriter<W> {
+    fn new(inner: W, encoding: &'static Encoding, label: &str) -> Self {
+        Self {
+            inner,
+            encoding,
+            encoding_label: label.to_string(),
+            had_errors: false,
+        }
+    }
+
+    fn write_str(&mut self, s: &str) -> Result<(), ExportError> {
+        let (encoded, _, errors) = self.encoding.encode(s);
+        self.had_errors |= errors;
+        self.inner.write_all(&encoded)?;
+        Ok(())
+    }
+
+    fn finish(mut self) -> Result<(), ExportError> {
+        if self.had_errors {
+            tracing::warn!(
+                "TXT 编码 {} 时存在不可表示字符，已替换为占位符。",
+                self.encoding_label
+            );
+        }
+        self.inner.flush()?;
+        Ok(())
+    }
+}
 
 pub struct TxtExporter {
     encoding: &'static Encoding,
@@ -58,21 +97,27 @@ impl Exporter for TxtExporter {
             return Err(ExportError::EmptyChaptersDir(chapters_dir.to_path_buf()));
         }
 
-        let mut buf = String::new();
+        // 转码 + 写入：按首页/章节片段流式编码，避免整本小说拼成一个 String。
+        std::fs::create_dir_all(out_dir)?;
+        let filename = sanitize_filename(&format!("{}({}).txt", book.book_name, book.author));
+        let out_path = unique_path(out_dir, &filename);
+        let file = std::fs::File::create(&out_path)?;
+        let mut writer =
+            TxtEncodedWriter::new(BufWriter::new(file), self.encoding, &self.encoding_label);
+
         // 首页：书籍信息（与 Java 端首段格式一致）
-        buf.push_str(&format!("书名：{}\n", book.book_name));
-        buf.push_str(&format!("作者：{}\n", book.author));
+        writer.write_str(&format!("书名：{}\n", book.book_name))?;
+        writer.write_str(&format!("作者：{}\n", book.author))?;
         let intro = book.intro.as_deref().unwrap_or("");
         let intro_clean = strip_html_tags(intro);
-        buf.push_str(&format!(
-            "简介：{}\n",
+        writer.write_str(&format!(
+            "简介：{}\n\n",
             if intro_clean.is_empty() {
                 "暂无"
             } else {
                 intro_clean.as_str()
             }
-        ));
-        buf.push('\n');
+        ))?;
 
         // 章节合并（每个文件已是 render::render_txt 的输出：标题 + 缩进段落 + \n）
         for path in &files {
@@ -83,26 +128,13 @@ impl Exporter for TxtExporter {
                 }
             }
             let content = std::fs::read_to_string(path)?;
-            buf.push_str(&content);
+            writer.write_str(&content)?;
             // 章节之间留一空行
-            if !buf.ends_with("\n\n") {
-                buf.push('\n');
+            if !content.ends_with("\n\n") {
+                writer.write_str("\n")?;
             }
         }
-
-        // 转码 + 写入
-        std::fs::create_dir_all(out_dir)?;
-        let filename = sanitize_filename(&format!("{}({}).txt", book.book_name, book.author));
-        let out_path = unique_path(out_dir, &filename);
-
-        let (encoded, _, had_errors) = self.encoding.encode(&buf);
-        if had_errors {
-            tracing::warn!(
-                "TXT 编码 {} 时存在不可表示字符，已替换为占位符。",
-                self.encoding_label
-            );
-        }
-        std::fs::write(&out_path, &*encoded)?;
+        writer.finish()?;
         Ok(out_path)
     }
 }
