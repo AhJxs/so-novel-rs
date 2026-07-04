@@ -162,7 +162,7 @@ docker run -d \
   -p 8080:8080 \
   -v so-novel-data:/home/so-novel/.sonovel \
   --restart unless-stopped \
-  ghcr.io/ahjxs/so-novel-rs:0.3.3
+  ghcr.io/ahjxs/so-novel-rs:0.3.4
 ```
 
 > **首次拉取后**确认包是 public：访问
@@ -342,7 +342,7 @@ Caddy 自动管 TLS（Let's Encrypt 集成），3 行搞定。
 cargo build --release
 bash scripts/package-linux.sh x86_64-unknown-linux-gnu
 
-# 产物：dist/so-novel-rs-0.3.3-linux-x86_64/  +  .tar.gz
+# 产物：dist/so-novel-rs-0.3.4-linux-x86_64/  +  .tar.gz
 ls dist/
 ```
 
@@ -367,8 +367,8 @@ CI 路径：[`.github/workflows/release.yml`](../.github/workflows/release.yml)
 
 ```sh
 # 解压后
-tar -xzf so-novel-rs-0.3.3-linux-x86_64.tar.gz
-cd so-novel-rs-0.3.3-linux-x86_64
+tar -xzf so-novel-rs-0.3.4-linux-x86_64.tar.gz
+cd so-novel-rs-0.3.4-linux-x86_64
 ./so-novel-rs --web --host 0.0.0.0 --port 8080
 # 浏览器开 http://localhost:8080
 ```

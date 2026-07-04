@@ -70,11 +70,15 @@ so-novel-rs/
 │   └── web/               # Web 前端静态资源
 ├── locales/app.yml        # i18n 翻译（zh-CN / zh-HK / en）
 └── src/
-    ├── main.rs            # 入口（GUI / CLI / Web）
-    ├── cli.rs             # CLI 子命令
+    ├── main.rs            # 进程入口（18 行：crane attribute + 委托给 startup）
+    ├── startup/           # 启动层：mode 判定 / console attach / dispatch
+    │   ├── mod.rs         # LaunchMode / detect / dispatch / attach_parent_console
+    │   └── web.rs         # web bootstrap（paths → config → rules → http → tasks → axum）
+    ├── cli/               # CLI 子命令（args / search / download / sources / util / tests）
     ├── app/               # 业务层（与 GUI 解耦）
     │   └── ops/           # download / search / sources / library / settings / update
     ├── config/            # config.toml 读写
+    ├── i18n/              # rust_i18n 包装 + locale_for
     ├── persistent/        # JSON 持久化（tasks.json / sources_config.json / rules/）
     ├── models/            # Rule / Book / Chapter / SearchResult / TaskRecord
     ├── crawler/           # 搜索 / 下载 / 重试 / 健康检测
@@ -124,6 +128,9 @@ so-novel-rs download "https://example.com/book/123" --output D:\novels --format 
 # 列出书源
 so-novel-rs sources --json
 ```
+
+`--help` / `-h` / 子命令 help 跟随 `~/.sonovel/config.toml [global].language`
+显示对应语言（zh-CN / zh-TW → zh-HK / en），与 GUI 同步。
 
 📖 完整 CLI 用法、子命令参数、注意事项、故障排查见 [docs/CLI.md](./docs/CLI.md)。
 

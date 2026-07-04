@@ -1,9 +1,9 @@
 //! 书库列表 + 文件下载 + 删除。
 
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Json, Response};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::util::fs::sanitize_filename;
 
@@ -17,7 +17,15 @@ pub(crate) struct LibraryEntry {
     ext: String,
 }
 
-pub async fn library_list(State(state): State<SharedState>) -> Json<Vec<LibraryEntry>> {
+#[derive(Deserialize)]
+pub(crate) struct LibraryQuery {
+    pub ext: Option<String>,
+}
+
+pub async fn library_list(
+    Query(q): Query<LibraryQuery>,
+    State(state): State<SharedState>,
+) -> Json<Vec<LibraryEntry>> {
     let dir = &state.download_path;
     let mut entries = Vec::new();
     if let Ok(read_dir) = std::fs::read_dir(dir) {
@@ -53,6 +61,9 @@ pub async fn library_list(State(state): State<SharedState>) -> Json<Vec<LibraryE
                 ext,
             });
         }
+    }
+    if let Some(ext) = &q.ext {
+        entries.retain(|f| f.ext.eq_ignore_ascii_case(ext));
     }
     entries.sort_by_key(|b| std::cmp::Reverse(b.modified));
     Json(entries)

@@ -4,11 +4,13 @@
 //! 拆分子模块后，测试统一搬到这里。`Cli` / `Cmd` 通过 `super::*` 拿到
 //! 公共 re-export，`effective_cfg` 是内部 helper，按模块路径直接取。
 
-use clap::Parser;
+use clap::{CommandFactory, Parser};
 
-use crate::config::{AppConfig, ExportFormat};
+use crate::config::{AppConfig, ExportFormat, Language};
 
-use super::{Cli, Cmd, SourcesAction, util::effective_cfg};
+use super::{
+    Cli, Cmd, SourcesAction, build_localized_command, subcommand_name, util::effective_cfg,
+};
 
 #[test]
 fn cli_rejects_version_subcommand() {
@@ -343,4 +345,124 @@ fn cli_verbose_and_quiet_combine() {
     let cli = Cli::try_parse_from(["so-novel-rs", "--verbose", "-q", "search", "kw"]).unwrap();
     assert!(cli.verbose);
     assert!(cli.quiet);
+}
+
+/// `build_localized_command` 与 derive `Cli::command()` 在 arg IDs / subcommand
+/// 名称集合上必须等价 —— 这是手搓版"行为兼容 derive"的唯一机械性保证。
+///
+/// 任何对 `build_localized_command` 的改动如果漏了某个 arg / subcommand，或
+/// 改了 arg id / short / long 标识，都会被这条测试抓住。
+#[test]
+fn localized_command_matches_derive_structure() {
+    let derive = Cli::command();
+    let localized = build_localized_command(Language::English);
+
+    // 顶层 arg id 集合（顺序不要求——用 BTreeSet 排序比较）。
+    let derive_args: std::collections::BTreeSet<String> = derive
+        .get_arguments()
+        .map(|a| a.get_id().to_string())
+        .collect();
+    let localized_args: std::collections::BTreeSet<String> = localized
+        .get_arguments()
+        .map(|a| a.get_id().to_string())
+        .collect();
+    assert_eq!(
+        derive_args, localized_args,
+        "顶层 arg ID 集合必须与 derive 完全一致"
+    );
+
+    // subcommand 名称集合。
+    let derive_subs: std::collections::BTreeSet<String> = derive
+        .get_subcommands()
+        .map(|s| s.get_name().to_string())
+        .collect();
+    let localized_subs: std::collections::BTreeSet<String> = localized
+        .get_subcommands()
+        .map(|s| s.get_name().to_string())
+        .collect();
+    assert_eq!(
+        derive_subs, localized_subs,
+        "subcommand 名称集合必须与 derive 完全一致"
+    );
+
+    // sources 必须有 list / enable / disable 三个 sub-subcommand。
+    let sources = localized
+        .find_subcommand("sources")
+        .expect("sources subcommand must exist");
+    let source_subs: std::collections::BTreeSet<String> = sources
+        .get_subcommands()
+        .map(|s| s.get_name().to_string())
+        .collect();
+    assert_eq!(
+        source_subs,
+        ["disable", "enable", "list"]
+            .into_iter()
+            .map(String::from)
+            .collect(),
+        "sources 必须有 list / enable / disable 三个 sub-subcommand"
+    );
+}
+
+/// 三种 locale 下 `build_localized_command` 的顶层 `about` / `long_about`
+/// 必须互不相同 —— 这是"真的拿到翻译"的最小可见断言。
+///
+/// `build_localized_command` 内部会调 `rust_i18n::set_locale` + 清缓存，
+/// 整个进程全局生效。结尾恢复 en 避免污染后续测试（与 `i18n::tests::ts_and_ts_fmt_work`
+/// 同样的收尾策略）。
+#[test]
+fn localized_command_about_changes_with_language() {
+    let en = build_localized_command(Language::English);
+    let zh = build_localized_command(Language::SimplifiedChinese);
+    let hk = build_localized_command(Language::TraditionalChinese);
+
+    let en_about = en.get_about().expect("en about").to_string();
+    let zh_about = zh.get_about().expect("zh-CN about").to_string();
+    let hk_about = hk.get_about().expect("zh-HK about").to_string();
+
+    assert_ne!(en_about, zh_about, "en 与 zh-CN about 应不同");
+    assert_ne!(en_about, hk_about, "en 与 zh-HK about 应不同");
+    assert_ne!(zh_about, hk_about, "zh-CN 与 zh-HK about 应不同");
+
+    // 简单自检：英文 about 包含 "So Novel"，繁简 about 包含 "批量下載"/"批量下载"。
+    assert!(en_about.contains("So Novel"));
+    assert!(zh_about.contains("批量下载"));
+    assert!(hk_about.contains("批量下載"));
+
+    // 收尾：恢复 en。
+    rust_i18n::set_locale("en");
+    crate::i18n::invalidate_cache();
+}
+
+/// `subcommand_name` 把 `Cmd` variant 映射到 clap 子命令名。
+#[test]
+fn subcommand_name_maps_variants() {
+    let search = Cli::try_parse_from(["so-novel-rs", "search", "kw"]).unwrap();
+    let download = Cli::try_parse_from(["so-novel-rs", "download", "http://x"]).unwrap();
+    let sources = Cli::try_parse_from(["so-novel-rs", "sources"]).unwrap();
+
+    assert_eq!(subcommand_name(search.command.as_ref().unwrap()), "search");
+    assert_eq!(
+        subcommand_name(download.command.as_ref().unwrap()),
+        "download"
+    );
+    assert_eq!(
+        subcommand_name(sources.command.as_ref().unwrap()),
+        "sources"
+    );
+}
+
+/// `locale_for` 是项目里 `Language → locale 字符串` 的唯一权威映射。
+/// 测试三种 enum 的输出 + 关键差异（TraditionalChinese 返回 `zh-HK` 而
+/// **不是** `Language::as_str()` 的 `zh-TW`）。
+#[test]
+fn locale_for_maps_to_rust_i18n_tags() {
+    assert_eq!(
+        crate::i18n::locale_for(Language::SimplifiedChinese),
+        "zh-CN"
+    );
+    assert_eq!(
+        crate::i18n::locale_for(Language::TraditionalChinese),
+        "zh-HK"
+    );
+    assert_eq!(crate::i18n::locale_for(Language::English), "en");
 }

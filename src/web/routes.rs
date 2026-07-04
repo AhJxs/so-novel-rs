@@ -5,42 +5,41 @@ use axum::routing::{delete, get, post, put};
 use axum_session::{SessionLayer, SessionNullPool, SessionStore};
 
 use super::SharedState;
+use super::spa_handler;
 use crate::web::handlers;
 
 /// 构建 axum Router。
+/// SPA 前端由 rust-embed 编译期嵌入，通过 `spa_handler` fallback 提供。
 pub fn build_router(state: SharedState, session_store: SessionStore<SessionNullPool>) -> Router {
-    Router::new()
-        // 前端
-        .route("/", get(handlers::misc::index_page))
-        .route("/favicon.ico", get(handlers::misc::favicon))
-        .route("/logo.png", get(handlers::misc::logo))
+    let api = Router::new()
         // 搜索
-        .route("/api/search", get(handlers::search::search))
+        .route("/search", get(handlers::search::search))
         // 书籍
-        .route("/api/book/detail", get(handlers::book::book_detail))
-        .route("/api/book/toc", get(handlers::book::book_toc))
+        .route("/book/detail", get(handlers::book::book_detail))
+        .route("/book/toc", get(handlers::book::book_toc))
         // 下载 + 任务
-        .route("/api/download", post(handlers::download::download))
-        .route("/api/tasks", get(handlers::download::tasks_list))
-        .route("/api/tasks/{id}/cancel", post(handlers::download::task_cancel))
+        .route("/download", post(handlers::download::download))
+        .route("/tasks", get(handlers::download::tasks_list))
+        .route("/tasks/{id}/cancel", post(handlers::download::task_cancel))
+        .route("/tasks/{id}", delete(handlers::download::task_delete))
         // 书库 + 文件
-        .route("/api/library", get(handlers::library::library_list))
-        .route("/api/library/{filename}", delete(handlers::library::library_delete))
-        .route("/api/files/{filename}", get(handlers::library::file_download))
+        .route("/library", get(handlers::library::library_list))
+        .route("/library/{filename}", delete(handlers::library::library_delete))
+        .route("/files/{filename}", get(handlers::library::file_download))
         // 书源
-        .route("/api/sources", get(handlers::misc::sources_list))
-        .route("/api/sources/{id}/toggle", post(handlers::misc::source_toggle))
-        .route("/api/sources/{id}/test", post(handlers::misc::source_test))
+        .route("/sources", get(handlers::misc::sources_list))
+        .route("/sources/{id}/toggle", post(handlers::misc::source_toggle))
+        .route("/sources/{id}/test", post(handlers::misc::source_test))
         // 设置
-        .route("/api/settings", get(handlers::misc::settings_get))
-        .route("/api/settings", put(handlers::misc::settings_put))
-        // 认证
-        .route("/api/auth", post(handlers::misc::auth_verify))
-        .route("/api/auth/status", get(handlers::misc::auth_status))
-        .route("/api/access-code", post(handlers::misc::set_access_code))
+        .route("/settings", get(handlers::misc::settings_get))
+        .route("/settings", put(handlers::misc::settings_put))
         // 健康检查
-        .route("/api/health", get(handlers::misc::health))
-        .with_state(state)
+        .route("/health", get(handlers::misc::health))
+        .with_state(state);
+
+    Router::new()
+        .nest("/api", api)
+        .fallback(spa_handler)
         .layer(SessionLayer::new(session_store))
         .layer(tower_http::cors::CorsLayer::permissive())
 }

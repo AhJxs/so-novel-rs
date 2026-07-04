@@ -1,0 +1,155 @@
+{
+  "app": {
+    "title": "So Novel"
+  },
+  "nav": {
+    "search": "搜尋",
+    "tasks": "任務",
+    "library": "書庫",
+    "sources": "書源",
+    "settings": "設定"
+  },
+  "search": {
+    "title": "搜尋小說",
+    "placeholder": "輸入書名或作者...",
+    "allSources": "全部源",
+    "searchButton": "搜尋",
+    "searching": "搜尋中 ({{count}} 源)...",
+    "noResults": "沒有找到相關書籍",
+    "initialPrompt": "輸入關鍵詞開始搜尋",
+    "card": {
+      "latestChapter": "最新章節",
+      "wordCount": "字數"
+    }
+  },
+  "book": {
+    "backToSearch": "返回搜尋",
+    "toc": "目錄",
+    "chapters": "{{count}} 章",
+    "loadToc": "載入目錄",
+    "refreshToc": "重新整理",
+    "notLoaded": "尚未載入目錄",
+    "format": "格式：",
+    "startDownload": "開始下載",
+    "downloading": "下載中 ({{current}}/{{total}})",
+    "cancel": "取消",
+    "downloadComplete": "下載完成！",
+    "latestChapter": "最新",
+    "missingSource": "缺少書源資訊，請從搜尋結果重新進入",
+    "loadFailed": "載入書籍資訊失敗",
+    "loading": "載入中..."
+  },
+  "tasks": {
+    "title": "下載任務",
+    "count": "共 {{total}} 個任務",
+    "empty": "暫無下載任務",
+    "status": {
+      "downloading": "下載中",
+      "finished": "已完成",
+      "failed": "失敗",
+      "cancelled": "已取消"
+    },
+    "cancel": "取消",
+    "delete": "刪除",
+    "deleted": "已刪除",
+    "deleteConfirm": {
+      "title": "刪除任務記錄",
+      "message": "確定要刪除任務「{{name}}」嗎？本地下載的檔案會保留。",
+      "confirm": "刪除",
+      "cancel": "取消"
+    },
+    "chapters": "{{current}} / {{total}} 章",
+    "started": "開始",
+    "finished": "結束",
+    "downloadFile": "下載檔案",
+    "failedCount": "失敗 {{n}} 章"
+  },
+  "library": {
+    "title": "本地書庫",
+    "empty": "書庫為空",
+    "filter": {
+      "all": "全部",
+      "epub": "EPUB",
+      "txt": "TXT",
+      "pdf": "PDF",
+      "html": "HTML"
+    },
+    "download": "下載",
+    "delete": "刪除",
+    "deleted": "已刪除",
+    "deleteConfirm": {
+      "title": "刪除檔案",
+      "message": "確定要刪除「{{name}}」嗎？此操作無法復原。",
+      "confirm": "刪除",
+      "cancel": "取消"
+    },
+    "pageSummary": "共 {{total}} 個檔案"
+  },
+  "sources": {
+    "title": "書源管理",
+    "enabled": "{{enabled}} / {{total}} 已啟用",
+    "enabledLabel": "已啟用",
+    "disabledLabel": "未啟用",
+    "test": "測速",
+    "testing": "測速中...",
+    "testAll": "全部測速",
+    "testingAll": "測速中 ({{done}}/{{total}})...",
+    "timeout": "逾時"
+  },
+  "settings": {
+    "title": "設定",
+    "loading": "載入中...",
+    "saving": "儲存中…",
+    "saved": "已儲存 ✓",
+    "saveFailed": "儲存失敗",
+    "error": {
+      "pathEmpty": "下載目錄不能為空",
+      "pathNotDir": "目錄不存在或無法存取",
+      "hostEmpty": "代理主機不能為空"
+    },
+    "language": {
+      "title": "語言",
+      "label": "介面語言",
+      "zh-CN": "简体中文",
+      "zh-TW": "繁體中文",
+      "en": "English"
+    },
+    "download": {
+      "title": "下載",
+      "path": "下載目錄",
+      "format": "匯出格式",
+      "encoding": "文字編碼",
+      "searchFilter": "搜尋篩選"
+    },
+    "proxy": {
+      "title": "代理",
+      "enabled": "啟用代理",
+      "host": "代理主機",
+      "port": "代理埠"
+    },
+    "retry": {
+      "title": "重試",
+      "enabled": "啟用重試",
+      "concurrency": "並行數",
+      "maxRetries": "最大重試次數"
+    },
+    "readonly": {
+      "title": "間隔與繞過（唯讀，不可編輯）",
+      "minInterval": "最小間隔 (ms)：",
+      "maxInterval": "最大間隔 (ms)：",
+      "cfBypass": "CF 繞過："
+    }
+  },
+  "theme": {
+    "light": "淺色",
+    "dark": "深色",
+    "system": "跟隨系統"
+  },
+  "common": {
+    "ok": "確定",
+    "cancel": "取消",
+    "close": "關閉",
+    "loading": "載入中...",
+    "error": "錯誤"
+  }
+}

@@ -1,0 +1,155 @@
+{
+  "app": {
+    "title": "So Novel"
+  },
+  "nav": {
+    "search": "Search",
+    "tasks": "Tasks",
+    "library": "Library",
+    "sources": "Sources",
+    "settings": "Settings"
+  },
+  "search": {
+    "title": "Search Novels",
+    "placeholder": "Enter book name or author...",
+    "allSources": "All Sources",
+    "searchButton": "Search",
+    "searching": "Searching ({{count}} sources)...",
+    "noResults": "No books found",
+    "initialPrompt": "Enter keywords to start searching",
+    "card": {
+      "latestChapter": "Latest",
+      "wordCount": "Words"
+    }
+  },
+  "book": {
+    "backToSearch": "Back to Search",
+    "toc": "Table of Contents",
+    "chapters": "{{count}} chapters",
+    "loadToc": "Load TOC",
+    "refreshToc": "Refresh",
+    "notLoaded": "TOC not loaded yet",
+    "format": "Format:",
+    "startDownload": "Start Download",
+    "downloading": "Downloading ({{current}}/{{total}})",
+    "cancel": "Cancel",
+    "downloadComplete": "Download complete!",
+    "latestChapter": "Latest",
+    "missingSource": "Missing source information, please re-enter from search results",
+    "loadFailed": "Failed to load book information",
+    "loading": "Loading..."
+  },
+  "tasks": {
+    "title": "Download Tasks",
+    "count": "{{total}} tasks",
+    "empty": "No download tasks",
+    "status": {
+      "downloading": "Downloading",
+      "finished": "Finished",
+      "failed": "Failed",
+      "cancelled": "Cancelled"
+    },
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "deleted": "Deleted",
+    "deleteConfirm": {
+      "title": "Delete task record",
+      "message": "Delete task \"{{name}}\"? Local file will be kept.",
+      "confirm": "Delete",
+      "cancel": "Cancel"
+    },
+    "chapters": "{{current}} / {{total}} chapters",
+    "started": "Started",
+    "finished": "Finished",
+    "downloadFile": "Download File",
+    "failedCount": "{{n}} failed"
+  },
+  "library": {
+    "title": "Local Library",
+    "empty": "Library is empty",
+    "filter": {
+      "all": "All",
+      "epub": "EPUB",
+      "txt": "TXT",
+      "pdf": "PDF",
+      "html": "HTML"
+    },
+    "download": "Download",
+    "delete": "Delete",
+    "deleted": "Deleted",
+    "deleteConfirm": {
+      "title": "Delete file",
+      "message": "Delete \"{{name}}\"? This can't be undone.",
+      "confirm": "Delete",
+      "cancel": "Cancel"
+    },
+    "pageSummary": "{{total}} files"
+  },
+  "sources": {
+    "title": "Source Management",
+    "enabled": "{{enabled}} / {{total}} enabled",
+    "enabledLabel": "Enabled",
+    "disabledLabel": "Disabled",
+    "test": "Test Speed",
+    "testing": "Testing...",
+    "testAll": "Test All",
+    "testingAll": "Testing ({{done}}/{{total}})...",
+    "timeout": "Timeout"
+  },
+  "settings": {
+    "title": "Settings",
+    "loading": "Loading...",
+    "saving": "Saving…",
+    "saved": "Saved ✓",
+    "saveFailed": "Save failed",
+    "error": {
+      "pathEmpty": "Download folder can't be empty",
+      "pathNotDir": "Folder doesn't exist or isn't accessible",
+      "hostEmpty": "Proxy host can't be empty"
+    },
+    "language": {
+      "title": "Language",
+      "label": "Interface Language",
+      "zh-CN": "简体中文",
+      "zh-TW": "繁體中文",
+      "en": "English"
+    },
+    "download": {
+      "title": "Download",
+      "path": "Download Directory",
+      "format": "Export Format",
+      "encoding": "Text Encoding",
+      "searchFilter": "Search Filter"
+    },
+    "proxy": {
+      "title": "Proxy",
+      "enabled": "Enable Proxy",
+      "host": "Proxy Host",
+      "port": "Proxy Port"
+    },
+    "retry": {
+      "title": "Retry",
+      "enabled": "Enable Retry",
+      "concurrency": "Concurrency",
+      "maxRetries": "Max Retries"
+    },
+    "readonly": {
+      "title": "Intervals & Bypass (Read-only)",
+      "minInterval": "Min Interval (ms):",
+      "maxInterval": "Max Interval (ms):",
+      "cfBypass": "CF Bypass:"
+    }
+  },
+  "theme": {
+    "light": "Light",
+    "dark": "Dark",
+    "system": "System"
+  },
+  "common": {
+    "ok": "OK",
+    "cancel": "Cancel",
+    "close": "Close",
+    "loading": "Loading...",
+    "error": "Error"
+  }
+}

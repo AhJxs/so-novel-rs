@@ -18,9 +18,9 @@ use crate::models::{Book, Chapter, Rule, SearchResult};
 
 use super::super::download_task::DownloadTask;
 use super::super::events::WakeupHandle;
-use super::super::now::now_unix_secs;
 use super::super::search_state::TocEvent;
 use super::super::trace::{TraceId, sub};
+use crate::util::time::now_unix_secs;
 
 /// spawn 共享上下文：提取 `rules` / `config` / `http` / `runtime` 四个参数，
 /// 消除 `spawn_download` / `spawn_download_range` / `spawn_resolve_toc` 的重复参数列表。

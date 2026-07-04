@@ -1,6 +1,8 @@
 //! `Cli` / `Cmd` clap 定义。
 
-use clap::{Parser, Subcommand};
+use clap::{Arg, ArgAction, Command, Parser, Subcommand};
+
+use crate::config::Language;
 
 /// 主入口元信息：`name` / `version` 由 `--version` 自动注入。
 pub(crate) const PKG_NAME: &str = "so-novel-rs";
@@ -168,4 +170,210 @@ pub enum SourcesAction {
         #[arg(value_name = "ID")]
         id: i32,
     },
+}
+
+/// 手搓一个**本地化的 `clap::Command`** 用于 help 打印。
+///
+/// ## 为什么不用 derive-built `Cli::command()`
+///
+/// clap 4 顶层 `about` / `long_about` / `after_help` 是构造期 builder 设置的
+/// `String`，**没有 public setter** —— derive 之后只能 mutate `Arg` / 子命令
+/// 字段，顶层 help 文案改不动。我们的 help 是 `config.toml [global].language`
+/// 决定的（zh-CN / zh-HK / en），必须在运行时切换 —— 只能整棵 `Command` 手搓。
+///
+/// ## 结构与 derive 一一对应
+///
+/// - 顶层：4 个 global arg（`-v` / `-q` / `-h` / `-V`）
+/// - 3 个 subcommand：`search` / `download` / `sources`
+/// - `sources` 下 3 个 sub-subcommand：`list` / `enable` / `disable`
+///
+/// 与 `Cli` derive 结构上的差异（仅行为等价 / parse 兼容）：
+/// - derive 的 `Cmd::Sources { action: Option<SourcesAction>, json }` 里 `action`
+///   走 `#[command(subcommand)]`，手搓版 `sources` 自身不显式定义 `action` 参数
+///   —— sub-subcommand 由 clap 自动从 `find_subcommand` 树里识别。
+/// - `--json` 在 derive 里是 `Cmd::Sources` 的字段（同时支持 `sources --json`
+///   和 `sources list --json`）；手搓版在 `sources` 顶层和 `sources list` 各放
+///   一个同名 flag，clap 都识别。
+///
+/// **测试守住正确性**：`src/cli/tests.rs::localized_command_matches_derive_structure`
+/// 断言 `build_localized_command(en)` 的 arg IDs / subcommand 名称集合与
+/// `Cli::command()` 相等；任何结构偏离都会被该测试抓住。
+pub(crate) fn build_localized_command(lang: Language) -> Command {
+    // 切到目标 locale，并清空 `ts()` 缓存（缓存里的旧 locale 翻译要失效）。
+    rust_i18n::set_locale(crate::i18n::locale_for(lang));
+    crate::i18n::invalidate_cache();
+
+    // 一次性把 `ts(key)` 转 String —— clap 的 `help` / `about` / `long_about` 都
+    // 接 `&'static str` / `String`，TStr 在 gui feature 下是 SharedString、
+    // web-only 下是 String，统一 `.to_string()`。
+    let ts = |key: &'static str| crate::i18n::ts(key).to_string();
+
+    Command::new(PKG_NAME)
+        .about(ts("Cli.about_short"))
+        .long_about(ts("Cli.about_long"))
+        .after_help(ts("Cli.after_help"))
+        .version(VERSION_STRING)
+        // 关闭 clap 自动注入的 --help / -V / help 子命令：与 derive `Cli` 的
+        // `disable_help_flag = true` / `disable_version_flag = true` /
+        // `disable_help_subcommand = true` 对齐。我们手搓同名 arg 自己处理。
+        .disable_help_flag(true)
+        .disable_version_flag(true)
+        .disable_help_subcommand(true)
+        // 全局 flag —— 与 derive `Cli` 字段一一对应。
+        .arg(
+            Arg::new("verbose")
+                .short('v')
+                .long("verbose")
+                .action(ArgAction::SetTrue)
+                .global(true)
+                .help(ts("Cli.verbose_help")),
+        )
+        .arg(
+            Arg::new("quiet")
+                .short('q')
+                .long("quiet")
+                .action(ArgAction::SetTrue)
+                .global(true)
+                .help(ts("Cli.quiet_help")),
+        )
+        .arg(
+            Arg::new("help")
+                .short('h')
+                .long("help")
+                .action(ArgAction::SetTrue)
+                .global(true)
+                .help(ts("Cli.help_help")),
+        )
+        .arg(
+            Arg::new("version_flag")
+                .short('V')
+                .long("version")
+                .action(ArgAction::SetTrue)
+                .global(true)
+                .help(ts("Cli.version_help")),
+        )
+        // 三个 subcommand —— about / after_help 走 `Cli.xxx` 翻译。
+        .subcommand(
+            Command::new("search")
+                .about(ts("Cli.search_about"))
+                .after_help(ts("Cli.search_after_help"))
+                .arg(
+                    Arg::new("keyword")
+                        .help(ts("Cli.search_keyword_help"))
+                        .required(true),
+                )
+                .arg(
+                    Arg::new("source")
+                        .long("source")
+                        .value_name("ID")
+                        .help(ts("Cli.search_source_help")),
+                )
+                .arg(
+                    Arg::new("limit")
+                        .long("limit")
+                        .value_name("N")
+                        .help(ts("Cli.search_limit_help")),
+                )
+                .arg(
+                    Arg::new("json")
+                        .long("json")
+                        .action(ArgAction::SetTrue)
+                        .help(ts("Cli.search_json_help")),
+                ),
+        )
+        .subcommand(
+            Command::new("download")
+                .about(ts("Cli.download_about"))
+                .after_help(ts("Cli.download_after_help"))
+                .arg(
+                    Arg::new("url")
+                        .help(ts("Cli.download_url_help"))
+                        .required(true),
+                )
+                .arg(
+                    Arg::new("source")
+                        .long("source")
+                        .value_name("ID")
+                        .help(ts("Cli.download_source_help")),
+                )
+                .arg(
+                    Arg::new("output")
+                        .long("output")
+                        .value_name("DIR")
+                        .help(ts("Cli.download_output_help")),
+                )
+                .arg(
+                    Arg::new("format")
+                        .long("format")
+                        .value_name("epub|txt|html")
+                        .help(ts("Cli.download_format_help")),
+                )
+                .arg(
+                    Arg::new("from")
+                        .long("from")
+                        .value_name("N")
+                        .help(ts("Cli.download_from_help")),
+                )
+                .arg(
+                    Arg::new("to")
+                        .long("to")
+                        .value_name("N")
+                        .help(ts("Cli.download_to_help")),
+                ),
+        )
+        .subcommand(
+            Command::new("sources")
+                .about(ts("Cli.sources_about"))
+                .after_help(ts("Cli.sources_after_help"))
+                // 顶层 --json（与 derive 里 `Cmd::Sources.json` 等价 —— 兼容旧版
+                // 裸 `sources --json` 调用）。
+                .arg(
+                    Arg::new("json")
+                        .long("json")
+                        .action(ArgAction::SetTrue)
+                        .help(ts("Cli.sources_json_help")),
+                )
+                // 三个 sub-subcommand：list / enable / disable。
+                .subcommand(
+                    Command::new("list")
+                        .about(ts("Cli.sources_list_about"))
+                        .arg(
+                            Arg::new("json")
+                                .long("json")
+                                .action(ArgAction::SetTrue)
+                                .help(ts("Cli.sources_list_json_help")),
+                        ),
+                )
+                .subcommand(
+                    Command::new("enable")
+                        .about(ts("Cli.sources_enable_about"))
+                        .arg(
+                            Arg::new("id")
+                                .value_name("ID")
+                                .required(true)
+                                .help(ts("Cli.sources_enable_id_help")),
+                        ),
+                )
+                .subcommand(
+                    Command::new("disable")
+                        .about(ts("Cli.sources_disable_about"))
+                        .arg(
+                            Arg::new("id")
+                                .value_name("ID")
+                                .required(true)
+                                .help(ts("Cli.sources_disable_id_help")),
+                        ),
+                ),
+        )
+}
+
+/// 把 `cli.command` 映射到子命令名（用于 `build_localized_command` 之后的
+/// `find_subcommand_mut(name).print_long_help()`）。派生 derive `Cmd` 的
+/// variant 与子命令名一一对应。
+pub(crate) fn subcommand_name(cmd: &Cmd) -> &'static str {
+    match cmd {
+        Cmd::Search { .. } => "search",
+        Cmd::Download { .. } => "download",
+        Cmd::Sources { .. } => "sources",
+    }
 }

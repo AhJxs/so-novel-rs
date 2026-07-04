@@ -1,4 +1,38 @@
 //! 下载 API（SSE 进度）+ 任务管理。
+//!
+//! ## 任务存储：单源 `Vec<DownloadTask>`（跟 GPUI 一致）
+//!
+//! 旧实现是双 store（`HashMap<u64, ActiveDownload>` + `Vec<DownloadTaskRecord>` + 一个
+//! bridge task 来回同步），反复出现 active 拿到 `(None, 0)` 把 history 修正过的元数据
+//! 盖回去、或者 `Finished` 状态被 `Downloading` 覆盖之类的 bug。根因是同一份数据
+//! 两边各持一份，时序窗口不一致。
+//!
+//! 现在 web 跟 GPUI 一样只持一个 `Vec<DownloadTask>`，所有字段（持久化 + 运行期 +
+//! rx/cancel）都在这个 struct 上。
+//!
+//! ## 事件流
+//!
+//! ```text
+//! crawler  ──mpsc::UnboundedSender──▶  per-task drain  ──broadcast::Sender──▶  SSE
+//!                                        │
+//!                                        └─lock state.tasks, 更新 task 字段
+//! ```
+//!
+//!  - crawler 看到的还是 mpsc（crawler API 不变；跟 GPUI 路径完全一致）
+//!  - 每个下载一个 per-task drain tokio task（不依赖中心循环），spawn 后自生自灭
+//!  - drain 既是单一 mpsc consumer（forward 引用全部权），也是 broadcast producer
+//!    + 状态更新者，三者合一 → 不再有"状态更新到了 / broadcast 没发" / 反过来的
+//!      漂移窗口
+//!  - SSE handler subscribe broadcast；多个并发 SSE 客户端互不干扰
+//!
+//! ## 时序保证
+//!
+//! 1. 任务先 push 进 `state.tasks`（可见性），再 spawn drain，再 spawn crawler
+//!    —— `tasks_list` 在返回 SSE 之前已经能看到这个 id
+//! 2. drain 收到 mpsc 断开（crawler 退出）时，若 `finished.is_none()` 则标
+//!    `AppRestarted` 并 save（与 GPUI `DownloadTask::drain` 同语义）
+//! 3. 用户 cancel：`task.cancelling = true` 立即反映到 `tasks_list`；
+//    `Progress::Cancelled` 经 mpsc → drain → apply_progress 最终落 `UserCancelled`
 
 use std::convert::Infallible;
 use std::sync::Arc;
@@ -8,26 +42,24 @@ use axum::http::StatusCode;
 use axum::response::{Json, Sse};
 use futures::stream::Stream;
 use serde::{Deserialize, Serialize};
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, mpsc};
 
+use crate::app::DownloadTask;
 use crate::crawler::{self, CancelToken, DownloadOptions, Progress};
 use crate::models::Source;
-use crate::models::{Chapter, DownloadTaskRecord, FailureRecord, FinishedReason};
+use crate::models::{Chapter, FinishedReason, SearchResult};
+use crate::util::time::now_unix_secs;
 
-use super::super::{ActiveDownload, SharedState, TaskStatus};
-
-/// 将任务历史持久化到 `tasks.json`（失败仅 warn，不阻塞）。
-fn persist_tasks(state: &SharedState) {
-    let mut history = state.task_history.lock().unwrap();
-    if let Err(e) = crate::persistent::save_with_trim(&state.tasks_file, &mut history) {
-        tracing::warn!("保存 tasks.json 失败: {e}");
-    }
-}
+use super::super::{SharedState, TaskStatus, WebState};
 
 #[derive(Deserialize)]
 pub struct DownloadRequest {
     url: String,
     source_id: i32,
+    /// 搜索结果展示的书名 —— 在 `BookResolved` 事件抵达 drain 之前填充
+    /// `origin.book_name`，避免任务列表在最初的几个 frame 看到空书名。
+    /// 旧 web 流程这里写 `String::new()` 是导致 `book_name: null` 的根因之一。
+    book_name: Option<String>,
     format: Option<String>,
     chapter_start: Option<u32>,
     chapter_end: Option<u32>,
@@ -56,6 +88,58 @@ struct ProgressEvent {
 type BoxedSseStream =
     std::pin::Pin<Box<dyn Stream<Item = Result<axum::response::sse::Event, Infallible>> + Send>>;
 
+/// 单个下载任务的 per-task drain。
+///
+/// 三件事合一：
+/// 1. 单一 mpsc consumer（`crawler_rx`）—— 没人能 race
+/// 2. 状态更新者：lock `state.tasks` → 找对应 id → `task.apply_progress(ev)`
+/// 3. broadcast producer：把同一事件转发给 SSE subscribers
+///
+/// 退出条件：`crawler_rx.recv()` 返回 `None`（crawler 退出发送端被 drop）。
+/// 退出前若 `finished.is_none()` 标 `AppRestarted`（对齐 GPUI `DownloadTask::drain`
+/// 的 `TryRecvError::Disconnected` 分支），并触发一次 `save_tasks_to_file` 兜底
+/// 落盘 —— 不依赖中心 tick，drain 退出后所有变更都已经被保存。
+fn spawn_task_drain(
+    state: Arc<WebState>,
+    task_id: u64,
+    mut crawler_rx: mpsc::UnboundedReceiver<Progress>,
+    sse_tx: broadcast::Sender<Progress>,
+) {
+    tokio::spawn(async move {
+        while let Some(progress) = crawler_rx.recv().await {
+            // 1. 锁 + 更新 in-memory task
+            {
+                let mut tasks = state.tasks.lock().unwrap();
+                if let Some(task) = tasks.iter_mut().find(|t| t.id == task_id) {
+                    task.apply_progress(progress.clone());
+                }
+            }
+            // 2. 转发给 SSE subscribers（多 client 并发各自 lagging 互不干扰）
+            let _ = sse_tx.send(progress);
+        }
+
+        // mpsc 断开：crawler 已退出。若任务还没走到 finished 态，补 AppRestarted
+        // + finished_at_unix，然后 save。
+        let needs_save = {
+            let mut tasks = state.tasks.lock().unwrap();
+            if let Some(task) = tasks.iter_mut().find(|t| t.id == task_id) {
+                if task.finished.is_none() {
+                    task.finished = Some(Err(FinishedReason::AppRestarted));
+                }
+                if task.finished_at_unix.is_none() {
+                    task.finished_at_unix = Some(now_unix_secs());
+                }
+                true
+            } else {
+                false
+            }
+        };
+        if needs_save {
+            state.save_tasks_to_file();
+        }
+    });
+}
+
 pub async fn download(
     State(state): State<SharedState>,
     Json(req): Json<DownloadRequest>,
@@ -81,6 +165,7 @@ pub async fn download(
         return Sse::new(Box::pin(stream));
     };
 
+    // 1. mint id —— push 到 state.tasks 之前必须先有 id（其它请求靠它找任务）
     let task_id = {
         let mut id = state.next_task_id.lock().unwrap();
         let current = *id;
@@ -96,41 +181,29 @@ pub async fn download(
     let source = Source::from(rule, &config);
     let client = state.http.for_rule(&source.rule);
     let cancel = CancelToken::new();
-    let (broadcast_tx, _) = broadcast::channel::<Progress>(256);
+    let (crawler_tx, crawler_rx) = mpsc::unbounded_channel::<Progress>();
+    let (sse_tx, _) = broadcast::channel::<Progress>(256);
 
+    // 2. 任务先入 state.tasks —— `tasks_list` 在 SSE 返回前已经能列到这条记录
     {
-        let mut downloads = state.active_downloads.lock().unwrap();
-        downloads.insert(
-            task_id,
-            ActiveDownload {
-                cancel: cancel.clone(),
-                progress_tx: broadcast_tx.clone(),
-                filename: None,
-                book_name: None,
-                total_chapters: 0,
-                current_chapter: 0,
-                status: TaskStatus::Downloading,
-            },
-        );
-    }
-
-    // 插入历史任务记录
-    {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs() as i64;
-        let mut history = state.task_history.lock().unwrap();
-        history.push(DownloadTaskRecord {
+        let mut tasks = state.tasks.lock().unwrap();
+        tasks.push(DownloadTask {
             id: task_id,
-            origin: crate::models::SearchResult {
+            origin: SearchResult {
                 source_id: source.rule.id,
                 source_name: source.rule.name.clone(),
                 url: req.url.clone(),
-                book_name: String::new(),
+                // 旧 web 这里写空串 → /tasks 返回 `book_name: null`。
+                // 改用请求里带的搜索结果书名（前端可保证非空；缺省时回退到空串，
+                // 后续 BookResolved 会被 drain 写入 book_meta，book_name() 仍可显示）。
+                book_name: req.book_name.clone().unwrap_or_default(),
                 ..Default::default()
             },
-            started_at_unix: now,
+            // web 不在 struct 上挂 rx —— drain task 拥有它，drain 退出时丢。
+            rx: None,
+            cancel: Some(cancel.clone()),
+            cancelling: false,
+            started_at_unix: now_unix_secs(),
             finished_at_unix: None,
             book_meta: None,
             total_chapters: 0,
@@ -139,89 +212,25 @@ pub async fn download(
             last_chapter_title: String::new(),
             finished: None,
             failures: Vec::new(),
+            version: 0,
         });
     }
+    state.save_tasks_to_file();
 
+    // 3. spawn per-task drain
+    spawn_task_drain(Arc::clone(&state), task_id, crawler_rx, sse_tx.clone());
+
+    // 4. spawn crawler（吃掉 crawler_tx + cancel 的所有权）
     let book_url = req.url.clone();
-    let cancel_clone = cancel.clone();
-    let broadcast_tx_clone = broadcast_tx.clone();
-    let state_clone = Arc::clone(&state);
-
-    let (crawler_tx, mut crawler_rx) = tokio::sync::mpsc::unbounded_channel::<Progress>();
-
-    let broadcast_tx_bridge = broadcast_tx.clone();
-    let state_bridge = Arc::clone(&state);
-    tokio::spawn(async move {
-        while let Some(progress) = crawler_rx.recv().await {
-            // 更新 ActiveDownload 状态 + 历史记录
-            {
-                let mut downloads = state_bridge.active_downloads.lock().unwrap();
-                if let Some(dl) = downloads.get_mut(&task_id) {
-                    match &progress {
-                        Progress::BookResolved {
-                            book,
-                            total_chapters,
-                        } => {
-                            dl.book_name = Some(book.book_name.clone());
-                            dl.total_chapters = *total_chapters;
-                        }
-                        Progress::ChapterDone { index, .. } => {
-                            dl.current_chapter = *index;
-                        }
-                        Progress::Finished { .. } => {
-                            dl.status = TaskStatus::Finished;
-                        }
-                        Progress::Failed { .. } => {
-                            dl.status = TaskStatus::Failed;
-                        }
-                        Progress::Cancelled => {
-                            dl.status = TaskStatus::Cancelled;
-                        }
-                        _ => {}
-                    }
-                }
-            }
-            // 同步更新历史记录
-            {
-                let mut history = state_bridge.task_history.lock().unwrap();
-                if let Some(rec) = history.iter_mut().find(|r| r.id == task_id) {
-                    match &progress {
-                        Progress::BookResolved {
-                            book,
-                            total_chapters,
-                        } => {
-                            rec.book_meta = Some(*book.clone());
-                            rec.total_chapters = *total_chapters;
-                            rec.origin.book_name = book.book_name.clone();
-                        }
-                        Progress::ChapterDone { index, title } => {
-                            rec.completed = *index;
-                            rec.last_chapter_title = title.clone();
-                        }
-                        Progress::ChapterFailed {
-                            index,
-                            title,
-                            reason,
-                        } => {
-                            rec.failed += 1;
-                            rec.failures.push(FailureRecord {
-                                index: *index,
-                                title: title.clone(),
-                                reason: reason.clone(),
-                            });
-                        }
-                        _ => {}
-                    }
-                }
-            }
-            let _ = broadcast_tx_bridge.send(progress);
-        }
-    });
-
+    let state_for_crawler = Arc::clone(&state);
+    let cancel_for_crawler = cancel.clone();
+    let sse_tx_for_crawler = sse_tx.clone();
+    let chapter_start = req.chapter_start;
+    let chapter_end = req.chapter_end;
     tokio::spawn(async move {
         let opts = DownloadOptions {
             progress: crawler_tx,
-            cancel: cancel_clone,
+            cancel: cancel_for_crawler,
         };
 
         let resolve_result =
@@ -230,98 +239,52 @@ pub async fn download(
         let (book, chapters) = match resolve_result {
             Ok((book, chapters)) => (book, chapters),
             Err(e) => {
-                let _ = broadcast_tx_clone.send(Progress::Failed {
+                // resolve 失败也走 broadcast → SSE；同时 drain 拿不到事件，drain
+                // 会在 mpsc 断开时补 AppRestarted —— 这里显式发 Failed 优先
+                // 让前端看到具体错误。
+                let _ = sse_tx_for_crawler.send(Progress::Failed {
                     reason: format!("{e:#}"),
                 });
+                state_for_crawler.save_tasks_to_file();
                 return;
             }
         };
 
-        let chapters: Vec<Chapter> =
-            if let (Some(start), Some(end)) = (req.chapter_start, req.chapter_end) {
-                chapters
-                    .into_iter()
-                    .filter(|c| c.order >= start && c.order <= end)
-                    .collect()
-            } else {
-                chapters
-            };
+        let chapters: Vec<Chapter> = if let (Some(start), Some(end)) = (chapter_start, chapter_end)
+        {
+            chapters
+                .into_iter()
+                .filter(|c| c.order >= start && c.order <= end)
+                .collect()
+        } else {
+            chapters
+        };
+
+        // 对齐 GPUI `spawn_download_range`：在 `download_chapters` 前手动发
+        // `BookResolved`。`download_chapters` 内部只发 Cancelled/ChapterDone/
+        // ChapterFailed/Finished —— 不补这一发 drain 拿不到 book_meta /
+        // total_chapters，任务列表 book_name=null、total_chapters=0。
+        let _ = opts.progress.send(Progress::BookResolved {
+            book: Box::new(book.clone()),
+            total_chapters: chapters.len(),
+        });
 
         let result =
             crawler::download_chapters(&config, &client, &source, &book, chapters, opts).await;
 
-        // 结束时更新历史记录
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs() as i64;
-
-        match result {
-            Ok(path) => {
-                let filename = path
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or("unknown")
-                    .to_string();
-                {
-                    let mut downloads = state_clone.active_downloads.lock().unwrap();
-                    if let Some(dl) = downloads.get_mut(&task_id) {
-                        dl.filename = Some(filename.clone());
-                    }
-                }
-                // 更新历史记录：完成
-                {
-                    let mut history = state_clone.task_history.lock().unwrap();
-                    if let Some(rec) = history.iter_mut().find(|r| r.id == task_id) {
-                        rec.finished_at_unix = Some(now);
-                        rec.finished = Some(Ok(path.clone()));
-                    }
-                }
-                persist_tasks(&state_clone);
-                let _ = broadcast_tx_clone.send(Progress::Finished { output_path: path });
-            }
-            Err(e) => {
-                if matches!(e, crawler::CrawlerError::Cancelled) {
-                    // 更新历史记录：用户取消
-                    {
-                        let mut history = state_clone.task_history.lock().unwrap();
-                        if let Some(rec) = history.iter_mut().find(|r| r.id == task_id) {
-                            rec.finished_at_unix = Some(now);
-                            rec.finished = Some(Err(FinishedReason::UserCancelled));
-                        }
-                    }
-                    persist_tasks(&state_clone);
-                } else {
-                    // 更新历史记录：失败
-                    {
-                        let mut history = state_clone.task_history.lock().unwrap();
-                        if let Some(rec) = history.iter_mut().find(|r| r.id == task_id) {
-                            rec.finished_at_unix = Some(now);
-                            rec.finished = Some(Err(FinishedReason::Failed {
-                                message: format!("{e:#}"),
-                            }));
-                        }
-                    }
-                    persist_tasks(&state_clone);
-                    let _ = broadcast_tx_clone.send(Progress::Failed {
-                        reason: format!("{e:#}"),
-                    });
-                }
-            }
-        }
-
-        tokio::time::sleep(std::time::Duration::from_secs(60)).await;
-        state_clone
-            .active_downloads
-            .lock()
-            .unwrap()
-            .remove(&task_id);
+        // crawler 退出 → drop(progress: crawler_tx) → drain 端 mpsc recv 返 None
+        // → drain 退出循环并 save。这里再 save 一次兜底：crawler 路径上某些 early
+        // return（如 resolve 失败）drain 看不到任何终结事件，drain 还是会标
+        // AppRestarted + save，但显式 save 不亏。
+        let _ = result;
+        state_for_crawler.save_tasks_to_file();
     });
 
-    let mut rx = broadcast_tx.subscribe();
+    // 5. SSE 流 —— subscribe broadcast
+    let mut sse_rx = sse_tx.subscribe();
     let stream = async_stream::stream! {
         loop {
-            match rx.recv().await {
+            match sse_rx.recv().await {
                 Ok(progress) => {
                     let ev = match progress {
                         Progress::BookResolved { book, total_chapters } => ProgressEvent {
@@ -390,73 +353,81 @@ pub(crate) struct TaskInfo {
     book_name: Option<String>,
     total_chapters: usize,
     current_chapter: u32,
+    /// 已失败章节数（与 GPUI `DownloadTask::failed` 同语义，前端 UI 用作红色 chip）。
+    failed: u32,
     status: super::super::TaskStatus,
     started_at_unix: i64,
     finished_at_unix: Option<i64>,
 }
 
-/// 将 `DownloadTaskRecord` 转换为 `TaskInfo` 用于 API 返回。
-fn record_to_info(rec: &DownloadTaskRecord) -> TaskInfo {
-    let status = match &rec.finished {
+/// 从 `book.epub` / `book(作者).txt` 等文件名里粗略抽书名 —— 只作 fallback：
+/// 历史里 `book_meta` 缺失（旧任务漏发过 `BookResolved`）时，至少让 UI 显示个名字。
+/// 规则：去掉扩展名，再把尾部 `(...作者)` / `（...作者）` 整段砍掉。
+fn derive_book_name_from_filename(filename: &str) -> Option<String> {
+    let stem = std::path::Path::new(filename)
+        .file_stem()
+        .and_then(|s| s.to_str())?;
+    let cut = stem.rfind(['(', '（']).unwrap_or(stem.len());
+    let without_author = stem[..cut].trim_end();
+    let result = if without_author.is_empty() {
+        stem.trim()
+    } else {
+        without_author
+    };
+    if result.is_empty() {
+        None
+    } else {
+        Some(result.to_string())
+    }
+}
+
+/// `DownloadTask` → `TaskInfo`。
+///
+/// 关键点：不再 merge 两个 store —— `state.tasks` 是唯一来源。
+fn task_to_info(task: &DownloadTask) -> TaskInfo {
+    let status = match &task.finished {
         Some(Ok(_)) => TaskStatus::Finished,
         Some(Err(FinishedReason::UserCancelled)) => TaskStatus::Cancelled,
         Some(Err(FinishedReason::AppRestarted)) => TaskStatus::Cancelled,
         Some(Err(FinishedReason::Failed { .. })) => TaskStatus::Failed,
         None => TaskStatus::Downloading,
     };
+    let filename = task
+        .finished
+        .as_ref()
+        .and_then(|r| r.as_ref().ok())
+        .and_then(|p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .map(|s| s.to_string())
+        });
+    // book_name 优先：book_meta（BookResolved 之后）> origin.book_name（请求里带的搜索书名）。
+    // 两者都为空时回退到 finished output filename 派生（仅 Finished 任务有值）。
+    let book_name = {
+        let direct = task.book_name();
+        if !direct.is_empty() {
+            Some(direct.to_string())
+        } else {
+            filename.as_deref().and_then(derive_book_name_from_filename)
+        }
+    };
     TaskInfo {
-        id: rec.id,
-        filename: rec
-            .finished
-            .as_ref()
-            .and_then(|r| r.as_ref().ok())
-            .and_then(|p| {
-                p.file_name()
-                    .and_then(|n| n.to_str())
-                    .map(|s| s.to_string())
-            }),
-        book_name: rec.book_meta.as_ref().map(|b| b.book_name.clone()),
-        total_chapters: rec.total_chapters,
-        current_chapter: rec.completed,
+        id: task.id,
+        filename,
+        book_name,
+        total_chapters: task.total_chapters,
+        current_chapter: task.completed,
+        failed: task.failed,
         status,
-        started_at_unix: rec.started_at_unix,
-        finished_at_unix: rec.finished_at_unix,
+        started_at_unix: task.started_at_unix,
+        finished_at_unix: task.finished_at_unix,
     }
 }
 
 pub async fn tasks_list(State(state): State<SharedState>) -> Json<Vec<TaskInfo>> {
-    // 合并活跃任务 + 历史记录（活跃任务优先，覆盖历史中同 ID 的条目）。
-    let mut result: Vec<TaskInfo> = {
-        let history = state.task_history.lock().unwrap();
-        history.iter().map(record_to_info).collect()
-    };
-
-    {
-        let downloads = state.active_downloads.lock().unwrap();
-        for (id, dl) in downloads.iter() {
-            let info = TaskInfo {
-                id: *id,
-                filename: dl.filename.clone(),
-                book_name: dl.book_name.clone(),
-                total_chapters: dl.total_chapters,
-                current_chapter: dl.current_chapter,
-                status: dl.status,
-                started_at_unix: 0, // 活跃任务的 started_at_unix 从历史取
-                finished_at_unix: None,
-            };
-            // 用活跃状态覆盖历史记录
-            if let Some(existing) = result.iter_mut().find(|t| t.id == *id) {
-                existing.filename = info.filename;
-                existing.book_name = info.book_name;
-                existing.total_chapters = info.total_chapters;
-                existing.current_chapter = info.current_chapter;
-                existing.status = info.status;
-            } else {
-                result.push(info);
-            }
-        }
-    }
-
+    let tasks = state.tasks.lock().unwrap();
+    let mut result: Vec<TaskInfo> = tasks.iter().map(task_to_info).collect();
+    drop(tasks);
     // 按 id 降序（最新任务在前）。
     result.sort_by_key(|b| std::cmp::Reverse(b.id));
     Json(result)
@@ -466,11 +437,52 @@ pub async fn task_cancel(
     State(state): State<SharedState>,
     Path(id): Path<u64>,
 ) -> Result<&'static str, (StatusCode, String)> {
-    let downloads = state.active_downloads.lock().unwrap();
-    if let Some(dl) = downloads.get(&id) {
-        dl.cancel.cancel();
-        Ok("已取消")
-    } else {
-        Err((StatusCode::NOT_FOUND, "任务未找到".to_string()))
+    let mut tasks = state.tasks.lock().unwrap();
+    let Some(task) = tasks.iter_mut().find(|t| t.id == id) else {
+        return Err((StatusCode::NOT_FOUND, "任务未找到".to_string()));
+    };
+    // 任务已结束：cancel 不会触发任何 crawler 状态变化（crawler 已退出）。
+    // 返回 409 提示前端"无法取消已结束任务"，避免前端 cancel 按钮无响应却显示 ok。
+    if task.finished.is_some() {
+        return Err((StatusCode::CONFLICT, "任务已结束,无法取消".to_string()));
     }
+    let Some(cancel) = task.cancel.as_ref() else {
+        return Err((StatusCode::NOT_FOUND, "任务未找到".to_string()));
+    };
+    // 立即翻 cancelling 标记（前端可显示"正在取消..."），cancel.cancel() 同步触发
+    // crawler 内部的 CancelToken；crawler 下一次 progress tick 看到 cancel 时会发
+    // Progress::Cancelled → drain → apply_progress 落 UserCancelled。
+    task.cancelling = true;
+    cancel.cancel();
+    Ok("已取消")
+}
+
+/// 从 `state.tasks` 移除一条任务记录，**不动磁盘**。
+///
+/// 跟 `task_cancel` 的语义区别：
+/// - `cancel`：仅对 `Downloading` 任务有意义（触发 crawler stop），已结束任务是 409
+/// - `delete`：纯 metadata 清理。任何 `finished.is_some()` 的任务都能删，活跃任务也
+///   允许 —— 删后该任务的 in-flight crawler / drain 还在跑，自然写入
+///   `state.tasks` 的旧下标位置已经不存在，但 `apply_progress` 是按 `id` 查找的，
+///   find 会 no-op，drain 退出时 save 兜底空 vec 也写。**、简单粗暴地对
+///   tasks.json 做一次 trim —— 这是用户主动清理历史，不算脏数据。
+///
+/// 跟 library delete 的语义区别：library delete 删的是磁盘文件；这里删的是
+/// tasks.json 里的任务记录。两个端点分开是因为用途不同：
+///   - 在 /tasks 页面删 → 删记录（保留文件）
+///   - 在 /library 页面删 → 删文件（记录留着也无害：下一次 /api/tasks 重启时
+///     会从 .tasks.json 加载，但既然文件没了，UI 上 `filename` 是孤儿）
+pub async fn task_delete(
+    State(state): State<SharedState>,
+    Path(id): Path<u64>,
+) -> Result<&'static str, (StatusCode, String)> {
+    let mut tasks = state.tasks.lock().unwrap();
+    let initial_len = tasks.len();
+    tasks.retain(|t| t.id != id);
+    if tasks.len() == initial_len {
+        return Err((StatusCode::NOT_FOUND, "任务未找到".to_string()));
+    }
+    drop(tasks);
+    state.save_tasks_to_file();
+    Ok("已删除任务")
 }

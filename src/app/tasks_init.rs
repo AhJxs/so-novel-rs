@@ -6,8 +6,8 @@
 use std::path::Path;
 
 use super::download_task::DownloadTask;
-use super::now::now_unix_secs;
 use crate::models::FinishedReason;
+use crate::util::time::now_unix_secs;
 
 pub fn load_tasks_from_file(path: &Path) -> (Vec<DownloadTask>, u64) {
     let records = crate::persistent::load_tasks(path);

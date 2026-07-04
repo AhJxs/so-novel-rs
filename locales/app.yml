@@ -1154,3 +1154,239 @@ Search:
         en: URL
         zh-CN: 链接
         zh-HK: 連結
+
+# CLI 帮助文案（clap `--help` / `-h` / 无子命令时显示）。
+# 数据源：`src/cli/args.rs::build_localized_command`。
+# 与 GUI 的 `t!()` 不同：clap 顶层 `about` / `long_about` / `after_help` 没有
+# public setter，derive 后无法 mutate，所以整棵 `Command` 是手搓的；
+# 每条人类可读字符串从这里查表。
+Cli:
+  about_short:
+    en: "So Novel — batch novel downloader (CLI / GUI / WEB)"
+    zh-CN: "So Novel — 简繁小说批量下载（CLI / GUI / WEB 三模）"
+    zh-HK: "So Novel — 簡繁小說批量下載（CLI / GUI / WEB 三模）"
+  about_long:
+    en: |
+      So Novel — batch novel downloader (CLI / GUI / WEB).
+      No subcommand → launch the GPUI desktop client.
+      With --web / --host / --port → start the Web server.
+      With a subcommand → CLI mode (same parser/crawler/export as GUI).
+
+      Global flags (-v / -q) apply to every subcommand:
+        -v, --verbose  enable internal tracing logs (silent by default)
+        -q, --quiet    suppress per-chapter progress and failure dumps
+    zh-CN: |
+      So Novel — 简繁小说批量下载（CLI / GUI / WEB 三模）
+
+      不传任何子命令 → 启动 GPUI 桌面客户端；
+      带 --web / --host / --port → 启动 Web 服务（GUI 模式）；
+      带子命令 → 走 CLI 模式，复用同一份 parser / crawler / export。
+
+      全局 flag（-v / -q）对所有子命令生效：
+        -v, --verbose  打开内部 tracing 日志（默认静默）
+        -q, --quiet    抑制逐章进度与失败源 dump，脚本管道友好
+    zh-HK: |
+      So Novel — 簡繁小說批量下載（CLI / GUI / WEB 三模）
+
+      不傳任何子命令 → 啟動 GPUI 桌面用戶端；
+      帶 --web / --host / --port → 啟動 Web 服務（GUI 模式）；
+      帶子命令 → 走 CLI 模式，複用同一份 parser / crawler / export。
+
+      全域 flag（-v / -q）對所有子命令生效：
+        -v, --verbose  打開內部 tracing 日誌（預設靜默）
+        -q, --quiet    抑制逐章進度與失敗源 dump，腳本管線友善
+  after_help:
+    en: |
+      Examples:
+        Launch GUI (no subcommand):                         so-novel-rs
+        Search all sources:                                so-novel-rs search "novel title"
+        Single source + JSON output:                       so-novel-rs search "novel title" --source 5 --json
+        Download whole book:                               so-novel-rs download https://example.com/book/123.html
+        Download a chapter range:                          so-novel-rs download https://example.com/book/123.html --from 100 --to 200
+        List sources:                                      so-novel-rs sources list
+        Disable source:                                    so-novel-rs sources disable 5
+        Enable source:                                     so-novel-rs sources enable 5
+    zh-CN: |
+      Examples:
+        启动 GUI（无子命令）:                                so-novel-rs
+        搜索书源（聚合）:                                    so-novel-rs search 凡人修仙传
+        单源搜索 + JSON 输出:                                so-novel-rs search 凡人修仙传 --source 5 --json
+        下载整本书:                                          so-novel-rs download https://example.com/book/123.html
+        下载指定章节范围:                                    so-novel-rs download https://example.com/book/123.html --from 100 --to 200
+        列出书源:                                            so-novel-rs sources list
+        禁用书源:                                            so-novel-rs sources disable 5
+        启用书源:                                            so-novel-rs sources enable 5
+    zh-HK: |
+      Examples:
+        啟動 GUI（無子命令）:                                so-novel-rs
+        搜尋書源（聚合）:                                    so-novel-rs search 凡人修仙傳
+        單源搜尋 + JSON 輸出:                                so-novel-rs search 凡人修仙傳 --source 5 --json
+        下載整本書:                                          so-novel-rs download https://example.com/book/123.html
+        下載指定章節範圍:                                    so-novel-rs download https://example.com/book/123.html --from 100 --to 200
+        列出書源:                                            so-novel-rs sources list
+        禁用書源:                                            so-novel-rs sources disable 5
+        啟用書源:                                            so-novel-rs sources enable 5
+
+  # 全局 flag
+  verbose_help:
+    en: "Enable internal tracing logs (silent by default, keeps --json clean)"
+    zh-CN: "打开内部 tracing 日志（默认静默，避免污染 --json 等机器可读输出）"
+    zh-HK: "打開內部 tracing 日誌（預設靜默，避免污染 --json 等機器可讀輸出）"
+  quiet_help:
+    en: "Suppress per-chapter progress / failure dumps (script-friendly)"
+    zh-CN: "抑制逐章进度 / 失败源 dump（脚本友好；纯 stdout 输出）"
+    zh-HK: "抑制逐章進度 / 失敗源 dump（腳本友善；純 stdout 輸出）"
+  help_help:
+    en: "Print help information"
+    zh-CN: "打印帮助信息"
+    zh-HK: "打印說明資訊"
+  version_help:
+    en: "Print version"
+    zh-CN: "打印版本号"
+    zh-HK: "打印版本"
+
+  # search 子命令
+  search_about:
+    en: "Search book sources (all enabled by default; --source for a single one)"
+    zh-CN: "搜索书源。默认聚合搜索；--source 指定单源。"
+    zh-HK: "搜尋書源。預設聚合搜尋；--source 指定單源。"
+  search_after_help:
+    en: |
+      Examples:
+        Search all enabled sources:                       so-novel-rs search "novel title"
+        Search a single source:                          so-novel-rs search "novel title" --source 5
+        Per-source limit + JSON output:                  so-novel-rs search "novel title" --limit 20 --json
+    zh-CN: |
+      Examples:
+        聚合搜索（默认走所有启用书源）:                       so-novel-rs search 凡人修仙传
+        单源搜索（只走 #5 书源）:                             so-novel-rs search 凡人修仙传 --source 5
+        限制每源条数 + JSON 输出:                             so-novel-rs search 凡人修仙传 --limit 20 --json
+    zh-HK: |
+      Examples:
+        聚合搜尋（預設走所有啟用書源）:                       so-novel-rs search 凡人修仙傳
+        單源搜尋（只走 #5 書源）:                             so-novel-rs search 凡人修仙傳 --source 5
+        限制每源條數 + JSON 輸出:                             so-novel-rs search 凡人修仙傳 --limit 20 --json
+  search_keyword_help:
+    en: "Keyword (book title / author)"
+    zh-CN: "关键词（书名 / 作者）"
+    zh-HK: "關鍵詞（書名 / 作者）"
+  search_source_help:
+    en: "Book source ID; default: aggregate all enabled sources"
+    zh-CN: "指定书源 ID；省略则聚合所有启用书源"
+    zh-HK: "指定書源 ID；省略則聚合所有啟用書源"
+  search_limit_help:
+    en: "Max results per source (overrides config.toml search-limit)"
+    zh-CN: "每源最多返回条数（覆盖 config.toml 的 search-limit）"
+    zh-HK: "每源最多返回條數（覆蓋 config.toml 的 search-limit）"
+  search_json_help:
+    en: "Output JSON to stdout (machine-readable; suppresses human-readable format)"
+    zh-CN: "输出 JSON 到 stdout（机器可读，禁用人类可读格式）"
+    zh-HK: "輸出 JSON 到 stdout（機器可讀，停用人類可讀格式）"
+
+  # download 子命令
+  download_about:
+    en: "Download a whole book via its detail page URL (default full book; --from / --to for a chapter range)"
+    zh-CN: "通过详情页 URL 下载整本书（默认全本；可用 --from / --to 指定章节范围）"
+    zh-HK: "透過詳情頁 URL 下載整本書（預設全本；可用 --from / --to 指定章節範圍）"
+  download_after_help:
+    en: |
+      Examples:
+        Full book download:                               so-novel-rs download https://example.com/book/123.html
+        Pick source + custom output dir:                  so-novel-rs download https://example.com/book/123.html --source 5 --output D:\novels
+        Download chapters 100-200 (1-based):              so-novel-rs download https://example.com/book/123.html --from 100 --to 200
+        Suppress per-chapter progress (script mode):      so-novel-rs download https://example.com/book/123.html --quiet
+    zh-CN: |
+      Examples:
+        全本下载:                                            so-novel-rs download https://example.com/book/123.html
+        指定书源 + 自定义输出目录:                           so-novel-rs download https://example.com/book/123.html --source 5 --output D:\novels
+        下载章节 100-200（1-based）:                         so-novel-rs download https://example.com/book/123.html --from 100 --to 200
+        抑制逐章进度，脚本模式:                              so-novel-rs download https://example.com/book/123.html --quiet
+    zh-HK: |
+      Examples:
+        全本下載:                                            so-novel-rs download https://example.com/book/123.html
+        指定書源 + 自訂輸出目錄:                           so-novel-rs download https://example.com/book/123.html --source 5 --output D:\novels
+        下載章節 100-200（1-based）:                         so-novel-rs download https://example.com/book/123.html --from 100 --to 200
+        抑制逐章進度，腳本模式:                              so-novel-rs download https://example.com/book/123.html --quiet
+  download_url_help:
+    en: "Detail page URL"
+    zh-CN: "详情页 URL"
+    zh-HK: "詳情頁 URL"
+  download_source_help:
+    en: "Book source ID (auto-matched from URL by default; falls back to the first enabled source)"
+    zh-CN: "书源 ID（默认按 URL 自动匹配；未匹配则取第一个启用的源）"
+    zh-HK: "書源 ID（預設按 URL 自動匹配；未匹配則取第一個啟用的源）"
+  download_output_help:
+    en: "Override config.toml download-path"
+    zh-CN: "覆盖 config.toml 的下载目录"
+    zh-HK: "覆蓋 config.toml 的下載目錄"
+  download_format_help:
+    en: "Override config.toml output format (epub / txt / html)"
+    zh-CN: "覆盖 config.toml 的输出格式（epub / txt / html）"
+    zh-HK: "覆蓋 config.toml 的輸出格式（epub / txt / html）"
+  download_from_help:
+    en: "Start chapter (1-based; default: 1)"
+    zh-CN: "起始章节（1-based；省略 → 1）"
+    zh-HK: "起始章節（1-based；省略 → 1）"
+  download_to_help:
+    en: "End chapter (1-based; default: last; auto-truncated if out of range)"
+    zh-CN: "结束章节（1-based；省略 → 最后一章；超出实际章数自动截断）"
+    zh-HK: "結束章節（1-based；省略 → 最後一章；超出實際章數自動截斷）"
+
+  # sources 子命令
+  sources_about:
+    en: "Manage book sources: list / enable / disable"
+    zh-CN: "书源管理：list / enable / disable"
+    zh-HK: "書源管理：list / enable / disable"
+  sources_after_help:
+    en: |
+      Examples:
+        List all sources (human-readable):                so-novel-rs sources list
+        List all sources (JSON):                         so-novel-rs sources list --json
+        Disable source #5:                               so-novel-rs sources disable 5
+        Enable source #5:                                so-novel-rs sources enable 5
+    zh-CN: |
+      Examples:
+        列出所有书源（人类可读）:                           so-novel-rs sources list
+        列出所有书源（JSON）:                               so-novel-rs sources list --json
+        禁用 #5 书源:                                       so-novel-rs sources disable 5
+        启用 #5 书源:                                       so-novel-rs sources enable 5
+    zh-HK: |
+      Examples:
+        列出所有書源（人類可讀）:                           so-novel-rs sources list
+        列出所有書源（JSON）:                               so-novel-rs sources list --json
+        禁用 #5 書源:                                       so-novel-rs sources disable 5
+        啟用 #5 書源:                                       so-novel-rs sources enable 5
+  sources_json_help:
+    en: "Output JSON to stdout (list only; equivalent to `sources list --json`; legacy compat)"
+    zh-CN: "输出 JSON 到 stdout（仅 list 有效；与 `sources list --json` 等价；旧版兼容）"
+    zh-HK: "輸出 JSON 到 stdout（僅 list 有效；與 `sources list --json` 等價；舊版相容）"
+
+  # sources list
+  sources_list_about:
+    en: "List current sources"
+    zh-CN: "列出当前书源"
+    zh-HK: "列出當前書源"
+  sources_list_json_help:
+    en: "Output JSON to stdout (machine-readable; suppresses human-readable format)"
+    zh-CN: "输出 JSON 到 stdout（机器可读，禁用人类可读格式）"
+    zh-HK: "輸出 JSON 到 stdout（機器可讀，停用人類可讀格式）"
+
+  # sources enable
+  sources_enable_about:
+    en: "Enable the source with the given ID (writes back sources_config.json)"
+    zh-CN: "启用指定 ID 的书源（写回 sources_config.json）"
+    zh-HK: "啟用指定 ID 的書源（寫回 sources_config.json）"
+  sources_enable_id_help:
+    en: "Book source ID"
+    zh-CN: "书源 ID"
+    zh-HK: "書源 ID"
+
+  # sources disable
+  sources_disable_about:
+    en: "Disable the source with the given ID (writes back sources_config.json)"
+    zh-CN: "禁用指定 ID 的书源（写回 sources_config.json）"
+    zh-HK: "禁用指定 ID 的書源（寫回 sources_config.json）"
+  sources_disable_id_help:
+    en: "Book source ID"
+    zh-CN: "书源 ID"
+    zh-HK: "書源 ID"

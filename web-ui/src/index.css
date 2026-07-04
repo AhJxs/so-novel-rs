@@ -1,0 +1,31 @@
+@import "tailwindcss";
+@import "@heroui/styles";
+
+body {
+  margin: 0;
+}
+
+/* Custom accent color override */
+:root,
+[data-theme="light"] {
+  --accent: oklch(0.65 0.25 280); /* violet-500 in OKLCH */
+  --accent-foreground: oklch(1 0 0); /* white */
+
+  /* 浅色：卡片(surface)是纯白，输入/下拉(field)默认也是纯白且无边框，
+     视觉上糊在一起。把 field 背景下沉到页面灰底并给出可见边框，制造层次。 */
+  --field-background: oklch(0.9702 0 0); /* = 页面 --background 灰底 */
+  --field-border: oklch(0.9 0.004 286.32); /* = --border，可见描边 */
+  --field-border-width: 1px;
+}
+
+.dark,
+[data-theme="dark"] {
+  --accent: oklch(0.75 0.2 280); /* violet-400 in OKLCH */
+  --accent-foreground: oklch(1 0 0); /* white */
+
+  /* 深色：卡片(surface) oklch(0.21)，field 默认同色。把 field 背景下沉到
+     更深的页面底色并加可见边框，与卡片拉开对比。 */
+  --field-background: oklch(0.16 0.005 285.823);
+  --field-border: oklch(0.32 0.006 286.033);
+  --field-border-width: 1px;
+}

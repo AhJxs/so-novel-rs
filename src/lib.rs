@@ -30,6 +30,7 @@ pub mod logging;
 pub mod models;
 pub mod parser;
 pub mod persistent;
+pub mod startup;
 pub mod util;
 #[cfg(feature = "web")]
 pub mod web;

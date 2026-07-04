@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" href="/favicon.ico" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>So Novel</title>
+    <script>
+      // 首帧防闪烁：在 next-themes 接管前，按 localStorage 设置正确的 class + data-theme。
+      // HeroUI 浅色变量命中 [data-theme="light"]，暗色命中 .dark / [data-theme="dark"]，
+      // 两个属性都要设，且互斥的旧值要清掉，否则浅/暗变量互相打架。
+      (function () {
+        try {
+          var stored = localStorage.getItem('theme') || 'system'
+          var isDark =
+            stored === 'dark' ||
+            (stored === 'system' && matchMedia('(prefers-color-scheme: dark)').matches)
+          var mode = isDark ? 'dark' : 'light'
+          var el = document.documentElement
+          el.classList.remove('light', 'dark')
+          el.classList.add(mode)
+          el.setAttribute('data-theme', mode)
+        } catch (e) {}
+      })()
+    </script>
+  </head>
+  <body class="bg-background text-foreground">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

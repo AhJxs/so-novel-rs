@@ -12,7 +12,12 @@
 //! `background_executor().timer()` / `update_entity` / `ctx.notify()`），
 //! 不属于"业务层与 UI 框架解耦"的 `crate::app`。
 
+// `drain` 函数体里要用 `AppModel` / `UpdateOutcome`，跟 `drain` 一起 gate。
+// web-only 构建不编译 `drain`（cf. drain 上面的 `#[cfg(feature = "gui")]`），
+// 不 gate 这两条会触发 `unused_imports` warning。
+#[cfg(feature = "gui")]
 use super::AppModel;
+#[cfg(feature = "gui")]
 use super::UpdateOutcome;
 
 /// 唤醒信号 handle。**仅在 GPUI/smol executor 上使用** —— gpui 的 `cx.spawn`
@@ -68,6 +73,12 @@ pub fn new_wakeup() -> (WakeupHandle, WakeupReceiver) {
 ///
 /// 调用方：拿到 `&mut AppModel` 时调一次。如果返回 `true`，调 `cx.notify()` 触发
 /// 当前 view 的 `Render` 重绘。
+///
+/// 仅在桌面（GPUI）路径使用 —— 唯一调用方是 `gpui_app::drain_loop::spawn_drain_loop`
+/// （`AsyncApp::update_entity` 闭包）。`gui` feature 关闭时（e.g. web-only 构建
+/// `cargo build --features web --no-default-features`）是 dead code。
+/// `default = ["gui", "web"]` 双开时不生效。
+#[cfg(feature = "gui")]
 pub fn drain(model: &mut AppModel) -> bool {
     let mut any = false;
 
@@ -174,9 +185,12 @@ pub fn drain(model: &mut AppModel) -> bool {
     any
 }
 
+// 跟 `drain` 一起 gate —— `drain` 内部用 `UIEvent::Success/Info/Error` 构造
+// 通知；web-only 构建下 `drain` 不编，留它会触发 unused import warning。
+#[cfg(feature = "gui")]
 use crate::app::UIEvent;
 
-#[cfg(test)]
+#[cfg(all(test, feature = "gui"))]
 mod tests {
     use super::*;
 

@@ -27,29 +27,148 @@ mod util;
 pub use args::{Cli, Cmd, SourcesAction};
 
 use anyhow::{Context, Result};
-use clap::{CommandFactory, Parser};
+use clap::Parser;
 
 use crate::config::{ConfigPaths, load_config};
 use crate::persistent::init_rules_dir;
 
-use self::args::{PKG_NAME, VERSION_STRING};
+use self::args::{PKG_NAME, VERSION_STRING, build_localized_command, subcommand_name};
+
+/// 解析 CLI 参数。`--help` / `-h` 场景下用 `try_parse_from` + 兜底空 Cli，
+/// 让 `Cli::parse()` 必需的必填 positional（`search` 的 `keyword`、
+/// `download` 的 `url`）缺失时不被 clap 拦截 —— help 路径应该总是可达的。
+///
+/// 具体：
+/// 1. argv 不含 --help / -h → 直接 `try_parse_from`，错误照旧向上抛
+///    （用户拼写错误 / 必填缺失照常报）。
+/// 2. argv 含 --help / -h → 剥掉 help flag 再 try_parse，错误时给一个
+///    `command: None` 的空 Cli + `help: true`，让 `run` 走 help 分发。
+fn parse_or_help_fallback() -> Result<Cli> {
+    let argv: Vec<String> = std::env::args().collect();
+    let wants_help = argv.iter().any(|a| a == "--help" || a == "-h");
+    if !wants_help {
+        return Cli::try_parse_from(argv).map_err(Into::into);
+    }
+    // 剥掉 -h / --help 再 parse —— 让 required 必填项不参与校验
+    let mut trimmed = argv;
+    trimmed.retain(|a| a != "--help" && a != "-h");
+    // 找子命令名（如果有）—— 在剥掉 --help 的 argv 里第一个非 flag 的子串。
+    // 用于 fallback 时正确路由到子命令 help。
+    let sub: Option<&'static str> = trimmed
+        .iter()
+        .skip(1) // 跳过 binary name
+        .find_map(|a| match a.as_str() {
+            "search" => Some("search"),
+            "download" => Some("download"),
+            "sources" => Some("sources"),
+            _ => None,
+        });
+    let mut cli = Cli::try_parse_from(trimmed).unwrap_or(Cli {
+        verbose: false,
+        quiet: false,
+        help: true,
+        version_flag: false,
+        command: None,
+    });
+    cli.help = true;
+    // 手动把 sub 标到 cli.command 上（如果 try_parse 没成功解析出 command）。
+    if cli.command.is_none() && sub.is_some() {
+        // stub subcommand：run() 不用看它的具体内容，只看 subcommand_name
+        // 决定走哪个子命令 help。给个空 `Search { keyword: "".into() }`。
+        // 但 Search 的 keyword 是 String 必填 —— 解析不会成功（已被兜底成 None），
+        // 走这个分支就是 sub 已知但 try_parse 失败。给一个 dummy 必填字段
+        // 让 try_parse 不会过 —— 我们现在需要的只是让 find_subcommand 知道 name。
+        // 用 `build_localized_command` 走子命令 help 时不读 subcommand 的具体值，
+        // 只 `find_subcommand_mut(name)`，所以这里不构造 `cli.command` 也能工作：
+        // run() 看到 cli.command.is_none() 会打印**顶层** help。
+        //
+        // 想让 `search --help` 真的进 search help，需要 cli.command 是 Some。
+        // 重建 `Cmd::Search { keyword: "".into() }` —— 但用户没传 keyword，
+        // 占位字符串足够用于 subcommand_name 路由。
+        cli.command = sub.and_then(|s| match s {
+            "search" => Some(Cmd::Search {
+                keyword: String::new(),
+                source: None,
+                limit: None,
+                json: false,
+            }),
+            "download" => Some(Cmd::Download {
+                url: String::new(),
+                source: None,
+                output: None,
+                format: None,
+                from: None,
+                to: None,
+            }),
+            "sources" => Some(Cmd::Sources {
+                action: None,
+                json: false,
+            }),
+            _ => None,
+        });
+    }
+    Ok(cli)
+}
 
 /// CLI 入口。被 `main.rs` 在检测到子命令时调用。
+///
+/// ## 控制流（i18n 后）
+///
+/// 1. `Cli::parse()` —— parsing 不依赖 config / locale。
+/// 2. `--version` → 立即打印（locale 无关）→ return。
+/// 3. `load_config` —— 文件不存在时 `load_config` 返回 `AppConfig::default()`
+///    （`language = SimplifiedChinese` → 默认中文 help）；无需特判。
+/// 4. `rust_i18n::set_locale(crate::i18n::locale_for(cfg.language))` + 清缓存。
+/// 5. `--help` / `-h` / 无子命令 → 用 `build_localized_command(lang)` 打印本地化 help。
+/// 6. 否则：init tracing / first-run save / init rules / 派发子命令。
+///
+/// ## 为什么 help 分发要在 config 加载之后
+///
+/// 旧版直接 `Cli::command().print_help()` —— help 文本是 derive 写死的简体中文。
+/// 现在需要按 `config.toml [global].language` 切语言，必须先知道 language 才能
+/// `set_locale` + 拿正确翻译。控制流重排见 `docs/superpowers/plans/`。
 pub fn run() -> Result<()> {
-    let cli = Cli::parse();
+    let cli = parse_or_help_fallback()?;
 
-    // 手动分发 --version / --help（避开 clap 默认的英文 help 文本）。
-    // 见 `args.rs` 的 `disable_help_flag` / `disable_version_flag` 注释。
+    // 手动分发 --version（locale 无关，先于 config 加载）。
     if cli.version_flag {
         println!("{PKG_NAME} {VERSION_STRING}");
         return Ok(());
     }
+
+    // 加载 config。文件不存在 → `load_config` 返回 `AppConfig::default()`
+    // （含 `language = SimplifiedChinese`），无 panic / 无错误。malformed TOML
+    // 才报错向上抛。
+    let paths = ConfigPaths::discover();
+    let cfg = load_config(&paths.config_file).context("加载 config.toml 失败")?;
+
+    // 切到用户配置的语言。`locale_for` 是项目里 `Language → locale 字符串`
+    // 的唯一权威映射（见 `crate::i18n::locale_for` 注释）。先 `invalidate_cache`
+    // —— `ts()` 的缓存是按 `key` 维度存的，旧 locale 翻译要失效。
+    rust_i18n::set_locale(crate::i18n::locale_for(cfg.language));
+    crate::i18n::invalidate_cache();
+
+    // 手动分发 --help / -h / 无子命令：调用 `build_localized_command(cfg.language)`
+    // 手搓一个含本地化文本的 `Command` 树，按需 `find_subcommand_mut(name)` 定位。
+    // 见 `args.rs::build_localized_command` 关于"为什么不用 derive 版本"的注释。
+    let is_short_help = std::env::args().any(|a| a == "-h");
     if cli.help {
-        let mut cmd = Cli::command();
-        // 顶层用 -h 时，clap 行为是"短帮助"（只列命令名 + 主选项），
-        // --help 给全文。这里按命令行长度判定（h 单字符 = 短）。
-        let is_short = std::env::args().any(|a| a == "-h");
-        if is_short {
+        let mut cmd = build_localized_command(cfg.language);
+        // `find_subcommand_mut` 返回 `Option<&mut Command>` —— 用 if let 显式
+        // 拿出子命令引用，避免 `.unwrap_or(&mut cmd)` 的双 mutable borrow。
+        if let Some(sub) = &cli.command {
+            if let Some(target) = cmd.find_subcommand_mut(subcommand_name(sub)) {
+                if is_short_help {
+                    target.print_help().ok();
+                } else {
+                    target.print_long_help().ok();
+                }
+                println!();
+                return Ok(());
+            }
+            // 找不到子命令（不该发生 —— derive 和手搓结构应一致），fall through 顶层。
+        }
+        if is_short_help {
             cmd.print_help().ok();
         } else {
             cmd.print_long_help().ok();
@@ -59,9 +178,9 @@ pub fn run() -> Result<()> {
     }
 
     // 没传子命令（main.rs 通常已经把"无参数 → GUI"拦了，但 `-v` / `-q`
-    // 单跑这种边缘情况还是有可能走到这里）：打印帮助。
+    // 单跑这种边缘情况还是有可能走到这里）：打印顶层长帮助。
     let Some(cmd) = cli.command else {
-        let mut cmd = Cli::command();
+        let mut cmd = build_localized_command(cfg.language);
         cmd.print_long_help().ok();
         println!();
         return Ok(());
@@ -73,8 +192,6 @@ pub fn run() -> Result<()> {
     if cli.verbose {
         crate::logging::init_tracing();
     }
-    let paths = ConfigPaths::discover();
-    let cfg = load_config(&paths.config_file).context("加载 config.toml 失败")?;
 
     // 与 GUI 启动行为保持一致：首次运行时把默认 config 写出去，
     // 用户立刻能在项目根看到 config.toml 可编辑。失败仅警告，不阻塞 CLI。

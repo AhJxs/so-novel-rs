@@ -6,6 +6,18 @@
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+/// 当前 unix 时间戳（秒）。
+///
+/// 失败时（系统时钟早于 UNIX_EPOCH 这种罕见情况）返回 0 —— UI 显示"未知"
+/// 远比 `panic!` 友好。`DownloadTask::started_at_unix = 0` 在语义上表示"任务还没
+/// 开始"，和这个 fallback 自然重合。
+pub fn now_unix_secs() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
 /// 把 unix 秒数（可能为负或 0）格式化为 `YYYY-MM-DD HH:MM`（本地时区）。
 ///
 /// `unix_secs <= 0` 视为"未知" —— DownloadTask 里 `started_at_unix=0` 表示

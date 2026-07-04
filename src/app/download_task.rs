@@ -5,8 +5,7 @@ use tokio::sync::mpsc;
 
 use crate::crawler::{CancelToken, Progress};
 use crate::models::{Book, DownloadTaskRecord, FailureRecord, FinishedReason, SearchResult};
-
-use super::now::now_unix_secs;
+use crate::util::time::now_unix_secs;
 
 // `FinishedReason` 定义在 `db::tasks`（持久化层 —— JSON schema 跟着 db 走）。
 // 直接 use 即可，业务层复用同一枚举类型。
@@ -76,7 +75,47 @@ pub struct DownloadTask {
 }
 
 impl DownloadTask {
+    /// 把单条进度事件应用到任务字段。web 的 per-task drain 也复用这同一套语义。
+    pub fn apply_progress(&mut self, ev: Progress) {
+        match ev {
+            Progress::BookResolved {
+                book,
+                total_chapters,
+            } => {
+                self.book_meta = Some(*book);
+                self.total_chapters = total_chapters;
+            }
+            Progress::ChapterDone { index, title } => {
+                self.completed += 1;
+                self.last_chapter_title = title;
+                let _ = index;
+            }
+            Progress::ChapterFailed {
+                index,
+                title,
+                reason,
+            } => {
+                self.failed += 1;
+                self.failures.push((index, title, reason));
+            }
+            Progress::Finished { output_path } => {
+                self.finished = Some(Ok(output_path));
+            }
+            Progress::Cancelled => {
+                self.finished = Some(Err(FinishedReason::UserCancelled));
+                self.cancelling = false;
+            }
+            Progress::Failed { reason } => {
+                self.finished = Some(Err(FinishedReason::Failed { message: reason }));
+                self.cancelling = false;
+            }
+        }
+    }
+
     /// 排空进度通道；返回是否产生过事件（用于触发 repaint）。
+    ///
+    /// 与 `apply_progress` 共享同一套事件→字段映射，但 `drain` 必须直接拿 `rx`
+    /// 的可变借用（不能借 self），所以 match 内联（无法用 `self.apply_progress`）。
     pub fn drain(&mut self) -> bool {
         let mut any = false;
         let was_running = self.is_running();

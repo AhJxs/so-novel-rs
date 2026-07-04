@@ -6,38 +6,94 @@
 mod handlers;
 mod routes;
 
-use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, RwLock};
 
 use anyhow::{Context, Result};
 use axum_session::{SessionConfig, SessionNullPool, SessionStore};
 use serde::Serialize;
-use tokio::sync::broadcast;
 
+use crate::app::DownloadTask;
 use crate::config::AppConfig;
-use crate::crawler::{CancelToken, Progress};
 use crate::http::HttpClients;
-use crate::models::{DownloadTaskRecord, Rule};
+use crate::models::Rule;
 use crate::persistent::SourcesConfig;
+
+// ── rust-embed：编译期把 web-ui/dist/ 嵌入二进制 ──────────────────────
+#[cfg(feature = "web")]
+use axum::{
+    body::Body,
+    extract::Request,
+    http::{StatusCode, header},
+    response::{Html, IntoResponse, Response},
+};
+#[cfg(feature = "web")]
+use rust_embed::RustEmbed;
+
+/// 编译期嵌入 `web-ui/dist/` 下所有静态文件。
+/// `include-exclude` feature 会按 .gitignore 跳过 node_modules/src/ 等。
+#[cfg(feature = "web")]
+#[derive(RustEmbed)]
+#[folder = "web-ui/dist/"]
+pub struct Assets;
+
+#[cfg(feature = "web")]
+pub async fn spa_handler(req: Request<Body>) -> Response {
+    let path = req.uri().path().trim_start_matches('/');
+    let path = if path.is_empty() { "index.html" } else { path };
+
+    match Assets::get(path) {
+        Some(file) => {
+            let mime = mime_guess::from_path(path).first_or_octet_stream();
+            (
+                [(header::CONTENT_TYPE, mime.as_ref().to_owned())],
+                file.data,
+            )
+                .into_response()
+        }
+        None => match Assets::get("index.html") {
+            Some(f) => Html(f.data).into_response(),
+            None => StatusCode::NOT_FOUND.into_response(),
+        },
+    }
+}
 
 /// `WebState::new` / `web::run` 的额外初始化参数，避免参数过多。
 pub struct WebInitParams {
     pub sources_config: SourcesConfig,
     pub sources_config_path: PathBuf,
-    pub task_history: Vec<DownloadTaskRecord>,
+    /// 启动时从 `tasks.json` 反序列化的任务列表（包括已完成 + 上次未结束的）；
+    /// 由调用方 (`load_tasks`) 读文件后传入。空 vec 表示无历史。
+    pub tasks: Vec<DownloadTask>,
     pub tasks_file: PathBuf,
     pub next_task_id: u64,
 }
 
 /// Web 服务共享状态。
+///
+/// ## 任务存储是单源的 `Vec<DownloadTask>`
+///
+/// 旧实现是双 store：`HashMap<u64, ActiveDownload>`（活跃内存态）+ `Vec<DownloadTaskRecord>`
+/// （持久化历史）+ 一个跨线程的 bridge task 把两者同步 + merge 时还要兜底
+/// "active 拿 None/0 别把历史里正确的元数据盖掉" —— 这类问题反复出现，本质就是
+/// 双 store 各自维护同一份数据但时序窗口不一致。
+///
+/// 现在 web 跟 GPUI 一样只持一个 `Vec<DownloadTask>`：
+/// - 持久化字段全在 record-like fields 上（id / origin / started_at_unix / ...）
+/// - 运行期字段 `rx` / `cancel` / `cancelling` 也只是这个 struct 的一部分
+/// - 每个下载一个 per-task drain tokio task 排空 mpsc rx（详见
+///   `crate::web::handlers::download::spawn_task_drain`），同时负责
+///   "drain 到的事件 → SSE broadcast_tx"，把"状态更新"和"事件转发"合并到一处。
+///
+/// `tasks_file` 只是磁盘路径，`save_tasks_to_file` 用它做原子写入。
 pub struct WebState {
     pub config: RwLock<AppConfig>,
     pub http: Arc<HttpClients>,
     pub rules: RwLock<Vec<Rule>>,
     pub download_path: PathBuf,
-    /// 活跃的下载任务：task_id → (CancelToken, progress broadcast sender)。
-    pub active_downloads: Mutex<HashMap<u64, ActiveDownload>>,
+    /// **单源真相**：每个任务（活跃 + 已结束）的所有状态都在这里。
+    /// 跟 `crate::app::AppModel::tasks` 同型 —— web 和 GUI 用的是同一个类型。
+    pub tasks: Mutex<Vec<DownloadTask>>,
     pub next_task_id: Mutex<u64>,
     /// 访问码（仅存内存，启动时为空，用户通过 Web UI 设置）。
     pub access_code: Mutex<String>,
@@ -45,30 +101,20 @@ pub struct WebState {
     pub sources_config: RwLock<SourcesConfig>,
     /// `sources_config.json` 磁盘路径。
     pub sources_config_path: PathBuf,
-    /// 历史下载任务记录（持久化到 `tasks.json`）。
-    pub task_history: Mutex<Vec<DownloadTaskRecord>>,
     /// `tasks.json` 磁盘路径。
     pub tasks_file: PathBuf,
 }
 
-/// 任务状态。
+/// 任务状态（API 返回用，跟 DownloadTaskRecord.finished 1:1 映射）。
+///
+/// 仅在序列化层暴露给前端用 —— 后端内部统一用 `DownloadTask::finished`
+/// (`Option<Result<PathBuf, FinishedReason>>`)，避免字符串语义。
 #[derive(Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum TaskStatus {
     Downloading,
     Finished,
     Failed,
     Cancelled,
-}
-
-/// 单个活跃下载任务的状态。
-pub struct ActiveDownload {
-    pub cancel: CancelToken,
-    pub progress_tx: broadcast::Sender<Progress>,
-    pub filename: Option<String>,
-    pub book_name: Option<String>,
-    pub total_chapters: usize,
-    pub current_chapter: u32,
-    pub status: TaskStatus,
 }
 
 /// 所有 handler 共享的状态类型别名。
@@ -87,13 +133,30 @@ impl WebState {
             http,
             rules: RwLock::new(rules),
             download_path,
-            active_downloads: Mutex::new(HashMap::new()),
+            tasks: Mutex::new(params.tasks),
             next_task_id: Mutex::new(params.next_task_id),
             access_code: Mutex::new(String::new()),
             sources_config: RwLock::new(params.sources_config),
             sources_config_path: params.sources_config_path,
-            task_history: Mutex::new(params.task_history),
             tasks_file: params.tasks_file,
+        }
+    }
+
+    /// 把当前 `tasks` vec 序列化为 `DownloadTaskRecord` vec，写到磁盘。
+    ///
+    /// 触发时机：每次某任务终结（drain 线程从 rx Disconnected 或 crawler 写 finished）。
+    /// 失败仅 warn —— tasks.json 偶尔丢一次不致命（best-effort 持久化，跟 GPUI 同语义）。
+    ///
+    /// **不**在内存 `tasks` 上反映 trim —— `save_with_trim` 只在 records vec 上做
+    /// 修剪，in-memory `DownloadTask` 维持原样（next drain 才会再次被列出）。
+    /// GPUI 走的也是这个语义（见 `AppModel::save_tasks_to_file` 的注释）。
+    pub fn save_tasks_to_file(&self) {
+        let tasks = self.tasks.lock().unwrap();
+        let mut records: Vec<crate::models::DownloadTaskRecord> =
+            tasks.iter().map(|t| t.to_record()).collect();
+        drop(tasks);
+        if let Err(e) = crate::persistent::save_with_trim(&self.tasks_file, &mut records) {
+            tracing::warn!("保存 tasks.json 失败: {e}");
         }
     }
 }

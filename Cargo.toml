@@ -1,6 +1,6 @@
 [package]
 name = "so-novel-rs"
-version = "0.3.3"
+version = "0.3.4"
 edition = "2024"
 rust-version = "1.85"
 description = "So Novel — Rust desktop client (gpui + gpui-component)."
@@ -12,8 +12,9 @@ name = "so-novel-rs"
 path = "src/main.rs"
 
 [features]
-default = ["gui", "web"]
+default = ["gui"]
 # GUI 桌面特性：拉入 GPUI 栈 + 文件对话框 + 文件监听 + LRU 封面缓存。
+# 默认开启 —— 主入口是 GUI 客户端（gpui_app::run），CLI / Web 走子路径。
 # `cargo build --no-default-features --features gui` 得到仅含 GUI 的二进制。
 gui = [
     "dep:gpui",
@@ -26,6 +27,8 @@ gui = [
 # `cargo build --no-default-features --features web` 得到不含任何 GPUI 系统库链接的 Web 二进制
 # （Dockerfile 用这个路径，去掉所有 xcb/xkbcommon/wayland/egl/mesa/vulkan 依赖）。
 web = [
+    "dep:rust-embed",
+    "dep:mime_guess",
     "dep:axum",
     "dep:axum_session",
     "dep:tower-http",
@@ -135,6 +138,11 @@ zip = { version = "8", default-features = false, features = ["deflate-flate2"] }
 # CLI 子命令（5c）。
 clap = { version = "4", features = ["derive"] }
 
+# Web 前端资源嵌入（web feature 专属）。
+# `include-exclude` 按 #[folder] 的 .gitignore 规则过滤（跳过 .map / node_modules / src 等）。
+rust-embed = { version = "8", features = ["include-exclude"], optional = true }
+# MIME 类型推导，给 rust-embed 提供的静态文件设置 Content-Type。
+mime_guess = { version = "2", optional = true }
 # Web 服务：axum（tokio 原生 HTTP 框架）+ tower-http（CORS 中间件）。（web feature 专属）
 axum = { version = "0.8", features = ["macros"], optional = true }
 axum_session = { version = "0.20", optional = true }
@@ -161,7 +169,7 @@ zhconv = "0.4.1"
 # 不启用 `rendering` feature：项目只用 `pdf_oxide::writer::{DocumentBuilder, ...}` 直接拼文本
 # （详见 `src/export/pdf.rs:6-7` 注释，不走 `from_html_css` 渲染流水线）。`rendering` 会拉入
 # 一整套 HTML/CSS 解析依赖，编译时间显著增加而无功能收益。
-pdf_oxide = { version = "0.3.68" }
+pdf_oxide = { version = "0.3.70" }
 
 # LRU 缓存（`SearchState::cover_cache` 走有界 LRU 替代无界 HashMap，
 # 避免长会话累积所有查看过的封面字节）。

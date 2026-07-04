@@ -94,7 +94,7 @@ impl Exporter for PdfExporter {
             },
             None => {
                 tracing::warn!(
-                    "未找到系统 CJK 字体（C:\\Windows\\Fonts\\msyh.ttc / NotoSansCJK / \
+                    "未找到系统 CJK 字体（msyh.ttc / NotoSansCJK / \
                      PingFang 等），PDF 中中文将显示为方块。建议安装 Noto Sans CJK 后重试。"
                 );
                 Measurer::Heuristic

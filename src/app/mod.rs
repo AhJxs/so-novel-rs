@@ -3,18 +3,17 @@
 //! 拆分子模块：
 //! - `download_task`  / `search_state` / `library_state` / `sources_state` / `update_state` — 5 个状态结构体
 //! - `cover` — UI 辅助（封面字节解码 + URI 生成）
-//! - `now` / `runtime` — 自由辅助
+//! - `runtime` — 自由辅助
 //! - `crate::app::ops::download` / `crate::app::ops::search` / `crate::app::ops::sources` / `crate::app::ops::library` / `crate::app::ops::update` / `crate::app::ops::settings` — 业务方法
 //!
 //! 入口：`AppModel` 持有所有状态 struct 实例，UI 中立（不依赖任何 GUI 框架）。
 //! 后台通道排空 + UI 重绘触发由 `crate::app::events` 负责。
 
 mod cover;
-mod download_task;
+pub mod download_task;
 pub(crate) mod events;
 mod library_state;
 mod list_cache;
-mod now;
 mod runtime;
 mod search_state;
 mod sources_state;
@@ -30,7 +29,6 @@ pub use cover::{CoverEntry, hash_short};
 pub use download_task::DownloadTask;
 pub use library_state::{LibraryEntry, LibraryState, scan_library_dir};
 pub use list_cache::{ListCache, ListCacheKey, PageKind, filter_signature};
-pub use now::now_unix_secs;
 pub use runtime::build_shared_runtime;
 pub use search_state::{
     CoverEvent, DetailEvent, DetailState, SearchState, SourceSearchEvent, SourceStatus, TocEvent,

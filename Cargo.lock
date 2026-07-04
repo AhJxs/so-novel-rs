@@ -5290,9 +5290,9 @@ dependencies = [
 
 [[package]]
 name = "pdf_oxide"
-version = "0.3.68"
+version = "0.3.70"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "785098be85b44eeae72b021431124f74d41da241106d01a1d63ef8c007cca3f1"
+checksum = "3be9e4752f2319dec7c079ca96ec141e1be70faac82b21cb06a53bb6c2e0034e"
 dependencies = [
  "aes 0.9.1",
  "base64",
@@ -5317,7 +5317,7 @@ dependencies = [
  "office_oxide",
  "phf 0.14.0",
  "qcms",
- "quick-xml 0.40.1",
+ "quick-xml 0.41.0",
  "regex",
  "serde",
  "serde_json",
@@ -5813,6 +5813,15 @@ checksum = "2474bd2e5029e7ccb6abb2ba48cf2383a333851dedf495901544281590c7da7f"
 dependencies = [
  "memchr",
  "serde",
+]
+
+[[package]]
+name = "quick-xml"
+version = "0.41.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e660451e55124f798a69a5af3f49ccfbefbd41910eefd25caf2393e1f3473ec1"
+dependencies = [
+ "memchr",
 ]
 
 [[package]]
@@ -7081,7 +7090,7 @@ checksum = "dd538fb6910ac1099850255cf94a94df6551fbdd602454387d0adb2d1ca6dead"
 
 [[package]]
 name = "so-novel-rs"
-version = "0.3.3"
+version = "0.3.4"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -7100,6 +7109,7 @@ dependencies = [
  "image",
  "json5",
  "lru",
+ "mime_guess",
  "notify 8.2.0",
  "once_cell",
  "pdf_oxide",
@@ -7107,6 +7117,7 @@ dependencies = [
  "regex",
  "reqwest",
  "rfd",
+ "rust-embed",
  "rust-i18n",
  "scraper",
  "serde",

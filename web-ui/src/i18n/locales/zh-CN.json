@@ -1,0 +1,157 @@
+{
+  "app": {
+    "title": "So Novel"
+  },
+  "nav": {
+    "search": "搜索",
+    "tasks": "任务",
+    "library": "书库",
+    "sources": "书源",
+    "settings": "设置"
+  },
+  "search": {
+    "title": "搜索小说",
+    "placeholder": "输入书名或作者...",
+    "allSources": "全部源",
+    "searchButton": "搜索",
+    "searching": "搜索中 ({{count}} 源)...",
+    "noResults": "没有找到相关书籍",
+    "initialPrompt": "输入关键词开始搜索",
+    "card": {
+      "latestChapter": "最新章节",
+      "wordCount": "字数"
+    }
+  },
+  "book": {
+    "backToSearch": "返回搜索",
+    "toc": "目录",
+    "chapters": "{{count}} 章",
+    "loadToc": "加载目录",
+    "refreshToc": "刷新",
+    "notLoaded": "尚未加载目录",
+    "format": "格式：",
+    "startDownload": "开始下载",
+    "downloading": "下载中 ({{current}}/{{total}})",
+    "cancel": "取消",
+    "downloadComplete": "下载完成！",
+    "latestChapter": "最新",
+    "missingSource": "缺少书源信息，请从搜索结果重新进入",
+    "loadFailed": "加载书籍信息失败",
+    "loading": "加载中..."
+  },
+  "tasks": {
+    "title": "下载任务",
+    "count": "共 {{total}} 个任务",
+    "empty": "暂无下载任务",
+    "status": {
+      "downloading": "下载中",
+      "finished": "已完成",
+      "failed": "失败",
+      "cancelled": "已取消"
+    },
+    "cancel": "取消",
+    "delete": "删除",
+    "deleted": "已删除",
+    "deleteConfirm": {
+      "title": "删除任务记录",
+      "message": "确定要删除任务「{{name}}」吗？本地下载的文件会保留。",
+      "confirm": "删除",
+      "cancel": "取消"
+    },
+    "chapters": "{{current}} / {{total}} 章",
+    "started": "开始",
+    "finished": "结束",
+    "downloadFile": "下载文件",
+    "failedCount": "失败 {{n}} 章"
+  },
+  "library": {
+    "title": "本地书库",
+    "empty": "书库为空",
+    "filter": {
+      "all": "全部",
+      "epub": "EPUB",
+      "txt": "TXT",
+      "pdf": "PDF",
+      "html": "HTML"
+    },
+    "download": "下载",
+    "delete": "删除",
+    "deleted": "已删除",
+    "deleteConfirm": {
+      "title": "删除文件",
+      "message": "确定要删除「{{name}}」吗？此操作不可撤销。",
+      "confirm": "删除",
+      "cancel": "取消"
+    },
+    "pageSummary": "共 {{total}} 个文件"
+  },
+  "sources": {
+    "title": "书源管理",
+    "enabled": "{{enabled}} / {{total}} 已启用",
+    "enabledLabel": "已启用",
+    "disabledLabel": "未启用",
+    "test": "测速",
+    "testing": "测速中...",
+    "testAll": "全部测速",
+    "testingAll": "测速中 ({{done}}/{{total}})...",
+    "timeout": "超时"
+  },
+  "settings": {
+    "title": "设置",
+    "loading": "加载中...",
+    "status": {
+      "saving": "保存中…",
+      "saved": "已保存 ✓",
+      "error": "保存失败"
+    },
+    "errors": {
+      "pathEmpty": "下载目录不能为空",
+      "pathNotDir": "目录不存在，请填写有效路径",
+      "hostEmpty": "启用代理时代理主机不能为空"
+    },
+    "language": {
+      "title": "语言",
+      "label": "界面语言",
+      "zh-CN": "简体中文",
+      "zh-TW": "繁體中文",
+      "en": "English"
+    },
+    "download": {
+      "title": "下载",
+      "path": "下载目录",
+      "format": "导出格式",
+      "encoding": "文本编码",
+      "searchFilter": "搜索过滤"
+    },
+    "proxy": {
+      "title": "代理",
+      "enabled": "启用代理",
+      "host": "代理主机",
+      "port": "代理端口"
+    },
+    "retry": {
+      "title": "重试",
+      "enabled": "启用重试",
+      "concurrency": "并发数",
+      "maxRetries": "最大重试次数"
+    },
+    "readonly": {
+      "title": "间隔与绕过（只读，不可编辑）",
+      "minInterval": "最小间隔 (ms)：",
+      "maxInterval": "最大间隔 (ms)：",
+      "cfBypass": "CF 绕过："
+    }
+  },
+  "theme": {
+    "light": "浅色",
+    "dark": "深色",
+    "system": "跟随系统"
+  },
+  "common": {
+    "ok": "确定",
+    "cancel": "取消",
+    "close": "关闭",
+    "loading": "加载中...",
+    "error": "错误"
+  }
+}

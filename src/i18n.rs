@@ -32,6 +32,32 @@
 
 use std::sync::OnceLock;
 
+use crate::config::Language;
+
+/// 把 `Language` 映射到 `rust_i18n` 用的 locale 标签。
+///
+/// **这是项目里 `Language → locale 字符串` 的唯一权威映射**。
+/// `Language::as_str()` 返回的是 toml_io 持久化用的 `"zh-TW"` —— 跟 `app.yml`
+/// 实际的 locale 标签（`"zh-HK"`）不一致，所以 `load_config` 之后、任何
+/// `ts("Cli.xxx")` / `gpui_component::set_locale` 之前都要走这里。
+///
+/// 三种映射：
+/// - `SimplifiedChinese` → `"zh-CN"`
+/// - `TraditionalChinese` → `"zh-HK"`（**不是** `Language::as_str()` 返回的 `"zh-TW"`）
+/// - `English` → `"en"`
+///
+/// **位置历史**：原本在 `gpui_app::mod::locale_for`（仅 gui feature 编译）。
+/// CLI 路径（web-only / 未来 cli-only 构建）不依赖 `gpui_app`，但 CLI 也要按
+/// `config.toml` 的 language 切帮助语言 —— 必须从 cfg gate 模块搬到中性 crate
+/// root 模块 `crate::i18n`。`gpui_app` 那边改成 `use crate::i18n::locale_for`。
+pub fn locale_for(lang: Language) -> &'static str {
+    match lang {
+        Language::SimplifiedChinese => "zh-CN",
+        Language::TraditionalChinese => "zh-HK",
+        Language::English => "en",
+    }
+}
+
 /// 翻译返回类型别名：gui feature 开启时为 `gpui::SharedString`（`Arc<str>` 语义，clone 零 alloc）；
 /// 非 gui 构建（如 web-only Docker）时为 `String`。
 /// 调用方在两种构建下均可直接 `.into()` 得到目标类型。

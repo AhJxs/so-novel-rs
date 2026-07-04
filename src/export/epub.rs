@@ -136,12 +136,6 @@ pub fn merge_with_cover_bytes(
                     .reftype(ReferenceType::Text),
             )
             .map_err(|e| ExportError::Epub(format!("add chapter {entry_name}: {e}")))?;
-        tracing::debug!(
-            chapter = idx + 1,
-            total = total_chapters,
-            bytes = buf.len(),
-            "EPUB 章节写入"
-        );
     }
     tracing::info!(
         chapters = total_chapters,
