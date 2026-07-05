@@ -6,6 +6,9 @@
 mod handlers;
 mod routes;
 
+#[cfg(test)]
+mod tests;
+
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, RwLock};
 
@@ -151,10 +154,19 @@ impl WebState {
     /// 修剪，in-memory `DownloadTask` 维持原样（next drain 才会再次被列出）。
     /// GPUI 走的也是这个语义（见 `AppModel::save_tasks_to_file` 的注释）。
     pub fn save_tasks_to_file(&self) {
-        let tasks = self.tasks.lock().unwrap();
-        let mut records: Vec<crate::models::DownloadTaskRecord> =
-            tasks.iter().map(|t| t.to_record()).collect();
-        drop(tasks);
+        // Poisoned lock = 之前持锁的线程 panic 了：磁盘保存是 best-effort，
+        // 这里吃掉 poison 错误 + log，不要再炸一次。
+        let mut records: Vec<crate::models::DownloadTaskRecord> = match self.tasks.lock() {
+            Ok(tasks) => {
+                let r = tasks.iter().map(|t| t.to_record()).collect();
+                drop(tasks);
+                r
+            }
+            Err(e) => {
+                tracing::error!("save_tasks_to_file: tasks Mutex poisoned: {e}");
+                return;
+            }
+        };
         if let Err(e) = crate::persistent::save_with_trim(&self.tasks_file, &mut records) {
             tracing::warn!("保存 tasks.json 失败: {e}");
         }
@@ -180,9 +192,12 @@ pub fn run(
 
     rt.block_on(async move {
         let session_config = SessionConfig::default();
-        let session_store = SessionStore::<SessionNullPool>::new(None, session_config)
-            .await
-            .unwrap();
+        let session_store = match SessionStore::<SessionNullPool>::new(None, session_config).await {
+            Ok(s) => s,
+            Err(e) => {
+                return Err(anyhow::anyhow!("构造 SessionStore 失败: {e}"));
+            }
+        };
         let router = routes::build_router(state, session_store);
         let addr = format!("{host}:{port}");
         let listener = tokio::net::TcpListener::bind(&addr)

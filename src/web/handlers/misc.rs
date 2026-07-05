@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use crate::config::AppConfig;
 
 use super::super::SharedState;
+use super::lock::{rw_read, rw_write};
 
 pub async fn health(State(state): State<SharedState>) -> Json<HealthInfo> {
     // 健康检查：返回 server 版本 + build feature + rules 数量 + 当前任务数。
@@ -59,8 +60,10 @@ pub(crate) struct SourceInfo {
     enabled: bool,
 }
 
-pub async fn sources_list(State(state): State<SharedState>) -> Json<Vec<SourceInfo>> {
-    let rules = state.rules.read().unwrap();
+pub async fn sources_list(
+    State(state): State<SharedState>,
+) -> Result<Json<Vec<SourceInfo>>, (StatusCode, String)> {
+    let rules = rw_read("sources_list", &state.rules)?;
     let sources: Vec<SourceInfo> = rules
         .iter()
         .map(|r| SourceInfo {
@@ -70,7 +73,7 @@ pub async fn sources_list(State(state): State<SharedState>) -> Json<Vec<SourceIn
             enabled: !r.disabled,
         })
         .collect();
-    Json(sources)
+    Ok(Json(sources))
 }
 
 pub async fn source_toggle(
@@ -79,7 +82,7 @@ pub async fn source_toggle(
 ) -> Result<Json<SourceInfo>, (StatusCode, String)> {
     // 1. 先从 rules 中取到目标书源的 URL（短锁，取完即放）。
     let url = {
-        let rules = state.rules.read().unwrap();
+        let rules = rw_read("source_toggle:read_url", &state.rules)?;
         rules
             .iter()
             .find(|r| r.id == id)
@@ -89,7 +92,7 @@ pub async fn source_toggle(
 
     // 2. 切换 SourcesConfig 并持久化到磁盘。
     let now_disabled = {
-        let mut sc = state.sources_config.write().unwrap();
+        let mut sc = rw_write("source_toggle:write_sc", &state.sources_config)?;
         let d = sc.toggle_disabled(&url);
         if let Err(e) = sc.save(&state.sources_config_path) {
             tracing::warn!("保存 sources_config.json 失败: {e}");
@@ -99,15 +102,18 @@ pub async fn source_toggle(
 
     // 3. 同步更新内存中的 Rule.disabled。
     {
-        let mut rules = state.rules.write().unwrap();
+        let mut rules = rw_write("source_toggle:write_rules", &state.rules)?;
         if let Some(r) = rules.iter_mut().find(|r| r.id == id) {
             r.disabled = now_disabled;
         }
     }
 
     // 4. 返回更新后的信息。
-    let rules = state.rules.read().unwrap();
-    let r = rules.iter().find(|r| r.id == id).unwrap();
+    let rules = rw_read("source_toggle:read_back", &state.rules)?;
+    let r = rules
+        .iter()
+        .find(|r| r.id == id)
+        .ok_or_else(|| (StatusCode::NOT_FOUND, "书源未找到".to_string()))?;
     let info = SourceInfo {
         id: r.id,
         name: r.name.clone(),
@@ -130,17 +136,17 @@ pub(crate) struct SourceTestResult {
 pub async fn source_test(
     State(state): State<SharedState>,
     axum::extract::Path(id): axum::extract::Path<i32>,
-) -> Json<SourceTestResult> {
+) -> Result<Json<SourceTestResult>, (StatusCode, String)> {
     let (url, client) = {
-        let rules = state.rules.read().unwrap();
-        let rule = match rules.iter().find(|r| r.id == id) {
-            Some(r) => r.clone(),
+        let rules = rw_read("source_test", &state.rules)?;
+        let rule = match rules.iter().find(|r| r.id == id).cloned() {
+            Some(r) => r,
             None => {
-                return Json(SourceTestResult {
+                return Ok(Json(SourceTestResult {
                     ok: false,
                     latency_ms: 0,
                     error: Some("书源未找到".into()),
-                });
+                }));
             }
         };
         let client = state.http.for_rule(&rule);
@@ -155,10 +161,10 @@ pub async fn source_test(
         .await;
     let latency = start.elapsed().as_millis() as u64;
 
-    match result {
+    Ok(Json(match result {
         Ok(resp) => {
             let ok = resp.status().is_success();
-            Json(SourceTestResult {
+            SourceTestResult {
                 ok,
                 latency_ms: latency,
                 error: if ok {
@@ -166,19 +172,21 @@ pub async fn source_test(
                 } else {
                     Some(format!("HTTP {}", resp.status()))
                 },
-            })
+            }
         }
-        Err(e) => Json(SourceTestResult {
+        Err(e) => SourceTestResult {
             ok: false,
             latency_ms: latency,
             error: Some(e.to_string()),
-        }),
-    }
+        },
+    }))
 }
 
-pub async fn settings_get(State(state): State<SharedState>) -> Json<AppConfig> {
-    let cfg = state.config.read().unwrap();
-    Json(cfg.clone())
+pub async fn settings_get(
+    State(state): State<SharedState>,
+) -> Result<Json<AppConfig>, (StatusCode, String)> {
+    let cfg = rw_read("settings_get", &state.config)?;
+    Ok(Json(cfg.clone()))
 }
 
 #[derive(Deserialize)]
@@ -212,7 +220,7 @@ pub async fn settings_put(
         }
     }
 
-    let mut cfg = state.config.write().unwrap();
+    let mut cfg = rw_write("settings_put", &state.config)?;
 
     if let Some(v) = update.download_path {
         cfg.download_path = v.trim().to_string();

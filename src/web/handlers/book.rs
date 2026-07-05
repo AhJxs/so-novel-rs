@@ -12,6 +12,7 @@ use crate::models::{Book, Rule};
 use crate::parser;
 
 use super::super::SharedState;
+use super::lock::rw_read;
 
 #[derive(Deserialize)]
 pub struct BookDetailParams {
@@ -24,8 +25,8 @@ fn extract_config_and_rule(
     state: &SharedState,
     source_id: i32,
 ) -> Result<(AppConfig, Rule), (StatusCode, String)> {
-    let cfg = state.config.read().unwrap();
-    let rules = state.rules.read().unwrap();
+    let cfg = rw_read("book:cfg", &state.config)?;
+    let rules = rw_read("book:rules", &state.rules)?;
     let rule = rules
         .iter()
         .find(|r| r.id == source_id)

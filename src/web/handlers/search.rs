@@ -4,6 +4,7 @@ use std::convert::Infallible;
 use std::sync::Arc;
 
 use axum::extract::{Query, State};
+use axum::http::StatusCode;
 use axum::response::Sse;
 use futures::stream::Stream;
 use serde::{Deserialize, Serialize};
@@ -12,6 +13,33 @@ use crate::models::SearchResult;
 use crate::models::Source;
 
 use super::super::SharedState;
+use super::lock::rw_read;
+
+type BoxedSearchStream =
+    std::pin::Pin<Box<dyn Stream<Item = Result<axum::response::sse::Event, Infallible>> + Send>>;
+
+/// 在 SSE search handler 入口拿到 poisoned lock 时，把错误以 `result` event
+/// (error 字段) + `done` 形式给前端，避免连接哑断。
+fn lock_failure_stream(status: u16, msg: &str) -> Sse<BoxedSearchStream> {
+    let reason = format!("[{status}] {msg}");
+    let stream = async_stream::stream! {
+        let event = SearchEvent {
+            source_id: 0,
+            source_name: String::new(),
+            results: vec![],
+            error: Some(reason),
+        };
+        let data = serde_json::to_string(&event).unwrap_or_default();
+        yield Ok(axum::response::sse::Event::default()
+            .event("result")
+            .data(data));
+        let done = serde_json::to_string(&SearchDoneEvent { total: 0 }).unwrap_or_default();
+        yield Ok(axum::response::sse::Event::default()
+            .event("done")
+            .data(done));
+    };
+    Sse::new(Box::pin(stream))
+}
 
 #[derive(Deserialize)]
 pub struct SearchParams {
@@ -36,12 +64,15 @@ struct SearchDoneEvent {
 pub async fn search(
     State(state): State<SharedState>,
     Query(params): Query<SearchParams>,
-) -> Sse<impl Stream<Item = Result<axum::response::sse::Event, Infallible>>> {
+) -> Sse<BoxedSearchStream> {
     let keyword = params.keyword.trim().to_string();
-    let (config, http, rules) = {
-        let cfg = state.config.read().unwrap();
-        let rules = state.rules.read().unwrap();
-        (cfg.clone(), Arc::clone(&state.http), rules.clone())
+    let (config, http, rules) = match (|| -> Result<_, (StatusCode, String)> {
+        let cfg = rw_read("search:cfg", &state.config)?;
+        let rules = rw_read("search:rules", &state.rules)?;
+        Ok((cfg.clone(), Arc::clone(&state.http), rules.clone()))
+    })() {
+        Ok(v) => v,
+        Err((code, msg)) => return lock_failure_stream(code.as_u16(), &msg),
     };
 
     let sources: Vec<Source> = if let Some(id) = params.source_id {
@@ -107,5 +138,5 @@ pub async fn search(
             .data(done));
     };
 
-    Sse::new(stream)
+    Sse::new(Box::pin(stream))
 }

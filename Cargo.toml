@@ -189,6 +189,8 @@ windows-sys = { version = "0.61", features = [
 tempfile = "3"
 # 测试用：构造最小 PNG 验证 cover_entry_from_bytes。
 image = "0.25"
+# axum Router 在测试里走 tower::ServiceExt::oneshot。
+tower = { version = "0.5", features = ["util"] }
 
 # 在 Windows 上把 assets/logo.ico 嵌入 exe 的资源段（资源管理器/任务栏会看到图标）。
 # build.rs 调用，仅 Windows target 需要。

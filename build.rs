@@ -10,22 +10,37 @@ fn main() {
     println!("cargo:rerun-if-changed=web-ui/index.html");
 
     if std::env::var("CARGO_FEATURE_WEB").is_ok() {
-        #[cfg(target_os = "windows")]
-        let mut cmd = {
-            // On Windows, `npm` is `npm.cmd` — `cmd /c` resolves it reliably
-            // through %PATHEXT%, even when cargo inherits a bash-modified PATH.
-            let mut c = Command::new("cmd");
-            c.args(["/c", "npm", "run", "build", "--prefix", "web-ui"]);
-            c
-        };
-        #[cfg(not(target_os = "windows"))]
-        let mut cmd = {
-            let mut c = Command::new("npm");
-            c.args(["run", "build", "--prefix", "web-ui"]);
-            c
-        };
+        // SO_NOVEL_SKIP_WEB_BUILD=1: explicitly skip `npm run build` here.
+        // Only intended for Rust static-analysis runs where the caller has
+        // already produced web-ui/dist/. Release / Docker builds must leave
+        // this unset so the latest frontend is compiled in.
+        if std::env::var("SO_NOVEL_SKIP_WEB_BUILD").as_deref() == Ok("1") {
+            let index = std::path::Path::new("web-ui/dist/index.html");
+            if !index.exists() {
+                panic!(
+                    "SO_NOVEL_SKIP_WEB_BUILD=1 set but web-ui/dist/index.html is missing; \
+                     pre-build with `npm run build --prefix web-ui` or unset the flag."
+                );
+            }
+            println!("cargo:warning=SO_NOVEL_SKIP_WEB_BUILD=1, reusing web-ui/dist/");
+        } else {
+            #[cfg(target_os = "windows")]
+            let mut cmd = {
+                // On Windows, `npm` is `npm.cmd` — `cmd /c` resolves it reliably
+                // through %PATHEXT%, even when cargo inherits a bash-modified PATH.
+                let mut c = Command::new("cmd");
+                c.args(["/c", "npm", "run", "build", "--prefix", "web-ui"]);
+                c
+            };
+            #[cfg(not(target_os = "windows"))]
+            let mut cmd = {
+                let mut c = Command::new("npm");
+                c.args(["run", "build", "--prefix", "web-ui"]);
+                c
+            };
 
-        run_npm_build(&mut cmd);
+            run_npm_build(&mut cmd);
+        }
     }
 
     // ── Windows icon resource ────────────────────────────────────────────

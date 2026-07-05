@@ -51,6 +51,24 @@ use crate::models::{Chapter, FinishedReason, SearchResult};
 use crate::util::time::now_unix_secs;
 
 use super::super::{SharedState, TaskStatus, WebState};
+use super::lock::{mutex, rw_read};
+
+/// 在 SSE handler 入口拿到 poisoned lock 时，把错误以 SSE `failed` event 形式
+/// 给前端（稳定字面量 + status code），避免连接哑断。
+fn lock_failure_stream(status: u16, msg: &str) -> Sse<BoxedSseStream> {
+    let reason = format!("[{status}] {msg}");
+    let stream = async_stream::stream! {
+        let ev = ProgressEvent {
+            kind: "failed",
+            reason: Some(reason),
+            ..Default::default()
+        };
+        yield Ok(axum::response::sse::Event::default()
+            .event("progress")
+            .data(serde_json::to_string(&ev).unwrap_or_default()));
+    };
+    Sse::new(Box::pin(stream))
+}
 
 #[derive(Deserialize)]
 pub struct DownloadRequest {
@@ -107,11 +125,18 @@ fn spawn_task_drain(
 ) {
     tokio::spawn(async move {
         while let Some(progress) = crawler_rx.recv().await {
-            // 1. 锁 + 更新 in-memory task
-            {
-                let mut tasks = state.tasks.lock().unwrap();
-                if let Some(task) = tasks.iter_mut().find(|t| t.id == task_id) {
-                    task.apply_progress(progress.clone());
+            // 1. 锁 + 更新 in-memory task；poison 状态跳过（drain 里没法返 500，
+            //    也不应让 worker panic —— 标记 lost-progress 后继续 SSE 转发）
+            match state.tasks.lock() {
+                Ok(mut tasks) => {
+                    if let Some(task) = tasks.iter_mut().find(|t| t.id == task_id) {
+                        task.apply_progress(progress.clone());
+                    }
+                }
+                Err(e) => {
+                    tracing::error!(
+                        "spawn_task_drain {task_id}: tasks Mutex poisoned, drop progress: {e}"
+                    );
                 }
             }
             // 2. 转发给 SSE subscribers（多 client 并发各自 lagging 互不干扰）
@@ -120,17 +145,25 @@ fn spawn_task_drain(
 
         // mpsc 断开：crawler 已退出。若任务还没走到 finished 态，补 AppRestarted
         // + finished_at_unix，然后 save。
-        let needs_save = {
-            let mut tasks = state.tasks.lock().unwrap();
-            if let Some(task) = tasks.iter_mut().find(|t| t.id == task_id) {
-                if task.finished.is_none() {
-                    task.finished = Some(Err(FinishedReason::AppRestarted));
+        let needs_save = match state.tasks.lock() {
+            Ok(mut tasks) => {
+                let mut changed = false;
+                if let Some(task) = tasks.iter_mut().find(|t| t.id == task_id) {
+                    if task.finished.is_none() {
+                        task.finished = Some(Err(FinishedReason::AppRestarted));
+                        changed = true;
+                    }
+                    if task.finished_at_unix.is_none() {
+                        task.finished_at_unix = Some(now_unix_secs());
+                        changed = true;
+                    }
                 }
-                if task.finished_at_unix.is_none() {
-                    task.finished_at_unix = Some(now_unix_secs());
-                }
-                true
-            } else {
+                changed
+            }
+            Err(e) => {
+                tracing::error!(
+                    "spawn_task_drain {task_id}: tasks Mutex poisoned on exit, skip AppRestarted: {e}"
+                );
                 false
             }
         };
@@ -144,11 +177,15 @@ pub async fn download(
     State(state): State<SharedState>,
     Json(req): Json<DownloadRequest>,
 ) -> Sse<BoxedSseStream> {
-    let (config, rule) = {
-        let cfg = state.config.read().unwrap();
-        let rules = state.rules.read().unwrap();
+    // Lock 失败也走 SSE 错误事件，让前端看到稳定原因，而不是连接哑断。
+    let (config, rule) = match (|| -> Result<_, (StatusCode, String)> {
+        let cfg = rw_read("download:cfg", &state.config)?;
+        let rules = rw_read("download:rules", &state.rules)?;
         let rule = rules.iter().find(|r| r.id == req.source_id).cloned();
-        (cfg.clone(), rule)
+        Ok((cfg.clone(), rule))
+    })() {
+        Ok(v) => v,
+        Err((code, msg)) => return lock_failure_stream(code.as_u16(), &msg),
     };
 
     let Some(rule) = rule else {
@@ -166,11 +203,14 @@ pub async fn download(
     };
 
     // 1. mint id —— push 到 state.tasks 之前必须先有 id（其它请求靠它找任务）
-    let task_id = {
-        let mut id = state.next_task_id.lock().unwrap();
+    let task_id = match (|| -> Result<_, (StatusCode, String)> {
+        let mut id = mutex("download:next_task_id", &state.next_task_id)?;
         let current = *id;
         *id += 1;
-        current
+        Ok(current)
+    })() {
+        Ok(v) => v,
+        Err((code, msg)) => return lock_failure_stream(code.as_u16(), &msg),
     };
 
     let mut config = config;
@@ -185,8 +225,8 @@ pub async fn download(
     let (sse_tx, _) = broadcast::channel::<Progress>(256);
 
     // 2. 任务先入 state.tasks —— `tasks_list` 在 SSE 返回前已经能列到这条记录
-    {
-        let mut tasks = state.tasks.lock().unwrap();
+    if let Err((code, msg)) = (|| -> Result<(), (StatusCode, String)> {
+        let mut tasks = mutex("download:push_task", &state.tasks)?;
         tasks.push(DownloadTask {
             id: task_id,
             origin: SearchResult {
@@ -214,6 +254,9 @@ pub async fn download(
             failures: Vec::new(),
             version: 0,
         });
+        Ok(())
+    })() {
+        return lock_failure_stream(code.as_u16(), &msg);
     }
     state.save_tasks_to_file();
 
@@ -424,20 +467,22 @@ fn task_to_info(task: &DownloadTask) -> TaskInfo {
     }
 }
 
-pub async fn tasks_list(State(state): State<SharedState>) -> Json<Vec<TaskInfo>> {
-    let tasks = state.tasks.lock().unwrap();
+pub async fn tasks_list(
+    State(state): State<SharedState>,
+) -> Result<Json<Vec<TaskInfo>>, (StatusCode, String)> {
+    let tasks = mutex("tasks_list", &state.tasks)?;
     let mut result: Vec<TaskInfo> = tasks.iter().map(task_to_info).collect();
     drop(tasks);
     // 按 id 降序（最新任务在前）。
     result.sort_by_key(|b| std::cmp::Reverse(b.id));
-    Json(result)
+    Ok(Json(result))
 }
 
 pub async fn task_cancel(
     State(state): State<SharedState>,
     Path(id): Path<u64>,
 ) -> Result<&'static str, (StatusCode, String)> {
-    let mut tasks = state.tasks.lock().unwrap();
+    let mut tasks = mutex("task_cancel", &state.tasks)?;
     let Some(task) = tasks.iter_mut().find(|t| t.id == id) else {
         return Err((StatusCode::NOT_FOUND, "任务未找到".to_string()));
     };
@@ -476,7 +521,7 @@ pub async fn task_delete(
     State(state): State<SharedState>,
     Path(id): Path<u64>,
 ) -> Result<&'static str, (StatusCode, String)> {
-    let mut tasks = state.tasks.lock().unwrap();
+    let mut tasks = mutex("task_delete", &state.tasks)?;
     let initial_len = tasks.len();
     tasks.retain(|t| t.id != id);
     if tasks.len() == initial_len {
