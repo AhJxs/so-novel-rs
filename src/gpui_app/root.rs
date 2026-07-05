@@ -24,7 +24,7 @@ use gpui_component::{
     sidebar::{Sidebar, SidebarMenu, SidebarMenuItem, SidebarToggleButton},
 };
 
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 
 /// Sidebar header 用的小 logo（assets/logo.png 编译期嵌入）。
 ///
@@ -35,7 +35,8 @@ use once_cell::sync::Lazy;
 const LOGO_PNG: &[u8] = include_bytes!("../../assets/logo.png");
 
 /// 解码好的 logo（RGBA→BGRA swap 后的 `RenderImage`）。`Lazy` 启动首帧用一次，之后复用。
-static LOGO_IMAGE: Lazy<Option<Arc<RenderImage>>> = Lazy::new(|| decode_logo_image(LOGO_PNG));
+static LOGO_IMAGE: LazyLock<Option<Arc<RenderImage>>> =
+    LazyLock::new(|| decode_logo_image(LOGO_PNG));
 
 /// 解码 PNG 字节 → `RenderImage`。流程同 `decode_cover_image`，但 logo 是静态资源 → `Lazy` 缓存。
 fn decode_logo_image(bytes: &[u8]) -> Option<Arc<RenderImage>> {

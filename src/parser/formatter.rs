@@ -17,13 +17,13 @@
 //! 2. **非闭合标签** (`false`)：源站每段以 `<br>+` 等分隔符隔开。按规则中的
 //!    `paragraphTag`（已经是个正则，例如 `<br>+`）切分，逐段包 `<p>`。
 
-use once_cell::sync::Lazy;
 use regex::Regex;
+use std::sync::LazyLock;
 
 use crate::models::RuleChapter;
 use crate::parser::dom::clear_all_attributes;
 
-static NON_P_PAIR_RE: Lazy<Regex> = Lazy::new(|| {
+static NON_P_PAIR_RE: LazyLock<Regex> = LazyLock::new(|| {
     // 匹配一对开闭标签（不要求名字一致；见模块文档解释）。
     Regex::new(r"<([A-Za-z][A-Za-z0-9]*)>([\s\S]*?)</[A-Za-z][A-Za-z0-9]*>").expect("non-p pair re")
 });

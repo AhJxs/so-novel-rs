@@ -20,21 +20,22 @@
 //!
 //! 这一层是**纯函数**：只依赖 rule.chapter 与输入 chapter，无 IO。
 
-use once_cell::sync::Lazy;
 use regex::Regex;
+use std::sync::LazyLock;
 
 use crate::http::clean_invisible_chars;
 use crate::models::{Chapter, RuleChapter};
 use crate::parser::dom::remove_tags;
 
-static HTML_ENTITY_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"&[^;]+;").expect("html entity re"));
-static EMPTY_TAG_RE: Lazy<Regex> = Lazy::new(|| {
+static HTML_ENTITY_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"&[^;]+;").expect("html entity re"));
+static EMPTY_TAG_RE: LazyLock<Regex> = LazyLock::new(|| {
     // 反复运行直到稳定（嵌套空 tag）。每次匹配一个最内层的 <tag></tag>。
     Regex::new(r"<([A-Za-z][A-Za-z0-9]*)\b[^>]*>\s*</\s*([A-Za-z][A-Za-z0-9]*)\s*>")
         .expect("empty tag re")
 });
-static TITLE_NUMBER_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"^(\d+)\s*\.\s*(.+)$").expect("title number re"));
+static TITLE_NUMBER_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^(\d+)\s*\.\s*(.+)$").expect("title number re"));
 
 /// 清洗一个章节，返回新的 Chapter（不修改入参）。
 ///

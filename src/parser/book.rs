@@ -170,9 +170,9 @@ pub fn parse_book_html(html: &str, base_url: &str, rule: &Rule) -> Result<Book, 
         .and_then(|u| crate::http::abs_url(base_url, &u).or(Some(u)));
     let last_update_time = optional_field(&document, &book_rule.last_update_time)?.map(|s| {
         // Java 端 BookParser: lastUpdateTime.replaceAll("(更新时间|最后更新)：", "")
-        use once_cell::sync::Lazy;
         use regex::Regex;
-        static RE: Lazy<Regex> = Lazy::new(|| {
+        use std::sync::LazyLock;
+        static RE: LazyLock<Regex> = LazyLock::new(|| {
             Regex::new(r"^(更新时间|最后更新)[：:]?\s*").expect("lastUpdateTime prefix re")
         });
         RE.replace(&s, "").into_owned()

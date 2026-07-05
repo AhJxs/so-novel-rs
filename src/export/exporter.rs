@@ -194,12 +194,14 @@ pub(crate) fn pad_zero(n: u32, width: usize) -> String {
 /// 极简 HTML 标签清理（仅用于 intro 文本）：删除 `<...>`、HTML 实体、多余空白。
 /// 不引入 ammonia / scraper（intro 一般几百字，正则足够）。
 pub(crate) fn strip_html_tags(s: &str) -> String {
-    use once_cell::sync::Lazy;
     use regex::Regex;
+    use std::sync::LazyLock;
 
-    static TAG_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?s)<[^>]+>").expect("strip tag re"));
-    static ENTITY_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"&[^;]+;").expect("strip entity re"));
-    static WS_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"\s+").expect("ws re"));
+    static TAG_RE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?s)<[^>]+>").expect("strip tag re"));
+    static ENTITY_RE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"&[^;]+;").expect("strip entity re"));
+    static WS_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\s+").expect("ws re"));
 
     let no_tag = TAG_RE.replace_all(s, "").into_owned();
     let no_ent = ENTITY_RE.replace_all(&no_tag, "").into_owned();

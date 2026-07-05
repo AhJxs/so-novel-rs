@@ -1,0 +1,53 @@
+# Docker Compose — Web 模式开箱即用。
+#
+# 用法：
+#   docker compose up -d
+#   docker compose logs -f
+#   docker compose down  # 不删卷
+#
+# 默认 8080 端口对外。生产部署建议：
+# 1. 把 ports 改成 "127.0.0.1:8080:8080"（只本机访问）
+# 2. 前置 nginx / Caddy 做 TLS 终结（参考 docs/WEB.md §反向代理）
+# 3. 设 SO_NOVEL_ACCESS_CODE 启用访问码
+# 4. volumes 命名卷已自带，重建容器数据不丢
+#
+# 镜像来源（任选其一）：
+# A. 预构建镜像：取消 build 那一段、注释 image 那一行
+# B. 本地构建：保留 build + image 段
+
+services:
+  so-novel:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: so-novel:local
+    container_name: so-novel
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - so-novel-data:/home/so-novel/.sonovel
+    environment:
+      - SO_NOVEL_WEB=1
+      # RUST_LOG 默认 info；调试时改 debug；想看单次爬取 trace 时 trace
+      - RUST_LOG=info,so_novel_rs=debug
+    # 健康检查：命中 /api/health 端点（v0.3.5+）。
+    # 旧版镜像只有 /（HTML），会回 200 但语义上不准。新镜像 build 后启用。
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:8080/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    # 镜像默认 `tini -- so-novel-rs --host 0.0.0.0 --port 8080`。
+    # 想换端口只需改 ports 映射，CMD 里 --port 也得跟着改（见下方）。
+    # command: ["so-novel-rs", "--host", "0.0.0.0", "--port", "9000"]
+
+volumes:
+  so-novel-data:
+    # 命名卷会自动管理；想手动指定宿主路径可改为：
+    # driver: local
+    # driver_opts:
+    #   type: none
+    #   o: bind
+    #   device: /path/on/host/.sonovel

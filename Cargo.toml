@@ -114,8 +114,9 @@ chardetng = "1"
 # 现有规则全部 ES5/ES6 子集 boa 完整支持（详见 audit §6.1 的修订）。
 boa_engine = "0.21"
 
-# 静态/惰性初始化（UA 池等）
-once_cell = "1"
+# 静态/惰性初始化（UA 池等）。原来用 once_cell 1.x，
+# Rust 1.80+ 提供 `std::sync::LazyLock`（[std::sync::LazyLock]），行为等价，
+# 编译期 const fn 约束也兼容我们的用法。已在 13 个文件中批量替换为 std 版本。
 rand = "0.10"
 
 # 图片解码校验：下载的封面字节在缓存前用 image::ImageReader 校验是否真的是有效图片，

@@ -106,10 +106,11 @@ fn maybe_convert_chinese(
 /// TXT：从 `<p>...</p>` 中抽段落文字，全角缩进 2 字符 + 换行。
 /// Java 端逻辑：`while matcher.find() { sb.append(indent).append(group(1)).append('\n'); }`
 fn render_txt(title: &str, p_html: &str) -> String {
-    use once_cell::sync::Lazy;
     use regex::Regex;
+    use std::sync::LazyLock;
 
-    static P_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?s)<p>(.*?)</p>").expect("p tag re"));
+    static P_RE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?s)<p>(.*?)</p>").expect("p tag re"));
 
     // 全角空格，与 Java 端 `　` 一致
     let indent = "\u{3000}\u{3000}";

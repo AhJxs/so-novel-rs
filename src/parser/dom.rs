@@ -183,9 +183,9 @@ fn is_xpath(s: &str) -> bool {
 /// 引入完整 XPath 引擎（libxml/sxd-xpath）的成本远高于改写这几条规则，
 /// 因此只覆盖以上两种精确模式；其它 XPath 一律返回 `None`。
 fn xpath_to_css(s: &str) -> Option<String> {
-    use once_cell::sync::Lazy;
     use regex::Regex;
-    static RE: Lazy<Regex> = Lazy::new(|| {
+    use std::sync::LazyLock;
+    static RE: LazyLock<Regex> = LazyLock::new(|| {
         // //*[@id="readbg"]/script[4]
         // 允许 id 用单或双引号；尾部 [N] 可选（无则不指定 nth-of-type）。
         Regex::new(
@@ -257,11 +257,13 @@ fn normalize_selector(selector_part: &str) -> Result<String, SelectError> {
 /// 与 `<tag/>`（自闭合）。这比走 DOM API 更轻、且不会被 scraper
 /// 重新规整化（rewrap into <html><body>）影响。
 pub fn clear_all_attributes(html: &str) -> String {
-    use once_cell::sync::Lazy;
     use regex::Regex;
-    static OPEN_TAG: Lazy<Regex> =
+    use std::sync::LazyLock;
+    static OPEN_TAG: LazyLock<Regex> =
         // 匹配 <tag ...> 或 <tag .../>；标签名不含 `/`，且不在 `<!`、`</` 开头处启动。
-        Lazy::new(|| Regex::new(r"<([A-Za-z][A-Za-z0-9]*)\b[^>]*?(/?)>").expect("open tag re"));
+        LazyLock::new(|| {
+            Regex::new(r"<([A-Za-z][A-Za-z0-9]*)\b[^>]*?(/?)>").expect("open tag re")
+        });
 
     OPEN_TAG
         .replace_all(html, |caps: &regex::Captures<'_>| {

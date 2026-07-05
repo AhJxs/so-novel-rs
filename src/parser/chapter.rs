@@ -19,12 +19,12 @@
 //! - 简繁转换 — 归阶段 5。
 
 use anyhow::Result;
-use once_cell::sync::Lazy;
 use regex::Regex;
 use reqwest::Client;
 use scraper::Html;
 #[cfg(test)]
 use scraper::Selector;
+use std::sync::LazyLock;
 use thiserror::Error;
 
 use crate::http::abs_url;
@@ -261,10 +261,10 @@ fn is_last_page(
     !url_is_pagination && mentions_next_chapter
 }
 
-static PAGINATION_URL_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r#".*[-_]\d\.html"#).expect("pagination url re"));
-static NEXT_CHAPTER_TEXT_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"(下一章|没有了|>>|书末页)").expect("next chapter text re"));
+static PAGINATION_URL_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#".*[-_]\d\.html"#).expect("pagination url re"));
+static NEXT_CHAPTER_TEXT_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(下一章|没有了|>>|书末页)").expect("next chapter text re"));
 
 async fn fetch_with_cf_fallback(
     client: &Client,

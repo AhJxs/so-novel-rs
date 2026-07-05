@@ -15,8 +15,8 @@ use std::fs::File;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
-use once_cell::sync::Lazy;
 use regex::Regex;
+use std::sync::LazyLock;
 use zip::CompressionMethod;
 use zip::write::SimpleFileOptions;
 
@@ -76,8 +76,8 @@ fn is_chapter_html(p: &Path) -> bool {
 
 /// 从单章 HTML 里提取 `<title>...</title>` 文本。
 fn extract_title(html: &str) -> Option<String> {
-    static TITLE_RE: Lazy<Regex> =
-        Lazy::new(|| Regex::new(r"(?is)<title[^>]*>(.*?)</title>").expect("title re"));
+    static TITLE_RE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?is)<title[^>]*>(.*?)</title>").expect("title re"));
     TITLE_RE
         .captures(html)
         .and_then(|c| c.get(1))

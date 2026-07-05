@@ -1,8 +1,8 @@
 //! 杂项工具。对应 Java `util.CrawlUtils` 中除 `hasCf`/`request` 之外的部分。
 
-use once_cell::sync::Lazy;
 use rand::RngExt;
 use regex::Regex;
+use std::sync::LazyLock;
 
 use crate::config::AppConfig;
 use crate::models::EffectiveCrawl;
@@ -19,7 +19,7 @@ use crate::models::EffectiveCrawl;
 /// 调用时按出现顺序把每个值里的 `%s` 替换成 `args` 中下一个元素。
 /// 与 Java 端 `CrawlUtils#buildData` 行为一致。
 pub fn build_form_data(template: &str, args: &[&str]) -> Vec<(String, String)> {
-    static KV: Lazy<Regex> = Lazy::new(|| {
+    static KV: LazyLock<Regex> = LazyLock::new(|| {
         // 形如 `key: value`，value 直到下一个 `,` 或 `}`。
         // 容忍 key/value 两侧可选的引号，以及 value 内部的空白。
         Regex::new(r#"([\w\-]+)\s*:\s*("([^"]*)"|'([^']*)'|([^,}]*))"#).unwrap()

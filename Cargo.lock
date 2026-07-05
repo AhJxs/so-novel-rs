@@ -7111,7 +7111,6 @@ dependencies = [
  "lru",
  "mime_guess",
  "notify 8.2.0",
- "once_cell",
  "pdf_oxide",
  "rand 0.10.1",
  "regex",

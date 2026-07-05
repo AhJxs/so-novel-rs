@@ -28,9 +28,9 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use once_cell::sync::Lazy;
 use pdf_oxide::writer::{DocumentBuilder, DocumentMetadata, EmbeddedFont, PageSize};
 use regex::Regex;
+use std::sync::LazyLock;
 
 use crate::export::exporter::{
     ExportError, Exporter, sort_chapter_files, strip_html_tags, unique_path,
@@ -426,9 +426,10 @@ fn wrap_text(s: &str, max_w: f32, size: f32, m: &Measurer) -> Vec<String> {
 /// - 标题：第一个 `<h1>` 内文（剥标签 + 解码实体）；无则 None。
 /// - 段落：所有 `<p>` 内文，剥标签 + 解码实体，丢空。
 fn extract_chapter_content(body_html: &str) -> (Option<String>, Vec<String>) {
-    static H1_RE: Lazy<Regex> =
-        Lazy::new(|| Regex::new(r"(?is)<h1[^>]*>(.*?)</h1>").expect("h1 re"));
-    static P_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?is)<p[^>]*>(.*?)</p>").expect("p re"));
+    static H1_RE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?is)<h1[^>]*>(.*?)</h1>").expect("h1 re"));
+    static P_RE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?is)<p[^>]*>(.*?)</p>").expect("p re"));
 
     let title = H1_RE
         .captures(body_html)
@@ -447,9 +448,9 @@ fn extract_chapter_content(body_html: &str) -> (Option<String>, Vec<String>) {
 
 /// HTML 片段 → 纯文本：`<br>` 转空格 → 剥所有标签 → 解码实体 → 折叠空白。
 fn html_to_text(html: &str) -> String {
-    static BR_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?i)<br\s*/?>").expect("br re"));
-    static TAG_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?s)<[^>]+>").expect("tag re"));
-    static WS_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"\s+").expect("ws re"));
+    static BR_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)<br\s*/?>").expect("br re"));
+    static TAG_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?s)<[^>]+>").expect("tag re"));
+    static WS_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\s+").expect("ws re"));
 
     let no_br = BR_RE.replace_all(html, " ");
     let no_tag = TAG_RE.replace_all(&no_br, "");
@@ -459,8 +460,8 @@ fn html_to_text(html: &str) -> String {
 
 /// 解码常见 HTML 实体 + 数字实体（&#NN; / &#xHH;）。
 fn decode_entities(s: &str) -> String {
-    static ENT_RE: Lazy<Regex> =
-        Lazy::new(|| Regex::new(r"&#(x?)([0-9a-fA-F]+);|&([a-zA-Z]+);").expect("ent re"));
+    static ENT_RE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"&#(x?)([0-9a-fA-F]+);|&([a-zA-Z]+);").expect("ent re"));
     ENT_RE
         .replace_all(s, |caps: &regex::Captures| {
             // 数字实体 &#NN; / &#xHH;
@@ -498,8 +499,8 @@ fn decode_entities(s: &str) -> String {
 ///
 /// 找不到 `<body>` 时返回 None（由 caller 兜底用原文）。
 fn extract_body(html: &str) -> Option<String> {
-    static BODY_RE: Lazy<Regex> =
-        Lazy::new(|| Regex::new(r"(?is)<body[^>]*>(.*)</body>").expect("body re"));
+    static BODY_RE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?is)<body[^>]*>(.*)</body>").expect("body re"));
     BODY_RE
         .captures(html)
         .and_then(|c| c.get(1))
@@ -509,7 +510,7 @@ fn extract_body(html: &str) -> Option<String> {
 
 /// 删掉网页模板自带的翻页按钮栏 `<div class="bottom-bar">…上一页…下一页…</div>`。
 fn strip_nav_bar(body_html: &str) -> String {
-    static NAV_RE: Lazy<Regex> = Lazy::new(|| {
+    static NAV_RE: LazyLock<Regex> = LazyLock::new(|| {
         Regex::new(r#"(?is)<div[^>]*class="[^"]*bottom-bar[^"]*"[^>]*>.*?</div>"#).expect("nav re")
     });
     NAV_RE.replace_all(body_html, "").into_owned()

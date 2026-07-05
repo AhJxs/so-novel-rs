@@ -13,9 +13,9 @@
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use once_cell::sync::Lazy;
 use regex::Regex;
 use reqwest::Client;
+use std::sync::LazyLock;
 
 const CF_TITLES: &[&str] = &[
     "Just a moment...",
@@ -24,8 +24,8 @@ const CF_TITLES: &[&str] = &[
     "Checking your browser before accessing",
 ];
 
-static TITLE_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"(?is)<title[^>]*>(.*?)</title>").expect("title regex"));
+static TITLE_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?is)<title[^>]*>(.*?)</title>").expect("title regex"));
 
 /// 给定原始 HTML，判断是否是 Cloudflare 真人验证页。
 pub fn has_cloudflare(html: &str) -> bool {

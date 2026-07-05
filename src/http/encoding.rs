@@ -13,10 +13,10 @@
 //! 不直接吃 reqwest::Response 是为了让本函数能脱离 HTTP 上下文做单测。
 
 use encoding_rs::{Encoding, UTF_8};
-use once_cell::sync::Lazy;
 use regex::Regex;
+use std::sync::LazyLock;
 
-static META_CHARSET_RE: Lazy<Regex> = Lazy::new(|| {
+static META_CHARSET_RE: LazyLock<Regex> = LazyLock::new(|| {
     // 同时匹配 <meta charset="GBK"> 与
     // <meta http-equiv="Content-Type" content="text/html; charset=GBK">
     Regex::new(
