@@ -52,6 +52,73 @@ pub struct HealthInfo {
     active_tasks: usize,
 }
 
+/// GET /api/settings 返回的脱敏 DTO。
+///
+/// 关键差异 vs `AppConfig`:
+/// - 不含 `qidian_cookie` 明文（web 模式下 cookie 仅 GPUI 桌面端使用，
+///   web 端不需要也**不应该**看到明文 cookie —— 否则监听 0.0.0.0:8080 时
+///   任意能访问端口的客户端都能拉走用户的起点站 cookie）
+/// - 用 `has_qidian_cookie: bool` 替代，让 UI 仍能告知用户"已设置/未设置"
+/// - 字段顺序 / 命名与 `AppConfig` 完全一致，前端按字段名取，无破坏性变更
+#[derive(Serialize)]
+pub(crate) struct PublicSettings {
+    pub version: String,
+    pub theme_pref: crate::config::ThemePref,
+    pub language: crate::config::Language,
+    pub gh_proxy: String,
+    pub cf_bypass: String,
+    pub sidebar_collapsed: bool,
+    pub font_size: f32,
+    pub download_path: String,
+    pub ext_name: crate::config::ExportFormat,
+    pub txt_encoding: String,
+    pub preserve_chapter_cache: bool,
+    pub search_limit: Option<i32>,
+    pub search_filter: bool,
+    pub concurrency: Option<i32>,
+    pub min_interval: u32,
+    pub max_interval: u32,
+    pub enable_retry: bool,
+    pub max_retries: u32,
+    pub retry_min_interval: u32,
+    pub retry_max_interval: u32,
+    pub has_qidian_cookie: bool,
+    pub proxy_enabled: bool,
+    pub proxy_host: String,
+    pub proxy_port: u16,
+}
+
+impl From<&AppConfig> for PublicSettings {
+    fn from(cfg: &AppConfig) -> Self {
+        Self {
+            version: cfg.version.clone(),
+            theme_pref: cfg.theme_pref.clone(),
+            language: cfg.language,
+            gh_proxy: cfg.gh_proxy.clone(),
+            cf_bypass: cfg.cf_bypass.clone(),
+            sidebar_collapsed: cfg.sidebar_collapsed,
+            font_size: cfg.font_size,
+            download_path: cfg.download_path.clone(),
+            ext_name: cfg.ext_name,
+            txt_encoding: cfg.txt_encoding.clone(),
+            preserve_chapter_cache: cfg.preserve_chapter_cache,
+            search_limit: cfg.search_limit,
+            search_filter: cfg.search_filter,
+            concurrency: cfg.concurrency,
+            min_interval: cfg.min_interval,
+            max_interval: cfg.max_interval,
+            max_retries: cfg.max_retries,
+            enable_retry: cfg.enable_retry,
+            retry_min_interval: cfg.retry_min_interval,
+            retry_max_interval: cfg.retry_max_interval,
+            has_qidian_cookie: !cfg.qidian_cookie.trim().is_empty(),
+            proxy_enabled: cfg.proxy_enabled,
+            proxy_host: cfg.proxy_host.clone(),
+            proxy_port: cfg.proxy_port,
+        }
+    }
+}
+
 #[derive(Serialize)]
 pub(crate) struct SourceInfo {
     id: i32,
@@ -184,9 +251,9 @@ pub async fn source_test(
 
 pub async fn settings_get(
     State(state): State<SharedState>,
-) -> Result<Json<AppConfig>, (StatusCode, String)> {
+) -> Result<Json<PublicSettings>, (StatusCode, String)> {
     let cfg = rw_read("settings_get", &state.config)?;
-    Ok(Json(cfg.clone()))
+    Ok(Json(PublicSettings::from(&*cfg)))
 }
 
 #[derive(Deserialize)]

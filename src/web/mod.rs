@@ -3,6 +3,7 @@
 //! 提供 REST API 和 SSE 推送，让用户通过浏览器搜索、下载小说。
 //! 与 CLI 模式同构，直接调用底层 crawler / parser / export 函数。
 
+mod error;
 mod handlers;
 mod routes;
 

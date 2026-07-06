@@ -38,6 +38,7 @@ use anyhow::{Context, Result};
 use crate::config::AppConfig;
 use crate::http::client::{ClientOptions, build_async_client};
 use crate::models::Rule;
+use crate::util::lock::{mutex_or, rw_read_or, rw_write_or};
 
 /// 当前生效的 proxy 配置快照。`rebuild_proxy` 用它判断"配置是否真的变了"。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -129,11 +130,25 @@ impl HttpClients {
     /// 返回 owned 而非 `&` 是因为底层用 `RwLock` 保护：`RwLockReadGuard` 不能泄漏出引用。
     #[inline]
     pub fn for_rule(&self, rule: &Rule) -> reqwest::Client {
-        let guard = self.clients.read().expect("clients RwLock poisoned");
-        if rule.ignore_ssl {
-            guard.1.as_ref().clone()
-        } else {
-            guard.0.as_ref().clone()
+        match rw_read_or("for_rule", &self.clients) {
+            Ok(guard) => {
+                if rule.ignore_ssl {
+                    guard.1.as_ref().clone()
+                } else {
+                    guard.0.as_ref().clone()
+                }
+            }
+            Err(_) => {
+                // 锁 poison：退路拿 unsafe_ssl（哪怕可能坏，也比 worker panic 把整个 web 拖死好）。
+                // 二次 read 仍失败则返 reqwest::Client::new() 作 last resort。
+                self.clients
+                    .read()
+                    .map(|g| g.1.as_ref().clone())
+                    .unwrap_or_else(|_| {
+                        tracing::error!("for_rule: 二次 read 仍失败，返回 reqwest::Client::new()");
+                        reqwest::Client::new()
+                    })
+            }
         }
     }
 
@@ -142,23 +157,29 @@ impl HttpClients {
     /// 返回 `(gh_proxy_url, Arc<client>)` —— 调用方应自己判断 `gh_proxy_url.is_empty()`
     /// 再决定用这个 client 还是改走 `for_rule`。
     pub fn gh_proxy_pair(&self) -> (String, Arc<reqwest::Client>) {
-        let guard = self.gh_proxy.lock().expect("gh_proxy mutex poisoned");
-        (guard.0.clone(), Arc::clone(&guard.1))
+        // 锁 poison：返空配置 + safe client（调用方看到空 url 会走 for_rule 路径，
+        // 不会用坏掉的 gh_proxy client）。
+        match mutex_or("gh_proxy_pair", &self.gh_proxy) {
+            Ok(guard) => (guard.0.clone(), Arc::clone(&guard.1)),
+            Err(_) => {
+                let fallback = self
+                    .clients
+                    .read()
+                    .ok()
+                    .map(|g| Arc::clone(&g.0))
+                    .unwrap_or_else(|| Arc::new(reqwest::Client::new()));
+                (String::new(), fallback)
+            }
+        }
     }
-
     /// proxy 配置变了 → 重建 safe + unsafe_ssl 两个 client。
     ///
-    /// 短路逻辑：proxy 元组未变 → 直接 return Ok，不重建。这样改
-    /// timeout / theme / language 时不会误触发 TLS 重连。
     pub fn rebuild_proxy(&self, cfg: &AppConfig) -> Result<()> {
         let new_sig = ProxySignature::from_cfg(cfg);
-        let old_sig = {
-            let guard = self
-                .proxy_signature
-                .lock()
-                .expect("proxy_signature poisoned");
-            guard.clone()
-        };
+        let old_sig = mutex_or("rebuild_proxy:read_sig", &self.proxy_signature)
+            .map_err(anyhow::Error::msg)
+            .context("proxy_signature 锁 poison")?
+            .clone();
         if old_sig == new_sig {
             return Ok(());
         }
@@ -175,15 +196,16 @@ impl HttpClients {
                 .context("重建 unsafe_ssl HTTP client 失败")?,
         );
         {
-            let mut guard = self.clients.write().expect("clients RwLock poisoned");
+            let mut guard = rw_write_or("rebuild_proxy:write_clients", &self.clients)
+                .map_err(anyhow::Error::msg)
+                .context("clients 锁 poison")?;
             guard.0 = safe;
             guard.1 = unsafe_ssl;
         }
 
-        let mut guard = self
-            .proxy_signature
-            .lock()
-            .expect("proxy_signature poisoned");
+        let mut guard = mutex_or("rebuild_proxy:write_sig", &self.proxy_signature)
+            .map_err(anyhow::Error::msg)
+            .context("proxy_signature 锁 poison")?;
         *guard = new_sig;
         Ok(())
     }
@@ -192,7 +214,8 @@ impl HttpClients {
     /// 用于断言"rebuild 真的换了实例"。
     #[cfg(test)]
     fn safe_client_ptr(&self) -> *const reqwest::Client {
-        let guard = self.clients.read().expect("clients RwLock poisoned");
+        // 测试路径上锁不会 poison；panic 立即可见，比静默返错更易调试。
+        let guard = self.clients.read().expect("clients RwLock poisoned (test)");
         Arc::as_ptr(&guard.0)
     }
 }

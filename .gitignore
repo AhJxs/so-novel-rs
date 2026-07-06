@@ -20,3 +20,13 @@
 /.claude/
 /.codegraph/
 /tasks/
+
+# OS / IDE 临时文件（macOS / Windows / VSCode / IntelliJ / 任意编辑器）
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.githooks.local

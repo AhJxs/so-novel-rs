@@ -19,6 +19,7 @@ import type {
   StartDownloadResult,
   Task,
 } from './types'
+import { consumeSse, type SseEvent } from './sse'
 
 const API_BASE = '/api'
 
@@ -43,75 +44,8 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
   return (text ? JSON.parse(text) : undefined) as T
 }
 
-// ─── SSE 解析工具 ─────────────────────────────────────────────
-// axum SSE 每条形如 `event: <name>\ndata: <json>\n\n`。我们按 event 名分发，解析 data 行。
-
-interface SseEvent {
-  event: string
-  data: string
-}
-
-/**
- * 把一条 SSE 响应流解析为事件序列，逐条回调。
- * 复用于搜索与下载两个流式接口。
- */
-async function consumeSse(
-  res: Response,
-  onEvent: (ev: SseEvent) => void,
-  signal?: AbortSignal,
-): Promise<void> {
-  if (!res.body) return
-  const reader = res.body.getReader()
-  const decoder = new TextDecoder()
-  let buffer = ''
-
-  const close = async () => {
-    try {
-      await reader.cancel()
-    } catch {
-      /* ignore */
-    }
-  }
-
-  try {
-    while (true) {
-      if (signal?.aborted) {
-        await close()
-        return
-      }
-      const { done, value } = await reader.read()
-      if (done) break
-      buffer += decoder.decode(value, { stream: true })
-
-      // SSE 以空行分隔事件；buffer 末尾可能含不完整块，保留。
-      let sep: number
-      while ((sep = buffer.indexOf('\n\n')) !== -1) {
-        const raw = buffer.slice(0, sep)
-        buffer = buffer.slice(sep + 2)
-        const ev = parseSseBlock(raw)
-        if (ev) onEvent(ev)
-      }
-    }
-  } finally {
-    await close()
-  }
-}
-
-function parseSseBlock(raw: string): SseEvent | null {
-  let event = 'message'
-  const dataLines: string[] = []
-  for (const line of raw.split('\n')) {
-    if (line.startsWith('event:')) {
-      event = line.slice(6).trim()
-    } else if (line.startsWith('data:')) {
-      dataLines.push(line.slice(5).replace(/^ /, ''))
-    }
-  }
-  if (dataLines.length === 0) return null
-  return { event, data: dataLines.join('\n') }
-}
-
 // ─── 搜索（SSE） ──────────────────────────────────────────────
+
 // GET /api/search?keyword=&source_id=&limit=
 // event "result" → SearchStreamEvent；event "done" → SearchDoneEvent（流结束）。
 

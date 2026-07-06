@@ -9,6 +9,10 @@ export default defineConfig({
   server: { proxy: { '/api': 'http://localhost:8080' } },
   build: {
     outDir: 'dist',
+    // 生产 sourcemap: 'hidden' 生成 .map 但不在 JS 末尾加 //# sourceMappingURL 注释，
+    // 体积略增 ~10MB 给 Sentry / 用户报错用，公开文件不带 map 链接避免暴露源码结构。
+    // dev 默认 true（Vite 默认行为）。
+    sourcemap: 'hidden',
     // 单 chunk ~720kB（gzip 224kB），主体是 react + react-aria + heroui 全量
     // 组件 + i18next。传输体积尚可接受，暂时不拆 manualChunks：拆完后单
     // 次首屏体积不降（要下的 vendor 总量一样），但要复杂化部署/缓存策略。

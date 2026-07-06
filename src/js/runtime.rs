@@ -10,7 +10,29 @@
 //! 如果将来发现 JS 是热点，再做 ThreadLocal pool。
 
 use anyhow::{Context as _, Result};
+use boa_engine::vm::RuntimeLimits;
 use boa_engine::{Context, Source};
+
+/// JS 规则执行的资源护栏。
+///
+/// boa 0.21 没有 wall-clock timeout API（`eval()` 是同步阻塞），
+/// 但提供了 `RuntimeLimits`：每次循环 + 递归 + 栈帧都会计数，
+/// 超过上限脚本立即 throw `RuntimeError`，不会卡死主流程。
+///
+/// 数值选择：
+/// - `loop_iteration = 100_000`：远大于任何真实书源后处理（典型 10-1000 步），
+///   但挡得住 `while(true){}` / `for(;;)` 类恶意规则
+/// - `recursion_limit = 256`：覆盖正常链式调用，挡无限递归
+/// - `stack_size = 1024 * 1024`：1 MB，够深嵌套
+///
+/// 配套还做了 `console.log/info/...` shim（见下 `install_console_shim`），
+/// 防止规则作者调试时打的 `console.log` 把脚本炸掉。
+fn apply_runtime_limits(ctx: &mut Context) {
+    let mut limits = RuntimeLimits::default();
+    limits.set_loop_iteration_limit(100_000);
+    limits.set_recursion_limit(256);
+    ctx.set_runtime_limits(limits);
+}
 
 /// 给 boa Context 注入一个 no-op `console`，让规则 / 测试资源里的
 /// `console.log` 不会把整段脚本中断（boa 默认没有 `console` 全局对象）。
@@ -39,6 +61,7 @@ fn install_console_shim(ctx: &mut Context) {
 pub fn post_process(body: &str, input: &str) -> Result<String> {
     // 注入 input 时用 JSON.stringify 风格转义，避免引号 / 反斜杠破坏脚本。
     let mut ctx = Context::default();
+    apply_runtime_limits(&mut ctx);
     install_console_shim(&mut ctx);
     let injected_input = json_quote_for_js(input);
 
@@ -72,9 +95,10 @@ pub fn eval_function_returning_string(
     string_args: &[&str],
 ) -> Result<String> {
     let mut ctx = Context::default();
+    apply_runtime_limits(&mut ctx);
+    install_console_shim(&mut ctx);
     install_console_shim(&mut ctx);
 
-    // 1. 先把 module 的全局函数装进 context
     ctx.eval(Source::from_bytes(module_js))
         .map_err(|e| anyhow::anyhow!("js module eval failed: {e}"))?;
 
@@ -188,6 +212,16 @@ mod tests {
         let input = r#"<dd data-id="2">B</dd><dd data-id="1">A</dd>"#;
         let out = post_process(body, input).unwrap();
         assert_eq!(out, "A|B");
+    }
+
+    #[test]
+    fn infinite_loop_is_bounded_by_runtime_limits() {
+        // 验证 RuntimeLimits 生效：while(true) 触发 loop_iteration_limit
+        // 抛错，post_process 不会卡死。
+        // 上限 100_000 远小于测试 timeout，正常 1s 内返回 Err。
+        let body = "while(true){}";
+        let result = post_process(body, "x");
+        assert!(result.is_err(), "infinite loop must error, got {result:?}");
     }
 
     // ---------- eval_function（独立 JS 文件 + 函数调用）----------

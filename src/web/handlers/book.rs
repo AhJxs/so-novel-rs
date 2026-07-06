@@ -12,6 +12,7 @@ use crate::models::{Book, Rule};
 use crate::parser;
 
 use super::super::SharedState;
+use super::super::error::WebError;
 use super::lock::rw_read;
 
 #[derive(Deserialize)]
@@ -38,8 +39,9 @@ fn extract_config_and_rule(
 pub async fn book_detail(
     State(state): State<SharedState>,
     Query(params): Query<BookDetailParams>,
-) -> Result<Json<Book>, (StatusCode, String)> {
-    let (config, rule) = extract_config_and_rule(&state, params.source_id)?;
+) -> Result<Json<Book>, WebError> {
+    let (config, rule) = extract_config_and_rule(&state, params.source_id)
+        .map_err(|_| WebError::NotFound("书源未找到"))?;
 
     let source = Source::from(rule, &config);
     let client = state.http.for_rule(&source.rule);
@@ -47,9 +49,7 @@ pub async fn book_detail(
     let cf = (!config.cf_bypass.trim().is_empty()).then_some(config.cf_bypass.as_str());
     let qc = (!config.qidian_cookie.trim().is_empty()).then_some(config.qidian_cookie.as_str());
 
-    let book = parser::parse_book_detail(&client, &source.rule, &params.url, cf, qc)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:#}")))?;
+    let book = parser::parse_book_detail(&client, &source.rule, &params.url, cf, qc).await?;
 
     Ok(Json(book))
 }
@@ -57,16 +57,16 @@ pub async fn book_detail(
 pub async fn book_toc(
     State(state): State<SharedState>,
     Query(params): Query<BookDetailParams>,
-) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    let (config, rule) = extract_config_and_rule(&state, params.source_id)?;
+) -> Result<Json<serde_json::Value>, WebError> {
+    let (config, rule) = extract_config_and_rule(&state, params.source_id)
+        .map_err(|_| WebError::NotFound("书源未找到"))?;
 
     let source = Source::from(rule, &config);
     let client = state.http.for_rule(&source.rule);
     let cancel = CancelToken::new();
 
-    let (book, chapters) = crawler::resolve_book(&config, &client, &source, &params.url, &cancel)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:#}")))?;
+    let (book, chapters) =
+        crawler::resolve_book(&config, &client, &source, &params.url, &cancel).await?;
 
     Ok(Json(serde_json::json!({
         "book": book,

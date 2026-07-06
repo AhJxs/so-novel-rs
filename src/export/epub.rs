@@ -16,7 +16,7 @@
 //!   作为输入参数，由调度层负责 soft-skip 决策。
 
 use std::fs::File;
-use std::io::{BufWriter, Read, Write};
+use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 
 use epub_builder::{EpubBuilder, EpubContent, EpubVersion, ReferenceType, ZipLibrary};
@@ -123,15 +123,16 @@ pub fn merge_with_cover_bytes(
     let digit = total_chapters.to_string().len().max(3);
     let started = std::time::Instant::now();
     for (idx, path) in files.iter().enumerate() {
-        let mut buf = Vec::new();
-        File::open(path)?.read_to_end(&mut buf)?;
+        // 流式：File 直接作为 R: Read 传给 EpubContent，避免 read_to_end 把整章
+        // 字节先吃进 Vec<u8> 再交出去。1000 章 * 50KB = 50MB 内存 → 流式后约 0。
+        let file = File::open(path)?;
         let title =
             chapter_title_from_filename(path).unwrap_or_else(|| format!("第 {} 章", idx + 1));
         let id = pad_zero((idx + 1) as u32, digit);
         let entry_name = format!("{id}.xhtml");
         builder
             .add_content(
-                EpubContent::new(&entry_name, &buf[..])
+                EpubContent::new(&entry_name, file)
                     .title(title)
                     .reftype(ReferenceType::Text),
             )
