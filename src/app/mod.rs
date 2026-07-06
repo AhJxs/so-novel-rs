@@ -106,7 +106,7 @@ pub struct AppModel {
     ///
     /// 为什么用 plain enum：`app/` 想保持 UI 框架解耦（CLAUDE.md 明确要求）；`UIEvent`
     /// 是业务层 → UI 层的事件桥，零 `gpui` / `gpui_component` 依赖。
-    pub pending_notifications: Vec<UIEvent>,
+    pub(crate) pending_notifications: Vec<UIEvent>,
 
     /// 列表渲染缓存（Library / Search / Tasks 三页共用）。
     /// 详见 `crate::app::list_cache`。
@@ -524,9 +524,13 @@ impl AppModel {
         let abs = if dir_raw.is_absolute() {
             dir_raw
         } else {
-            std::env::current_dir()
-                .map(|cwd| cwd.join(&dir_raw))
-                .unwrap_or(dir_raw)
+            match std::env::current_dir() {
+                Ok(cwd) => cwd.join(&dir_raw),
+                Err(e) => {
+                    tracing::warn!("获取当前目录失败: {e:#}，使用原始路径");
+                    dir_raw
+                }
+            }
         };
 
         // 先在主线程重置 entries / scanned_dir / pending_delete（轻量、即时反馈）。

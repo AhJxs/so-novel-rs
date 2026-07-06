@@ -97,7 +97,6 @@ pub fn eval_function_returning_string(
     let mut ctx = Context::default();
     apply_runtime_limits(&mut ctx);
     install_console_shim(&mut ctx);
-    install_console_shim(&mut ctx);
 
     ctx.eval(Source::from_bytes(module_js))
         .map_err(|e| anyhow::anyhow!("js module eval failed: {e}"))?;
