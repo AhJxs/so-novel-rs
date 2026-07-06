@@ -57,6 +57,7 @@ pub fn spawn_resolve_toc(
         %book_url,
     );
     let span_for_instrument = span.clone();
+    let wakeup = ctx.wakeup.clone();
 
     ctx.runtime.spawn(
         async move {
@@ -93,6 +94,7 @@ pub fn spawn_resolve_toc(
                 url: book_url,
                 state,
             });
+            wakeup.notify();
         }
         .instrument(span_for_instrument),
     );

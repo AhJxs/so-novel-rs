@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use super::super::events::WakeupHandle;
 use super::super::update_state::UpdateState;
 use crate::config::AppConfig;
 use crate::http::HttpClients;
@@ -14,6 +15,7 @@ pub fn spawn_update_check(
     _config: &AppConfig,
     http: Arc<HttpClients>,
     runtime: &tokio::runtime::Runtime,
+    wakeup: &WakeupHandle,
     update_state: &mut UpdateState,
 ) {
     if update_state.checking {
@@ -27,8 +29,10 @@ pub fn spawn_update_check(
     update_state.rx = Some(rx);
 
     let http = Arc::clone(&http);
+    let wakeup = wakeup.clone();
     runtime.spawn(async move {
         let result = super::super::update_state::check_github_latest_release(&http).await;
         let _ = tx.send(result);
+        wakeup.notify();
     });
 }

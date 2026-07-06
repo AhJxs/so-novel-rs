@@ -346,6 +346,7 @@ impl AppModel {
             &self.config,
             Arc::clone(&self.http),
             self.runtime,
+            &self.wakeup,
             &mut self.search,
         )
     }
@@ -357,6 +358,7 @@ impl AppModel {
             &self.config,
             Arc::clone(&self.http),
             self.runtime,
+            &self.wakeup,
             &mut self.search,
             idx,
         );
@@ -502,6 +504,7 @@ impl AppModel {
             &self.config,
             Arc::clone(&self.http),
             self.runtime,
+            &self.wakeup,
             &mut self.update_state,
         );
     }

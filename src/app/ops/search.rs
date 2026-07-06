@@ -10,6 +10,7 @@ use crate::http::HttpClients;
 use crate::models::Source;
 use crate::models::{Book, Rule};
 
+use super::super::events::WakeupHandle;
 use super::super::search_state::{DetailEvent, DetailState, SourceSearchEvent, SourceStatus};
 use super::super::trace::{TraceId, sub};
 
@@ -19,6 +20,7 @@ pub fn spawn_search(
     config: &AppConfig,
     http: Arc<HttpClients>,
     runtime: &tokio::runtime::Runtime,
+    wakeup: &WakeupHandle,
     search: &mut super::super::search_state::SearchState,
 ) -> bool {
     let keyword = search.keyword.trim().to_string();
@@ -86,6 +88,8 @@ pub fn spawn_search(
 
     // 顶层 trace_id：在所有 spawn 之前 mint；通过 `info_span!` 跨 .await 传播。
     // 之后所有 `tracing::info!/warn!`（含 crawler 内部）都会自动带 trace_id 字段。
+    let wakeup = wakeup.clone();
+
     let trace_id = TraceId::mint();
     let span = tracing::info_span!(
         sub::SEARCH,
@@ -166,6 +170,7 @@ pub fn spawn_search(
                             source_name: name.clone(),
                             result: Err("后台任务异常退出".to_string()),
                         });
+                        wakeup.notify();
                     }
                 }
             }
@@ -189,6 +194,7 @@ pub fn select_search_result(
     config: &AppConfig,
     http: Arc<HttpClients>,
     runtime: &tokio::runtime::Runtime,
+    wakeup: &WakeupHandle,
     search: &mut super::super::search_state::SearchState,
     idx: usize,
 ) {
@@ -233,6 +239,8 @@ pub fn select_search_result(
 
     // 详情拉取 mint 一个新 trace_id —— 它是一次独立的"动作"（不与搜索本身
     // 共享 trace_id，方便 grep `trace_id=N` 时只看一次详情拉取）。
+    let wakeup = wakeup.clone();
+
     let trace_id = TraceId::mint();
     let span = tracing::info_span!(
         sub::DETAIL,
@@ -271,6 +279,7 @@ pub fn select_search_result(
             url: url_for_event,
             state,
         });
+        wakeup.notify();
     }
     .instrument(span_for_task);
     runtime.spawn(task);
