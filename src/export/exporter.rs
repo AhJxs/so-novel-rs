@@ -114,6 +114,30 @@ pub fn write_chapter_files(
     Ok(total)
 }
 
+/// 把单章写入 chapters_dir（并发安全：order 唯一不会冲突）。
+/// 不检查文件已存在（全新下载不可能冲突），避免每章一次额外 syscall。
+pub fn write_single_chapter(
+    dir: &Path,
+    order: u32,
+    title: &str,
+    body: &str,
+    format: ExportFormat,
+    total_chapters: usize,
+) -> std::io::Result<PathBuf> {
+    let digit_count = total_chapters.to_string().len().max(3);
+    let order_str = pad_zero(order, digit_count);
+    let safe_title = sanitize_filename(title);
+    let filename = match format {
+        ExportFormat::Html => format!("{order_str}_.html"),
+        ExportFormat::Txt => format!("{order_str}_{safe_title}.txt"),
+        ExportFormat::Epub => format!("{order_str}_{safe_title}.html"),
+        ExportFormat::Pdf => format!("{order_str}_.html"),
+    };
+    let path = dir.join(&filename);
+    std::fs::write(&path, body)?;
+    Ok(path)
+}
+
 /// 按"前缀数字"升序枚举目录下的章节文件。
 /// 跳过 `0_`（书目索引、封面这类）开头的辅助文件以避免被当成正文章节。
 pub fn sort_chapter_files(dir: &Path) -> Result<Vec<PathBuf>, ExportError> {

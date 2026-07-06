@@ -172,7 +172,6 @@ pub fn ts_fmt(key: &'static str, vars: &[(&str, &str)]) -> TStr {
 pub fn ts_fmt_cached(key: &'static str, vars: &[(&str, &str)]) -> TStr {
     use std::collections::HashMap;
     use std::sync::Mutex;
-    use std::sync::OnceLock;
 
     static TPL_CACHE: OnceLock<Mutex<HashMap<&'static str, String>>> = OnceLock::new();
     let cache = TPL_CACHE.get_or_init(|| Mutex::new(HashMap::new()));

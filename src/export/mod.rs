@@ -13,6 +13,6 @@ pub mod txt;
 
 pub use exporter::{
     ExportError, Exporter, RenderedChapter, build_book_dir_name, exporter_for, sort_chapter_files,
-    write_chapter_files,
+    write_chapter_files, write_single_chapter,
 };
 pub use render::{RenderTarget, render_chapter};

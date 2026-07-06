@@ -34,8 +34,7 @@ use tokio::sync::{Notify, Semaphore, mpsc};
 
 use crate::config::AppConfig;
 use crate::export::{
-    ExportError, RenderTarget, RenderedChapter, build_book_dir_name, exporter_for,
-    write_chapter_files,
+    ExportError, RenderTarget, build_book_dir_name, exporter_for, write_single_chapter,
 };
 use crate::models::Source;
 use crate::models::{Book, Chapter};
@@ -360,6 +359,9 @@ pub async fn download_chapters(
     let mut handles = Vec::with_capacity(chapters.len());
     let chapter_count = chapters.len();
 
+    let format = cfg.ext_name;
+    let digit_count = chapters.len().to_string().len().max(3);
+
     for chapter in chapters {
         if cancel.is_cancelled() {
             // dispatch 阶段被取消：dir 里还没写过任何章节文件，安全清理。
@@ -381,6 +383,11 @@ pub async fn download_chapters(
         // 目标语言从界面语言 (`Language`) 推导 —— 合并设置后用户只设 Language。
         let rule_lang = source.rule.language.clone();
         let target_lang = cfg.language.to_book_target_lang();
+
+        // per-task write path
+        let ch_dir = chapters_dir.clone();
+        let ch_format = format;
+        let ch_digit_count = digit_count;
 
         handles.push(tokio::spawn(async move {
             // 限并发。`acquire_owned` 当前 tokio 实现在 Semaphore 不被 close 的情况
@@ -463,15 +470,22 @@ pub async fn download_chapters(
                         &rule_lang,
                         &target_lang,
                     );
+                    // per-chapter write: persist immediately
+                    if let Err(e) = write_single_chapter(
+                        &ch_dir,
+                        order,
+                        &final_title,
+                        &body,
+                        ch_format,
+                        ch_digit_count,
+                    ) {
+                        tracing::warn!(order, error = %e, "chapter file write failed (skipped)");
+                    }
                     let _ = progress.send(Progress::ChapterDone {
                         index: order,
                         title: final_title.clone(),
                     });
-                    ChapterOutcome::Done(RenderedChapter {
-                        order,
-                        title: final_title,
-                        body,
-                    })
+                    ChapterOutcome::Done
                 }
                 Err(e) => {
                     let reason = format!("{e:#}");
@@ -498,11 +512,11 @@ pub async fn download_chapters(
     // 5. 收尾。同时用 select! race "全部 join" 与 "cancel"：
     //    - 用户取消 → 立即 abort 所有 chapter handle、发 Progress::Cancelled、return
     //    - 正常完成 → 收 rendered
-    let mut rendered: Vec<RenderedChapter> = Vec::new();
+    let mut rendered_count = 0usize;
     let drain_handles = async {
         for h in &mut handles {
             match h.await {
-                Ok(ChapterOutcome::Done(r)) => rendered.push(r),
+                Ok(ChapterOutcome::Done) => rendered_count += 1,
                 Ok(ChapterOutcome::Failed) => {}
                 Ok(ChapterOutcome::Cancelled) => {}
                 Err(join_err) => {
@@ -519,7 +533,7 @@ pub async fn download_chapters(
             for h in &handles {
                 h.abort();
             }
-            // 章节文件要等到 select! 之后的 write_chapter_files 才落盘，
+            // 章节文件在 task 内部已完成写盘（或未能写入），
             // 所以取消时 chapters_dir 一定是空的（除非用户事先放过文件） — 直接清理。
             cleanup_chapters_dir_if_empty(&chapters_dir);
             let _ = progress.send(Progress::Cancelled);
@@ -533,18 +547,13 @@ pub async fn download_chapters(
         let _ = progress.send(Progress::Cancelled);
         return Err(CrawlerError::Cancelled);
     }
-    if rendered.is_empty() {
+    if rendered_count == 0 {
         // 所有章节都失败：跟取消同等处理 — dir 还是空的，清掉。
         cleanup_chapters_dir_if_empty(&chapters_dir);
         return Err(CrawlerError::EmptyToc);
     }
 
-    // 按 order 排序（spawn 出来的 Future 完成顺序不保证）
-    rendered.sort_by_key(|r| r.order);
-
-    // 6. 写章节文件 + 导出
-    write_chapter_files(&chapters_dir, &rendered, cfg.ext_name)
-        .map_err(|e| CrawlerError::Client(format!("write chapters: {e:#}")))?;
+    // 6. 导出（章节文件已在每个 task 中写入 chapters_dir）
 
     // 封面：仅 EPUB 才下载；失败 soft-skip。
     let cover_bytes = if matches!(render_target, RenderTarget::Epub) {
@@ -572,7 +581,6 @@ pub async fn download_chapters(
         output_path: final_path.clone(),
     });
 
-    let rendered_count = rendered.len();
     // 终态日志已由 ops/download.rs 的 `下载任务终止 outcome=ok` 覆盖；
     // 这里留 debug 级用于排查"为什么声称 1454 章只渲染了 1400 章"之类的细节。
     // `book` / `chapters` 已在 `#[tracing::instrument]` 的 span 字段里 —— 不重复带。
@@ -587,7 +595,7 @@ pub async fn download_chapters(
 }
 
 enum ChapterOutcome {
-    Done(RenderedChapter),
+    Done,
     /// 失败原因已通过 `Progress::ChapterFailed` 推给 UI，这里无需再带载荷。
     Failed,
     /// 取消时章节对象不再使用，用 unit 变体。
