@@ -77,6 +77,7 @@ pub(crate) fn run_download(
     let opts = crawler::DownloadOptions {
         progress: tx,
         cancel: cancel.clone(),
+        notify: None,
     };
 
     // 是否走范围下载路径（让 consumer 在 BookResolved 时跳过"共 N 章"那行，

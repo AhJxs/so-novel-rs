@@ -140,6 +140,10 @@ impl Clone for CancelToken {
 pub struct DownloadOptions {
     pub progress: mpsc::UnboundedSender<Progress>,
     pub cancel: CancelToken,
+    /// Optional wakeup callback: called after each progress.send()
+    /// to let GPUI's drain_loop pick up events immediately
+    /// instead of waiting for the 100ms poll interval.
+    pub notify: Option<std::sync::Arc<dyn Fn() + Send + Sync>>,
 }
 
 /// 入口：抓一本书并导出。**全 async**：内部直接 await 各级 parser，
@@ -164,6 +168,7 @@ pub async fn download_book(
 ) -> Result<PathBuf, CrawlerError> {
     let cancel = opts.cancel.clone();
     let progress = opts.progress.clone();
+    let notify = opts.notify.clone();
 
     let (book, toc) = resolve_book(cfg, client, source, book_url, &cancel).await?;
 
@@ -177,9 +182,15 @@ pub async fn download_book(
         book: Box::new(book.clone()),
         total_chapters: toc.len(),
     });
+    if let Some(ref n) = notify {
+        n()
+    }
 
     if cancel.is_cancelled() {
         let _ = progress.send(Progress::Cancelled);
+        if let Some(ref n) = notify {
+            n()
+        }
         return Err(CrawlerError::Cancelled);
     }
 
@@ -325,7 +336,11 @@ pub async fn download_chapters(
     chapters: Vec<Chapter>,
     opts: DownloadOptions,
 ) -> Result<PathBuf, CrawlerError> {
-    let DownloadOptions { progress, cancel } = opts;
+    let DownloadOptions {
+        progress,
+        cancel,
+        notify,
+    } = opts;
 
     if chapters.is_empty() {
         return Err(CrawlerError::EmptyToc);
@@ -367,6 +382,9 @@ pub async fn download_chapters(
             // dispatch 阶段被取消：dir 里还没写过任何章节文件，安全清理。
             cleanup_chapters_dir_if_empty(&chapters_dir);
             let _ = progress.send(Progress::Cancelled);
+            if let Some(ref n) = notify {
+                n()
+            }
             return Err(CrawlerError::Cancelled);
         }
         let permit = Arc::clone(&semaphore);
@@ -388,6 +406,7 @@ pub async fn download_chapters(
         let ch_dir = chapters_dir.clone();
         let ch_format = format;
         let ch_digit_count = digit_count;
+        let ch_notify = notify.clone();
 
         handles.push(tokio::spawn(async move {
             // 限并发。`acquire_owned` 当前 tokio 实现在 Semaphore 不被 close 的情况
@@ -485,6 +504,9 @@ pub async fn download_chapters(
                         index: order,
                         title: final_title.clone(),
                     });
+                    if let Some(ref n) = ch_notify {
+                        n()
+                    }
                     ChapterOutcome::Done
                 }
                 Err(e) => {
@@ -503,6 +525,9 @@ pub async fn download_chapters(
                         title: title.clone(),
                         reason,
                     });
+                    if let Some(ref n) = ch_notify {
+                        n()
+                    }
                     ChapterOutcome::Failed
                 }
             }
@@ -537,6 +562,7 @@ pub async fn download_chapters(
             // 所以取消时 chapters_dir 一定是空的（除非用户事先放过文件） — 直接清理。
             cleanup_chapters_dir_if_empty(&chapters_dir);
             let _ = progress.send(Progress::Cancelled);
+            if let Some(ref n) = notify { n() }
             return Err(CrawlerError::Cancelled);
         }
         () = drain_handles => {}
@@ -545,6 +571,9 @@ pub async fn download_chapters(
     if cancel.is_cancelled() {
         cleanup_chapters_dir_if_empty(&chapters_dir);
         let _ = progress.send(Progress::Cancelled);
+        if let Some(ref n) = notify {
+            n()
+        }
         return Err(CrawlerError::Cancelled);
     }
     if rendered_count == 0 {
@@ -580,6 +609,9 @@ pub async fn download_chapters(
     let _ = progress.send(Progress::Finished {
         output_path: final_path.clone(),
     });
+    if let Some(ref n) = notify {
+        n()
+    }
 
     // 终态日志已由 ops/download.rs 的 `下载任务终止 outcome=ok` 覆盖；
     // 这里留 debug 级用于排查"为什么声称 1454 章只渲染了 1400 章"之类的细节。

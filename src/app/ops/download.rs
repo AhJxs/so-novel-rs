@@ -31,7 +31,6 @@ pub(crate) struct OpsCtx<'a> {
     pub runtime: &'a tokio::runtime::Runtime,
     /// 唤醒信号 sender：producer 写入 mpsc 后调 `notify()` 让 drain_loop
     /// 立即排空，不必等 100ms 兜底。详见 `crate::app::events::WakeupHandle`。
-    #[allow(dead_code)]
     pub wakeup: &'a WakeupHandle,
 }
 
@@ -168,6 +167,8 @@ pub fn spawn_download_range(
         book: Box::new(book.clone()),
         total_chapters: total,
     });
+    let wakeup_guard = ctx.wakeup.clone();
+    wakeup_guard.notify();
 
     // 顶层 trace_id：一次下载 = 一个 trace_id；后续所有阶段共享。
     let trace_id = TraceId::mint();
@@ -184,6 +185,10 @@ pub fn spawn_download_range(
     let started = std::time::Instant::now();
     let book_name = target.book_name.clone();
 
+    drop(tx);
+
+    let wakeup_inner = ctx.wakeup.clone();
+
     ctx.runtime.spawn(
         async move {
             let Some(rule) = rule else {
@@ -198,19 +203,20 @@ pub fn spawn_download_range(
             };
             let source = Source::from(rule, &cfg);
             let client = http.for_rule(&source.rule);
-            // 留一个 sender 副本用于失败时发 Progress::Failed（tx_for_task 会 move 进 opts）。
             let tx_for_failure = tx_for_task.clone();
+            let notify: std::option::Option<
+                std::sync::Arc<dyn Fn() + std::marker::Send + std::marker::Sync>,
+            > = Some(std::sync::Arc::new(move || wakeup_inner.notify()));
             let opts = DownloadOptions {
                 progress: tx_for_task,
                 cancel: cancel_for_task,
+                notify,
             };
             let result = download_chapters(&cfg, &client, &source, &book, chapters, opts).await;
             log_download_outcome(result, &book_name, started, "（指定范围）", &tx_for_failure);
         }
         .instrument(span_for_instrument),
     );
-
-    drop(tx);
 
     let task = DownloadTask {
         id,
@@ -261,6 +267,7 @@ pub fn spawn_download(
     let span_for_instrument = span.clone();
     let started = std::time::Instant::now();
     let book_name = target.book_name.clone();
+    let wakeup_inner = ctx.wakeup.clone();
 
     ctx.runtime.spawn(
         async move {
@@ -278,9 +285,13 @@ pub fn spawn_download(
             let client = http.for_rule(&source.rule);
             // 留一个 sender 副本用于失败时发 Progress::Failed（tx_for_task 会 move 进 opts）。
             let tx_for_failure = tx_for_task.clone();
+            let notify: std::option::Option<
+                std::sync::Arc<dyn Fn() + std::marker::Send + std::marker::Sync>,
+            > = Some(std::sync::Arc::new(move || wakeup_inner.notify()));
             let opts = DownloadOptions {
                 progress: tx_for_task,
                 cancel: cancel_for_task,
+                notify,
             };
             let result = download_book(&cfg, &client, &source, &book_url, opts).await;
             log_download_outcome(result, &book_name, started, "", &tx_for_failure);
