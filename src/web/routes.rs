@@ -62,14 +62,14 @@ pub fn build_router(state: SharedState, session_store: SessionStore<SessionNullP
         .route("/library/{filename}", delete(handlers::library::library_delete))
         .route("/files/{filename}", get(handlers::library::file_download))
         // 书源
-        .route("/sources", get(handlers::misc::sources_list))
-        .route("/sources/{id}/toggle", post(handlers::misc::source_toggle))
-        .route("/sources/{id}/test", post(handlers::misc::source_test))
+        .route("/sources", get(handlers::sources::sources_list))
+        .route("/sources/{id}/toggle", post(handlers::sources::source_toggle))
+        .route("/sources/{id}/test", post(handlers::sources::source_test))
         // 设置
-        .route("/settings", get(handlers::misc::settings_get))
-        .route("/settings", put(handlers::misc::settings_put))
+        .route("/settings", get(handlers::settings::settings_get))
+        .route("/settings", put(handlers::settings::settings_put))
         // 健康检查
-        .route("/health", get(handlers::misc::health))
+        .route("/health", get(handlers::health::health))
         .with_state(state);
 
     Router::new()
