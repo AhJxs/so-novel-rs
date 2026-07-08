@@ -1,28 +1,27 @@
-//! 详情页解析。对应 Java `parse.BookParser`。
+//! 详情页 HTML 解析 + 主流程 (PR #17 拆分, 2026-07-08).
 //!
-//! 阶段 2b 实现的能力（Java 端等价子集）：
-//! - GET 详情页（编码兜底已由 fetch 层完成）；
-//! - 检测 Cloudflare（命中返回 `BookError::Cloudflare`，不在本阶段做旁路）；
-//! - bookName / author 必填，否则报错；
-//! - 其余字段（intro / category / coverUrl / latestChapter / lastUpdateTime /
-//!   status）的字段查询字符串如果以 `meta[` 开头，按 `ATTR_CONTENT` 抽，否则按 `TEXT` 抽，
-//!   与 Java `BookParser#getContentType` 等价；
-//! - 选 coverUrl 时 attr_content 是相对路径的话，用 `abs_url` 拼绝对（Java 用 `absUrl`）。
+//! 来自原 `parser/book.rs`:
+//! - [`BookError`] 错误枚举
+//! - [`parse_book_detail`] 公共入口 (抓 + 解析 + CoverUpdater)
+//! - [`parse_book_html`] 离线同步解析 (便于测试)
+//! - [`content_type_for`] / [`optional_field`] 内部 helper
 //!
-//! **未实现**（后续阶段）：
-//! - `CoverUpdater`（起点 cookie 取最新封面），属阶段 4 / 阶段 5；
-//! - 简繁转换（属阶段 5）；
-//! - CF bypass 旁路（属阶段 2c）。
+//! 封面 URL 处理在 [`super::cover`]。
 
 use anyhow::Result;
+use regex::Regex;
 use reqwest::Client;
 use scraper::Html;
+use std::sync::LazyLock;
 use thiserror::Error;
 
 use crate::crawler::cover_updater;
 use crate::http::{FetchRequest, HttpMethod, fetch, fetch_via_cf_bypass, has_cloudflare};
+use crate::http::abs_url;
 use crate::models::{Book, ContentType, Rule};
 use crate::parser::dom::{SelectError, select_and_invoke_js};
+
+use super::cover::{content_type_for, extract_cover_url, maybe_replace_cover};
 
 #[derive(Debug, Error)]
 pub enum BookError {
@@ -31,7 +30,7 @@ pub enum BookError {
     #[error("HTTP 错误: {0}")]
     Http(String),
     #[error(
-        "命中 Cloudflare 验证页，未配置 cf-bypass 旁路（请在 config.toml [global] cf-bypass 填地址）: {0}"
+        "命中 Cloudflare 验证页, 未配置 cf-bypass 旁路 (请在 config.toml [global] cf-bypass 填地址): {0}"
     )]
     Cloudflare(String),
     #[error("详情页书名或作者为空")]
@@ -44,13 +43,27 @@ pub enum BookError {
 
 /// 抓取 + 解析详情页。
 ///
-/// `cf_bypass_base` 同 `search_one`：CF 命中时若非空则自动重试 bypass 服务。
-/// `qidian_cookie` 是全局 `AppConfig.qidian_cookie` —— **仅供 CoverUpdater 使用**，
-/// 详情页 fetch 本身**不附** Cookie 头（与 Java 端语义一致；cookie 只在 CoverUpdater
-/// 跑起点站搜索时才用得上）。
+/// `cf_bypass_base` 同 `search_one`: CF 命中时若非空则自动重试 bypass 服务。
+/// `qidian_cookie` 是全局 `AppConfig.qidian_cookie` —— **仅供 CoverUpdater 使用**,
+/// 详情页 fetch 本身**不附** Cookie 头 (与 Java 端语义一致; cookie 只在 CoverUpdater
+/// 跑起点站搜索时才用得上)。
 ///
-/// 末尾 `!rule.need_proxy` 时调 3 站 CoverUpdater 拿更高清封面（与 Java
-/// `BookParser.parse()` line 71 行为对齐）。
+/// 末尾 `!rule.need_proxy` 时调 3 站 CoverUpdater 拿更高清封面 (与 Java
+/// `BookParser.parse()` line 71 行为对齐)。
+///
+/// # Examples
+///
+/// ```ignore
+/// let book = parse_book_detail(&client, &rule, &url, None, None).await?;
+/// println!("{}: {}", book.book_name, book.author);
+/// ```
+///
+/// # Errors
+///
+/// - `BookError::BookRuleMissing` — 规则没有 `book` 段
+/// - `BookError::Http` / `BookError::Cloudflare` — 抓取失败
+/// - `BookError::MissingTitleOrAuthor` — 详情页核心字段空
+/// - `BookError::Parse` / `BookError::Selector` — HTML 解析失败
 #[tracing::instrument(
     name = "parse_book_detail",
     skip_all,
@@ -88,7 +101,7 @@ pub async fn parse_book_detail(
         match cf_bypass_base.filter(|s| !s.trim().is_empty()) {
             Some(base) => {
                 // `source_id` + `url` 已在 span 里 —— 事件文本只补"做了什么"。
-                tracing::info!("详情页命中 Cloudflare，尝试 cf-bypass");
+                tracing::info!("详情页命中 Cloudflare, 尝试 cf-bypass");
                 fetch_via_cf_bypass(client, base, url)
                     .await
                     .map_err(|e| BookError::Http(format!("cf-bypass: {e:#}")))?
@@ -104,16 +117,16 @@ pub async fn parse_book_detail(
 
     let mut book = parse_book_html(&html_after_cf, &response.final_url, rule)?;
 
-    // 3 站 CoverUpdater：仅 `!rule.need_proxy` 时跑（与 Java `BookParser.parse()`
-    // line 71 一致 —— 代理 IP 会被起点等网站屏蔽，故代理时不使用源站封面）。
-    // 失败/无可用候选时 `cover_updater::fetch_cover` 内部已经返回原 fallback，
+    // 3 站 CoverUpdater: 仅 `!rule.need_proxy` 时跑 (与 Java `BookParser.parse()`
+    // line 71 一致 —— 代理 IP 会被起点等网站屏蔽, 故代理时不使用源站封面)。
+    // 失败/无可用候选时 `cover_updater::fetch_cover` 内部已经返回原 fallback,
     // 这里无脑赋值即可。
     if !rule.need_proxy {
         // `source_id` 已在 span 里 —— 只补新字段 `book` 和 `has_qidian_cookie`。
         tracing::debug!(
             book = %book.book_name,
             has_qidian_cookie = qidian_cookie.map(|s| !s.trim().is_empty()).unwrap_or(false),
-            "触发 CoverUpdater（3 站 fan-out）"
+            "触发 CoverUpdater (3 站 fan-out)"
         );
         let new_cover = cover_updater::fetch_cover(
             client,
@@ -122,14 +135,13 @@ pub async fn parse_book_detail(
             qidian_cookie.unwrap_or(""),
         )
         .await;
-        if !new_cover.is_empty() && book.cover_url.as_deref() != Some(new_cover.as_str()) {
+        if maybe_replace_cover(&mut book, new_cover) {
             // 同样是去掉冗余的 `source_id`。
             tracing::info!(book = %book.book_name, "CoverUpdater 替换封面");
-            book.cover_url = Some(new_cover);
         }
     }
 
-    // 终止事件：保留"新信息"（author / cf_hit / cover_url / elapsed_ms），
+    // 终止事件: 保留"新信息" (author / cf_hit / cover_url / elapsed_ms),
     // 去掉已在 span 里的 `source_id`。
     tracing::info!(
         book = %book.book_name,
@@ -142,7 +154,19 @@ pub async fn parse_book_detail(
     Ok(book)
 }
 
-/// 仅做 HTML → Book 的解析，不抓网络。便于离线测试。
+/// 仅做 HTML → Book 的解析, 不抓网络。便于离线测试。
+///
+/// # Examples
+///
+/// ```ignore
+/// let book = parse_book_html(&html, "https://x.com/b/", &rule)?;
+/// ```
+///
+/// # Errors
+///
+/// - `BookError::BookRuleMissing` — 规则没有 `book` 段
+/// - `BookError::MissingTitleOrAuthor` — 详情页核心字段空
+/// - `BookError::Selector` — 选择器/JS 执行失败
 pub fn parse_book_html(html: &str, base_url: &str, rule: &Rule) -> Result<Book, BookError> {
     let book_rule = rule.book.as_ref().ok_or(BookError::BookRuleMissing)?;
     let document = Html::parse_document(html);
@@ -157,8 +181,8 @@ pub fn parse_book_html(html: &str, base_url: &str, rule: &Rule) -> Result<Book, 
         &book_rule.author,
         content_type_for(&book_rule.author),
     )?;
-    // Java 端 BookParser: author.replace("作者：", "")
-    let author = author.replace("作者：", "").replace("作者:", "");
+    // Java 端 BookParser: author.replace("作者: ", "")
+    let author = author.replace("作者: ", "").replace("作者:", "");
     if book_name.is_empty() || author.is_empty() {
         return Err(BookError::MissingTitleOrAuthor);
     }
@@ -167,30 +191,24 @@ pub fn parse_book_html(html: &str, base_url: &str, rule: &Rule) -> Result<Book, 
     let category = optional_field(&document, &book_rule.category)?;
     let latest_chapter = optional_field(&document, &book_rule.latest_chapter)?;
     let latest_chapter_url = optional_field(&document, &book_rule.latest_chapter_url)?
-        .and_then(|u| crate::http::abs_url(base_url, &u).or(Some(u)));
+        .and_then(|u| abs_url(base_url, &u).or(Some(u)));
     let last_update_time = optional_field(&document, &book_rule.last_update_time)?.map(|s| {
-        // Java 端 BookParser: lastUpdateTime.replaceAll("(更新时间|最后更新)：", "")
-        use regex::Regex;
-        use std::sync::LazyLock;
+        // Java 端 BookParser: lastUpdateTime.replaceAll("(更新时间|最后更新): ", "")
         static RE: LazyLock<Regex> = LazyLock::new(|| {
-            Regex::new(r"^(更新时间|最后更新)[：:]?\s*").expect("lastUpdateTime prefix re")
+            Regex::new(r"^(更新时间|最后更新)[::]?\s*").expect("lastUpdateTime prefix re")
         });
         RE.replace(&s, "").into_owned()
     });
     let status = optional_field(&document, &book_rule.status)?;
 
-    // coverUrl 抽出来如果是相对路径，按 baseUri 拼成绝对（Java 端 jsoup `absUrl("content")`
-    // 会自动做这件事）。
+    // coverUrl 抽出来如果是相对路径, 按 baseUri 拼成绝对 (Java 端 jsoup `absUrl("content")`
+    // 会自动做这件事)。
     let raw_cover = select_and_invoke_js(
         &document,
         &book_rule.cover_url,
         content_type_for(&book_rule.cover_url),
     )?;
-    let cover_url = if raw_cover.is_empty() {
-        None
-    } else {
-        crate::http::abs_url(base_url, &raw_cover).or(Some(raw_cover))
-    };
+    let cover_url = extract_cover_url(raw_cover, base_url);
 
     Ok(Book {
         url: base_url.to_string(),
@@ -207,16 +225,6 @@ pub fn parse_book_html(html: &str, base_url: &str, rule: &Rule) -> Result<Book, 
     })
 }
 
-/// 等价 Java `BookParser#getContentType`：以 `meta[` 开头的查询走 `attr=content`，
-/// 否则走文本。这条规则只对 book 的字段成立（search/toc/chapter 不需要这层判断）。
-fn content_type_for(query: &str) -> ContentType {
-    if query.trim_start().starts_with("meta[") {
-        ContentType::AttrContent
-    } else {
-        ContentType::Text
-    }
-}
-
 fn optional_field(document: &Html, query: &str) -> Result<Option<String>, BookError> {
     if query.trim().is_empty() {
         return Ok(None);
@@ -231,7 +239,7 @@ mod tests {
     use crate::config::LangType;
     use crate::db::apply_default_rule;
 
-    /// 笔趣阁22 真实详情规则。注意 Java 注释提到 meta 字段名拼错（`lastest_chapter_name`），
+    /// 笔趣阁22 真实详情规则。注意 Java 注释提到 meta 字段名拼错 (`lastest_chapter_name`),
     /// 我们保留这个拼写以保持兼容。
     fn rule_22biqu() -> Rule {
         let mut r: Rule = serde_json::from_str(
@@ -249,8 +257,8 @@ mod tests {
         r
     }
 
-    /// 一个仿真的详情页 HTML：包含 og:novel:* meta 标签 + 简介 div。
-    /// 22biqu 的详情页字段 99% 来自 meta，配规则里 book 段几乎是空的，
+    /// 一个仿真的详情页 HTML: 包含 og:novel:* meta 标签 + 简介 div。
+    /// 22biqu 的详情页字段 99% 来自 meta, 配规则里 book 段几乎是空的,
     /// 所以默认填充会把 bookName / author / intro / category / coverUrl 等
     /// 全部回退到 meta 查询。
     fn fake_book_html() -> String {
@@ -305,7 +313,7 @@ mod tests {
 
     #[test]
     fn book_name_via_explicit_selector_overrides_meta_default() {
-        // 模拟一条规则：bookName 不走 meta，而走显式 CSS 选择器
+        // 模拟一条规则: bookName 不走 meta, 而走显式 CSS 选择器
         let mut rule: Rule = serde_json::from_str(
             r##"{
                 "url": "https://demo.test/",
@@ -336,7 +344,7 @@ mod tests {
 
     #[test]
     fn cover_url_with_js_postprocess_concats_host() {
-        // main.json mcxs 真实规则：
+        // main.json mcxs 真实规则:
         //   "coverUrl": "meta[property=\"og:image\"]@js:r='http://www.mcxs.info'+r"
         let mut rule: Rule = serde_json::from_str(
             r##"{
@@ -373,7 +381,7 @@ mod tests {
         assert!(matches!(err, BookError::BookRuleMissing));
     }
 
-    /// 真实联网测试：默认 ignore。
+    /// 真实联网测试: 默认 ignore。
     #[tokio::test]
     #[ignore = "live network: depends on 22biqu availability"]
     async fn live_22biqu_book_detail_parses() {
@@ -384,7 +392,7 @@ mod tests {
         let cfg = AppConfig::default();
         let client = build_async_client(&cfg, &ClientOptions::default()).unwrap();
 
-        // 先搜一下，拿到第一个结果的 URL。
+        // 先搜一下, 拿到第一个结果的 URL。
         let mut search_rule: Rule = serde_json::from_str(
             r##"{
                 "url": "https://www.22biqu.com/",
