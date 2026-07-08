@@ -17,6 +17,17 @@ use std::sync::{Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
 ///
 /// 调用方决定 `Err` 怎么处理 —— 上层模块（web / http）通常把 `Err` 包装成
 /// HTTP 5xx 或业务 error enum。
+///
+/// # Examples
+///
+/// ```
+/// use std::sync::Mutex;
+/// use so_novel_rs::utils::lock::mutex_or;
+///
+/// let m = Mutex::new(42_u32);
+/// let g = mutex_or("counter", &m).unwrap();
+/// assert_eq!(*g, 42);
+/// ```
 pub fn mutex_or<'a, T>(label: &str, mtx: &'a Mutex<T>) -> Result<MutexGuard<'a, T>, String> {
     mtx.lock().map_err(|e| {
         tracing::error!("{label}: Mutex poisoned: {e}");
@@ -25,6 +36,17 @@ pub fn mutex_or<'a, T>(label: &str, mtx: &'a Mutex<T>) -> Result<MutexGuard<'a, 
 }
 
 /// `RwLock` 读锁版本。
+///
+/// # Examples
+///
+/// ```
+/// use std::sync::RwLock;
+/// use so_novel_rs::utils::lock::rw_read_or;
+///
+/// let lk = RwLock::new(vec![1, 2, 3]);
+/// let g = rw_read_or("items", &lk).unwrap();
+/// assert_eq!(g.len(), 3);
+/// ```
 pub fn rw_read_or<'a, T>(label: &str, lk: &'a RwLock<T>) -> Result<RwLockReadGuard<'a, T>, String> {
     lk.read().map_err(|e| {
         tracing::error!("{label}: RwLock read poisoned: {e}");
@@ -33,6 +55,19 @@ pub fn rw_read_or<'a, T>(label: &str, lk: &'a RwLock<T>) -> Result<RwLockReadGua
 }
 
 /// `RwLock` 写锁版本。
+///
+/// # Examples
+///
+/// ```
+/// use std::sync::RwLock;
+/// use so_novel_rs::utils::lock::{rw_read_or, rw_write_or};
+///
+/// let lk = RwLock::new(0_u32);
+/// let mut g = rw_write_or("counter", &lk).unwrap();
+/// *g += 1;
+/// drop(g);
+/// assert_eq!(*rw_read_or("counter", &lk).unwrap(), 1);
+/// ```
 pub fn rw_write_or<'a, T>(
     label: &str,
     lk: &'a RwLock<T>,
@@ -41,4 +76,66 @@ pub fn rw_write_or<'a, T>(
         tracing::error!("{label}: RwLock write poisoned: {e}");
         format!("{label} write lock poisoned")
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+    use std::thread;
+
+    #[test]
+    fn mutex_or_happy_path() {
+        let m = Mutex::new(42_u32);
+        let g = mutex_or("test", &m).unwrap();
+        assert_eq!(*g, 42);
+    }
+
+    #[test]
+    fn mutex_or_returns_err_on_poison() {
+        let m = Arc::new(Mutex::new(0_u32));
+        let m2 = Arc::clone(&m);
+        // 在持锁线程里 panic, 触发 poison
+        let _ = thread::spawn(move || {
+            let _g = m2.lock().unwrap();
+            panic!("intentional");
+        })
+        .join();
+        // 主线程再 lock 必返 PoisonError
+        let res = mutex_or("test", &m);
+        assert!(res.is_err());
+        assert_eq!(res.unwrap_err(), "test lock poisoned");
+    }
+
+    #[test]
+    fn rw_read_or_happy_path() {
+        let lk = RwLock::new(String::from("hello"));
+        let g = rw_read_or("test", &lk).unwrap();
+        assert_eq!(g.as_str(), "hello");
+    }
+
+    #[test]
+    fn rw_write_or_happy_path() {
+        let lk = RwLock::new(0_u32);
+        {
+            let mut g = rw_write_or("test", &lk).unwrap();
+            *g = 7;
+        }
+        let g = rw_read_or("test", &lk).unwrap();
+        assert_eq!(*g, 7);
+    }
+
+    #[test]
+    fn rw_write_or_returns_err_on_poison() {
+        let lk = Arc::new(RwLock::new(0_u32));
+        let lk2 = Arc::clone(&lk);
+        let _ = thread::spawn(move || {
+            let _g = lk2.write().unwrap();
+            panic!("intentional");
+        })
+        .join();
+        let res = rw_write_or("test", &lk);
+        assert!(res.is_err());
+        assert_eq!(res.unwrap_err(), "test write lock poisoned");
+    }
 }
