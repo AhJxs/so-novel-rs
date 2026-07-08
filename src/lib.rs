@@ -35,6 +35,7 @@ rust_i18n::i18n!("locales");
 pub mod app;
 pub mod cli;
 pub mod config;
+pub mod constant;
 pub mod crawler;
 pub mod db;
 pub mod error;

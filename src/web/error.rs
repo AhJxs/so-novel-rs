@@ -112,68 +112,83 @@ impl WebErrorKind {
 }
 
 impl WebError {
-    /// 暴露的 message（**不含**内部 cause / 库错误细节）。
-    pub const fn message(&self) -> &'static str {
+    /// 错误码 (数字, e.g. `1001`)。走 [`crate::constant::error_code::ErrorCode`]
+    /// 单点维护, 不在此处硬编码。
+    pub const fn code(&self) -> crate::constant::error_code::ErrorCode {
+        use crate::constant::error_code::ErrorCode;
         match self {
-            // BookError 子类逐个映射
-            Self::Book(BookError::BookRuleMissing) => "书源没有 book 规则",
-            Self::Book(BookError::MissingTitleOrAuthor) => "详情页书名或作者为空",
-            Self::Book(BookError::Http(_)) => "书源 HTTP 请求失败",
-            Self::Book(BookError::Cloudflare(_)) => "书源命中 Cloudflare 验证",
+            // BookError
+            Self::Book(BookError::BookRuleMissing) => ErrorCode::BookRuleMissing,
+            Self::Book(BookError::MissingTitleOrAuthor) => ErrorCode::MissingTitleOrAuthor,
+            Self::Book(BookError::Http(_)) => ErrorCode::BookHttp,
+            Self::Book(BookError::Cloudflare(_)) => ErrorCode::BookCloudflare,
             Self::Book(BookError::Parse(_)) | Self::Book(BookError::Selector(_)) => {
-                "详情页 HTML 解析失败"
+                ErrorCode::BookParse
             }
 
             // TocError
-            Self::Toc(TocError::TocRuleMissing) => "书源没有 toc 规则",
-            Self::Toc(TocError::Http(_)) => "目录 HTTP 请求失败",
-            Self::Toc(TocError::Cloudflare(_)) => "目录页命中 Cloudflare 验证",
+            Self::Toc(TocError::TocRuleMissing) => ErrorCode::TocRuleMissing,
+            Self::Toc(TocError::Http(_)) => ErrorCode::TocHttp,
+            Self::Toc(TocError::Cloudflare(_)) => ErrorCode::TocCloudflare,
             Self::Toc(TocError::Parse(_)) | Self::Toc(TocError::Selector(_)) => {
-                "目录页 HTML 解析失败"
+                ErrorCode::TocParse
             }
 
             // ChapterError
-            Self::Chapter(ChapterError::ChapterRuleMissing) => "书源没有 chapter 规则",
-            Self::Chapter(ChapterError::Http(_)) => "章节 HTTP 请求失败",
-            Self::Chapter(ChapterError::Cloudflare(_)) => "章节页命中 Cloudflare 验证",
-            Self::Chapter(ChapterError::EmptyContent(_)) => "章节正文为空",
-            Self::Chapter(ChapterError::Parse(_)) | Self::Chapter(ChapterError::Selector(_)) => {
-                "章节 HTML 解析失败"
-            }
+            Self::Chapter(ChapterError::ChapterRuleMissing) => ErrorCode::ChapterRuleMissing,
+            Self::Chapter(ChapterError::Http(_)) => ErrorCode::ChapterHttp,
+            Self::Chapter(ChapterError::Cloudflare(_)) => ErrorCode::ChapterCloudflare,
+            Self::Chapter(ChapterError::EmptyContent(_)) => ErrorCode::EmptyContent,
+            Self::Chapter(ChapterError::Parse(_))
+            | Self::Chapter(ChapterError::Selector(_)) => ErrorCode::ChapterParse,
 
             // SearchError
-            Self::Search(SearchError::SearchDisabled) => "书源未启用搜索",
-            Self::Search(SearchError::SourceDisabled) => "书源已被禁用",
-            Self::Search(SearchError::Http(_)) => "搜索 HTTP 请求失败",
-            Self::Search(SearchError::Cloudflare(_)) => "搜索页命中 Cloudflare 验证",
+            Self::Search(SearchError::SearchDisabled) => ErrorCode::SearchDisabled,
+            Self::Search(SearchError::SourceDisabled) => ErrorCode::SourceDisabled,
+            Self::Search(SearchError::Http(_)) => ErrorCode::SearchHttp,
+            Self::Search(SearchError::Cloudflare(_)) => ErrorCode::SearchCloudflare,
             Self::Search(SearchError::Parse(_)) | Self::Search(SearchError::Selector(_)) => {
-                "搜索结果 HTML 解析失败"
+                ErrorCode::SearchParse
             }
 
             // CrawlerError
-            Self::Crawler(CrawlerError::EmptyToc) => "目录返回 0 章",
-            Self::Crawler(CrawlerError::Client(_)) => "HTTP 客户端构造失败",
-            Self::Crawler(CrawlerError::Io(_)) => "任务文件 IO 失败",
-            Self::Crawler(CrawlerError::Export(_)) => "导出失败",
-            Self::Crawler(CrawlerError::Cancelled) => "任务已取消",
-            Self::Crawler(CrawlerError::InvalidRange(_)) => "章节范围非法",
-            // 嵌套源不展开，message 已统一为聚合描述
-            Self::Crawler(CrawlerError::Book(_)) => "书源解析失败",
-            Self::Crawler(CrawlerError::Toc(_)) => "目录解析失败",
+            Self::Crawler(CrawlerError::EmptyToc) => ErrorCode::EmptyToc,
+            Self::Crawler(CrawlerError::Client(_)) => ErrorCode::CrawlerClient,
+            Self::Crawler(CrawlerError::Io(_)) => ErrorCode::CrawlerIo,
+            Self::Crawler(CrawlerError::Export(_)) => ErrorCode::CrawlerExport,
+            Self::Crawler(CrawlerError::Cancelled) => ErrorCode::Cancelled,
+            Self::Crawler(CrawlerError::InvalidRange(_)) => ErrorCode::InvalidRange,
+            Self::Crawler(CrawlerError::Book(_)) => ErrorCode::CrawlerBookAggregate,
+            Self::Crawler(CrawlerError::Toc(_)) => ErrorCode::CrawlerTocAggregate,
 
             // ExportError
-            Self::Export(ExportError::EmptyChaptersDir(_)) => "章节缓存目录为空",
-            Self::Export(ExportError::Io(_)) => "导出文件 IO 失败",
-            Self::Export(ExportError::Epub(_)) => "EPUB 生成失败",
-            Self::Export(ExportError::Zip(_)) => "ZIP 打包失败",
-            Self::Export(ExportError::Encoding(_)) => "编码转换失败",
-            Self::Export(ExportError::Pdf(_)) => "PDF 生成失败",
+            Self::Export(ExportError::EmptyChaptersDir(_)) => ErrorCode::ExportEmptyChaptersDir,
+            Self::Export(ExportError::Io(_)) => ErrorCode::ExportIo,
+            Self::Export(ExportError::Epub(_)) => ErrorCode::ExportEpub,
+            Self::Export(ExportError::Zip(_)) => ErrorCode::ExportZip,
+            Self::Export(ExportError::Encoding(_)) => ErrorCode::ExportEncoding,
+            Self::Export(ExportError::Pdf(_)) => ErrorCode::ExportPdf,
 
-            // 显式
+            // 显式 (WebError 自带的 4 类)
+            Self::NotFound(_) => ErrorCode::NotFound,
+            Self::Conflict(_) => ErrorCode::Conflict,
+            Self::BadRequest(_) => ErrorCode::BadRequest,
+            Self::Internal(_) => ErrorCode::Internal,
+        }
+    }
+
+    /// 暴露的 message（**不含**内部 cause / 库错误细节）。
+    /// 文案走 [`crate::constant::error_code::ErrorCode::message`] 单点维护。
+    ///
+    /// 例外: `NotFound/Conflict/BadRequest/Internal` 4 个显式变体接受调用方传
+    /// 入的动态消息 (e.g. `"task_id=42 not found"`), 不进 ErrorCode 表。
+    pub const fn message(&self) -> &'static str {
+        match self {
             Self::NotFound(msg)
             | Self::Conflict(msg)
             | Self::BadRequest(msg)
             | Self::Internal(msg) => msg,
+            _ => self.code().message(),
         }
     }
 
