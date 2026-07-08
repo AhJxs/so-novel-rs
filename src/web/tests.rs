@@ -18,7 +18,7 @@ use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode};
 use tower::ServiceExt;
 
-use crate::config::AppConfig;
+use crate::config::{AppConfig, CookieCfg, CrawlCfg, DownloadCfg, GlobalCfg, ProxyCfg, SourceCfg};
 use crate::http::HttpClients;
 use crate::models::Rule;
 use crate::db::SourcesConfig;

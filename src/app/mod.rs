@@ -511,7 +511,7 @@ impl AppModel {
 
     /// 扫描下载目录。
     pub fn refresh_library(&mut self) {
-        refresh_library(&mut self.library, &self.config.download_path);
+        refresh_library(&mut self.library, &self.config.download.download_path);
     }
 
     /// 异步扫描下载目录。
@@ -523,7 +523,7 @@ impl AppModel {
         if self.library.scan_in_flight {
             return;
         }
-        let dir_raw = std::path::PathBuf::from(&self.config.download_path);
+        let dir_raw = std::path::PathBuf::from(&self.config.download.download_path);
         let abs = if dir_raw.is_absolute() {
             dir_raw
         } else {
@@ -576,7 +576,7 @@ impl AppModel {
 
     /// 真正删除一个本地文件。
     pub fn delete_library_entry(&mut self, path: &std::path::Path) {
-        match delete_library_entry(&mut self.library, &self.config.download_path, path) {
+        match delete_library_entry(&mut self.library, &self.config.download.download_path, path) {
             Ok(msg) if !msg.is_empty() => self.push_success(msg),
             Ok(_) => {}
             Err(msg) => self.push_error(msg),

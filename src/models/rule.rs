@@ -219,7 +219,7 @@ pub struct RuleCrawl {
 // 原本在 `crate::rules::source`，合并到这里是因为它本质上只是 `Rule` 的
 // "派生视图" —— 跟 Rule 同模型层最自然，跨模块再 import 一层显得啰嗦。
 
-use crate::config::AppConfig;
+use crate::config::{AppConfig, CookieCfg, CrawlCfg, DownloadCfg, GlobalCfg, ProxyCfg, SourceCfg};
 
 /// 由 `AppConfig` 与 `Rule.crawl` 派生的有效抓取参数。
 /// 单位与 Java 端一致：interval 毫秒。
@@ -237,13 +237,13 @@ pub struct EffectiveCrawl {
 impl EffectiveCrawl {
     pub fn derive(cfg: &AppConfig, rule: &Rule) -> Self {
         let mut eff = EffectiveCrawl {
-            concurrency: cfg.concurrency,
-            min_interval_ms: cfg.min_interval,
-            max_interval_ms: cfg.max_interval,
-            max_retries: cfg.max_retries,
-            retry_min_interval_ms: cfg.retry_min_interval,
-            retry_max_interval_ms: cfg.retry_max_interval,
-            enable_retry: cfg.enable_retry,
+            concurrency: cfg.crawl.concurrency,
+            min_interval_ms: cfg.crawl.min_interval,
+            max_interval_ms: cfg.crawl.max_interval,
+            max_retries: cfg.crawl.max_retries,
+            retry_min_interval_ms: cfg.crawl.retry_min_interval,
+            retry_max_interval_ms: cfg.crawl.retry_max_interval,
+            enable_retry: cfg.crawl.enable_retry,
         };
 
         if let Some(c) = rule.crawl.as_ref() {
@@ -316,7 +316,7 @@ mod source_tests {
         // 未覆盖的字段保留全局值
         assert_eq!(
             src.effective_crawl.retry_min_interval_ms,
-            cfg.retry_min_interval
+            cfg.crawl.retry_min_interval
         );
     }
 
@@ -328,7 +328,7 @@ mod source_tests {
             ..Rule::default()
         };
         let src = Source::from(rule, &cfg);
-        assert_eq!(src.effective_crawl.min_interval_ms, cfg.min_interval);
-        assert_eq!(src.effective_crawl.max_interval_ms, cfg.max_interval);
+        assert_eq!(src.effective_crawl.min_interval_ms, cfg.crawl.min_interval);
+        assert_eq!(src.effective_crawl.max_interval_ms, cfg.crawl.max_interval);
     }
 }

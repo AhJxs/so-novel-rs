@@ -82,7 +82,7 @@ impl SettingsPage {
         let initial_light = themes::list_theme_names_by_mode(cx, false);
         let initial_dark = themes::list_theme_names_by_mode(cx, true);
 
-        let pref0 = model.read(cx).config.theme_pref.clone();
+        let pref0 = model.read(cx).config.global.theme_pref.clone();
         // 宏而非闭包：`window: &mut Window` 闭包捕获后只能调一次（&mut 借用），三个
         // SelectState 各需独立借用 → 宏在调用处展开。
         macro_rules! make_state {
@@ -104,7 +104,7 @@ impl SettingsPage {
             if let SelectEvent::Confirm(Some(v)) = ev {
                 let name = v.to_string();
                 this.model.update(cx, |m, _| {
-                    m.config.theme_pref.static_name = name;
+                    m.config.global.theme_pref.static_name = name;
                     m.persist_settings();
                 });
                 this.reapply_theme(None, cx);
@@ -115,7 +115,7 @@ impl SettingsPage {
             if let SelectEvent::Confirm(Some(v)) = ev {
                 let name = v.to_string();
                 this.model.update(cx, |m, _| {
-                    m.config.theme_pref.dyn_light = name;
+                    m.config.global.theme_pref.dyn_light = name;
                     m.persist_settings();
                 });
                 this.reapply_theme(None, cx);
@@ -126,7 +126,7 @@ impl SettingsPage {
             if let SelectEvent::Confirm(Some(v)) = ev {
                 let name = v.to_string();
                 this.model.update(cx, |m, _| {
-                    m.config.theme_pref.dyn_dark = name;
+                    m.config.global.theme_pref.dyn_dark = name;
                     m.persist_settings();
                 });
                 this.reapply_theme(None, cx);
@@ -134,7 +134,7 @@ impl SettingsPage {
         })
         .detach();
 
-        let initial_download_path = model.read(cx).config.download_path.clone();
+        let initial_download_path = model.read(cx).config.download.download_path.clone();
         let download_path_input = cx.new(|cx| {
             InputState::new(window, cx)
                 .placeholder(ts("Settings.desc.download_path"))
@@ -145,10 +145,10 @@ impl SettingsPage {
         cx.subscribe(&download_path_input, |this, input, event, cx| {
             if matches!(event, InputEvent::Change) {
                 let new_val = input.read(cx).value().to_string();
-                let cur = this.model.read(cx).config.download_path.clone();
+                let cur = this.model.read(cx).config.download.download_path.clone();
                 if new_val != cur {
                     this.model.update(cx, |m, _| {
-                        m.config.download_path = new_val;
+                        m.config.download.download_path = new_val;
                         m.persist_settings();
                     });
                 }
@@ -164,7 +164,7 @@ impl SettingsPage {
 
         // `multi_line(true).rows(3)`：用户能粘贴整段 `Cookie:` 头（不止单 key=value）；
         // placeholder 提示 cookie 头以 `w_tsfp=` 开头（DevTools 复制）。
-        let initial_qidian_cookie = model.read(cx).config.qidian_cookie.clone();
+        let initial_qidian_cookie = model.read(cx).config.cookie.qidian_cookie.clone();
         let qidian_cookie_input = cx.new(|cx| {
             InputState::new(window, cx)
                 .multi_line(true)
@@ -176,10 +176,10 @@ impl SettingsPage {
         cx.subscribe(&qidian_cookie_input, |this, input, event, cx| {
             if matches!(event, InputEvent::Change) {
                 let new_val = input.read(cx).value().to_string();
-                let cur = this.model.read(cx).config.qidian_cookie.clone();
+                let cur = this.model.read(cx).config.cookie.qidian_cookie.clone();
                 if new_val != cur {
                     this.model.update(cx, |m, _| {
-                        m.config.qidian_cookie = new_val;
+                        m.config.cookie.qidian_cookie = new_val;
                         m.persist_settings();
                     });
                 }
@@ -191,6 +191,7 @@ impl SettingsPage {
         let initial_font_size = model
             .read(cx)
             .config
+            .global
             .font_size
             .clamp(themes::FONT_SIZE_MIN, themes::FONT_SIZE_MAX);
         let font_size_state = cx.new(|_cx| {
@@ -210,7 +211,7 @@ impl SettingsPage {
                 SliderValue::Range(_, end) => end,
             };
             this.model.update(cx, |m, _| {
-                m.config.font_size = size;
+                m.config.global.font_size = size;
                 m.persist_settings();
             });
             themes::apply_font_size(size, cx);
@@ -232,15 +233,15 @@ impl SettingsPage {
         }
     }
 
-    /// 把当前 `config.theme_pref` 应用到全局 Theme + 重应用字号。
+    /// 把当前 `config.global.theme_pref` 应用到全局 Theme + 重应用字号。
     ///
     /// 抽出来给三处 Select Confirm 订阅 + kind/dyn-mode dropdown setter 复用，
     /// 避免每个 setter 各写一遍「apply_theme_pref + apply_font_size」。
     /// apply_theme_pref 内部会 apply_config（重置字号），所以字号必须在后面重应用。
     fn reapply_theme(&self, window: Option<&mut Window>, cx: &mut App) {
-        let pref = self.model.read(cx).config.theme_pref.clone();
+        let pref = self.model.read(cx).config.global.theme_pref.clone();
         themes::apply_theme_pref(&pref, window, cx);
-        themes::apply_font_size(self.model.read(cx).config.font_size, cx);
+        themes::apply_font_size(self.model.read(cx).config.global.font_size, cx);
     }
 
     /// 「下载目录」旁边的「浏览」按钮点击 → 调 rfd 选目录 → 回写 model + persist + notify。
@@ -257,7 +258,7 @@ impl SettingsPage {
     /// `cur` 在 click handler 里同步读出再 move 进 async —— 别在 async 里
     /// `model.read(async_cx)`，那里只有 `&mut AsyncApp`，拿不到 `&App`。
     fn pick_folder(&mut self, cx: &mut Context<Self>) {
-        let cur = self.model.read(cx).config.download_path.clone();
+        let cur = self.model.read(cx).config.download.download_path.clone();
         let title = ts("Settings.choose_download_dir_dialog_title");
         let model = self.model.clone();
         let page_handle = cx.entity().downgrade();
@@ -271,7 +272,7 @@ impl SettingsPage {
                 let path_str = folder.path().to_string_lossy().to_string();
                 let _ = page_handle.update(async_cx, |_page, cx| {
                     model.update(cx, |m, _| {
-                        m.config.download_path = path_str;
+                        m.config.download.download_path = path_str;
                         m.persist_settings();
                     });
                     cx.notify();
@@ -290,7 +291,7 @@ impl SettingsPage {
     /// 触发链：`themes::init` async reload 完成 → `apply_theme_pref` 触发 `Theme` observer
     /// → `cx.refresh_windows()` → render → 这里检测到变化。
     fn sync_theme_items(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let pref = self.model.read(cx).config.theme_pref.clone();
+        let pref = self.model.read(cx).config.global.theme_pref.clone();
 
         let new_names = themes::list_theme_names(cx);
         if new_names != self.last_theme_names {
@@ -329,13 +330,13 @@ impl SettingsPage {
         }
     }
 
-    /// 外部改了 `model.config.download_path`（目前唯一的外部源是 rfd 选目录）→ 同步到
+    /// 外部改了 `model.config.download.download_path`（目前唯一的外部源是 rfd 选目录）→ 同步到
     /// InputState。常规键入走 `InputEvent::Change` 订阅，那条路径已维护一致性。
     ///
     /// `InputState::set_value` 需要 `&mut Window`，observer 拿不到，走 render 路径
     /// —— 和 `sync_theme_items` 同套路。
     fn sync_download_path(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let model_val = self.model.read(cx).config.download_path.clone();
+        let model_val = self.model.read(cx).config.download.download_path.clone();
         let input_val = self.download_path_input.read(cx).value().to_string();
         if model_val == input_val {
             return;

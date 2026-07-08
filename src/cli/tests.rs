@@ -6,7 +6,10 @@
 
 use clap::{CommandFactory, Parser};
 
-use crate::config::{AppConfig, ExportFormat, Language};
+use crate::config::{
+    AppConfig, CookieCfg, CrawlCfg, DownloadCfg, ExportFormat, GlobalCfg, Language, ProxyCfg,
+    SourceCfg,
+};
 
 use super::{
     Cli, Cmd, SourcesAction, build_localized_command, subcommand_name, util::effective_cfg,
@@ -284,20 +287,23 @@ fn cli_rejects_unknown_subcommand() {
 fn effective_cfg_overrides_output_and_format() {
     let cfg = AppConfig::default();
     let new_cfg = effective_cfg(cfg, Some("D:/out".into()), Some("txt".into()));
-    assert_eq!(new_cfg.download_path, "D:/out");
-    assert_eq!(new_cfg.ext_name, ExportFormat::Txt);
+    assert_eq!(new_cfg.download.download_path, "D:/out");
+    assert_eq!(new_cfg.download.ext_name, ExportFormat::Txt);
 }
 
 #[test]
 fn effective_cfg_keeps_originals_when_no_overrides() {
     let cfg = AppConfig {
-        download_path: "orig".into(),
-        ext_name: ExportFormat::Html,
+        download: DownloadCfg {
+            download_path: "orig".into(),
+            ext_name: ExportFormat::Html,
+            ..DownloadCfg::default()
+        },
         ..AppConfig::default()
     };
     let new_cfg = effective_cfg(cfg, None, None);
-    assert_eq!(new_cfg.download_path, "orig");
-    assert_eq!(new_cfg.ext_name, ExportFormat::Html);
+    assert_eq!(new_cfg.download.download_path, "orig");
+    assert_eq!(new_cfg.download.ext_name, ExportFormat::Html);
 }
 
 #[test]

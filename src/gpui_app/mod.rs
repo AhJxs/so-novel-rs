@@ -36,7 +36,7 @@ pub use root::{NavPage, RootView};
 /// 内部 zh-CN/zh-HK 的简体/繁体翻译完全一样）。
 ///
 /// 何时调用：
-/// 1. **启动时**（`gpui_app::run`）—— 把 `config.language` 同步给 gpui-component，
+/// 1. **启动时**（`gpui_app::run`）—— 把 `config.global.language` 同步给 gpui-component，
 ///    让 Sidebar 搜索框 placeholder / Select placeholder / Dialog OK|Cancel 等
 ///    内部文案立刻用对语言。
 /// 2. **用户改语言时**（settings page 的 `界面语言` setter）—— `set_locale` 立即生效 +
@@ -110,8 +110,8 @@ pub fn run() -> Result<()> {
             let s = model.read(cx);
             (
                 s.paths.clone(),
-                s.config.theme_pref.clone(),
-                s.config.font_size,
+                s.config.global.theme_pref.clone(),
+                s.config.global.font_size,
             )
         };
         themes::init(cx, &app_paths, &theme_pref, font_size);
@@ -120,7 +120,7 @@ pub fn run() -> Result<()> {
         //    Sidebar 搜索 placeholder / Select placeholder / Dialog OK|Cancel 等所有
         //    `t!()` 调用的文案。必须在开任何带 Sidebar / Select / Dialog 的窗口前调用，
         //    否则首次 render 就会用错误的 fallback locale。
-        gpui_component::set_locale(locale_for(model.read(cx).config.language));
+        gpui_component::set_locale(locale_for(model.read(cx).config.global.language));
 
         // 6. 居中开窗 + 最小尺寸 + 自定义 TitleBar 配置。
         use gpui::{px, size};

@@ -142,7 +142,7 @@ fn spawn_search_tasks(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::AppConfig;
+    use crate::config::{AppConfig, CookieCfg, CrawlCfg, DownloadCfg, GlobalCfg, ProxyCfg, SourceCfg};
     use crate::models::Rule;
 
     fn make_source(id: i32, name: &str) -> Source {

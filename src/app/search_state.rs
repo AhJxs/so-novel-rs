@@ -437,7 +437,7 @@ impl SearchState {
 #[cfg(test)]
 mod search_state_tests {
     use super::*;
-    use crate::config::AppConfig;
+    use crate::config::{AppConfig, CookieCfg, CrawlCfg, DownloadCfg, GlobalCfg, ProxyCfg, SourceCfg};
 
     #[test]
     fn cover_cache_initially_empty() {

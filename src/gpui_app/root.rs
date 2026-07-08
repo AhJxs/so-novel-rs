@@ -158,7 +158,7 @@ pub fn register_key_bindings(cx: &mut App) {
 
 /// Root view：sidebar shell + 当前页面占位。
 pub struct RootView {
-    /// 1) `new()` 里 clone 给子 page；2) `toggle_sidebar` 读 / 写 `config.sidebar_collapsed` 并持久化。
+    /// 1) `new()` 里 clone 给子 page；2) `toggle_sidebar` 读 / 写 `config.global.sidebar_collapsed` 并持久化。
     model: Entity<AppModel>,
     current_page: NavPage,
     /// 初始值来自 `AppConfig.sidebar_collapsed`，翻转后写回 config + 落盘，重启保持。
@@ -187,7 +187,7 @@ impl RootView {
         let settings_page = cx.new(|cx| SettingsPage::new(model.clone(), window, cx));
 
         // 从 config 恢复上次折叠状态 — 不持久化的话，每次启动 sidebar 都会弹开。
-        let sidebar_collapsed = model.read(cx).config.sidebar_collapsed;
+        let sidebar_collapsed = model.read(cx).config.global.sidebar_collapsed;
 
         Self {
             model,
@@ -215,7 +215,7 @@ impl RootView {
         self.sidebar_collapsed = !self.sidebar_collapsed;
         let new_value = self.sidebar_collapsed;
         self.model.update(cx, |m, _| {
-            m.config.sidebar_collapsed = new_value;
+            m.config.global.sidebar_collapsed = new_value;
             m.persist_settings();
         });
         cx.notify();

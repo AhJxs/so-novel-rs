@@ -58,7 +58,7 @@ font-size = 16
 
 [download]
 # download-path 默认为系统 Documents/Novel/（由 AppConfig::default() 注入）。
-# 占位写空串，save_config 会按当前 cfg.download_path 覆盖此处的值。
+# 占位写空串，save_config 会按当前 cfg.download.download_path 覆盖此处的值。
 download-path = ""
 extname = "epub"
 txt-encoding = "UTF-8"

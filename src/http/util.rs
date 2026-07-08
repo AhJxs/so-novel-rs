@@ -4,7 +4,7 @@ use rand::RngExt;
 use regex::Regex;
 use std::sync::LazyLock;
 
-use crate::config::AppConfig;
+use crate::config::{AppConfig, CookieCfg, CrawlCfg, DownloadCfg, GlobalCfg, ProxyCfg, SourceCfg};
 use crate::models::EffectiveCrawl;
 
 /// 解析 hutool 风格的"宽松 JSON"字符串到键值对列表。
@@ -94,8 +94,8 @@ pub fn random_retry_interval_ms(eff: &EffectiveCrawl) -> u64 {
 
 /// 也提供一个直接吃 `AppConfig` 的版本，便于不需要 EffectiveCrawl 的调用方。
 pub fn random_interval_from_cfg(cfg: &AppConfig) -> u64 {
-    let lo = cfg.min_interval as u64;
-    let hi = cfg.max_interval.max(cfg.min_interval + 1) as u64;
+    let lo = cfg.crawl.min_interval as u64;
+    let hi = cfg.crawl.max_interval.max(cfg.crawl.min_interval + 1) as u64;
     rand::rng().random_range(lo..hi)
 }
 
@@ -187,7 +187,7 @@ mod tests {
         let cfg = AppConfig::default();
         for _ in 0..100 {
             let v = random_interval_from_cfg(&cfg);
-            assert!((cfg.min_interval as u64..cfg.max_interval as u64).contains(&v));
+            assert!((cfg.crawl.min_interval as u64..cfg.crawl.max_interval as u64).contains(&v));
         }
     }
 

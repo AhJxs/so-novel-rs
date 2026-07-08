@@ -87,93 +87,93 @@ pub fn load_config(path: &Path) -> Result<AppConfig> {
     // 旧键 `[global].theme = "X"`（单一主题名）的兼容迁移在本函数末尾 inline 做。
     let theme_kind = t_str(&doc, "global", "theme-kind");
     if let Some(v) = &theme_kind {
-        cfg.theme_pref.kind = ThemeKind::parse(v);
+        cfg.global.theme_pref.kind = ThemeKind::parse(v);
     }
     if let Some(v) = t_str(&doc, "global", "theme-name") {
-        cfg.theme_pref.static_name = v;
+        cfg.global.theme_pref.static_name = v;
     }
     if let Some(v) = t_str(&doc, "global", "theme-dyn-mode") {
-        cfg.theme_pref.dyn_mode = ThemeDynMode::parse(&v);
+        cfg.global.theme_pref.dyn_mode = ThemeDynMode::parse(&v);
     }
     if let Some(v) = t_str(&doc, "global", "theme-light") {
-        cfg.theme_pref.dyn_light = v;
+        cfg.global.theme_pref.dyn_light = v;
     }
     if let Some(v) = t_str(&doc, "global", "theme-dark") {
-        cfg.theme_pref.dyn_dark = v;
+        cfg.global.theme_pref.dyn_dark = v;
     }
     if let Some(v) = t_str(&doc, "global", "language") {
         if let Some(parsed) = Language::parse(&v) {
-            cfg.language = parsed;
+            cfg.global.language = parsed;
         }
     }
     if let Some(v) = t_str(&doc, "global", "gh-proxy") {
-        cfg.gh_proxy = v;
+        cfg.global.gh_proxy = v;
     }
     if let Some(v) = t_str(&doc, "global", "cf-bypass") {
-        cfg.cf_bypass = v;
+        cfg.global.cf_bypass = v;
     }
     if let Some(v) = t_bool(&doc, "global", "sidebar-collapsed") {
-        cfg.sidebar_collapsed = v;
+        cfg.global.sidebar_collapsed = v;
     }
     if let Some(v) = t_float(&doc, "global", "font-size") {
-        cfg.font_size = v;
+        cfg.global.font_size = v;
     }
 
     // [download]
     if let Some(v) = t_str(&doc, "download", "download-path") {
-        cfg.download_path = v;
+        cfg.download.download_path = v;
     }
     if let Some(v) = t_str(&doc, "download", "extname") {
-        cfg.ext_name = ExportFormat::parse(&v);
+        cfg.download.ext_name = ExportFormat::parse(&v);
     }
     if let Some(v) = t_str(&doc, "download", "txt-encoding") {
-        cfg.txt_encoding = v;
+        cfg.download.txt_encoding = v;
     }
     if let Some(v) = t_bool(&doc, "download", "preserve-chapter-cache") {
-        cfg.preserve_chapter_cache = v;
+        cfg.download.preserve_chapter_cache = v;
     }
 
     // [source]
-    cfg.search_limit = t_int(&doc, "source", "search-limit").map(sat_i32);
+    cfg.source.search_limit = t_int(&doc, "source", "search-limit").map(sat_i32);
     if let Some(v) = t_bool(&doc, "source", "search-filter") {
-        cfg.search_filter = v;
+        cfg.source.search_filter = v;
     }
 
     // [crawl]
-    cfg.concurrency = t_int(&doc, "crawl", "concurrency").map(sat_i32);
+    cfg.crawl.concurrency = t_int(&doc, "crawl", "concurrency").map(sat_i32);
     if let Some(v) = t_int(&doc, "crawl", "min-interval") {
-        cfg.min_interval = sat_u32(v);
+        cfg.crawl.min_interval = sat_u32(v);
     }
     if let Some(v) = t_int(&doc, "crawl", "max-interval") {
-        cfg.max_interval = sat_u32(v);
+        cfg.crawl.max_interval = sat_u32(v);
     }
     if let Some(v) = t_bool(&doc, "crawl", "enable-retry") {
-        cfg.enable_retry = v;
+        cfg.crawl.enable_retry = v;
     }
     if let Some(v) = t_int(&doc, "crawl", "max-retries") {
-        cfg.max_retries = sat_u32(v);
+        cfg.crawl.max_retries = sat_u32(v);
     }
     if let Some(v) = t_int(&doc, "crawl", "retry-min-interval") {
-        cfg.retry_min_interval = sat_u32(v);
+        cfg.crawl.retry_min_interval = sat_u32(v);
     }
     if let Some(v) = t_int(&doc, "crawl", "retry-max-interval") {
-        cfg.retry_max_interval = sat_u32(v);
+        cfg.crawl.retry_max_interval = sat_u32(v);
     }
 
     // [cookie]
     if let Some(v) = t_str(&doc, "cookie", "qidian-cookie") {
-        cfg.qidian_cookie = v;
+        cfg.cookie.qidian_cookie = v;
     }
 
     // [proxy]
     if let Some(v) = t_bool(&doc, "proxy", "enabled") {
-        cfg.proxy_enabled = v;
+        cfg.proxy.proxy_enabled = v;
     }
     if let Some(v) = t_str(&doc, "proxy", "host") {
-        cfg.proxy_host = v;
+        cfg.proxy.proxy_host = v;
     }
     if let Some(v) = t_int(&doc, "proxy", "port") {
-        cfg.proxy_port = sat_u16(v);
+        cfg.proxy.proxy_port = sat_u16(v);
     }
 
     let theme_kind_present = t_table(&doc, "global")
@@ -181,7 +181,7 @@ pub fn load_config(path: &Path) -> Result<AppConfig> {
         .is_some();
     if !theme_kind_present {
         if let Some(v) = t_str(&doc, "global", "theme") {
-            cfg.theme_pref = ThemePref {
+            cfg.global.theme_pref = ThemePref {
                 kind: ThemeKind::Static,
                 static_name: v,
                 ..ThemePref::default()
@@ -235,80 +235,140 @@ pub fn save_config(path: &Path, cfg: &AppConfig) -> Result<()> {
         &mut doc,
         "global",
         "theme-kind",
-        cfg.theme_pref.kind.as_str(),
+        cfg.global.theme_pref.kind.as_str(),
     );
     set_str(
         &mut doc,
         "global",
         "theme-name",
-        &cfg.theme_pref.static_name,
+        &cfg.global.theme_pref.static_name,
     );
     set_str(
         &mut doc,
         "global",
         "theme-dyn-mode",
-        cfg.theme_pref.dyn_mode.as_str(),
+        cfg.global.theme_pref.dyn_mode.as_str(),
     );
-    set_str(&mut doc, "global", "theme-light", &cfg.theme_pref.dyn_light);
-    set_str(&mut doc, "global", "theme-dark", &cfg.theme_pref.dyn_dark);
-    set_str(&mut doc, "global", "language", cfg.language.as_str());
-    set_str(&mut doc, "global", "gh-proxy", &cfg.gh_proxy);
-    set_str(&mut doc, "global", "cf-bypass", &cfg.cf_bypass);
+    set_str(
+        &mut doc,
+        "global",
+        "theme-light",
+        &cfg.global.theme_pref.dyn_light,
+    );
+    set_str(
+        &mut doc,
+        "global",
+        "theme-dark",
+        &cfg.global.theme_pref.dyn_dark,
+    );
+    set_str(&mut doc, "global", "language", cfg.global.language.as_str());
+    set_str(&mut doc, "global", "gh-proxy", &cfg.global.gh_proxy);
+    set_str(&mut doc, "global", "cf-bypass", &cfg.global.cf_bypass);
     set_bool(
         &mut doc,
         "global",
         "sidebar-collapsed",
-        cfg.sidebar_collapsed,
+        cfg.global.sidebar_collapsed,
     );
-    set_float(&mut doc, "global", "font-size", cfg.font_size as f64);
+    set_float(
+        &mut doc,
+        "global",
+        "font-size",
+        cfg.global.font_size as f64,
+    );
 
     // [download]
-    set_str(&mut doc, "download", "download-path", &cfg.download_path);
-    set_str(&mut doc, "download", "extname", cfg.ext_name.as_lower());
-    set_str(&mut doc, "download", "txt-encoding", &cfg.txt_encoding);
+    set_str(
+        &mut doc,
+        "download",
+        "download-path",
+        &cfg.download.download_path,
+    );
+    set_str(
+        &mut doc,
+        "download",
+        "extname",
+        cfg.download.ext_name.as_lower(),
+    );
+    set_str(
+        &mut doc,
+        "download",
+        "txt-encoding",
+        &cfg.download.txt_encoding,
+    );
     set_bool(
         &mut doc,
         "download",
         "preserve-chapter-cache",
-        cfg.preserve_chapter_cache,
+        cfg.download.preserve_chapter_cache,
     );
 
     // [source]
-    match cfg.search_limit {
+    match cfg.source.search_limit {
         Some(v) => set_int(&mut doc, "source", "search-limit", v as i64),
         None => unset(&mut doc, "source", "search-limit"),
     }
-    set_bool(&mut doc, "source", "search-filter", cfg.search_filter);
+    set_bool(
+        &mut doc,
+        "source",
+        "search-filter",
+        cfg.source.search_filter,
+    );
 
     // [crawl]
-    match cfg.concurrency {
+    match cfg.crawl.concurrency {
         Some(v) => set_int(&mut doc, "crawl", "concurrency", v as i64),
         None => unset(&mut doc, "crawl", "concurrency"),
     }
-    set_int(&mut doc, "crawl", "min-interval", cfg.min_interval as i64);
-    set_int(&mut doc, "crawl", "max-interval", cfg.max_interval as i64);
-    set_bool(&mut doc, "crawl", "enable-retry", cfg.enable_retry);
-    set_int(&mut doc, "crawl", "max-retries", cfg.max_retries as i64);
+    set_int(
+        &mut doc,
+        "crawl",
+        "min-interval",
+        cfg.crawl.min_interval as i64,
+    );
+    set_int(
+        &mut doc,
+        "crawl",
+        "max-interval",
+        cfg.crawl.max_interval as i64,
+    );
+    set_bool(
+        &mut doc,
+        "crawl",
+        "enable-retry",
+        cfg.crawl.enable_retry,
+    );
+    set_int(
+        &mut doc,
+        "crawl",
+        "max-retries",
+        cfg.crawl.max_retries as i64,
+    );
     set_int(
         &mut doc,
         "crawl",
         "retry-min-interval",
-        cfg.retry_min_interval as i64,
+        cfg.crawl.retry_min_interval as i64,
     );
     set_int(
         &mut doc,
         "crawl",
         "retry-max-interval",
-        cfg.retry_max_interval as i64,
+        cfg.crawl.retry_max_interval as i64,
     );
 
     // [cookie]
-    set_str(&mut doc, "cookie", "qidian-cookie", &cfg.qidian_cookie);
+    set_str(
+        &mut doc,
+        "cookie",
+        "qidian-cookie",
+        &cfg.cookie.qidian_cookie,
+    );
 
     // [proxy]
-    set_bool(&mut doc, "proxy", "enabled", cfg.proxy_enabled);
-    set_str(&mut doc, "proxy", "host", &cfg.proxy_host);
-    set_int(&mut doc, "proxy", "port", cfg.proxy_port as i64);
+    set_bool(&mut doc, "proxy", "enabled", cfg.proxy.proxy_enabled);
+    set_str(&mut doc, "proxy", "host", &cfg.proxy.proxy_host);
+    set_int(&mut doc, "proxy", "port", cfg.proxy.proxy_port as i64);
 
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).ok();

@@ -31,8 +31,8 @@ pub(super) fn build(ctx: &PageCtx<'_>, _cx: &App) -> SettingPage {
                         ts("Settings.item.proxy_enabled"),
                         bool_field(
                             &m,
-                            move |model| model.config.proxy_enabled,
-                            move |model, val| model.config.proxy_enabled = val,
+                            move |model| model.config.proxy.proxy_enabled,
+                            move |model, val| model.config.proxy.proxy_enabled = val,
                         ),
                     )
                     .description(ts("Settings.desc.proxy_enabled")),
@@ -40,8 +40,8 @@ pub(super) fn build(ctx: &PageCtx<'_>, _cx: &App) -> SettingPage {
                         ts("Settings.item.proxy_host"),
                         string_field(
                             &m,
-                            move |model| SharedString::from(model.config.proxy_host.clone()),
-                            move |model, s| model.config.proxy_host = s,
+                            move |model| SharedString::from(model.config.proxy.proxy_host.clone()),
+                            move |model, s| model.config.proxy.proxy_host = s,
                         ),
                     )
                     .description(ts("Settings.desc.proxy_host")),
@@ -54,8 +54,8 @@ pub(super) fn build(ctx: &PageCtx<'_>, _cx: &App) -> SettingPage {
                                 max: 65_535.0,
                                 ..Default::default()
                             },
-                            move |model| model.config.proxy_port,
-                            move |model, v| model.config.proxy_port = v,
+                            move |model| model.config.proxy.proxy_port,
+                            move |model, v| model.config.proxy.proxy_port = v,
                         ),
                     )
                     .description(ts("Settings.desc.proxy_port")),

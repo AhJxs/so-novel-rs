@@ -37,8 +37,8 @@ pub(super) fn build(_ctx: &PageCtx<'_>, _cx: &App) -> SettingPage {
                                 max: 10_000.0,
                                 ..Default::default()
                             },
-                            move |model| model.config.search_limit,
-                            move |model, v| model.config.search_limit = v,
+                            move |model| model.config.source.search_limit,
+                            move |model, v| model.config.source.search_limit = v,
                         ),
                     )
                     .description(ts("Settings.desc.search_limit")),
@@ -47,8 +47,8 @@ pub(super) fn build(_ctx: &PageCtx<'_>, _cx: &App) -> SettingPage {
                         ts("Settings.item.search_filter"),
                         bool_field(
                             &m,
-                            move |model| model.config.search_filter,
-                            move |model, val| model.config.search_filter = val,
+                            move |model| model.config.source.search_filter,
+                            move |model, val| model.config.source.search_filter = val,
                         ),
                     )
                     .description(ts("Settings.desc.search_filter")),
@@ -67,8 +67,8 @@ pub(super) fn build(_ctx: &PageCtx<'_>, _cx: &App) -> SettingPage {
                                 max: 100.0,
                                 ..Default::default()
                             },
-                            move |model| model.config.concurrency,
-                            move |model, v| model.config.concurrency = v,
+                            move |model| model.config.crawl.concurrency,
+                            move |model, v| model.config.crawl.concurrency = v,
                         ),
                     )
                     .description(ts("Settings.desc.concurrency")),
@@ -82,8 +82,8 @@ pub(super) fn build(_ctx: &PageCtx<'_>, _cx: &App) -> SettingPage {
                                 max: 60_000.0,
                                 ..Default::default()
                             },
-                            move |model| model.config.min_interval,
-                            move |model, v| model.config.min_interval = v,
+                            move |model| model.config.crawl.min_interval,
+                            move |model, v| model.config.crawl.min_interval = v,
                         ),
                     )
                     .description(ts("Settings.desc.min_interval")),
@@ -97,8 +97,8 @@ pub(super) fn build(_ctx: &PageCtx<'_>, _cx: &App) -> SettingPage {
                                 max: 60_000.0,
                                 ..Default::default()
                             },
-                            move |model| model.config.max_interval,
-                            move |model, v| model.config.max_interval = v,
+                            move |model| model.config.crawl.max_interval,
+                            move |model, v| model.config.crawl.max_interval = v,
                         ),
                     )
                     .description(ts("Settings.desc.max_interval")),
@@ -112,8 +112,8 @@ pub(super) fn build(_ctx: &PageCtx<'_>, _cx: &App) -> SettingPage {
                         ts("Settings.item.enable_retry"),
                         bool_field(
                             &m,
-                            move |model| model.config.enable_retry,
-                            move |model, val| model.config.enable_retry = val,
+                            move |model| model.config.crawl.enable_retry,
+                            move |model, val| model.config.crawl.enable_retry = val,
                         ),
                     )
                     .description(ts("Settings.desc.enable_retry")),
@@ -127,8 +127,8 @@ pub(super) fn build(_ctx: &PageCtx<'_>, _cx: &App) -> SettingPage {
                                 max: 20.0,
                                 ..Default::default()
                             },
-                            move |model| model.config.max_retries,
-                            move |model, v| model.config.max_retries = v,
+                            move |model| model.config.crawl.max_retries,
+                            move |model, v| model.config.crawl.max_retries = v,
                         ),
                     )
                     .description(ts("Settings.desc.max_retries")),
@@ -142,8 +142,8 @@ pub(super) fn build(_ctx: &PageCtx<'_>, _cx: &App) -> SettingPage {
                                 max: 60_000.0,
                                 ..Default::default()
                             },
-                            move |model| model.config.retry_min_interval,
-                            move |model, v| model.config.retry_min_interval = v,
+                            move |model| model.config.crawl.retry_min_interval,
+                            move |model, v| model.config.crawl.retry_min_interval = v,
                         ),
                     )
                     .description(ts("Settings.desc.retry_min_interval")),
@@ -157,8 +157,8 @@ pub(super) fn build(_ctx: &PageCtx<'_>, _cx: &App) -> SettingPage {
                                 max: 60_000.0,
                                 ..Default::default()
                             },
-                            move |model| model.config.retry_max_interval,
-                            move |model, v| model.config.retry_max_interval = v,
+                            move |model| model.config.crawl.retry_max_interval,
+                            move |model, v| model.config.crawl.retry_max_interval = v,
                         ),
                     )
                     .description(ts("Settings.desc.retry_max_interval")),

@@ -5,7 +5,7 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use serde::{Deserialize, Serialize};
 
-use crate::config::AppConfig;
+use crate::config::{AppConfig, CookieCfg, CrawlCfg, DownloadCfg, GlobalCfg, ProxyCfg, SourceCfg};
 
 use super::super::SharedState;
 use super::lock::{rw_read, rw_write};
@@ -92,29 +92,29 @@ impl From<&AppConfig> for PublicSettings {
     fn from(cfg: &AppConfig) -> Self {
         Self {
             version: cfg.version.clone(),
-            theme_pref: cfg.theme_pref.clone(),
-            language: cfg.language,
-            gh_proxy: cfg.gh_proxy.clone(),
-            cf_bypass: cfg.cf_bypass.clone(),
-            sidebar_collapsed: cfg.sidebar_collapsed,
-            font_size: cfg.font_size,
-            download_path: cfg.download_path.clone(),
-            ext_name: cfg.ext_name,
-            txt_encoding: cfg.txt_encoding.clone(),
-            preserve_chapter_cache: cfg.preserve_chapter_cache,
-            search_limit: cfg.search_limit,
-            search_filter: cfg.search_filter,
-            concurrency: cfg.concurrency,
-            min_interval: cfg.min_interval,
-            max_interval: cfg.max_interval,
-            max_retries: cfg.max_retries,
-            enable_retry: cfg.enable_retry,
-            retry_min_interval: cfg.retry_min_interval,
-            retry_max_interval: cfg.retry_max_interval,
-            has_qidian_cookie: !cfg.qidian_cookie.trim().is_empty(),
-            proxy_enabled: cfg.proxy_enabled,
-            proxy_host: cfg.proxy_host.clone(),
-            proxy_port: cfg.proxy_port,
+            theme_pref: cfg.global.theme_pref.clone(),
+            language: cfg.global.language,
+            gh_proxy: cfg.global.gh_proxy.clone(),
+            cf_bypass: cfg.global.cf_bypass.clone(),
+            sidebar_collapsed: cfg.global.sidebar_collapsed,
+            font_size: cfg.global.font_size,
+            download_path: cfg.download.download_path.clone(),
+            ext_name: cfg.download.ext_name,
+            txt_encoding: cfg.download.txt_encoding.clone(),
+            preserve_chapter_cache: cfg.download.preserve_chapter_cache,
+            search_limit: cfg.source.search_limit,
+            search_filter: cfg.source.search_filter,
+            concurrency: cfg.crawl.concurrency,
+            min_interval: cfg.crawl.min_interval,
+            max_interval: cfg.crawl.max_interval,
+            max_retries: cfg.crawl.max_retries,
+            enable_retry: cfg.crawl.enable_retry,
+            retry_min_interval: cfg.crawl.retry_min_interval,
+            retry_max_interval: cfg.crawl.retry_max_interval,
+            has_qidian_cookie: !cfg.cookie.qidian_cookie.trim().is_empty(),
+            proxy_enabled: cfg.proxy.proxy_enabled,
+            proxy_host: cfg.proxy.proxy_host.clone(),
+            proxy_port: cfg.proxy.proxy_port,
         }
     }
 }
@@ -290,37 +290,37 @@ pub async fn settings_put(
     let mut cfg = rw_write("settings_put", &state.config)?;
 
     if let Some(v) = update.download_path {
-        cfg.download_path = v.trim().to_string();
+        cfg.download.download_path = v.trim().to_string();
     }
     if let Some(v) = update.ext_name {
-        cfg.ext_name = crate::config::ExportFormat::parse(&v);
+        cfg.download.ext_name = crate::config::ExportFormat::parse(&v);
     }
     if let Some(v) = update.txt_encoding {
-        cfg.txt_encoding = v;
+        cfg.download.txt_encoding = v;
     }
     if let Some(v) = update.search_filter {
-        cfg.search_filter = v;
+        cfg.source.search_filter = v;
     }
     if let Some(v) = update.proxy_enabled {
-        cfg.proxy_enabled = v;
+        cfg.proxy.proxy_enabled = v;
     }
     if let Some(v) = update.proxy_host {
-        cfg.proxy_host = v;
+        cfg.proxy.proxy_host = v;
     }
     if let Some(v) = update.proxy_port {
-        cfg.proxy_port = v;
+        cfg.proxy.proxy_port = v;
     }
     if let Some(v) = update.concurrency {
-        cfg.concurrency = Some(v);
+        cfg.crawl.concurrency = Some(v);
     }
     if let Some(v) = update.max_retries {
-        cfg.max_retries = v;
+        cfg.crawl.max_retries = v;
     }
     if let Some(v) = update.enable_retry {
-        cfg.enable_retry = v;
+        cfg.crawl.enable_retry = v;
     }
     if let Some(v) = update.language {
-        cfg.language = v;
+        cfg.global.language = v;
     }
 
     let paths = crate::config::ConfigPaths::discover();

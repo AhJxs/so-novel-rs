@@ -166,7 +166,7 @@ fn short_err(e: &reqwest::Error) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::AppConfig;
+    use crate::config::{AppConfig, CookieCfg, CrawlCfg, DownloadCfg, GlobalCfg, ProxyCfg, SourceCfg};
     use crate::models::Rule;
 
     #[tokio::test(flavor = "multi_thread")]

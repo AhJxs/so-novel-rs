@@ -18,7 +18,7 @@ use axum_session::{SessionConfig, SessionNullPool, SessionStore};
 use serde::Serialize;
 
 use crate::app::DownloadTask;
-use crate::config::AppConfig;
+use crate::config::{AppConfig, CookieCfg, CrawlCfg, DownloadCfg, GlobalCfg, ProxyCfg, SourceCfg};
 use crate::http::HttpClients;
 use crate::models::Rule;
 use crate::db::SourcesConfig;
@@ -131,7 +131,7 @@ impl WebState {
         rules: Vec<Rule>,
         params: WebInitParams,
     ) -> Self {
-        let download_path = PathBuf::from(&config.download_path);
+        let download_path = PathBuf::from(&config.download.download_path);
         Self {
             config: RwLock::new(config),
             http,

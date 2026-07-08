@@ -5,7 +5,7 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::Instrument;
 
-use crate::config::AppConfig;
+use crate::config::{AppConfig, CookieCfg, CrawlCfg, DownloadCfg, GlobalCfg, ProxyCfg, SourceCfg};
 use crate::http::HttpClients;
 use crate::models::Source;
 use crate::models::{Book, Rule};
@@ -71,17 +71,18 @@ pub fn spawn_search(
         .collect();
     search.expected = target_sources.len();
     search.running = true;
-    search.filter_after_done = config.search_filter;
+    search.filter_after_done = config.source.search_filter;
 
     let (tx, rx) = mpsc::unbounded_channel::<SourceSearchEvent>();
     search.rx = Some(rx);
 
-    let cf_bypass = if config.cf_bypass.trim().is_empty() {
+    let cf_bypass = if config.global.cf_bypass.trim().is_empty() {
         None
     } else {
-        Some(config.cf_bypass.clone())
+        Some(config.global.cf_bypass.clone())
     };
     let limit = config
+        .source
         .search_limit
         .map(|v| v.max(0) as usize)
         .filter(|v| *v > 0);
@@ -226,15 +227,15 @@ pub fn select_search_result(
 
     let url = r.url.clone();
     let source_id = r.source_id;
-    let cf_bypass = if config.cf_bypass.trim().is_empty() {
+    let cf_bypass = if config.global.cf_bypass.trim().is_empty() {
         None
     } else {
-        Some(config.cf_bypass.clone())
+        Some(config.global.cf_bypass.clone())
     };
-    let qidian_cookie = if config.qidian_cookie.trim().is_empty() {
+    let qidian_cookie = if config.cookie.qidian_cookie.trim().is_empty() {
         None
     } else {
-        Some(config.qidian_cookie.clone())
+        Some(config.cookie.qidian_cookie.clone())
     };
 
     // 详情拉取 mint 一个新 trace_id —— 它是一次独立的"动作"（不与搜索本身

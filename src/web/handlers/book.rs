@@ -5,7 +5,7 @@ use axum::http::StatusCode;
 use axum::response::Json;
 use serde::Deserialize;
 
-use crate::config::AppConfig;
+use crate::config::{AppConfig, CookieCfg, CrawlCfg, DownloadCfg, GlobalCfg, ProxyCfg, SourceCfg};
 use crate::crawler::{self, CancelToken};
 use crate::models::Source;
 use crate::models::{Book, Rule};
@@ -46,8 +46,8 @@ pub async fn book_detail(
     let source = Source::from(rule, &config);
     let client = state.http.for_rule(&source.rule);
 
-    let cf = (!config.cf_bypass.trim().is_empty()).then_some(config.cf_bypass.as_str());
-    let qc = (!config.qidian_cookie.trim().is_empty()).then_some(config.qidian_cookie.as_str());
+    let cf = (!config.global.cf_bypass.trim().is_empty()).then_some(config.global.cf_bypass.as_str());
+    let qc = (!config.cookie.qidian_cookie.trim().is_empty()).then_some(config.cookie.qidian_cookie.as_str());
 
     let book = parser::parse_book_detail(&client, &source.rule, &params.url, cf, qc).await?;
 

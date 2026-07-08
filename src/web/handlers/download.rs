@@ -215,7 +215,7 @@ pub async fn download(
 
     let mut config = config;
     if let Some(fmt) = &req.format {
-        config.ext_name = crate::config::ExportFormat::parse(fmt);
+        config.download.ext_name = crate::config::ExportFormat::parse(fmt);
     }
 
     let source = Source::from(rule, &config);

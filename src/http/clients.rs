@@ -35,7 +35,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 
-use crate::config::AppConfig;
+use crate::config::{AppConfig, CookieCfg, CrawlCfg, DownloadCfg, GlobalCfg, ProxyCfg, SourceCfg};
 use crate::http::client::{ClientOptions, build_async_client};
 use crate::models::Rule;
 use crate::utils::lock::{mutex_or, rw_read_or, rw_write_or};
@@ -51,9 +51,9 @@ struct ProxySignature {
 impl ProxySignature {
     fn from_cfg(cfg: &AppConfig) -> Self {
         Self {
-            enabled: cfg.proxy_enabled,
-            host: cfg.proxy_host.clone(),
-            port: cfg.proxy_port,
+            enabled: cfg.proxy.proxy_enabled,
+            host: cfg.proxy.proxy_host.clone(),
+            port: cfg.proxy.proxy_port,
         }
     }
 }
@@ -92,7 +92,7 @@ impl HttpClients {
         );
         // gh_proxy client：如果用户配了 gh_proxy，用它做 forward proxy；否则退化为普通 client。
         // `gh_proxy_pair()` 调用方自己判断 URL 是否为空决定是否使用。
-        let gh_proxy_url = cfg.gh_proxy.trim().to_string();
+        let gh_proxy_url = cfg.global.gh_proxy.trim().to_string();
         let gh_proxy_client = if gh_proxy_url.is_empty() {
             Arc::new(
                 build_async_client(cfg, &ClientOptions::default())
@@ -245,9 +245,12 @@ mod tests {
 
         // rebuild 后 for_rule 仍正常工作
         let new_cfg = AppConfig {
-            proxy_enabled: true,
-            proxy_host: "127.0.0.1".into(),
-            proxy_port: 9999,
+            proxy: ProxyCfg {
+                proxy_enabled: true,
+                proxy_host: "127.0.0.1".into(),
+                proxy_port: 9999,
+                ..ProxyCfg::default()
+            },
             ..default_cfg()
         };
         clients.rebuild_proxy(&new_cfg).unwrap();
@@ -261,9 +264,12 @@ mod tests {
         let before = clients.safe_client_ptr();
 
         let new_cfg = AppConfig {
-            proxy_enabled: true,
-            proxy_host: "127.0.0.1".into(),
-            proxy_port: 8080,
+            proxy: ProxyCfg {
+                proxy_enabled: true,
+                proxy_host: "127.0.0.1".into(),
+                proxy_port: 8080,
+                ..ProxyCfg::default()
+            },
             ..default_cfg()
         };
         clients.rebuild_proxy(&new_cfg).unwrap();
@@ -312,7 +318,10 @@ mod tests {
 
         // 配了 gh_proxy 的 cfg 应该构造带代理的 client
         let cfg_with_proxy = AppConfig {
-            gh_proxy: "https://ghproxy.example.com/".into(),
+            global: GlobalCfg {
+                gh_proxy: "https://ghproxy.example.com/".into(),
+                ..GlobalCfg::default()
+            },
             ..default_cfg()
         };
         let clients2 = HttpClients::new(&cfg_with_proxy).unwrap();

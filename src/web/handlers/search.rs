@@ -91,10 +91,10 @@ pub async fn search(
 
     let limit = params.limit.map(|v| v.max(0) as usize).filter(|v| *v > 0);
 
-    let cf_bypass = if config.cf_bypass.trim().is_empty() {
+    let cf_bypass = if config.global.cf_bypass.trim().is_empty() {
         None
     } else {
-        Some(config.cf_bypass.clone())
+        Some(config.global.cf_bypass.clone())
     };
 
     let (tx, rx) =

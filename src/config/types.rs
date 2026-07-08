@@ -6,8 +6,9 @@
 use serde::{Deserialize, Serialize};
 
 /// 导出文件格式。EPUB / TXT / HTML / PDF。
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Copy, Clone, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub enum ExportFormat {
+    #[default]
     Epub,
     Txt,
     Html,
@@ -73,9 +74,10 @@ impl LangType {
 ///
 /// 三种：简体中文 / 繁體中文 / English。存到 TOML `[global].language`
 /// （旧名 `[global].app-lang` 仍可加载 —— 仅做向后兼容）。
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Copy, Clone, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub enum Language {
     /// 简体中文
+    #[default]
     SimplifiedChinese,
     /// 繁體中文
     TraditionalChinese,
@@ -204,83 +206,247 @@ pub struct ThemePref {
 }
 
 /// 主配置结构。`version` 字段用于将来 in-place 升级时做迁移判断。
+///
+/// 字段按 TOML 章节分组, 每个章节一个 sub-struct, 序列化时是嵌套表:
+///
+/// ```toml
+/// [global]
+/// theme-kind = "dynamic"
+/// font-size = 16.0
+///
+/// [download]
+/// download-path = "..."
+/// ```
+///
+/// 读取流程 (`toml_io::load_config`) 按章节用 toml_edit 解析, 不直接走 serde
+/// 反序列化 (要做旧键迁移、字段夹值、i18n 兜底等); 这里只声明结构与默认值。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
+    /// 配置 schema 版本。`env!("CARGO_PKG_VERSION")` 在 with_defaults 时填。
     pub version: String,
 
-    // [global]
+    /// `[global]` 章节: 主题偏好 / 语言 / 代理 / 字号。
+    #[serde(default)]
+    pub global: GlobalCfg,
+
+    /// `[download]` 章节: 下载路径 / 导出格式 / 编码 / 章节缓存策略。
+    #[serde(default)]
+    pub download: DownloadCfg,
+
+    /// `[source]` 章节: 书源搜索限制 / 过滤开关。
+    #[serde(default)]
+    pub source: SourceCfg,
+
+    /// `[crawl]` 章节: 并发数 / 间隔 / 重试参数。
+    #[serde(default)]
+    pub crawl: CrawlCfg,
+
+    /// `[cookie]` 章节: 站点专用 cookie (目前只起点中文)。
+    #[serde(default)]
+    pub cookie: CookieCfg,
+
+    /// `[proxy]` 章节: HTTP 代理配置。
+    #[serde(default)]
+    pub proxy: ProxyCfg,
+}
+
+/// `[global]` 章节。主题偏好 / 应用语言 / GitHub 代理 / Cloudflare bypass /
+/// 侧栏折叠状态 / 全局字号。
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct GlobalCfg {
+    /// 主题偏好 (静态 / 动态)。
     pub theme_pref: ThemePref,
+    /// 应用语言 (zh-CN / zh-TW / en)。
     pub language: Language,
+    /// GitHub raw 代理前缀 (留空 = 直连)。
     pub gh_proxy: String,
+    /// Cloudflare bypass URL (留空 = 关闭 bypass)。
     pub cf_bypass: String,
     /// 左侧 Sidebar 是否折叠。重启后保持上次状态。
     pub sidebar_collapsed: bool,
-    /// UI 字号（px）。gpui-component 默认 16；`Root::render` 每帧用它设 rem 基准，
-    /// 组件全用 `rems(...)` 缩放，改这一个字段 = 全局缩放。
-    /// 范围由 `themes::FONT_SIZE_MIN/MAX` 钳制（12–24），超出部分渲染时被夹住。
+    /// UI 字号 (px)。gpui-component 默认 16; `Root::render` 每帧用它设 rem 基准,
+    /// 组件全用 `rems(...)` 缩放, 改这一个字段 = 全局缩放。
+    /// 范围由 `validate()` 钳制到 [12, 24], 渲染层还会再夹一次防越界。
     pub font_size: f32,
+}
 
-    // [download]
+/// `[download]` 章节。下载路径 / 导出格式 / 编码 / 章节缓存策略。
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct DownloadCfg {
+    /// 默认下载目录 (由 `defaults::default_download_path` 决定)。
     pub download_path: String,
+    /// 导出文件格式 (EPUB / TXT / HTML / PDF)。
     pub ext_name: ExportFormat,
+    /// TXT 导出编码 (UTF-8 / GBK / Big5 ...)。
     pub txt_encoding: String,
+    /// 导出完成后是否保留章节缓存目录。
     pub preserve_chapter_cache: bool,
+}
 
-    // [source]
-    /// `None` 表示未指定（旧 INI `-1`）。
+/// `[source]` 章节。书源搜索限制 / 过滤开关。
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct SourceCfg {
+    /// 单次搜索最多返回结果数。`None` 表示未指定 (用书源默认)。
     pub search_limit: Option<i32>,
+    /// 是否启用搜索结果过滤 (按书名/作者名相似度去重)。
     pub search_filter: bool,
+}
 
-    // [crawl]
+/// `[crawl]` 章节。并发数 / 间隔 / 重试参数。
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct CrawlCfg {
+    /// 全局并发抓取上限。`None` = 由运行时按 CPU 数自动算。
     pub concurrency: Option<i32>,
+    /// 两次抓取的最小间隔 (ms)。
     pub min_interval: u32,
+    /// 两次抓取的最大间隔 (ms)。运行时在 [min, max] 间随机。
     pub max_interval: u32,
+    /// 是否启用失败重试。
     pub enable_retry: bool,
+    /// 单个书源的最大重试次数。
     pub max_retries: u32,
+    /// 重试最小间隔 (ms)。
     pub retry_min_interval: u32,
+    /// 重试最大间隔 (ms)。
     pub retry_max_interval: u32,
+}
 
-    // [cookie]
+/// `[cookie]` 章节。站点专用 cookie。
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct CookieCfg {
+    /// 起点中文网 cookie (订阅章节用)。
     pub qidian_cookie: String,
+}
 
-    // [proxy]
+/// `[proxy]` 章节。HTTP 代理配置。
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct ProxyCfg {
+    /// 是否启用 HTTP 代理。
     pub proxy_enabled: bool,
+    /// 代理主机地址。
     pub proxy_host: String,
+    /// 代理端口。
     pub proxy_port: u16,
 }
 
 impl AppConfig {
-    /// 构造默认配置，下载路径由 `defaults::default_download_path` 决定。
+    /// 构造默认配置, 下载路径由 `defaults::default_download_path` 决定。
     pub fn with_defaults() -> Self {
         Self {
             version: env!("CARGO_PKG_VERSION").to_string(),
-            theme_pref: ThemePref::default(),
-            // 默认 = Dynamic + System + 空名（gpui-component 默认浅/深主题，跟 OS 走）。
-            language: Language::SimplifiedChinese,
-            gh_proxy: String::new(),
-            cf_bypass: String::new(),
-            sidebar_collapsed: false,
-            // 与 themes::FONT_SIZE_DEFAULT 一致（16px）。
-            font_size: 16.0,
-            download_path: crate::config::defaults::default_download_path(),
-            ext_name: ExportFormat::Epub,
-            txt_encoding: "UTF-8".to_string(),
-            preserve_chapter_cache: false,
-            search_limit: None,
-            search_filter: true,
-            concurrency: None,
-            min_interval: 200,
-            max_interval: 400,
-            enable_retry: true,
-            max_retries: 5,
-            retry_min_interval: 2000,
-            retry_max_interval: 4000,
-            qidian_cookie: String::new(),
-            proxy_enabled: false,
-            proxy_host: "127.0.0.1".to_string(),
-            proxy_port: 7890,
+            global: GlobalCfg {
+                theme_pref: ThemePref::default(),
+                // 默认 = Dynamic + System + 空名 (gpui-component 默认浅/深主题, 跟 OS 走)
+                language: Language::SimplifiedChinese,
+                gh_proxy: String::new(),
+                cf_bypass: String::new(),
+                sidebar_collapsed: false,
+                // 与 themes::FONT_SIZE_DEFAULT 一致 (16px)
+                font_size: 16.0,
+            },
+            download: DownloadCfg {
+                download_path: crate::config::defaults::default_download_path(),
+                ext_name: ExportFormat::Epub,
+                txt_encoding: "UTF-8".to_string(),
+                preserve_chapter_cache: false,
+            },
+            source: SourceCfg {
+                search_limit: None,
+                search_filter: true,
+            },
+            crawl: CrawlCfg {
+                concurrency: None,
+                min_interval: 200,
+                max_interval: 400,
+                enable_retry: true,
+                max_retries: 5,
+                retry_min_interval: 2000,
+                retry_max_interval: 4000,
+            },
+            cookie: CookieCfg {
+                qidian_cookie: String::new(),
+            },
+            proxy: ProxyCfg {
+                proxy_enabled: false,
+                proxy_host: "127.0.0.1".to_string(),
+                proxy_port: 7890,
+            },
         }
     }
+
+    /// 校验配置合法性。启动时调一次, 失败让用户改 config.toml 重启。
+    ///
+    /// 当前校验:
+    /// - `font_size` ∈ [12.0, 24.0] (与 `gpui_app::themes::FONT_SIZE_MIN/MAX` 一致)
+    /// - `min_interval <= max_interval` (爬虫间隔合法性)
+    /// - `retry_min_interval <= retry_max_interval` (重试间隔合法性)
+    /// - `proxy_port != 0` (启用代理时端口必须非零; 实际上 u16 不会为 0 但显式校验可读)
+    /// - `download_path` 非空
+    pub fn validate(&self) -> Result<(), ConfigError> {
+        // 字号
+        const FONT_MIN: f32 = 12.0;
+        const FONT_MAX: f32 = 24.0;
+        if !(FONT_MIN..=FONT_MAX).contains(&self.global.font_size) {
+            return Err(ConfigError::OutOfRange {
+                field: "global.font_size",
+                value: self.global.font_size as f64,
+                min: FONT_MIN as f64,
+                max: FONT_MAX as f64,
+            });
+        }
+
+        // 爬虫间隔
+        if self.crawl.min_interval > self.crawl.max_interval {
+            return Err(ConfigError::InvalidRange {
+                field: "crawl.min_interval/max_interval",
+                min: self.crawl.min_interval as u64,
+                max: self.crawl.max_interval as u64,
+            });
+        }
+
+        // 重试间隔
+        if self.crawl.retry_min_interval > self.crawl.retry_max_interval {
+            return Err(ConfigError::InvalidRange {
+                field: "crawl.retry_min_interval/retry_max_interval",
+                min: self.crawl.retry_min_interval as u64,
+                max: self.crawl.retry_max_interval as u64,
+            });
+        }
+
+        // 下载路径
+        if self.download.download_path.trim().is_empty() {
+            return Err(ConfigError::Empty {
+                field: "download.download_path",
+            });
+        }
+
+        Ok(())
+    }
+}
+
+/// 配置校验错误 (PR #6, 2026-07-08)
+#[derive(Debug, thiserror::Error)]
+pub enum ConfigError {
+    /// 字段值超出合法范围。
+    #[error("配置字段 `{field}` = {value} 超出合法范围 [{min}, {max}]")]
+    OutOfRange {
+        field: &'static str,
+        value: f64,
+        min: f64,
+        max: f64,
+    },
+
+    /// 字段范围非法 (min > max)。
+    #[error("配置字段 `{field}` 范围非法: min={min} > max={max}")]
+    InvalidRange {
+        field: &'static str,
+        min: u64,
+        max: u64,
+    },
+
+    /// 必填字段为空。
+    #[error("配置字段 `{field}` 不能为空")]
+    Empty { field: &'static str },
 }
 
 impl Default for AppConfig {

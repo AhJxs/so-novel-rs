@@ -477,7 +477,7 @@ mod tests {
             .finish();
         let _g = tracing::subscriber::set_default(subscriber);
 
-        use crate::config::AppConfig;
+        use crate::config::{AppConfig, CookieCfg, CrawlCfg, DownloadCfg, GlobalCfg, ProxyCfg, SourceCfg};
         use crate::http::client::{ClientOptions, build_async_client};
 
         let cfg = AppConfig::default();
@@ -503,7 +503,7 @@ mod tests {
     #[tokio::test]
     #[ignore = "live network: depends on 22biqu availability"]
     async fn live_22biqu_search_returns_non_empty() {
-        use crate::config::AppConfig;
+        use crate::config::{AppConfig, CookieCfg, CrawlCfg, DownloadCfg, GlobalCfg, ProxyCfg, SourceCfg};
         use crate::http::client::{ClientOptions, build_async_client};
 
         let cfg = AppConfig::default();

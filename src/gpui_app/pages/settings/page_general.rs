@@ -36,7 +36,7 @@ use super::fields::{
 /// 构造 Page 1（常规）= 外观 + 网络 + 下载。
 pub(super) fn build(ctx: &PageCtx<'_>, cx: &App) -> SettingPage {
     let m = ctx.model.clone();
-    let theme_kind = ctx.model.read(cx).config.theme_pref.kind;
+    let theme_kind = ctx.model.read(cx).config.global.theme_pref.kind;
 
     // 3 种应用语言 → (value_str, label)，存到 TOML `[global].language`，
     // 由 `Language::as_str()` 给出（"zh-CN" / "zh-TW" / "en"）。
@@ -98,11 +98,11 @@ pub(super) fn build(ctx: &PageCtx<'_>, cx: &App) -> SettingPage {
                                 theme_kind_options,
                                 &m,
                                 move |model| {
-                                    SharedString::from(model.config.theme_pref.kind.as_str())
+                                    SharedString::from(model.config.global.theme_pref.kind.as_str())
                                 },
                                 move |model, val| {
                                     let kind = ThemeKind::parse(&val);
-                                    model.config.theme_pref.kind = kind;
+                                    model.config.global.theme_pref.kind = kind;
                                 },
                                 Some(after_theme_kind),
                             ),
@@ -119,20 +119,20 @@ pub(super) fn build(ctx: &PageCtx<'_>, cx: &App) -> SettingPage {
                             dropdown_field(
                                 language_options,
                                 &m,
-                                move |model| SharedString::from(model.config.language.as_str()),
+                                move |model| SharedString::from(model.config.global.language.as_str()),
                                 move |model, val| {
                                     let Some(lang) = Language::parse(&val) else {
                                         tracing::warn!("language setter: 未知语言值 {val}");
                                         return;
                                     };
                                     // 选的就是当前语言 → no-op。
-                                    if model.config.language == lang {
+                                    if model.config.global.language == lang {
                                         tracing::info!(
                                             "language setter: 选回当前语言 {lang:?}, no-op"
                                         );
                                         return;
                                     }
-                                    model.config.language = lang;
+                                    model.config.global.language = lang;
                                 },
                                 Some(after_language),
                             ),
@@ -183,8 +183,8 @@ pub(super) fn build(ctx: &PageCtx<'_>, cx: &App) -> SettingPage {
                         ts("Settings.item.gh_proxy"),
                         string_field(
                             &m,
-                            move |model| SharedString::from(model.config.gh_proxy.clone()),
-                            move |model, s| model.config.gh_proxy = s,
+                            move |model| SharedString::from(model.config.global.gh_proxy.clone()),
+                            move |model, s| model.config.global.gh_proxy = s,
                         ),
                     )
                     .description(ts("Settings.desc.gh_proxy")),
@@ -192,8 +192,8 @@ pub(super) fn build(ctx: &PageCtx<'_>, cx: &App) -> SettingPage {
                         ts("Settings.item.cf_bypass"),
                         string_field(
                             &m,
-                            move |model| SharedString::from(model.config.cf_bypass.clone()),
-                            move |model, s| model.config.cf_bypass = s,
+                            move |model| SharedString::from(model.config.global.cf_bypass.clone()),
+                            move |model, s| model.config.global.cf_bypass = s,
                         ),
                     )
                     .description(ts("Settings.desc.cf_bypass")),
@@ -267,12 +267,12 @@ pub(super) fn build(ctx: &PageCtx<'_>, cx: &App) -> SettingPage {
                         dropdown_field(
                             ext_options,
                             &m,
-                            move |model| SharedString::from(ext_value(model.config.ext_name)),
+                            move |model| SharedString::from(ext_value(model.config.download.ext_name)),
                             move |model, val| {
                                 let Some(ext) = ext_from_str(&val) else {
                                     return;
                                 };
-                                model.config.ext_name = ext;
+                                model.config.download.ext_name = ext;
                             },
                             None,
                         ),
@@ -284,9 +284,9 @@ pub(super) fn build(ctx: &PageCtx<'_>, cx: &App) -> SettingPage {
                         dropdown_field(
                             encoding_options,
                             &m,
-                            move |model| SharedString::from(model.config.txt_encoding.clone()),
+                            move |model| SharedString::from(model.config.download.txt_encoding.clone()),
                             move |model, val| {
-                                model.config.txt_encoding = val.to_string();
+                                model.config.download.txt_encoding = val.to_string();
                             },
                             None,
                         ),
@@ -297,8 +297,8 @@ pub(super) fn build(ctx: &PageCtx<'_>, cx: &App) -> SettingPage {
                         ts("Settings.item.preserve_chapter_cache"),
                         bool_field(
                             &m,
-                            move |model| model.config.preserve_chapter_cache,
-                            move |model, val| model.config.preserve_chapter_cache = val,
+                            move |model| model.config.download.preserve_chapter_cache,
+                            move |model, val| model.config.download.preserve_chapter_cache = val,
                         ),
                     )
                     .description(ts("Settings.desc.preserve_chapter_cache")),
@@ -353,10 +353,10 @@ fn theme_mode_items(ctx: &PageCtx<'_>, kind: ThemeKind, m: &Entity<AppModel>) ->
                         ),
                     ],
                     m,
-                    move |model| SharedString::from(model.config.theme_pref.dyn_mode.as_str()),
+                    move |model| SharedString::from(model.config.global.theme_pref.dyn_mode.as_str()),
                     move |model, val| {
                         let mode = ThemeDynMode::parse(&val);
-                        model.config.theme_pref.dyn_mode = mode;
+                        model.config.global.theme_pref.dyn_mode = mode;
                     },
                     Some(after_theme_kind),
                 ),
@@ -404,9 +404,9 @@ fn theme_mode_items(ctx: &PageCtx<'_>, kind: ThemeKind, m: &Entity<AppModel>) ->
 /// 写不到 caller 的闭包环境 —— 用模块内 `fn` 强制成 fn pointer，让
 /// `dropdown_field(... after_set: Option<fn(...)>)` 能 clone 出 `'static`。
 fn after_theme_kind(m: &Entity<AppModel>, cx: &mut App) {
-    let pref = m.read(cx).config.theme_pref.clone();
+    let pref = m.read(cx).config.global.theme_pref.clone();
     themes::apply_theme_pref(&pref, None, cx);
-    themes::apply_font_size(m.read(cx).config.font_size, cx);
+    themes::apply_font_size(m.read(cx).config.global.font_size, cx);
 }
 
 /// language setter 写完字段后的副作用：弹「重启确认」Dialog。

@@ -377,7 +377,7 @@ mod tests {
     #[tokio::test]
     #[ignore = "live network: depends on 22biqu availability"]
     async fn live_22biqu_book_detail_parses() {
-        use crate::config::AppConfig;
+        use crate::config::{AppConfig, CookieCfg, CrawlCfg, DownloadCfg, GlobalCfg, ProxyCfg, SourceCfg};
         use crate::http::client::{ClientOptions, build_async_client};
         use crate::parser::search::search_one;
 

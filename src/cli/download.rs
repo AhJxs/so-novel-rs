@@ -70,7 +70,7 @@ pub(crate) fn run_download(
         }
     };
 
-    // cfg.cf_bypass 由 crawler 内部读取；这里不重复计算。
+    // cfg.global.cf_bypass 由 crawler 内部读取；这里不重复计算。
 
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<Progress>();
     let cancel = CancelToken::new();

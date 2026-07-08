@@ -1,13 +1,13 @@
 //! Library 页面：本地书库（下载目录里的电子书文件）。
 //!
 //! 行为：
-//! - 进入页面时若 `library.scanned_dir` 为空 / 不匹配 `config.download_path` → 自动扫一次。
+//! - 进入页面时若 `library.scanned_dir` 为空 / 不匹配 `config.download.download_path` → 自动扫一次。
 //! - 工具栏：文件名过滤输入 + 文件类型按钮组（不在 State 里实现 —— 切语言即时更新）。
 //! - 列表：gpui-component `List`（虚拟滚动）+ `LibraryDelegate`，每页 30 条（5 列：文件名 /
 //!   格式 / 大小 / 修改时间 / 3 动作）。
 //! - 分页页脚自写（gpui-component 0.5.1 没 Pagination 组件），≤1 页时整段隐藏。
 //! - 文件系统 watcher：long-lived `cx.spawn` 任务持有 `notify::RecommendedWatcher`，监听
-//!   `config.download_path` 非递归增量，300 ms debounce 后触发 refresh。
+//!   `config.download.download_path` 非递归增量，300 ms debounce 后触发 refresh。
 //!   `SetPath` 命令让任务内部 drop 旧 watcher 并 arm 到新路径上（详见 `watcher`）。
 //! - 删除走 `WindowExt::open_dialog` 二次确认 → `model.delete_library_entry` → 再 refresh。
 
@@ -89,7 +89,7 @@ impl LibraryPage {
 
         // Watcher 主循环见 `watcher::run`（debounce + SetPath 重 arm 详情在 watcher.rs 顶部）。
         let (watcher_cmd_tx, watcher_cmd_rx) = smol::channel::bounded::<WatcherCmd>(8);
-        let initial_path = std::path::PathBuf::from(model.read(cx).config.download_path.clone());
+        let initial_path = std::path::PathBuf::from(model.read(cx).config.download.download_path.clone());
         let page_weak = cx.entity().downgrade();
         let model_for_watcher = model.clone();
 
@@ -128,7 +128,7 @@ impl LibraryPage {
     /// 过滤变化（filter_text / filter_ext）不走这里 —— 不改变路径。
     fn maybe_auto_scan(&mut self, cx: &mut Context<Self>) {
         let download_path =
-            std::path::PathBuf::from(self.model.read(cx).config.download_path.clone());
+            std::path::PathBuf::from(self.model.read(cx).config.download.download_path.clone());
         let already_scanned = self.model.read(cx).library.scanned_dir.clone();
         let need_scan = match &already_scanned {
             None => true,
@@ -246,7 +246,7 @@ impl Render for LibraryPage {
                 };
                 let total = entries_arc.len();
                 let scan_err = model.library.last_error.clone();
-                let download_path = model.config.download_path.clone();
+                let download_path = model.config.download.download_path.clone();
                 let current_ext = model.library.filter_ext.clone();
                 (entries_arc, total, scan_err, download_path, current_ext)
             });

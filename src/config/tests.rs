@@ -6,18 +6,18 @@
 use std::path::PathBuf;
 
 use crate::config::{
-    AppConfig, ExportFormat, LangType, Language, ThemeDynMode, ThemeKind, ThemePref, load_config,
-    save_config,
+    AppConfig, CookieCfg, CrawlCfg, DownloadCfg, ExportFormat, GlobalCfg, LangType, Language,
+    ProxyCfg, SourceCfg, ThemeDynMode, ThemeKind, ThemePref, load_config, save_config,
 };
 
 #[test]
 fn loads_default_when_missing() {
     let cfg = load_config(&PathBuf::from("/definitely/does/not/exist.toml")).unwrap();
-    assert_eq!(cfg.min_interval, 200);
-    assert_eq!(cfg.max_interval, 400);
-    assert!(cfg.enable_retry);
-    assert!(cfg.search_filter);
-    assert_eq!(cfg.ext_name, ExportFormat::Epub);
+    assert_eq!(cfg.crawl.min_interval, 200);
+    assert_eq!(cfg.crawl.max_interval, 400);
+    assert!(cfg.crawl.enable_retry);
+    assert!(cfg.source.search_filter);
+    assert_eq!(cfg.download.ext_name, ExportFormat::Epub);
 }
 
 #[test]
@@ -26,10 +26,10 @@ fn font_size_accepts_int_and_float_literal() {
     let path = dir.path().join("config.toml");
     // 整数形式（模板默认写法）
     std::fs::write(&path, "[global]\nfont-size = 18\n").unwrap();
-    assert_eq!(load_config(&path).unwrap().font_size, 18.0);
+    assert_eq!(load_config(&path).unwrap().global.font_size, 18.0);
     // 浮点形式
     std::fs::write(&path, "[global]\nfont-size = 20.5\n").unwrap();
-    assert_eq!(load_config(&path).unwrap().font_size, 20.5);
+    assert_eq!(load_config(&path).unwrap().global.font_size, 20.5);
 }
 
 #[test]
@@ -38,46 +38,67 @@ fn round_trip_through_save_and_load() {
     let path = dir.path().join("config.toml");
 
     let cfg = AppConfig {
-        download_path: "/tmp/sn-novels".to_string(),
-        ext_name: ExportFormat::Txt,
-        txt_encoding: "GBK".to_string(),
-        preserve_chapter_cache: true,
-        search_limit: Some(50),
-        concurrency: Some(8),
-        proxy_enabled: true,
-        proxy_host: "10.0.0.1".to_string(),
-        proxy_port: 1080,
-        qidian_cookie: "".to_string(),
-        language: Language::English,
-        theme_pref: ThemePref {
-            kind: ThemeKind::Dynamic,
-            dyn_mode: ThemeDynMode::Dark,
-            dyn_light: "Catppuccin Latte".to_string(),
-            dyn_dark: "Catppuccin Mocha".to_string(),
-            ..ThemePref::default()
+        global: GlobalCfg {
+            theme_pref: ThemePref {
+                kind: ThemeKind::Dynamic,
+                dyn_mode: ThemeDynMode::Dark,
+                dyn_light: "Catppuccin Latte".to_string(),
+                dyn_dark: "Catppuccin Mocha".to_string(),
+                ..ThemePref::default()
+            },
+            language: Language::English,
+            sidebar_collapsed: true,
+            font_size: 20.0,
+            ..GlobalCfg::default()
         },
-        sidebar_collapsed: true,
-        font_size: 20.0,
+        download: DownloadCfg {
+            download_path: "/tmp/sn-novels".to_string(),
+            ext_name: ExportFormat::Txt,
+            txt_encoding: "GBK".to_string(),
+            preserve_chapter_cache: true,
+            ..DownloadCfg::default()
+        },
+        source: SourceCfg {
+            search_limit: Some(50),
+            ..SourceCfg::default()
+        },
+        crawl: CrawlCfg {
+            concurrency: Some(8),
+            ..CrawlCfg::default()
+        },
+        proxy: ProxyCfg {
+            proxy_enabled: true,
+            proxy_host: "10.0.0.1".to_string(),
+            proxy_port: 1080,
+            ..ProxyCfg::default()
+        },
+        cookie: CookieCfg {
+            qidian_cookie: String::new(),
+            ..CookieCfg::default()
+        },
         ..AppConfig::default()
     };
 
     save_config(&path, &cfg).unwrap();
     let loaded = load_config(&path).unwrap();
 
-    assert_eq!(loaded.download_path, cfg.download_path);
-    assert_eq!(loaded.ext_name, cfg.ext_name);
-    assert_eq!(loaded.txt_encoding, cfg.txt_encoding);
-    assert_eq!(loaded.preserve_chapter_cache, cfg.preserve_chapter_cache);
-    assert_eq!(loaded.search_limit, cfg.search_limit);
-    assert_eq!(loaded.concurrency, cfg.concurrency);
-    assert_eq!(loaded.proxy_enabled, cfg.proxy_enabled);
-    assert_eq!(loaded.proxy_host, cfg.proxy_host);
-    assert_eq!(loaded.proxy_port, cfg.proxy_port);
-    assert_eq!(loaded.qidian_cookie, cfg.qidian_cookie);
-    assert_eq!(loaded.language, Language::English);
-    assert_eq!(loaded.theme_pref, cfg.theme_pref);
-    assert!(loaded.sidebar_collapsed);
-    assert_eq!(loaded.font_size, 20.0);
+    assert_eq!(loaded.download.download_path, cfg.download.download_path);
+    assert_eq!(loaded.download.ext_name, cfg.download.ext_name);
+    assert_eq!(loaded.download.txt_encoding, cfg.download.txt_encoding);
+    assert_eq!(
+        loaded.download.preserve_chapter_cache,
+        cfg.download.preserve_chapter_cache
+    );
+    assert_eq!(loaded.source.search_limit, cfg.source.search_limit);
+    assert_eq!(loaded.crawl.concurrency, cfg.crawl.concurrency);
+    assert_eq!(loaded.proxy.proxy_enabled, cfg.proxy.proxy_enabled);
+    assert_eq!(loaded.proxy.proxy_host, cfg.proxy.proxy_host);
+    assert_eq!(loaded.proxy.proxy_port, cfg.proxy.proxy_port);
+    assert_eq!(loaded.cookie.qidian_cookie, cfg.cookie.qidian_cookie);
+    assert_eq!(loaded.global.language, Language::English);
+    assert_eq!(loaded.global.theme_pref, cfg.global.theme_pref);
+    assert!(loaded.global.sidebar_collapsed);
+    assert_eq!(loaded.global.font_size, 20.0);
 }
 
 #[test]
@@ -95,8 +116,8 @@ fn save_preserves_user_comments_in_existing_file() {
     .unwrap();
 
     let mut cfg = load_config(&path).unwrap();
-    assert_eq!(cfg.gh_proxy, "https://my-proxy.example/");
-    cfg.gh_proxy = "https://changed.example/".to_string();
+    assert_eq!(cfg.global.gh_proxy, "https://my-proxy.example/");
+    cfg.global.gh_proxy = "https://changed.example/".to_string();
 
     save_config(&path, &cfg).unwrap();
     let written = std::fs::read_to_string(&path).unwrap();
@@ -124,8 +145,8 @@ fn missing_optional_int_keys_become_none() {
 
     let cfg = load_config(&path).unwrap();
     // search-limit / concurrency 都没填，应当是 None
-    assert!(cfg.search_limit.is_none());
-    assert!(cfg.concurrency.is_none());
+    assert!(cfg.source.search_limit.is_none());
+    assert!(cfg.crawl.concurrency.is_none());
 }
 
 #[test]
@@ -157,7 +178,7 @@ fn load_ignores_orphan_source_language_key() {
     .unwrap();
 
     let cfg = load_config(&path).unwrap();
-    assert!(cfg.search_filter);
+    assert!(cfg.source.search_filter);
 }
 
 /// 原子写：覆盖已存在文件后不留临时残留。
@@ -173,7 +194,7 @@ fn save_config_overwrites_existing_without_leaving_tmp() {
 
     // 改一个字段再写（覆盖已存在文件）
     let mut cfg2 = cfg.clone();
-    cfg2.font_size = 22.0;
+    cfg2.global.font_size = 22.0;
     save_config(&path, &cfg2).unwrap();
     let updated = std::fs::read_to_string(&path).unwrap();
     assert_ne!(original, updated, "file content should change");
@@ -196,7 +217,7 @@ fn save_config_overwrites_existing_without_leaving_tmp() {
 
     // load 回来确实拿到新值（兼容性：原子写后的文件能被 load_config 正确解析）。
     let cfg_loaded = load_config(&path).unwrap();
-    assert!((cfg_loaded.font_size - 22.0).abs() < 1e-3);
+    assert!((cfg_loaded.global.font_size - 22.0).abs() < 1e-3);
 }
 
 /// 原子写：写完后没有 panic，且文件可重新加载。
@@ -208,5 +229,5 @@ fn save_config_writes_to_new_path() {
     assert!(path.exists());
     // 反向解析：load_config 应能读回 default
     let cfg = load_config(&path).unwrap();
-    assert_eq!(cfg.font_size, AppConfig::default().font_size);
+    assert_eq!(cfg.global.font_size, AppConfig::default().global.font_size);
 }

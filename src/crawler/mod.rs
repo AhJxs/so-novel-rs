@@ -32,7 +32,7 @@ use rand::RngExt;
 use thiserror::Error;
 use tokio::sync::{Notify, Semaphore, mpsc};
 
-use crate::config::AppConfig;
+use crate::config::{AppConfig, CookieCfg, CrawlCfg, DownloadCfg, GlobalCfg, ProxyCfg, SourceCfg};
 use crate::export::{
     ExportError, RenderTarget, build_book_dir_name, exporter_for, write_single_chapter,
 };
@@ -217,18 +217,18 @@ pub async fn resolve_book(
     book_url: &str,
     cancel: &CancelToken,
 ) -> Result<(Book, Vec<Chapter>), CrawlerError> {
-    let cf_bypass = if cfg.cf_bypass.trim().is_empty() {
+    let cf_bypass = if cfg.global.cf_bypass.trim().is_empty() {
         None
     } else {
-        Some(cfg.cf_bypass.as_str())
+        Some(cfg.global.cf_bypass.as_str())
     };
 
     // 全局起点 cookie（整段粘贴），仅供详情页末尾的 CoverUpdater 用：
     // 详情页 fetch 本身不附 Cookie，与 Java 端语义一致。
-    let qidian_cookie = if cfg.qidian_cookie.trim().is_empty() {
+    let qidian_cookie = if cfg.cookie.qidian_cookie.trim().is_empty() {
         None
     } else {
-        Some(cfg.qidian_cookie.as_str())
+        Some(cfg.cookie.qidian_cookie.as_str())
     };
 
     let rule = source.rule.clone();
@@ -236,7 +236,7 @@ pub async fn resolve_book(
     let cf_bypass_owned: Option<Arc<str>> = cf_bypass.map(Arc::from);
     let qidian_cookie_owned = qidian_cookie.map(String::from);
     let eff = source.effective_crawl.clone();
-    let max_attempts = if cfg.enable_retry { eff.max_retries } else { 0 };
+    let max_attempts = if cfg.crawl.enable_retry { eff.max_retries } else { 0 };
     // 两次 retry 各需一份 eff（sleep_fn 是 move 闭包）。
     let eff_for_book = eff.clone();
     let eff_for_toc = eff;
@@ -308,7 +308,7 @@ pub async fn resolve_book(
     //
     // 目标语言从界面语言 (`Language`) 推 —— 合并 UI/书源语言设置后用户只设一个
     // Language，下载时的简繁转换目标即由此决定（English → ZhCn 兜底）。
-    let target_lang = cfg.language.to_book_target_lang();
+    let target_lang = cfg.global.language.to_book_target_lang();
     let book = convert_book_meta(&book, &source.rule.language, &target_lang);
 
     Ok((book, toc))
@@ -346,23 +346,23 @@ pub async fn download_chapters(
         return Err(CrawlerError::EmptyToc);
     }
 
-    let cf_bypass = if cfg.cf_bypass.trim().is_empty() {
+    let cf_bypass = if cfg.global.cf_bypass.trim().is_empty() {
         None
     } else {
-        Some(cfg.cf_bypass.as_str())
+        Some(cfg.global.cf_bypass.as_str())
     };
 
     let rule = Arc::new(source.rule.clone());
     let cf_bypass_owned: Option<Arc<str>> = cf_bypass.map(Arc::from);
 
     // 准备 chapters 目录
-    let book_dir_name = build_book_dir_name(book, cfg.ext_name);
-    let chapters_dir = std::path::Path::new(&cfg.download_path).join(&book_dir_name);
+    let book_dir_name = build_book_dir_name(book, cfg.download.ext_name);
+    let chapters_dir = std::path::Path::new(&cfg.download.download_path).join(&book_dir_name);
     std::fs::create_dir_all(&chapters_dir)?;
 
     // 并发抓章节
     let max_concurrent = compute_concurrency(source, chapters.len());
-    let render_target: RenderTarget = cfg.ext_name.into();
+    let render_target: RenderTarget = cfg.download.ext_name.into();
     let rule_chapter = Arc::new(
         rule.chapter
             .clone()
@@ -374,7 +374,7 @@ pub async fn download_chapters(
     let mut handles = Vec::with_capacity(chapters.len());
     let chapter_count = chapters.len();
 
-    let format = cfg.ext_name;
+    let format = cfg.download.ext_name;
     let digit_count = chapters.len().to_string().len().max(3);
 
     for chapter in chapters {
@@ -395,12 +395,12 @@ pub async fn download_chapters(
         let progress = progress.clone();
         let cancel = cancel.clone();
         let eff = eff.clone();
-        let enable_retry = cfg.enable_retry;
+        let enable_retry = cfg.crawl.enable_retry;
         // 简繁转换需要源/目标语言。`source` / `cfg` 是借用，闭包 'static 要求 owned
         // 值；clone Rule（Arc 浅拷贝，开销小）和 target LangType（Copy）。
         // 目标语言从界面语言 (`Language`) 推导 —— 合并设置后用户只设 Language。
         let rule_lang = source.rule.language.clone();
-        let target_lang = cfg.language.to_book_target_lang();
+        let target_lang = cfg.global.language.to_book_target_lang();
 
         // per-task write path
         let ch_dir = chapters_dir.clone();
@@ -591,13 +591,13 @@ pub async fn download_chapters(
         None
     };
 
-    let exporter = exporter_for(cfg.ext_name, &cfg.txt_encoding);
-    let out_dir = std::path::Path::new(&cfg.download_path);
+    let exporter = exporter_for(cfg.download.ext_name, &cfg.download.txt_encoding);
+    let out_dir = std::path::Path::new(&cfg.download.download_path);
     let final_path =
         exporter.merge_with_cover(book, &chapters_dir, out_dir, cover_bytes.as_deref())?;
 
     // 7. 清理章节临时目录
-    if !cfg.preserve_chapter_cache {
+    if !cfg.download.preserve_chapter_cache {
         if let Err(e) = std::fs::remove_dir_all(&chapters_dir) {
             tracing::warn!(
                 "清理章节缓存目录失败（已忽略）: {} — {e}",

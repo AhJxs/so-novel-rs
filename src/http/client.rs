@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 
-use crate::config::AppConfig;
+use crate::config::{AppConfig, CookieCfg, CrawlCfg, DownloadCfg, GlobalCfg, ProxyCfg, SourceCfg};
 
 /// 控制 client 行为的小结构。
 ///
@@ -45,8 +45,8 @@ pub fn build_async_client(cfg: &AppConfig, opts: &ClientOptions) -> Result<reqwe
             h
         });
 
-    if cfg.proxy_enabled {
-        let proxy_url = format!("http://{}:{}", cfg.proxy_host, cfg.proxy_port);
+    if cfg.proxy.proxy_enabled {
+        let proxy_url = format!("http://{}:{}", cfg.proxy.proxy_host, cfg.proxy.proxy_port);
         let proxy = reqwest::Proxy::all(&proxy_url)
             .with_context(|| format!("invalid proxy URL: {proxy_url}"))?;
         builder = builder.proxy(proxy);
@@ -75,9 +75,12 @@ mod tests {
     fn build_async_with_proxy_enabled_invalid_addr_still_constructs() {
         // reqwest 的 Proxy::all 只做 URL 解析；不真正连。
         let cfg = AppConfig {
-            proxy_enabled: true,
-            proxy_host: "127.0.0.1".to_string(),
-            proxy_port: 1,
+            proxy: ProxyCfg {
+                proxy_enabled: true,
+                proxy_host: "127.0.0.1".to_string(),
+                proxy_port: 1,
+                ..ProxyCfg::default()
+            },
             ..AppConfig::default()
         };
         let _client = build_async_client(&cfg, &ClientOptions::default()).unwrap();
@@ -96,7 +99,7 @@ mod tests {
     /// 2) **请求确实打到了 mock proxy**（HTTP 代理模式下 reqwest 把完整 URL
     ///    写进请求行，如 `GET http://example.com/ HTTP/1.1`，不打到目标主机，
     ///    直接打到 proxy）。
-    /// 这才能证明 `cfg.proxy_enabled=true` 不只是"URL 解析没报错"，而是真的把
+    /// 这才能证明 `cfg.proxy.proxy_enabled=true` 不只是"URL 解析没报错"，而是真的把
     /// 流量走了代理。
     #[tokio::test]
     async fn proxy_enabled_actually_routes_traffic_through_proxy() {
@@ -127,9 +130,12 @@ mod tests {
 
         // 2) 走工厂构造 client，proxy_enabled=true
         let cfg = AppConfig {
-            proxy_enabled: true,
-            proxy_host: "127.0.0.1".into(),
-            proxy_port: proxy_port as u16,
+            proxy: ProxyCfg {
+                proxy_enabled: true,
+                proxy_host: "127.0.0.1".into(),
+                proxy_port: proxy_port as u16,
+                ..ProxyCfg::default()
+            },
             ..AppConfig::default()
         };
         let client = build_async_client(&cfg, &ClientOptions::default()).unwrap();

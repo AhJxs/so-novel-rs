@@ -14,10 +14,10 @@ pub(crate) fn effective_cfg(
     format: Option<String>,
 ) -> AppConfig {
     if let Some(o) = output {
-        cfg.download_path = o;
+        cfg.download.download_path = o;
     }
     if let Some(f) = format {
-        cfg.ext_name = ExportFormat::parse(&f);
+        cfg.download.ext_name = ExportFormat::parse(&f);
     }
     cfg
 }

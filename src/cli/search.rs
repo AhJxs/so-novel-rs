@@ -36,15 +36,15 @@ pub(crate) fn run_search(
     // streaming task 把 target_sources move 走，先把总数存出来用于进度。
     let total_sources = target_sources.len();
 
-    let cf_bypass = if cfg.cf_bypass.trim().is_empty() {
+    let cf_bypass = if cfg.global.cf_bypass.trim().is_empty() {
         None
     } else {
-        Some(cfg.cf_bypass.clone())
+        Some(cfg.global.cf_bypass.clone())
     };
 
     // 与 GUI（app/ops/search.rs:71-74）一致：--limit 优先；否则用 config.search_limit。
     let limit = limit.or_else(|| {
-        cfg.search_limit
+        cfg.source.search_limit
             .map(|v| v.max(0) as usize)
             .filter(|v| *v > 0)
     });
@@ -112,8 +112,8 @@ pub(crate) fn run_search(
         }
     }
 
-    // 与 GUI 一致：config.search_filter 为真时按相似度过滤 + 去重 + 排序。
-    if cfg.search_filter {
+    // 与 GUI 一致：config.source.search_filter 为真时按相似度过滤 + 去重 + 排序。
+    if cfg.source.search_filter {
         flat = crate::parser::filter_sort(&flat, &keyword);
     }
 

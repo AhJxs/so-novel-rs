@@ -118,7 +118,7 @@ fn parse_or_help_fallback() -> Result<Cli> {
 /// 2. `--version` → 立即打印（locale 无关）→ return。
 /// 3. `load_config` —— 文件不存在时 `load_config` 返回 `AppConfig::default()`
 ///    （`language = SimplifiedChinese` → 默认中文 help）；无需特判。
-/// 4. `rust_i18n::set_locale(crate::i18n::locale_for(cfg.language))` + 清缓存。
+/// 4. `rust_i18n::set_locale(crate::i18n::locale_for(cfg.global.language))` + 清缓存。
 /// 5. `--help` / `-h` / 无子命令 → 用 `build_localized_command(lang)` 打印本地化 help。
 /// 6. 否则：init tracing / first-run save / init rules / 派发子命令。
 ///
@@ -145,15 +145,15 @@ pub fn run() -> Result<()> {
     // 切到用户配置的语言。`locale_for` 是项目里 `Language → locale 字符串`
     // 的唯一权威映射（见 `crate::i18n::locale_for` 注释）。先 `invalidate_cache`
     // —— `ts()` 的缓存是按 `key` 维度存的，旧 locale 翻译要失效。
-    rust_i18n::set_locale(crate::i18n::locale_for(cfg.language));
+    rust_i18n::set_locale(crate::i18n::locale_for(cfg.global.language));
     crate::i18n::invalidate_cache();
 
-    // 手动分发 --help / -h / 无子命令：调用 `build_localized_command(cfg.language)`
+    // 手动分发 --help / -h / 无子命令：调用 `build_localized_command(cfg.global.language)`
     // 手搓一个含本地化文本的 `Command` 树，按需 `find_subcommand_mut(name)` 定位。
     // 见 `args.rs::build_localized_command` 关于"为什么不用 derive 版本"的注释。
     let is_short_help = std::env::args().any(|a| a == "-h");
     if cli.help {
-        let mut cmd = build_localized_command(cfg.language);
+        let mut cmd = build_localized_command(cfg.global.language);
         // `find_subcommand_mut` 返回 `Option<&mut Command>` —— 用 if let 显式
         // 拿出子命令引用，避免 `.unwrap_or(&mut cmd)` 的双 mutable borrow。
         if let Some(sub) = &cli.command {
@@ -180,7 +180,7 @@ pub fn run() -> Result<()> {
     // 没传子命令（main.rs 通常已经把"无参数 → GUI"拦了，但 `-v` / `-q`
     // 单跑这种边缘情况还是有可能走到这里）：打印顶层长帮助。
     let Some(cmd) = cli.command else {
-        let mut cmd = build_localized_command(cfg.language);
+        let mut cmd = build_localized_command(cfg.global.language);
         cmd.print_long_help().ok();
         println!();
         return Ok(());

@@ -1,5 +1,5 @@
 //! Library 文件系统 watcher：long-lived task 持有 `notify::RecommendedWatcher`，
-//! 监听 `config.download_path` 增量（`Create`/`Modify`/`Remove`）。
+//! 监听 `config.download.download_path` 增量（`Create`/`Modify`/`Remove`）。
 //!
 //! 主循环在 smol executor 上跑：
 //! 1. 300 ms `timer` 醒来

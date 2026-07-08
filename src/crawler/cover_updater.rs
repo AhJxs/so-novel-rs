@@ -319,7 +319,7 @@ async fn measure_resolution(client: &Client, url: &str) -> Option<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::AppConfig;
+    use crate::config::{AppConfig, CookieCfg, CrawlCfg, DownloadCfg, GlobalCfg, ProxyCfg, SourceCfg};
     use crate::http::client::{ClientOptions, build_async_client};
 
     fn book(name: &str, author: &str) -> Book {
