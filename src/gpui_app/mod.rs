@@ -9,17 +9,39 @@
 //! 本模块仅依赖 GPUI + gpui-component + 业务模块（`crate::app`）。
 
 use anyhow::Result;
-use gpui::{App, AppContext, Bounds, WindowBackgroundAppearance, WindowBounds, WindowOptions};
+use gpui::{
+    App, AppContext, Bounds, WindowBackgroundAppearance, WindowBounds, WindowOptions, actions,
+};
 use gpui_component::{Root, TitleBar};
 
 use crate::app::AppModel;
 
+// 8 个全局导航 / 翻页 / 折叠 action。`actions!` 宏生成的类型放在调用点
+// (即 `gpui_app::*`), 让 root.rs / nav.rs 都能 `use crate::gpui_app::{ShowSearch, ...}`。
+actions!(
+    gpui_app,
+    [
+        ShowSearch,
+        ShowTasks,
+        ShowLibrary,
+        ShowSources,
+        ShowSettings,
+        NextPage,
+        PrevPage,
+        ToggleSidebar,
+    ]
+);
+
 pub mod components;
 mod drain_loop;
+mod logo;
+mod nav;
+mod notifications;
 mod pages;
 mod root;
 pub mod themes;
-pub use root::{NavPage, RootView};
+pub use nav::{NavPage, register_key_bindings};
+pub use root::RootView;
 
 /// 把 `AppConfig.language`（应用语言）映射到 gpui-component 接受的 locale 字符串。
 ///
@@ -98,7 +120,7 @@ pub fn run() -> Result<()> {
         };
 
         // 2. 注册快捷键。
-        root::register_key_bindings(cx);
+        register_key_bindings(cx);
 
         // 3. 启动 drain 循环（内部 detach），100ms 兜底 + wakeup 主动唤醒。
         drain_loop::spawn_drain_loop(model.clone(), wakeup_rx, cx);
