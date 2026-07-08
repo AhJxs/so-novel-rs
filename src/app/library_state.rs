@@ -3,6 +3,8 @@
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
+use crate::error::AppResult;
+
 #[derive(Debug, Clone)]
 pub struct LibraryEntry {
     pub path: PathBuf,
@@ -14,8 +16,9 @@ pub struct LibraryEntry {
     pub ext: String,
 }
 
-/// 后台扫描完成事件。Ok 直接装 entries；Err 装 i18n 渲染后的错误文案。
-pub type LibraryScanEvent = Result<Vec<LibraryEntry>, String>;
+/// 后台扫描完成事件。Ok 直接装 entries；Err 装 [`AppError`]，drain 时调
+/// `e.message()` 拿 i18n 渲染后的错误文案。
+pub type LibraryScanEvent = AppResult<Vec<LibraryEntry>>;
 
 #[derive(Default)]
 pub struct LibraryState {
@@ -110,8 +113,8 @@ impl LibraryState {
                             self.entries_version = self.entries_version.wrapping_add(1);
                             self.last_error = None;
                         }
-                        Err(msg) => {
-                            self.last_error = Some(msg);
+                        Err(e) => {
+                            self.last_error = Some(e.message());
                         }
                     }
                 }

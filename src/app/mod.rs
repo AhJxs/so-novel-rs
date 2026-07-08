@@ -563,12 +563,17 @@ impl AppModel {
             .await;
             let event = match result {
                 Ok(Ok(entries)) => Ok(entries),
-                Ok(Err(io_err)) => Err(crate::i18n::ts_fmt(
-                    "Toasts.library_scan_failed",
-                    &[("err", &io_err.to_string())],
-                )
-                .to_string()),
-                Err(join_err) => Err(format!("scan task join failed: {join_err}")),
+                Ok(Err(io_err)) => {
+                    let i18n_msg = crate::i18n::ts_fmt(
+                        "Toasts.library_scan_failed",
+                        &[("err", &io_err.to_string())],
+                    )
+                    .to_string();
+                    Err(crate::error::AppError::internal(i18n_msg))
+                }
+                Err(join_err) => Err(crate::error::AppError::internal(format!(
+                    "scan task join failed: {join_err}"
+                ))),
             };
             // receiver 可能已被 drop（AppModel 销毁）—— send 在 channel 关闭时
             // 静默失败，符合"没人听就不发"原则。

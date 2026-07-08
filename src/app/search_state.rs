@@ -183,7 +183,9 @@ pub enum SourceStatus {
 pub struct SourceSearchEvent {
     pub source_id: i32,
     pub source_name: String,
-    pub result: Result<Vec<SearchResult>, String>,
+    /// 单源搜索结果。`AppError` 承载 [`crate::parser::SearchError`] / 后台
+    /// 任务异常退出等场景, 调用方用 `e.message()` 拿 i18n 渲染文本。
+    pub result: crate::error::AppResult<Vec<SearchResult>>,
 }
 
 impl SearchState {
@@ -213,7 +215,7 @@ impl SearchState {
                                 SourceStatus::Ok(n)
                             }
                             Err(e) => {
-                                let line = e.lines().next().unwrap_or("(空错误)");
+                                let line = e.message();
                                 let truncated: String = line.chars().take(60).collect();
                                 SourceStatus::Err(truncated)
                             }

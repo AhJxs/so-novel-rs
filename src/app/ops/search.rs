@@ -144,7 +144,7 @@ pub fn spawn_search(
                 seen_ids.insert(o.source_id);
                 let send_result = match o.result {
                     Ok(list) => Ok(list),
-                    Err(e) => Err(format!("{e:#}")),
+                    Err(e) => Err(crate::error::AppError::from(e)),
                 };
                 if tx
                     .send(SourceSearchEvent {
@@ -169,7 +169,9 @@ pub fn spawn_search(
                         let _ = tx.send(SourceSearchEvent {
                             source_id: *id,
                             source_name: name.clone(),
-                            result: Err("后台任务异常退出".to_string()),
+                            result: Err(crate::error::AppError::internal(
+                                "后台任务异常退出",
+                            )),
                         });
                         wakeup.notify();
                     }
