@@ -1,22 +1,60 @@
-//! 下载调度层。对应 Java `core.Crawler` + `parse.ChapterParser` 的重试逻辑
-//! + `handle.CrawlerPostHandler` 的导出+清理逻辑。
+//! 下载调度层 (PR #12 文档化, 2026-07-08). 对应 Java `core.Crawler` +
+//! `parse.ChapterParser` 的重试逻辑 + `handle.CrawlerPostHandler` 的导出+清理逻辑。
 //!
-//! 入口：`download_book(cfg, source, book_url, opts) -> Result<PathBuf, CrawlerError>`。
+//! 入口: `download_book(cfg, source, book_url, opts) -> Result<PathBuf, CrawlerError>`.
 //!
-//! 流程：
-//! 1. `parse_book_detail` 拿到详情；
-//! 2. `parse_toc` 拿到完整章节列表；
-//! 3. 用 tokio Semaphore 限并发；每章 spawn async task 调
-//!    `parse_chapter` + `render_chapter`，失败按 `EffectiveCrawl::max_retries` 重试；
-//! 4. 章节字符串写入 `<download_path>/<bookDirName>/`；
-//! 5. EPUB 时下载封面（soft-skip），其它格式不下载；
-//! 6. `Exporter::merge_with_cover` 产出最终文件；
-//! 7. `preserve_chapter_cache=false` 时清掉 chapters 临时目录。
+//! # 整体流程 (ASCII)
 //!
-//! 进度：通过 `mpsc::UnboundedSender<Progress>` 推送事件给 UI；`events::drain` 排空。
+//! ```text
+//!  download_book(cfg, source, book_url, opts)
+//!      │
+//!      ├─► resolve_book     ── parse_book_detail ──►  BookError
+//!      │      │                                       (CFG/HTTP/Parse/CF)
+//!      │      ▼
+//!      │   Book { url, name, author, ... }
+//!      │
+//!      ├─► resolve_toc      ── parse_toc ──────────►  TocError
+//!      │      │
+//!      │      ▼
+//!      │   Vec<ChapterMeta>  (URL + title, no body)
+//!      │
+//!      ├─► spawn parallel (Semaphore: cfg.crawl.concurrency)
+//!      │      │
+//!      │      ├─► parse_chapter  ──► render_chapter ──► chapter_html
+//!      │      │     (with retry_with_backoff,  cfg.crawl.max_retries)
+//!      │      │
+//!      │      └─► write chapter_html to <book_dir>/<order>-<title>.html
+//!      │
+//!      │      (each chapter) ──Progress::ChapterDone{index, title}──► mpsc::UnboundedSender
+//!      │
+//!      ├─► if EPUB: download cover bytes (soft-skip on fail)
+//!      │
+//!      ├─► Exporter::merge_with_cover(book, chapters_dir, cover_bytes)
+//!      │      │
+//!      │      ▼
+//!      │   final_path: PathBuf
+//!      │
+//!      └─► if !cfg.download.preserve_chapter_cache: rm chapters_dir
+//! ```
 //!
-//! 取消：`Arc<AtomicBool>`；在每章入口检查；正在跑的章节会跑完才退出
-//! （非 hyper 连接级中断；当前用 JoinHandle::abort + CancelToken 轮询实现任务级取消）。
+//! # 进度 / 取消
+//!
+//! - **进度**: 通过 `mpsc::UnboundedSender<Progress>` 推送事件给 UI; `events::drain` 排空.
+//! - **取消**: `CancelToken` (Arc<AtomicBool>); 在每章入口检查; 正在跑的章节会跑完才退出
+//!   (非连接级中断; 用 CancelToken 轮询实现任务级取消).
+//!
+//! # 子模块
+//!
+//! - [`search`] — 聚合搜索 (多书源并发 + 相似度去重 + 排序)
+//! - [`cover_updater`] — 3 站封面替换 (起点 / 纵横 / 七猫, soft-skip)
+//! - [`health`] — 书源连通性 HEAD 检测
+//! - `retry` — 指数退避重试 (私有, 不导出)
+//!
+//! # 不在本模块
+//!
+//! - **service/ 单独抽出**: 提示词原说"抽 service/{download,search,cover}", 实际
+//!   `crawler/` 已经按职责拆 search/cover_updater/health, 再套 service/ 层是
+//!   过抽象 (增加 N 个 From<Service> 转换无业务逻辑). 保持现状.
 
 pub mod cover_updater;
 pub mod health;
