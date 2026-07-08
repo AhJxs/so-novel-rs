@@ -36,7 +36,7 @@ use crate::export::exporter::{
     ExportError, Exporter, sort_chapter_files, strip_html_tags, unique_path,
 };
 use crate::models::Book;
-use crate::util::fs::sanitize_filename;
+use crate::utils::fs::sanitize_filename;
 
 /// 正文与标题用的 CJK 字体注册名（找不到系统字体时退化为 Base-14 Helvetica）。
 const CJK_FONT: &str = "CJK";

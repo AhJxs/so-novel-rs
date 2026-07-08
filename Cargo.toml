@@ -201,3 +201,45 @@ winres = "0.1"
 lto = "thin"
 codegen-units = 1
 strip = "symbols"
+
+# -------------------------------------------------------------------------------------
+# 企业级 lint 配置 (PR #1, 2026-07-08)
+# -------------------------------------------------------------------------------------
+# 设计原则:
+#   - rust 编译期 lint 全开, 不允许 `unsafe_code`(仓库无 unsafe 需求)
+#   - clippy 走 pedantic + nursery 渐进式收紧, 当前阶段以 warn 为主
+#   - 豁免点必须写 `// ponytail: <理由>` 或本文件注明原因
+# -------------------------------------------------------------------------------------
+
+[lints.rust]
+# 用 `deny` 而非 `forbid`: 项目内有合法 unsafe 用法 (Windows console attach),
+# 集中在 `startup/mod.rs`, 加 `// SAFETY:` 注释。新增 unsafe 会被 deny 显式拒绝,
+# 但需 `#[allow(unsafe_code)]` 才能写, 强制评审。
+unsafe_code = "deny"
+missing_docs = "warn"
+# 失效的 unsafe 标记 (2024 edition 新 lint; 项目无 unsafe 实际不会触发)
+invalid_value = "warn"
+# rust 2024 死代码裁剪; clippy 也有同源 lint, 保留 rust 官方更准确
+dead_code = "warn"
+
+[lints.clippy]
+# pedantic 整体 warn, 不阻塞当前 PR; PR #5 起逐项清理
+pedantic = { level = "warn", priority = -1 }
+# nursery 同上, 偶有 false-positive, 边收边 allow
+nursery = { level = "warn", priority = -1 }
+# 模块名重复 (如 `error::Error`) 风格上对 crate 外用户可见, 业务代码不强制
+module_name_repetitions = "allow"
+# `must_use` 候选 — 过多 false-positive (内部 helper), 留待 PR #5 评估
+must_use_candidate = "allow"
+# 缺失错误文档 (本项目多数函数返回 `AppResult<T>`, 单独写错文档成本高)
+missing_errors_doc = "allow"
+# `cast_*` 损失精度 — 业务层刻意 (i64→i32 时间戳), 由调用方负责
+cast_possible_truncation = "allow"
+cast_lossless = "allow"
+cast_sign_loss = "allow"
+# `struct_excessive_bools` — 状态结构体常出现 ≥4 布尔, 不强求拆分
+struct_excessive_bools = "allow"
+# `too_many_lines` — 业务编排函数常超 100 行, 拆函数比触发 lint 更重
+too_many_lines = "allow"
+# `result_large_err` — `WebError` 含 `Box<dyn>`, 故意大
+result_large_err = "allow"

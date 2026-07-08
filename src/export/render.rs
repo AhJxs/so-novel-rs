@@ -86,7 +86,7 @@ fn maybe_convert_chinese(
     source_lang_raw: &str,
     target_lang: &LangType,
 ) -> (String, String) {
-    use crate::util::zhconv::{convert_html_body, convert_text};
+    use crate::utils::zhconv::{convert_html_body, convert_text};
     let Some(source) = LangType::parse(source_lang_raw) else {
         return (title, body);
     };

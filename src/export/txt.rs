@@ -21,7 +21,7 @@ use crate::export::exporter::{
     ExportError, Exporter, sort_chapter_files, strip_html_tags, unique_path,
 };
 use crate::models::Book;
-use crate::util::fs::sanitize_filename;
+use crate::utils::fs::sanitize_filename;
 
 /// 流式转码写入器：将 UTF-8 `&str` 片段即时转码为目标编码写入底层 writer，
 /// 避免整本小说先拼成一个大 `String` 再统一编码。

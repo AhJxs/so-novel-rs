@@ -21,7 +21,7 @@ use crate::app::DownloadTask;
 use crate::config::AppConfig;
 use crate::http::HttpClients;
 use crate::models::Rule;
-use crate::persistent::SourcesConfig;
+use crate::db::SourcesConfig;
 
 // ── rust-embed：编译期把 web-ui/dist/ 嵌入二进制 ──────────────────────
 #[cfg(feature = "web")]
@@ -168,7 +168,7 @@ impl WebState {
                 return;
             }
         };
-        if let Err(e) = crate::persistent::save_with_trim(&self.tasks_file, &mut records) {
+        if let Err(e) = crate::db::save_with_trim(&self.tasks_file, &mut records) {
             tracing::warn!("保存 tasks.json 失败: {e}");
         }
     }

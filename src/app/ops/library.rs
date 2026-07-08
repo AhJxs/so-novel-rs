@@ -60,7 +60,7 @@ pub fn delete_library_entry(
             let display = if file_name.is_empty() {
                 crate::i18n::ts("Toasts.library_delete_unknown").to_string()
             } else {
-                crate::util::formatting::truncate(&file_name, 50).to_string()
+                crate::utils::formatting::truncate(&file_name, 50).to_string()
             };
             Ok(crate::i18n::ts_fmt("Toasts.library_delete_ok", &[("file", &display)]).to_string())
         }

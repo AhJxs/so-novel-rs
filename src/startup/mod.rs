@@ -78,12 +78,15 @@ pub fn detect(args: &[String]) -> LaunchMode {
 ///
 /// debug build 是 console subsystem，本来就有自己的窗口，此函数静默成功。
 #[cfg(target_os = "windows")]
+#[allow(unsafe_code)] // SAFETY: Windows 控制台附着是 OS 层 FFI, 唯一可行的接入点
 pub fn attach_parent_console() {
     unsafe {
         use windows_sys::Win32::System::Console::{
             ATTACH_PARENT_PROCESS, AllocConsole, AttachConsole,
         };
-        // 先尝试挂载到父进程控制台
+        // SAFETY: `AttachConsole` / `AllocConsole` 是 Win32 控制台管理 API,
+        // 接受简单整数参数 (`ATTACH_PARENT_PROCESS` = `u32::MAX`), 无指针/句柄,
+        // 调用结果仅影响本进程 stdio 绑定, 不会越界。
         if AttachConsole(ATTACH_PARENT_PROCESS) == 0 {
             // 没有父控制台（如从 Explorer 启动），自行分配一个
             AllocConsole();

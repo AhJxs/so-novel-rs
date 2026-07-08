@@ -15,7 +15,7 @@ use anyhow::{Context, Result};
 use crate::config::{AppConfig, ConfigPaths};
 use crate::crawler::{self, CancelToken, CrawlerError, Progress, download_chapters, resolve_book};
 use crate::models::Chapter;
-use crate::util::system::open_path;
+use crate::utils::system::open_path;
 
 use super::util::{effective_cfg, load_active_sources, validate_range};
 
@@ -291,8 +291,8 @@ async fn run_range_download(
 
 /// TTY 模式下的原地单行下载进度。
 fn print_in_place(done: u32, total: usize, latest_title: &str) {
-    let title_short = crate::util::formatting::truncate(latest_title, TITLE_DISPLAY_MAX + 1);
-    crate::util::tty::print_in_place_line(
+    let title_short = crate::utils::formatting::truncate(latest_title, TITLE_DISPLAY_MAX + 1);
+    crate::utils::tty::print_in_place_line(
         "⏳ 已完成",
         done as u64,
         total,

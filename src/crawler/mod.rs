@@ -41,7 +41,7 @@ use crate::models::{Book, Chapter};
 use crate::parser::{
     BookError, ChapterError, SelectError, TocError, parse_book_detail, parse_chapter, parse_toc,
 };
-use crate::util::zhconv::convert_book_meta;
+use crate::utils::zhconv::convert_book_meta;
 use retry::retry_with_backoff;
 
 /// 调度层用户可见的进度事件。

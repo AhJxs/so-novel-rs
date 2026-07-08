@@ -21,7 +21,7 @@ use tower::ServiceExt;
 use crate::config::AppConfig;
 use crate::http::HttpClients;
 use crate::models::Rule;
-use crate::persistent::SourcesConfig;
+use crate::db::SourcesConfig;
 use crate::web::{SharedState, WebInitParams, WebState};
 
 use super::routes;

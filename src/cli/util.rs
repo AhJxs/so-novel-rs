@@ -1,11 +1,11 @@
 //! CLI 子命令共享工具：合并下载目录/格式覆盖、按书源规则加载启用列表、
-//! 章节范围校验。TTY 原地进度行打印见 `crate::util::tty`。
+//! 章节范围校验。TTY 原地进度行打印见 `crate::utils::tty`。
 
 use anyhow::{Context, Result};
 
 use crate::config::{AppConfig, ConfigPaths, ExportFormat};
 use crate::models::Source;
-use crate::persistent::{SourcesConfig, load_active_rules};
+use crate::db::{SourcesConfig, load_active_rules};
 
 /// 把 `--output` / `--format` 覆盖合并进 AppConfig（仅 download 用）。
 pub(crate) fn effective_cfg(

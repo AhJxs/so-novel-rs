@@ -185,8 +185,8 @@ fn print_failed_sources(failed: &[(i32, String, String)], quiet: bool) {
 
 /// TTY 模式下原地单行搜索进度。
 fn print_in_place(done: usize, total: usize, keyword: &str) {
-    let kw_short = crate::util::formatting::truncate(keyword, 16 + 1);
-    crate::util::tty::print_in_place_line(
+    let kw_short = crate::utils::formatting::truncate(keyword, 16 + 1);
+    crate::utils::tty::print_in_place_line(
         "🔍 搜索中…",
         done as u64,
         total,

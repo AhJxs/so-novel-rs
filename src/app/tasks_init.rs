@@ -7,10 +7,10 @@ use std::path::Path;
 
 use super::download_task::DownloadTask;
 use crate::models::FinishedReason;
-use crate::util::time::now_unix_secs;
+use crate::utils::time::now_unix_secs;
 
 pub fn load_tasks_from_file(path: &Path) -> (Vec<DownloadTask>, u64) {
-    let records = crate::persistent::load_tasks(path);
+    let records = crate::db::load_tasks(path);
     let now = now_unix_secs();
     let mut max_id: u64 = 0;
     let mut tasks = Vec::with_capacity(records.len());
@@ -32,7 +32,7 @@ pub fn load_tasks_from_file(path: &Path) -> (Vec<DownloadTask>, u64) {
     // 如果有中断的任务，重新保存到文件
     if need_rewrite {
         let records: Vec<_> = tasks.iter().map(|t| t.to_record()).collect();
-        if let Err(e) = crate::persistent::save_tasks(path, &records) {
+        if let Err(e) = crate::db::save_tasks(path, &records) {
             tracing::warn!("rewrite interrupted tasks failed: {e}");
         }
     }

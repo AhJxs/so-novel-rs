@@ -315,7 +315,7 @@ pub fn save_config(path: &Path, cfg: &AppConfig) -> Result<()> {
     }
     // 原子写：先写同目录下的临时文件 → fsync → rename → 避免断电/进程崩溃
     // 时留下半截文件导致下次启动 config 解析失败。
-    crate::persistent::write_atomically(path, doc.to_string().as_bytes())
+    crate::db::write_atomically(path, doc.to_string().as_bytes())
         .with_context(|| format!("原子写入 {}", path.display()))?;
     Ok(())
 }

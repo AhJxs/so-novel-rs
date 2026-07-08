@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use crate::http::HttpClients;
 use crate::models::Rule;
-use crate::persistent::SourcesConfig;
+use crate::db::SourcesConfig;
 
 use super::super::sources_state::SourcesState;
 
@@ -64,7 +64,7 @@ pub fn add_sources_from_file(
     // 如果导入的是当前活跃文件，重新加载规则
     let mut reloaded_active = false;
     if filename == sources_config.active_file {
-        match crate::persistent::load_active_rules(rules_dir, sources_config) {
+        match crate::db::load_active_rules(rules_dir, sources_config) {
             Ok(rs) => {
                 *rules = rs;
                 *rule_load_error = None;
@@ -119,7 +119,7 @@ pub fn delete_source(
         if file_path.exists() {
             let content =
                 serde_json::to_string_pretty(rules).map_err(|e| format!("序列化失败: {e}"))?;
-            crate::persistent::write_atomically(&file_path, content.as_bytes())
+            crate::db::write_atomically(&file_path, content.as_bytes())
                 .map_err(|e| format!("写入文件失败: {e}"))?;
         }
 
@@ -149,7 +149,7 @@ pub fn switch_active_file(
 
     sources_config.active_file = filename.to_string();
 
-    match crate::persistent::load_active_rules(rules_dir, sources_config) {
+    match crate::db::load_active_rules(rules_dir, sources_config) {
         Ok(rs) => {
             *rules = rs;
             *rule_load_error = None;

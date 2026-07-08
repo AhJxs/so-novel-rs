@@ -30,7 +30,7 @@ use anyhow::{Context, Result};
 use clap::Parser;
 
 use crate::config::{ConfigPaths, load_config};
-use crate::persistent::init_rules_dir;
+use crate::db::init_rules_dir;
 
 use self::args::{PKG_NAME, VERSION_STRING, build_localized_command, subcommand_name};
 

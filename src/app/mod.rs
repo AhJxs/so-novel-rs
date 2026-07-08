@@ -50,7 +50,7 @@ use crate::config::{AppConfig, ConfigPaths, load_config};
 use crate::http::HttpClients;
 use crate::i18n::{ts, ts_fmt};
 use crate::models::{Book, Chapter, Rule, SearchResult};
-use crate::persistent::SourcesConfig;
+use crate::db::SourcesConfig;
 use events::{WakeupHandle, WakeupReceiver};
 use ops::{
     OpsCtx, add_sources_from_file, clear_finished_tasks, delete_library_entry, delete_source,
@@ -143,12 +143,12 @@ impl AppModel {
         }
 
         // 初始化规则目录（首次启动时复制默认规则文件）
-        if let Err(e) = crate::persistent::init_rules_dir(&paths.rules_dir) {
+        if let Err(e) = crate::db::init_rules_dir(&paths.rules_dir) {
             tracing::warn!("规则目录初始化失败: {e:#}");
         }
 
         // 加载书源配置
-        let sources_config = crate::persistent::SourcesConfig::load(&paths.sources_config);
+        let sources_config = crate::db::SourcesConfig::load(&paths.sources_config);
         if !paths.sources_config.exists() {
             if let Err(e) = sources_config.save(&paths.sources_config) {
                 tracing::warn!("写入默认 sources_config.json 失败: {e:#}");
@@ -158,7 +158,7 @@ impl AppModel {
         let runtime = build_shared_runtime()?;
 
         let (rules, rule_load_error) =
-            match crate::persistent::load_active_rules(&paths.rules_dir, &sources_config) {
+            match crate::db::load_active_rules(&paths.rules_dir, &sources_config) {
                 Ok(rs) => (rs, None),
                 Err(e) => {
                     tracing::warn!("rules load failed: {e:#}");
@@ -284,7 +284,7 @@ impl AppModel {
             // 2. blocking pool：trim + write + fsync + rename。
             //    失败仅 warn —— tasks.json 的丢失可由下一次保存覆盖。
             let mut records = records;
-            if let Err(e) = crate::persistent::save_with_trim(&path, &mut records) {
+            if let Err(e) = crate::db::save_with_trim(&path, &mut records) {
                 tracing::warn!("保存任务到文件失败: {e:#}");
                 return;
             }

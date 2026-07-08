@@ -38,7 +38,7 @@ use anyhow::{Context, Result};
 use crate::config::AppConfig;
 use crate::http::client::{ClientOptions, build_async_client};
 use crate::models::Rule;
-use crate::util::lock::{mutex_or, rw_read_or, rw_write_or};
+use crate::utils::lock::{mutex_or, rw_read_or, rw_write_or};
 
 /// 当前生效的 proxy 配置快照。`rebuild_proxy` 用它判断"配置是否真的变了"。
 #[derive(Debug, Clone, PartialEq, Eq)]

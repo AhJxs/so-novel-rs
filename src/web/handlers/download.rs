@@ -48,7 +48,7 @@ use crate::app::DownloadTask;
 use crate::crawler::{self, CancelToken, DownloadOptions, Progress};
 use crate::models::Source;
 use crate::models::{Chapter, FinishedReason, SearchResult};
-use crate::util::time::now_unix_secs;
+use crate::utils::time::now_unix_secs;
 
 use super::super::{SharedState, TaskStatus, WebState};
 use super::lock::{mutex, rw_read};
@@ -274,6 +274,8 @@ pub async fn download(
         let opts = DownloadOptions {
             progress: crawler_tx,
             cancel: cancel_for_crawler,
+            // Web handler 暂未接 wakeup 通知 (SSE 走独立 channel, 见下面 sse_tx)
+            notify: None,
         };
 
         let resolve_result =

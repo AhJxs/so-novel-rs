@@ -19,7 +19,7 @@ use thiserror::Error;
 
 use crate::config::LangType;
 use crate::models::Rule;
-use crate::util::lang::detect_system_lang;
+use crate::utils::lang::detect_system_lang;
 
 use super::SourcesConfig;
 

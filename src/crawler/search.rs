@@ -35,7 +35,7 @@ pub struct SourceSearchOutcome {
 ///
 /// `cf_bypass_base` 与各 parser 中的同名参数一致：CF 命中时若非空则
 /// 调用外部 bypass 服务。
-#[tracing::instrument(skip_all, fields(sources = sources.len(), keyword = %crate::util::fs::truncate_log(&keyword, 10)))]
+#[tracing::instrument(skip_all, fields(sources = sources.len(), keyword = %crate::utils::fs::truncate_log(&keyword, 10)))]
 pub async fn search_aggregated(
     http: Arc<HttpClients>,
     sources: Vec<Source>,

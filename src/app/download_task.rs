@@ -5,7 +5,7 @@ use tokio::sync::mpsc;
 
 use crate::crawler::{CancelToken, Progress};
 use crate::models::{Book, DownloadTaskRecord, FailureRecord, FinishedReason, SearchResult};
-use crate::util::time::now_unix_secs;
+use crate::utils::time::now_unix_secs;
 
 // `FinishedReason` 定义在 `db::tasks`（持久化层 —— JSON schema 跟着 db 走）。
 // 直接 use 即可，业务层复用同一枚举类型。

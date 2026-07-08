@@ -1,0 +1,19 @@
+# 与 rustfmt.toml 对齐, 防止 IDE/编辑器与 rustfmt 冲突
+root = true
+
+[*.rs]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+indent_style = space
+indent_size = 4
+trim_trailing_whitespace = true
+max_line_length = 100
+
+[*.{toml,yml,yaml,json,md}]
+indent_style = space
+indent_size = 2
+trim_trailing_whitespace = true
+
+[*.{png,jpg,jpeg,gif,ico}]
+insert_final_newline = false

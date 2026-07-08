@@ -13,8 +13,8 @@
 //! 早期在 `gpui_app::components::formatting`，但 `truncate` / `format_local_unix_secs`
 //! 本身零 GUI 依赖（前者只吃 `String`/`&str`/`char`，后者只吃 `i64` + 3 个 i18n key）。
 //! 挪到 `util::formatting` 后：
-//! - `app/` 和 `gpui_app/` 都能直接 `use crate::util::formatting::*`；
-//! - `gpui_app::components` 仍 `pub use crate::util::formatting::{format_size, truncate}`
+//! - `app/` 和 `gpui_app/` 都能直接 `use crate::utils::formatting::*`；
+//! - `gpui_app::components` 仍 `pub use crate::utils::formatting::{format_size, truncate}`
 //!   保持向后兼容，UI 内部 page 模块不用改。
 
 pub use super::fs::format_size;

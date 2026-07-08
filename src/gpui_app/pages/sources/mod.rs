@@ -25,7 +25,7 @@ use crate::app::{AppModel, SourcesFilterStatus};
 use crate::gpui_app::components::{EmptyState, PageHeader, Pagination, compute_page_window};
 use crate::i18n::ts;
 use crate::models::Rule;
-use crate::persistent::list_rule_files;
+use crate::db::list_rule_files;
 
 use self::delegate::SourcesDelegate;
 

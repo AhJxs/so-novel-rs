@@ -1,0 +1,21 @@
+# 企业级 clippy 配置 (PR #1, 2026-07-08)
+# 与 Cargo.toml [lints.clippy] 配合, 此处只放阈值类参数。
+# 规则的 allow/warn 级别集中在 Cargo.toml, 便于单点扫描。
+
+# 圈复杂度上限 — 默认 100, 收紧到 25 强制拆分长函数
+cognitive-complexity-threshold = 25
+
+# 函数参数上限 — 默认 7, 收紧到 8 (本项目 service 层有 8 参的解析编排)
+too-many-arguments-threshold = 8
+
+# 类型复杂度上限 — 默认 250, 收紧到 300 略宽, 防误伤
+type-complexity-threshold = 300
+
+# 单字符变量名阈值 — 默认 3, 收紧到 5 防 `a/b/c` 滥用
+single-char-binding-names-threshold = 5
+
+# enum variant 数量 — 默认 200, 业务枚举 ~10 不会触发, 不改
+# enum-variant-names-threshold 不设置 (本项目业务枚举命名已稳定)
+
+# 文档缺失白名单 — 仅对 `lib.rs` `//!` 检查; 库级入口必须有
+# (Cargo.toml 的 `missing_docs` 实际触发位置更细, 此处不重复配置)

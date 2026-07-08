@@ -17,7 +17,7 @@ use thiserror::Error;
 
 use crate::config::ExportFormat;
 use crate::models::Book;
-use crate::util::fs::sanitize_filename;
+use crate::utils::fs::sanitize_filename;
 
 #[derive(Debug, Error)]
 pub enum ExportError {

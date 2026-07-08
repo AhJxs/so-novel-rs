@@ -229,7 +229,7 @@ fn optional_field(document: &Html, query: &str) -> Result<Option<String>, BookEr
 mod tests {
     use super::*;
     use crate::config::LangType;
-    use crate::persistent::apply_default_rule;
+    use crate::db::apply_default_rule;
 
     /// 笔趣阁22 真实详情规则。注意 Java 注释提到 meta 字段名拼错（`lastest_chapter_name`），
     /// 我们保留这个拼写以保持兼容。

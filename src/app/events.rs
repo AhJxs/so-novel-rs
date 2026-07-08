@@ -120,7 +120,7 @@ pub fn drain(model: &mut AppModel) -> bool {
                 .map(|b| b.book_name.as_str())
                 .filter(|s| !s.trim().is_empty())
                 .unwrap_or(t.origin.book_name.as_str());
-            let book_name = crate::util::formatting::truncate(book_name, 50);
+            let book_name = crate::utils::formatting::truncate(book_name, 50);
             let event = match &t.finished {
                 Some(Ok(_)) => UIEvent::Success(
                     crate::i18n::ts_fmt(

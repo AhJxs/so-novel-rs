@@ -14,7 +14,7 @@ use gpui_component::{
 
 use crate::gpui_app::components::{StatusBadge, StatusKind, truncate};
 use crate::i18n::{ts_cached, ts_fmt};
-use crate::util::system::{open_path, reveal_in_folder};
+use crate::utils::system::{open_path, reveal_in_folder};
 
 use super::TasksPage;
 use super::summary::TaskSummary;
@@ -33,7 +33,7 @@ pub(super) fn render(task: TaskSummary, page: Entity<TasksPage>, cx: &mut App) -
     let failed_count = task.failed;
     // 全局序号（1-based，跨分页连续）+ 开始时间。
     let seq = task.index + 1;
-    let started_display = crate::util::formatting::format_local_unix_secs(
+    let started_display = crate::utils::formatting::format_local_unix_secs(
         task.started_at_unix,
         "Tasks.card.meta.time_unknown",
         "Tasks.card.meta.time_unknown",

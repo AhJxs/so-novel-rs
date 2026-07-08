@@ -13,7 +13,7 @@ pub mod page_header;
 pub mod pagination;
 pub mod status_badge;
 
-pub use crate::util::formatting::{format_size, truncate};
+pub use crate::utils::formatting::{format_size, truncate};
 pub use empty_state::EmptyState;
 pub use page_header::PageHeader;
 pub use pagination::{PAGE_SIZE, PageSlice, Pagination, compute_page_window};

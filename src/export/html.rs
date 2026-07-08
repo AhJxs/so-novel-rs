@@ -22,7 +22,7 @@ use zip::write::SimpleFileOptions;
 
 use crate::export::exporter::{ExportError, Exporter, sort_chapter_files, unique_path};
 use crate::models::Book;
-use crate::util::fs::sanitize_filename;
+use crate::utils::fs::sanitize_filename;
 
 pub struct HtmlExporter;
 

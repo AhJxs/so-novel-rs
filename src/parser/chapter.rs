@@ -286,7 +286,7 @@ async fn fetch_with_cf_fallback(
 mod tests {
     use super::*;
     use crate::config::LangType;
-    use crate::persistent::apply_default_rule;
+    use crate::db::apply_default_rule;
 
     fn rule_22biqu_chapter() -> Rule {
         let mut r: Rule = serde_json::from_str(

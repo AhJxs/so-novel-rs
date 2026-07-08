@@ -15,7 +15,7 @@ use gpui_component::{
 use crate::app::LibraryEntry;
 use crate::gpui_app::components::truncate;
 use crate::i18n::ts_cached;
-use crate::util::system::{open_path, reveal_in_folder};
+use crate::utils::system::{open_path, reveal_in_folder};
 
 use super::LibraryPage;
 
@@ -44,7 +44,7 @@ pub(super) fn render_row(
         .to_string();
     let stem_display = truncate(&stem, 30);
     let ext_upper = entry.ext.to_uppercase();
-    let mod_time = crate::util::formatting::format_local_unix_secs(
+    let mod_time = crate::utils::formatting::format_local_unix_secs(
         entry.modified_unix_secs as i64,
         "Library.time.unknown",
         "Library.time.invalid",
@@ -115,7 +115,7 @@ pub(super) fn render_row(
                                 .child(
                                     Tag::secondary()
                                         .small()
-                                        .child(crate::util::formatting::format_size(
+                                        .child(crate::utils::formatting::format_size(
                                             entry.size_bytes,
                                         )),
                                 ),

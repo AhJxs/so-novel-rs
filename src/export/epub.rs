@@ -24,7 +24,7 @@ use epub_builder::{EpubBuilder, EpubContent, EpubVersion, ReferenceType, ZipLibr
 use super::exporter::pad_zero;
 use crate::export::exporter::{ExportError, Exporter, sort_chapter_files, unique_path};
 use crate::models::Book;
-use crate::util::fs::sanitize_filename;
+use crate::utils::fs::sanitize_filename;
 
 pub struct EpubExporter;
 

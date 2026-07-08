@@ -1,7 +1,28 @@
-# rustfmt 配置。全部使用 stable 选项，`cargo fmt` 在稳定工具链下即可用。
-# 贡献者无需 nightly；如需更激进的 import 分组，再评估引入 unstable 选项。
+# rustfmt 配置 (PR #1, 2026-07-08 加固)。全部使用 stable 选项, `cargo fmt`
+# 在稳定工具链下即可用。贡献者无需 nightly; 如需更激进的 import 分组, 再
+# 评估引入 unstable 选项。
 
 edition = "2024"
 max_width = 100
 use_field_init_shorthand = true
 use_try_shorthand = true
+
+# import 合并策略: 同 crate 合并 (`use crate::{a, b, c}`), 减少 use 行数
+imports_granularity = "Crate"
+# import 分组: std / 外部 crate / crate 内部
+group_imports = "StdExternalCrate"
+reorder_imports = true
+
+# 注释与文档: 强制宽度, doc 注释里 `code` 块强制格式化
+wrap_comments = true
+comment_width = 98
+format_code_in_doc_comments = true
+# 不要把 `// foo` 改成 `//foo` 等 (保留原始注释风格)
+normalize_comments = false
+
+# 链式调用缩进 — 默认 visual, 改成 4 空格 (与 rustfmt 默认 4 一致)
+chain_width = 60
+# 函数参数列表单行长度 — 触发换行
+fn_params_layout = "Tall"
+# 闭包体换行 — 复杂闭包单行显示
+closure_block_indent_threshold = 0

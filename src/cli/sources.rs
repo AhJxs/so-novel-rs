@@ -7,7 +7,7 @@ use anyhow::{Context, Result};
 
 use crate::config::ConfigPaths;
 use crate::models::Rule;
-use crate::persistent::{SourcesConfig, load_active_rules};
+use crate::db::{SourcesConfig, load_active_rules};
 
 /// 列出当前激活书源（人类可读 / JSON 两种格式）。
 pub(crate) fn run_list(paths: &ConfigPaths, json: bool) -> Result<()> {
