@@ -7,13 +7,13 @@
 mod download;
 mod library;
 mod search;
-mod settings;
 mod sources;
 mod update;
+
+pub mod settings;
 
 pub use download::*;
 pub use library::*;
 pub use search::*;
-pub use settings::*;
 pub use sources::*;
 pub use update::*;
