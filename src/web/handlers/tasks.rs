@@ -1,4 +1,4 @@
-//! 下载任务管理端点 + per-task drain 基础设施 (PR #18 拆分, 2026-07-08).
+//! 下载任务管理端点 + per-task drain 基础设施
 //!
 //! ## 任务存储: 单源 `Vec<DownloadTask>` (跟 GPUI 一致)
 //!
@@ -17,7 +17,7 @@
 //! 2. drain 收到 mpsc 断开 (crawler 退出) 时, 若 `finished.is_none()` 则标
 //!    `AppRestarted` 并 save (与 GPUI `DownloadTask::drain` 同语义)
 //! 3. 用户 cancel: `task.cancelling = true` 立即反映到 `tasks_list`;
-//!    `Progress::Cancelled` 经 mpsc → drain → apply_progress 最终落 `UserCancelled`
+//!    `Progress::Cancelled` 经 mpsc → drain → `apply_progress` 最终落 `UserCancelled`
 
 use std::sync::Arc;
 
@@ -33,12 +33,12 @@ use crate::models::FinishedReason;
 use crate::utils::time::now_unix_secs;
 
 use super::super::{TaskStatus, WebState};
+use crate::utils::lock::mutex_or;
 use crate::web::SharedState;
-use super::lock::mutex;
 
 /// `GET /api/tasks` 响应体。
 #[derive(Serialize)]
-pub(crate) struct TaskInfo {
+pub struct TaskInfo {
     pub id: u64,
     pub filename: Option<String>,
     pub book_name: Option<String>,
@@ -78,8 +78,9 @@ fn derive_book_name_from_filename(filename: &str) -> Option<String> {
 fn task_to_info(task: &DownloadTask) -> TaskInfo {
     let status = match &task.finished {
         Some(Ok(_)) => TaskStatus::Finished,
-        Some(Err(FinishedReason::UserCancelled)) => TaskStatus::Cancelled,
-        Some(Err(FinishedReason::AppRestarted)) => TaskStatus::Cancelled,
+        Some(Err(FinishedReason::UserCancelled | FinishedReason::AppRestarted)) => {
+            TaskStatus::Cancelled
+        }
         Some(Err(FinishedReason::Failed { .. })) => TaskStatus::Failed,
         None => TaskStatus::Downloading,
     };
@@ -90,16 +91,16 @@ fn task_to_info(task: &DownloadTask) -> TaskInfo {
         .and_then(|p| {
             p.file_name()
                 .and_then(|n| n.to_str())
-                .map(|s| s.to_string())
+                .map(std::string::ToString::to_string)
         });
     // book_name 优先: book_meta (BookResolved 之后) > origin.book_name (请求里带的搜索书名)。
     // 两者都为空时回退到 finished output filename 派生 (仅 Finished 任务有值)。
     let book_name = {
         let direct = task.book_name();
-        if !direct.is_empty() {
-            Some(direct.to_string())
-        } else {
+        if direct.is_empty() {
             filename.as_deref().and_then(derive_book_name_from_filename)
+        } else {
+            Some(direct.to_string())
         }
     };
     TaskInfo {
@@ -124,7 +125,8 @@ fn task_to_info(task: &DownloadTask) -> TaskInfo {
 pub async fn tasks_list(
     State(state): State<SharedState>,
 ) -> Result<Json<Vec<TaskInfo>>, (StatusCode, String)> {
-    let tasks = mutex("tasks_list", &state.tasks)?;
+    let tasks =
+        mutex_or("tasks_list", &state.tasks).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
     let mut result: Vec<TaskInfo> = tasks.iter().map(task_to_info).collect();
     drop(tasks);
     // 按 id 降序 (最新任务在前)。
@@ -147,22 +149,28 @@ pub async fn task_cancel(
     State(state): State<SharedState>,
     Path(id): Path<u64>,
 ) -> Result<&'static str, (StatusCode, String)> {
-    let mut tasks = mutex("task_cancel", &state.tasks)?;
-    let Some(task) = tasks.iter_mut().find(|t| t.id == id) else {
-        return Err((StatusCode::NOT_FOUND, "任务未找到".to_string()));
-    };
-    // 任务已结束: cancel 不会触发任何 crawler 状态变化 (crawler 已退出)。
-    // 返回 409 提示前端"无法取消已结束任务", 避免前端 cancel 按钮无响应却显示 ok。
-    if task.finished.is_some() {
-        return Err((StatusCode::CONFLICT, "任务已结束,无法取消".to_string()));
+    let cancel;
+    {
+        let mut tasks = mutex_or("task_cancel", &state.tasks)
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+        let Some(task) = tasks.iter_mut().find(|t| t.id == id) else {
+            return Err((StatusCode::NOT_FOUND, "任务未找到".to_string()));
+        };
+        // 任务已结束: cancel 不会触发任何 crawler 状态变化 (crawler 已退出)。
+        // 返回 409 提示前端"无法取消已结束任务", 避免前端 cancel 按钮无响应却显示 ok。
+        if task.finished.is_some() {
+            return Err((StatusCode::CONFLICT, "任务已结束,无法取消".to_string()));
+        }
+        let Some(c) = task.cancel.as_ref() else {
+            return Err((StatusCode::NOT_FOUND, "任务未找到".to_string()));
+        };
+        // 立即翻 cancelling 标记 (前端可显示"正在取消..."), cancel.cancel() 同步触发
+        // crawler 内部的 CancelToken; crawler 下一次 progress tick 看到 cancel 时会发
+        // Progress::Cancelled → drain → apply_progress 落 UserCancelled。
+        task.cancelling = true;
+        cancel = c.clone();
+        drop(tasks);
     }
-    let Some(cancel) = task.cancel.as_ref() else {
-        return Err((StatusCode::NOT_FOUND, "任务未找到".to_string()));
-    };
-    // 立即翻 cancelling 标记 (前端可显示"正在取消..."), cancel.cancel() 同步触发
-    // crawler 内部的 CancelToken; crawler 下一次 progress tick 看到 cancel 时会发
-    // Progress::Cancelled → drain → apply_progress 落 UserCancelled。
-    task.cancelling = true;
     cancel.cancel();
     Ok("已取消")
 }
@@ -191,7 +199,8 @@ pub async fn task_delete(
     State(state): State<SharedState>,
     Path(id): Path<u64>,
 ) -> Result<&'static str, (StatusCode, String)> {
-    let mut tasks = mutex("task_delete", &state.tasks)?;
+    let mut tasks = mutex_or("task_delete", &state.tasks)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
     let initial_len = tasks.len();
     tasks.retain(|t| t.id != id);
     if tasks.len() == initial_len {

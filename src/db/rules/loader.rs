@@ -1,11 +1,11 @@
-//! 规则文件加载 (PR #17 拆分, 2026-07-08).
+//! 规则文件加载
 //!
 //! 3 个公共 fn + 2 个私有 helper:
 //! - [`load_rules_from_path`] — 公共入口: 加载文件或目录
-//! - [`load_active_rules`] — 公共入口: 从 SourcesConfig.active_file 加载并合并禁用状态
+//! - [`load_active_rules`] — 公共入口: 从 `SourcesConfig.active_file` 加载并合并禁用状态
 //! - [`walk_rule_files`] — 私有: 递归枚举目录
 //! - [`parse_one_file`] — 私有: 解析单文件 (json + json5)
-//! - [`apply_disabled_urls`] — 私有: 按 disabled_urls 设 Rule.disabled = true
+//! - [`apply_disabled_urls`] — 私有: 按 `disabled_urls` 设 Rule.disabled = true
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -59,7 +59,7 @@ pub fn load_rules_from_path(path: &Path) -> Result<Vec<Rule>, RulesError> {
     let lang = detect_system_lang();
     for (idx, rule) in rules.iter_mut().enumerate() {
         apply_default_rule(rule, lang);
-        rule.id = (idx + 1) as i32;
+        rule.id = i32::try_from(idx + 1).unwrap_or(i32::MAX);
     }
 
     Ok(rules)
@@ -122,7 +122,7 @@ fn walk_rule_files(dir: &Path) -> Result<Vec<PathBuf>, RulesError> {
         let name_lower = p
             .file_name()
             .and_then(|s| s.to_str())
-            .map(|s| s.to_ascii_lowercase())
+            .map(str::to_ascii_lowercase)
             .unwrap_or_default();
         if name_lower.starts_with("rule-template") {
             continue;
@@ -147,8 +147,7 @@ fn parse_one_file(path: &Path) -> Result<Vec<Rule>, RulesError> {
     let is_json5 = path
         .extension()
         .and_then(|s| s.to_str())
-        .map(|s| s.eq_ignore_ascii_case("json5"))
-        .unwrap_or(false);
+        .is_some_and(|s| s.eq_ignore_ascii_case("json5"));
 
     let rules: Vec<Rule> = if is_json5 {
         json5::from_str(&text).map_err(|e| RulesError::Parse {
@@ -181,6 +180,7 @@ fn apply_disabled_urls(rules: &mut [Rule], disabled_urls: &HashSet<String>) {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
     use super::*;
     use std::path::PathBuf;
 
@@ -197,7 +197,11 @@ mod tests {
         assert!(!rules.is_empty(), "main.json should have rules");
         // id 必须从 1 开始, 连续
         for (i, r) in rules.iter().enumerate() {
-            assert_eq!(r.id, (i + 1) as i32, "id should be sequential 1-based");
+            assert_eq!(
+                r.id,
+                i32::try_from(i + 1).unwrap(),
+                "id should be sequential 1-based"
+            );
         }
     }
 
@@ -220,8 +224,10 @@ mod tests {
     #[test]
     fn load_active_rules_falls_back_to_dir_on_missing_file() {
         let dir = repo_rules_dir();
-        let mut cfg = SourcesConfig::default();
-        cfg.active_file = "nonexistent.json".into();
+        let cfg = SourcesConfig {
+            active_file: "nonexistent.json".into(),
+            ..SourcesConfig::default()
+        };
         // 不 panic, 退到整个目录
         let rules = load_active_rules(&dir, &cfg).unwrap();
         assert!(!rules.is_empty());
@@ -255,14 +261,14 @@ mod tests {
         let p = dir.path().join("test.json5");
         std::fs::write(
             &p,
-            r##"// 注释行
+            r#"// 注释行
 [
   {
     "url": "https://test.example",
     "name": "测试源",
     "language": "zh-CN"
   }
-]"##,
+]"#,
         )
         .unwrap();
         let rules = load_rules_from_path(&p).unwrap();

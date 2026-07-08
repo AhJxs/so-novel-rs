@@ -1,4 +1,4 @@
-//! 下载调度层 (PR #17 重构, 2026-07-08). 对应 Java `core.Crawler` +
+//! 下载调度层  对应 Java `core.Crawler` +
 //! `parse.ChapterParser` 的重试逻辑 + `handle.CrawlerPostHandler` 的导出+清理逻辑。
 //!
 //! 入口: `download_book(cfg, source, book_url, opts) -> Result<PathBuf, CrawlerError>`.
@@ -39,7 +39,7 @@
 //!
 //! - **进度**: 通过 `mpsc::UnboundedSender<Progress>` 推送事件给 UI; `events::drain` 排空.
 //! - **取消**: `CancelToken` (Arc<AtomicBool>); 在每章入口检查; 正在跑的章节会跑完才退出
-//!   (非连接级中断; 用 CancelToken 轮询实现任务级取消).
+//!   (非连接级中断; 用 `CancelToken` 轮询实现任务级取消).
 
 pub mod cover_updater;
 pub mod download;

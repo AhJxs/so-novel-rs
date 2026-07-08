@@ -24,6 +24,7 @@ pub fn print_in_place_line(label: &str, done: u64, total: usize, extra: &str) {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
     use super::*;
 
     #[test]

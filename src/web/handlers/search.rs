@@ -13,7 +13,7 @@ use crate::models::SearchResult;
 use crate::models::Source;
 
 use super::super::SharedState;
-use super::lock::rw_read;
+use crate::utils::lock::rw_read_or;
 
 type BoxedSearchStream =
     std::pin::Pin<Box<dyn Stream<Item = Result<axum::response::sse::Event, Infallible>> + Send>>;
@@ -67,8 +67,10 @@ pub async fn search(
 ) -> Sse<BoxedSearchStream> {
     let keyword = params.keyword.trim().to_string();
     let (config, http, rules) = match (|| -> Result<_, (StatusCode, String)> {
-        let cfg = rw_read("search:cfg", &state.config)?;
-        let rules = rw_read("search:rules", &state.rules)?;
+        let cfg = rw_read_or("search:cfg", &state.config)
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+        let rules = rw_read_or("search:rules", &state.rules)
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
         Ok((cfg.clone(), Arc::clone(&state.http), rules.clone()))
     })() {
         Ok(v) => v,
@@ -84,7 +86,7 @@ pub async fn search(
     } else {
         rules
             .into_iter()
-            .filter(|r| r.is_search_enabled())
+            .filter(crate::models::rule::Rule::is_search_enabled)
             .map(|r| Source::from(r, &config))
             .collect()
     };
@@ -94,7 +96,7 @@ pub async fn search(
     let cf_bypass = if config.global.cf_bypass.trim().is_empty() {
         None
     } else {
-        Some(config.global.cf_bypass.clone())
+        Some(config.global.cf_bypass)
     };
 
     let (tx, rx) =

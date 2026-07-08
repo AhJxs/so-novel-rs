@@ -1,4 +1,4 @@
-//! PDF 文档构建主流程 (PR #17 拆分, 2026-07-08).
+//! PDF 文档构建主流程
 //!
 //! `PdfExporter` + `Paginator` (流式分页) + `Run` (单行文本) + 排版常量。
 
@@ -13,7 +13,9 @@ use crate::export::exporter::{
 use crate::models::Book;
 use crate::utils::fs::sanitize_filename;
 
-use super::chapters::{extract_body, extract_chapter_content, html_to_text, strip_nav_bar, wrap_text};
+use super::chapters::{
+    extract_body, extract_chapter_content, html_to_text, strip_nav_bar, wrap_text,
+};
 use super::fonts::{CJK_FONT, Measurer, find_cjk_font};
 
 /// PDF 导出器 (实现 [`Exporter`] trait)。
@@ -41,8 +43,7 @@ impl Exporter for PdfExporter {
             .filter(|p| {
                 p.file_name()
                     .and_then(|s| s.to_str())
-                    .map(|s| !s.starts_with("0_"))
-                    .unwrap_or(false)
+                    .is_some_and(|s| !s.starts_with("0_"))
             })
             .collect::<Vec<_>>();
         if files.is_empty() {
@@ -65,21 +66,20 @@ impl Exporter for PdfExporter {
         // CJK 字体: 找到 → 量宽用 EmbeddedFont, 注册到 builder; 找不到 → 启发式量宽,
         // 不注册字体 (中文 tofu 但排版照常)。
         let font_bytes = find_cjk_font();
-        let measurer = match &font_bytes {
-            Some(b) => Measurer::Embedded {
+        let measurer = if let Some(b) = &font_bytes {
+            Measurer::Embedded {
                 font: Box::new(
                     EmbeddedFont::from_data(Some(CJK_FONT.into()), b.clone())
                         .map_err(|e| ExportError::Pdf(format!("font parse: {e}")))?,
                 ),
                 width_cache: std::cell::RefCell::new(std::collections::HashMap::new()),
-            },
-            None => {
-                tracing::warn!(
-                    "未找到系统 CJK 字体（msyh.ttc / NotoSansCJK / \
-                     PingFang 等），PDF 中中文将显示为方块。建议安装 Noto Sans CJK 后重试。"
-                );
-                Measurer::Heuristic
             }
+        } else {
+            tracing::warn!(
+                "未找到系统 CJK 字体（msyh.ttc / NotoSansCJK / \
+                 PingFang 等），PDF 中中文将显示为方块。建议安装 Noto Sans CJK 后重试。"
+            );
+            Measurer::Heuristic
         };
 
         let subject = book
@@ -168,7 +168,7 @@ const COVER_TITLE_SIZE: f32 = 30.0;
 const COVER_AUTHOR_SIZE: f32 = 14.0;
 const COVER_INTRO_SIZE: f32 = 11.0;
 
-/// 流式分页器: 边排边把满页 flush 到 DocumentBuilder, 内存只占一页。
+/// 流式分页器: 边排边把满页 flush 到 `DocumentBuilder`, 内存只占一页。
 struct Paginator<'b> {
     builder: &'b mut DocumentBuilder,
     measurer: &'b Measurer,
@@ -224,7 +224,7 @@ impl<'b> Paginator<'b> {
         self.line(text, x, size, lh);
     }
 
-    /// 一个段落: 首行缩进 2em, 逐字换行到 CONTENT_W。段后留白。
+    /// 一个段落: 首行缩进 2em, 逐字换行到 `CONTENT_W。段后留白`。
     fn paragraph(&mut self, text: &str, size: f32) {
         let lh = size * 1.8;
         let indent = 2.0 * size;
@@ -293,12 +293,13 @@ impl<'b> Paginator<'b> {
 /// `DocumentBuilder::build` 返回 `pdf_oxide::error::Error`, 统一转 `ExportError::Pdf`。
 impl From<pdf_oxide::error::Error> for ExportError {
     fn from(e: pdf_oxide::error::Error) -> Self {
-        ExportError::Pdf(format!("{e}"))
+        Self::Pdf(format!("{e}"))
     }
 }
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
     use super::*;
     use crate::config::ExportFormat;
     use crate::export::exporter::{RenderedChapter, write_chapter_files};
@@ -316,9 +317,9 @@ mod tests {
     /// 模拟 `render_chapter(target=Pdf)` 写出的章节 HTML (Html 模板产物)
     fn sample_html_chapter(title: &str, body: &str) -> String {
         format!(
-            r##"<!DOCTYPE html>
+            r#"<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>{title}</title></head>
-<body><h1>{title}</h1><p>{body}</p></body></html>"##
+<body><h1>{title}</h1><p>{body}</p></body></html>"#
         )
     }
 
@@ -350,10 +351,9 @@ mod tests {
         let path = PdfExporter.merge(&sample_book(), &chapters, &out).unwrap();
         assert!(path.exists(), "missing pdf: {}", path.display());
         assert!(
-            path.file_name()
-                .and_then(|s| s.to_str())
-                .unwrap()
-                .ends_with(".pdf")
+            std::path::Path::new(path.file_name().and_then(|s| s.to_str()).unwrap())
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("pdf"))
         );
         // PDF magic: 文件头 `%PDF-`
         let bytes = std::fs::read(&path).unwrap();

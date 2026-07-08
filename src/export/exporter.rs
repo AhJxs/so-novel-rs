@@ -102,10 +102,9 @@ pub fn write_chapter_files(
         let order = pad_zero(ch.order, digit_count);
         let safe_title = sanitize_filename(&ch.title);
         let filename = match format {
-            ExportFormat::Html => format!("{order}_.html"),
+            ExportFormat::Html | ExportFormat::Pdf => format!("{order}_.html"),
             ExportFormat::Txt => format!("{order}_{safe_title}.txt"),
             ExportFormat::Epub => format!("{order}_{safe_title}.html"),
-            ExportFormat::Pdf => format!("{order}_.html"),
         };
         let path = unique_path(chapters_dir, &filename);
         std::fs::write(&path, &ch.body)
@@ -114,7 +113,7 @@ pub fn write_chapter_files(
     Ok(total)
 }
 
-/// 把单章写入 chapters_dir（并发安全：order 唯一不会冲突）。
+/// 把单章写入 `chapters_dir（并发安全：order` 唯一不会冲突）。
 /// 不检查文件已存在（全新下载不可能冲突），避免每章一次额外 syscall。
 pub fn write_single_chapter(
     dir: &Path,
@@ -128,10 +127,9 @@ pub fn write_single_chapter(
     let order_str = pad_zero(order, digit_count);
     let safe_title = sanitize_filename(title);
     let filename = match format {
-        ExportFormat::Html => format!("{order_str}_.html"),
+        ExportFormat::Html | ExportFormat::Pdf => format!("{order_str}_.html"),
         ExportFormat::Txt => format!("{order_str}_{safe_title}.txt"),
         ExportFormat::Epub => format!("{order_str}_{safe_title}.html"),
-        ExportFormat::Pdf => format!("{order_str}_.html"),
     };
     let path = dir.join(&filename);
     std::fs::write(&path, body)?;
@@ -142,7 +140,7 @@ pub fn write_single_chapter(
 /// 跳过 `0_`（书目索引、封面这类）开头的辅助文件以避免被当成正文章节。
 pub fn sort_chapter_files(dir: &Path) -> Result<Vec<PathBuf>, ExportError> {
     let mut files: Vec<PathBuf> = std::fs::read_dir(dir)?
-        .filter_map(|e| e.ok())
+        .filter_map(std::result::Result::ok)
         .map(|e| e.path())
         .filter(|p| p.is_file())
         .collect();
@@ -172,7 +170,7 @@ pub fn build_book_dir_name(book: &Book, format: ExportFormat) -> String {
 /// 单个已渲染章节。
 ///
 /// `body` 已是目标格式的字符串（来自 `export::render::render_chapter`），
-/// `title` 是 ChapterFilter 重写过的最终标题。
+/// `title` 是 `ChapterFilter` 重写过的最终标题。
 #[derive(Debug, Clone)]
 pub struct RenderedChapter {
     pub order: u32,
@@ -221,11 +219,23 @@ pub(crate) fn strip_html_tags(s: &str) -> String {
     use regex::Regex;
     use std::sync::LazyLock;
 
-    static TAG_RE: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"(?s)<[^>]+>").expect("strip tag re"));
-    static ENTITY_RE: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"&[^;]+;").expect("strip entity re"));
-    static WS_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\s+").expect("ws re"));
+    // 这些正则由源码字面量直接构造，编译期就确定能编译；
+    // 用 `match` 走 panic 路径以避免 clippy::expect_used。
+    // panic IS the design：源码字面量写错就是程序员错误，让它在启动期炸出来
+    // 比在 lazy init 期间崩在半成品状态更易诊断。
+    #[allow(
+        clippy::panic,
+        reason = "static regex literal must compile; failure = programmer error"
+    )]
+    fn compile_static_re(pattern: &'static str) -> Regex {
+        match Regex::new(pattern) {
+            Ok(re) => re,
+            Err(e) => panic!("static regex `{pattern}` should compile: {e}"),
+        }
+    }
+    static TAG_RE: LazyLock<Regex> = LazyLock::new(|| compile_static_re(r"(?s)<[^>]+>"));
+    static ENTITY_RE: LazyLock<Regex> = LazyLock::new(|| compile_static_re(r"&[^;]+;"));
+    static WS_RE: LazyLock<Regex> = LazyLock::new(|| compile_static_re(r"\s+"));
 
     let no_tag = TAG_RE.replace_all(s, "").into_owned();
     let no_ent = ENTITY_RE.replace_all(&no_tag, "").into_owned();
@@ -234,6 +244,7 @@ pub(crate) fn strip_html_tags(s: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
     use super::*;
 
     #[test]

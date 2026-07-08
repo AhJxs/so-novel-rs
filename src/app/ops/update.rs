@@ -10,7 +10,8 @@ use crate::http::HttpClients;
 /// 手动检查 GitHub release 是否有新版本。
 ///
 /// 代理逻辑集中在 `HttpClients.gh_proxy_pair()`：
-/// gh_proxy 非空时走预构建的前向代理 client，否则复用共享 safe client。
+/// `gh_proxy` 非空时走预构建的前向代理 client，否则复用共享 safe client。
+#[allow(clippy::needless_pass_by_value)]
 pub fn spawn_update_check(
     _config: &AppConfig,
     http: Arc<HttpClients>,

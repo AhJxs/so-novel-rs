@@ -18,23 +18,38 @@ use crate::models::EffectiveCrawl;
 ///
 /// 调用时按出现顺序把每个值里的 `%s` 替换成 `args` 中下一个元素。
 /// 与 Java 端 `CrawlUtils#buildData` 行为一致。
+/// 编译期确定的正则：用 match 走 panic 路径以避免 `clippy::expect_used`，
+/// 与项目里其它 `LazyLock` 静态正则统一风格。
+/// panic IS the design：源码字面量写错就是程序员错误。
+#[allow(
+    clippy::panic,
+    reason = "static regex literal must compile; failure = programmer error"
+)]
+fn compile_static_re(pattern: &'static str) -> Regex {
+    match Regex::new(pattern) {
+        Ok(re) => re,
+        Err(e) => panic!("static regex `{pattern}` should compile: {e}"),
+    }
+}
+
 pub fn build_form_data(template: &str, args: &[&str]) -> Vec<(String, String)> {
     static KV: LazyLock<Regex> = LazyLock::new(|| {
         // 形如 `key: value`，value 直到下一个 `,` 或 `}`。
         // 容忍 key/value 两侧可选的引号，以及 value 内部的空白。
-        Regex::new(r#"([\w\-]+)\s*:\s*("([^"]*)"|'([^']*)'|([^,}]*))"#).unwrap()
+        compile_static_re(r#"([\w\-]+)\s*:\s*("([^"]*)"|'([^']*)'|([^,}]*))"#)
     });
 
     let mut arg_iter = args.iter();
     let mut out = Vec::new();
     for cap in KV.captures_iter(template) {
-        let key = cap.get(1).unwrap().as_str().trim().to_string();
+        // regex 第 1 组是 `[\w\-]+` 字面量, 命中即非空; 不命中 (NIL) 时视为空 key
+        // （保留 entry 顺序, 让 parser 仍然按出现次数消费 %s）。
+        let key = cap.get(1).map_or("", |m| m.as_str()).trim().to_string();
         let raw = cap
             .get(3)
             .or_else(|| cap.get(4))
             .or_else(|| cap.get(5))
-            .map(|m| m.as_str().trim())
-            .unwrap_or("");
+            .map_or("", |m| m.as_str().trim());
         let value = if raw == "%s" {
             arg_iter
                 .next()
@@ -92,7 +107,7 @@ pub fn random_retry_interval_ms(eff: &EffectiveCrawl) -> u64 {
     rand::rng().random_range(lo..hi)
 }
 
-/// 也提供一个直接吃 `AppConfig` 的版本，便于不需要 EffectiveCrawl 的调用方。
+/// 也提供一个直接吃 `AppConfig` 的版本，便于不需要 `EffectiveCrawl` 的调用方。
 pub fn random_interval_from_cfg(cfg: &AppConfig) -> u64 {
     let lo = cfg.crawl.min_interval as u64;
     let hi = cfg.crawl.max_interval.max(cfg.crawl.min_interval + 1) as u64;
@@ -126,6 +141,7 @@ pub fn clean_invisible_chars(s: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
     use super::*;
 
     #[test]

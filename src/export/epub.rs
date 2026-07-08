@@ -231,6 +231,7 @@ fn html_escape(s: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
     use super::*;
     use crate::config::ExportFormat;
     use crate::export::exporter::{RenderedChapter, write_chapter_files};
@@ -246,14 +247,14 @@ mod tests {
     }
 
     fn sample_chapters() -> Vec<RenderedChapter> {
-        let xhtml1 = r##"<?xml version="1.0" encoding="UTF-8" ?>
+        let xhtml1 = r#"<?xml version="1.0" encoding="UTF-8" ?>
 <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
 <html xmlns="http://www.w3.org/1999/xhtml"><head><title>第1章 楔子</title></head>
-<body><h2>第1章 楔子</h2><p>正文一</p></body></html>"##;
-        let xhtml2 = r##"<?xml version="1.0" encoding="UTF-8" ?>
+<body><h2>第1章 楔子</h2><p>正文一</p></body></html>"#;
+        let xhtml2 = r#"<?xml version="1.0" encoding="UTF-8" ?>
 <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
 <html xmlns="http://www.w3.org/1999/xhtml"><head><title>第2章 启程</title></head>
-<body><h2>第2章 启程</h2><p>正文二</p></body></html>"##;
+<body><h2>第2章 启程</h2><p>正文二</p></body></html>"#;
         vec![
             RenderedChapter {
                 order: 1,
@@ -280,10 +281,9 @@ mod tests {
         let path = EpubExporter.merge(&sample_book(), &chapters, &out).unwrap();
         assert!(path.exists(), "missing epub: {}", path.display());
         assert!(
-            path.file_name()
-                .and_then(|s| s.to_str())
-                .unwrap()
-                .ends_with(".epub")
+            std::path::Path::new(path.file_name().and_then(|s| s.to_str()).unwrap())
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("epub"))
         );
 
         // EPUB 是 ZIP；用 zip crate 打开校验关键文件
@@ -296,7 +296,9 @@ mod tests {
         assert!(names.iter().any(|n| n == "META-INF/container.xml"));
         // OPF / NCX 路径在 epub-builder 默认布局下放在 OEBPS 子目录
         assert!(
-            names.iter().any(|n| n.ends_with(".opf")),
+            names.iter().any(|n| std::path::Path::new(n)
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("opf"))),
             "no opf in {names:?}"
         );
     }

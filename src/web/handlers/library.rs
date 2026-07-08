@@ -10,7 +10,7 @@ use crate::utils::fs::sanitize_filename;
 use super::super::SharedState;
 
 #[derive(Serialize)]
-pub(crate) struct LibraryEntry {
+pub struct LibraryEntry {
     filename: String,
     size: u64,
     modified: u64,
@@ -18,7 +18,7 @@ pub(crate) struct LibraryEntry {
 }
 
 #[derive(Deserialize)]
-pub(crate) struct LibraryQuery {
+pub struct LibraryQuery {
     pub ext: Option<String>,
 }
 
@@ -43,13 +43,12 @@ pub async fn library_list(
                 continue;
             }
             let meta = entry.metadata().ok();
-            let size = meta.as_ref().map(|m| m.len()).unwrap_or(0);
+            let size = meta.as_ref().map_or(0, std::fs::Metadata::len);
             let modified = meta
                 .as_ref()
                 .and_then(|m| m.modified().ok())
                 .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                .map(|d| d.as_secs())
-                .unwrap_or(0);
+                .map_or(0, |d| d.as_secs());
             entries.push(LibraryEntry {
                 filename: path
                     .file_name()

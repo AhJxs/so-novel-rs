@@ -1,4 +1,4 @@
-//! 主题启动入口: `init()` 把 embed 喂给 `ThemeRegistry` 并在 on_load 应用偏好。
+//! 主题启动入口: `init()` 把 embed 喂给 `ThemeRegistry` 并在 `on_load` 应用偏好。
 //!
 //! `apply_theme_pref` / `apply_font_size` 在 [`super::apply`], 目录同步在
 //! [`super::user_dir`], embed consts 在 [`super::embedded`]。

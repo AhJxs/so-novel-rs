@@ -28,6 +28,7 @@ pub fn detect_system_lang() -> LangType {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
     use super::*;
 
     #[test]

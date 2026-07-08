@@ -16,12 +16,11 @@ fn main() {
         // this unset so the latest frontend is compiled in.
         if std::env::var("SO_NOVEL_SKIP_WEB_BUILD").as_deref() == Ok("1") {
             let index = std::path::Path::new("web-ui/dist/index.html");
-            if !index.exists() {
-                panic!(
-                    "SO_NOVEL_SKIP_WEB_BUILD=1 set but web-ui/dist/index.html is missing; \
-                     pre-build with `npm run build --prefix web-ui` or unset the flag."
-                );
-            }
+            assert!(
+                index.exists(),
+                "SO_NOVEL_SKIP_WEB_BUILD=1 set but web-ui/dist/index.html is missing; \
+                 pre-build with `npm run build --prefix web-ui` or unset the flag."
+            );
             println!("cargo:warning=SO_NOVEL_SKIP_WEB_BUILD=1, reusing web-ui/dist/");
         } else {
             #[cfg(target_os = "windows")]
@@ -51,7 +50,11 @@ fn main() {
         let ico = std::path::Path::new("assets").join("logo.ico");
         if ico.exists() {
             let mut res = winres::WindowsResource::new();
-            res.set_icon(ico.to_str().expect("ico path is valid utf-8"));
+            // ico path 是构建期固定常量，UTF-8 无效实际不会发生；保留 expect 行为
+            // 配合局部 `#[allow]` 而非 crate-level 抑制，避免误伤业务代码。
+            #[allow(clippy::expect_used)]
+            let icon_str = ico.to_str().expect("ico path is valid utf-8");
+            res.set_icon(icon_str);
             if let Err(e) = res.compile() {
                 println!("cargo:warning=embed icon failed: {e}");
             }
@@ -65,20 +68,20 @@ fn main() {
 fn run_npm_build(cmd: &mut Command) {
     match cmd.status() {
         Ok(status) => {
-            if !status.success() {
-                panic!("Vite build failed — check web-ui/ for errors");
-            }
+            assert!(
+                status.success(),
+                "Vite build failed — check web-ui/ for errors"
+            );
         }
         Err(e) => {
             // npm not found (e.g. CI without Node.js, or non-standard PATH).
             // Only fatal if web-ui/dist/ doesn't already exist.
             let index = std::path::Path::new("web-ui/dist/index.html");
-            if !index.exists() {
-                panic!(
-                    "npm not found ({e}) and web-ui/dist/index.html is missing. \
-                     Install Node.js or pre-build the frontend with `npm run build --prefix web-ui`."
-                );
-            }
+            assert!(
+                index.exists(),
+                "npm not found ({e}) and web-ui/dist/index.html is missing. \
+                 Install Node.js or pre-build the frontend with `npm run build --prefix web-ui`."
+            );
             println!("cargo:warning=npm not found ({e}), using pre-built web-ui/dist/");
         }
     }

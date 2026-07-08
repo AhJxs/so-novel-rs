@@ -1,4 +1,4 @@
-//! 数据模型层 (PR #10 文档化, 2026-07-08). 对应 Java 包 `com.pcdd.sonovel.model`.
+//! 数据模型层  对应 Java 包 `com.pcdd.sonovel.model`.
 //!
 //! # 设计原则
 //!

@@ -30,10 +30,13 @@ fn similar(kw: &str, target: &str) -> f64 {
 
     // 2. 子串包含度优化：如果关键词是目标文本的子串，赋予极高的基础分
     if target_lower.contains(&kw_lower) {
-        let kw_len = kw_lower.chars().count() as f64;
-        let tg_len = target_lower.chars().count() as f64;
+        // `chars().count()` 按架构可达 usize::MAX；这里用 `u32::try_from` 收敛后
+        // 再 `f64::from`，保证 f64 接收 u32 (52 位尾数 >= 32 位) 不会触发
+        // `cast_precision_loss`；业务上关键词/标题长度都远不到 2^32，失真风险为 0。
+        let kw_len = f64::from(u32::try_from(kw_lower.chars().count()).unwrap_or(u32::MAX));
+        let tg_len = f64::from(u32::try_from(target_lower.chars().count()).unwrap_or(u32::MAX));
         // 包含关系的基础分为 0.6，并根据覆盖率给予奖励得分
-        let contain_sim = 0.6 + (kw_len / tg_len) * 0.4;
+        let contain_sim = (kw_len / tg_len).mul_add(0.4, 0.6);
         return f64::max(lev_sim, contain_sim);
     }
 
@@ -42,11 +45,13 @@ fn similar(kw: &str, target: &str) -> f64 {
 
 /// 融合评分模型：不再二选一，而是动态混合书名和作者的匹配贡献
 fn calculate_hybrid_score(sr: &SearchResult, kw: &str) -> f64 {
-    let book_sim = similar(kw, &sr.book_name);
-    let author_sim = sr.author.as_deref().map(|a| similar(kw, a)).unwrap_or(0.0);
+    // 完全匹配特判（最高优先级）
+    // 用误差区间比较 f64，规避 clippy::float_cmp；EPSILON 对 normalized 类分数是足够的容差。
+    const ONE: f64 = 1.0;
 
-    // 1. 完全匹配特判（最高优先级）
-    if book_sim == 1.0 || author_sim == 1.0 {
+    let book_sim = similar(kw, &sr.book_name);
+    let author_sim = sr.author.as_deref().map_or(0.0, |a| similar(kw, a));
+    if (book_sim - ONE).abs() < f64::EPSILON || (author_sim - ONE).abs() < f64::EPSILON {
         return 1.0;
     }
 
@@ -105,6 +110,7 @@ pub fn filter_sort(results: &[SearchResult], kw: &str) -> Vec<SearchResult> {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
     use super::*;
 
     // 辅助构建 SearchResult 的函数
@@ -250,10 +256,12 @@ mod tests {
 
     #[test]
     fn similar_func_basics() {
-        assert_eq!(similar("abc", "abc"), 1.0);
-        assert_eq!(similar("", "abc"), 0.0);
-        assert_eq!(similar("abc", ""), 0.0);
+        // 显式断言 floating 点结果在 EPSILON 范围内的等价，避免 clippy::float_cmp
+        let one = 1.0_f64;
+        assert!((similar("abc", "abc") - one).abs() < f64::EPSILON);
+        assert!(similar("", "abc").abs() < f64::EPSILON);
+        assert!(similar("abc", "").abs() < f64::EPSILON);
         // 大小写不敏感测试
-        assert_eq!(similar("abc", "ABC"), 1.0);
+        assert!((similar("abc", "ABC") - one).abs() < f64::EPSILON);
     }
 }

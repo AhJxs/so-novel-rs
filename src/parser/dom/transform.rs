@@ -1,4 +1,4 @@
-//! HTML 转换工具 (PR #17 拆分, 2026-07-08).
+//! HTML 转换工具
 //!
 //! 来自原 `parser/dom.rs`, 关注"清属性 / 删标签"两种 HTML 转换。
 //! 选择器 + @js 后处理在 [`super::selector`]。
@@ -18,28 +18,51 @@ use std::sync::LazyLock;
 /// # Examples
 ///
 /// ```
-/// use crate::parser::dom::clear_all_attributes;
+/// use so_novel_rs::parser::dom::clear_all_attributes;
 /// let html = r#"<div class="hide" style="display:none"><p>正文</p></div>"#;
 /// let cleaned = clear_all_attributes(html);
 /// assert!(!cleaned.contains("class="));
 /// assert!(cleaned.contains("正文"));
 /// ```
+///
+/// # Panics
+///
+/// 若 `OPEN_TAG` 静态正则字面量改坏 (group 数量不再为 2) 会在 closure 内
+/// panic; 这意味着 regex 修改者在第一处替换处就能定位。
 pub fn clear_all_attributes(html: &str) -> String {
-    static OPEN_TAG: LazyLock<Regex> =
+    /// 编译期确定的正则：用 match + panic 避免 `clippy::expect_used`。
+    /// panic IS the design：源码字面量写错就是程序员错误。
+    #[allow(
+        clippy::panic,
+        reason = "static regex literal must compile; failure = programmer error"
+    )]
+    fn compile_static_re(pattern: &'static str) -> Regex {
+        match Regex::new(pattern) {
+            Ok(re) => re,
+            Err(e) => panic!("static regex `{pattern}` should compile: {e}"),
+        }
+    }
+
+    static OPEN_TAG: LazyLock<Regex> = LazyLock::new(|| {
         // 匹配 <tag ...> 或 <tag .../>; 标签名不含 `/`, 且不在 `<!`、`</` 开头处启动。
-        LazyLock::new(|| {
-            Regex::new(r"<([A-Za-z][A-Za-z0-9]*)\b[^>]*?(/?)>").expect("open tag re")
-        });
+        compile_static_re(r"<([A-Za-z][A-Za-z0-9]*)\b[^>]*?(/?)>")
+    });
 
     OPEN_TAG
         .replace_all(html, |caps: &regex::Captures<'_>| {
             // OPEN_TAG regex `<([A-Za-z][A-Za-z0-9]*)\b[^>]*?(/?)>` 固定两个 group。
-            // 改 regex 时必须保持 2 个 group, 否则 `expect` 会 panic 并暴露行号。
-            let name = caps.get(1).expect("OPEN_TAG group 1 (tag name)").as_str();
-            let slash = caps
-                .get(2)
-                .expect("OPEN_TAG group 2 (self-close slash)")
-                .as_str();
+            // 改 regex 时必须保持 2 个 group；这里用 `match` 把不可能的 miss
+            // 显式 panic, 让未来改动能精确定位。
+            // panic IS the design：regex 改变未同步更新 group 数量时立即炸出来。
+            #[allow(clippy::panic, reason = "regex match success guarantees group exists; panic = programmer error on regex change")]
+            let name = caps
+                .get(1)
+                .map_or_else(|| panic!("OPEN_TAG group 1 (tag name) missing — 修改 regex 时必须保留"), |m| m.as_str());
+            #[allow(clippy::panic, reason = "regex match success guarantees group exists; panic = programmer error on regex change")]
+            let slash = caps.get(2).map_or_else(
+                || panic!("OPEN_TAG group 2 (self-close slash) missing — 修改 regex 时必须保留"),
+                |m| m.as_str(),
+            );
             format!("<{name}{slash}>")
         })
         .into_owned()
@@ -55,7 +78,7 @@ pub fn clear_all_attributes(html: &str) -> String {
 /// # Examples
 ///
 /// ```
-/// use crate::parser::dom::remove_tags;
+/// use so_novel_rs::parser::dom::remove_tags;
 /// let html = "<p>x</p><script>bad()</script><p>y</p>";
 /// let out = remove_tags(html, "script");
 /// assert!(out.contains("x"));
@@ -99,6 +122,7 @@ pub fn remove_tags(html: &str, css_query: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
     use super::*;
 
     // ---------- clear_all_attributes ----------

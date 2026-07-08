@@ -3,18 +3,18 @@
 //! 设计：
 //! - **rustls** 替代 OpenSSL，避免在 Windows/CI 上引入 C 依赖；
 //! - 默认跟随重定向、复用连接池、给所有请求加 `Accept-Language: zh-CN,zh;q=0.9,en;q=0.8`
-//!   （等价 Java 端 OkHttpClientFactory 的拦截器行为）；
+//!   （等价 Java 端 `OkHttpClientFactory` 的拦截器行为）；
 //! - 代理与 SSL 跳过通过 `ClientOptions` 控制；
 //! - 仅提供 **async** client（`build_async_client`），blocking 路径已移除
-//!   （reqwest blocking 在 tokio spawn_blocking 里 drop 会 panic）。
+//!   （reqwest blocking 在 tokio `spawn_blocking` 里 drop 会 panic）。
 
 use std::time::Duration;
 
 use anyhow::{Context, Result};
 
+use crate::config::AppConfig;
 #[cfg(test)]
 use crate::config::ProxyCfg;
-use crate::config::AppConfig;
 
 /// 控制 client 行为的小结构。
 ///
@@ -65,6 +65,7 @@ pub fn build_async_client(cfg: &AppConfig, opts: &ClientOptions) -> Result<reqwe
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
     use super::*;
 
     #[test]
@@ -81,7 +82,6 @@ mod tests {
                 proxy_enabled: true,
                 proxy_host: "127.0.0.1".to_string(),
                 proxy_port: 1,
-                ..ProxyCfg::default()
             },
             ..AppConfig::default()
         };
@@ -136,7 +136,6 @@ mod tests {
                 proxy_enabled: true,
                 proxy_host: "127.0.0.1".into(),
                 proxy_port: proxy_port as u16,
-                ..ProxyCfg::default()
             },
             ..AppConfig::default()
         };

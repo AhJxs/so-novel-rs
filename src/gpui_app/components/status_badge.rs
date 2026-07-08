@@ -20,11 +20,11 @@ pub enum StatusKind {
 impl StatusKind {
     fn color(self, cx: &App) -> gpui::Hsla {
         match self {
-            StatusKind::Info => cx.theme().info,
-            StatusKind::Success => cx.theme().success,
-            StatusKind::Warning => cx.theme().warning,
-            StatusKind::Error => cx.theme().danger,
-            StatusKind::Neutral => cx.theme().muted_foreground,
+            Self::Info => cx.theme().info,
+            Self::Success => cx.theme().success,
+            Self::Warning => cx.theme().warning,
+            Self::Error => cx.theme().danger,
+            Self::Neutral => cx.theme().muted_foreground,
         }
     }
 }

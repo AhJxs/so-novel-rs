@@ -37,12 +37,12 @@ impl Clone for DownloadTask {
 pub struct DownloadTask {
     /// 任务唯一 id（递增）。
     pub id: u64,
-    /// 触发时拿到的搜索结果，包含 source / book_url / 书名作者等信息。
+    /// 触发时拿到的搜索结果，包含 source / `book_url` / 书名作者等信息。
     pub origin: SearchResult,
     /// 后台推送进度的接收端；每帧 `try_recv` 排空。
-    /// 加载自 SQLite 时为 None（已中断的旧任务不会有活通道）。
+    /// 加载自 `SQLite` 时为 None（已中断的旧任务不会有活通道）。
     pub rx: Option<mpsc::UnboundedReceiver<Progress>>,
-    /// 后台任务的取消令牌。加载自 SQLite 时为 None。
+    /// 后台任务的取消令牌。加载自 `SQLite` 时为 None。
     pub cancel: Option<CancelToken>,
 
     /// 用户点了"取消"但后台还没响应的中间态。true 时 UI 显示"正在取消..."，
@@ -181,12 +181,12 @@ impl DownloadTask {
         any
     }
 
-    pub fn is_running(&self) -> bool {
+    pub const fn is_running(&self) -> bool {
         self.finished.is_none()
     }
 
     /// 用户主动取消 → cancelled。
-    pub fn is_cancelled(&self) -> bool {
+    pub const fn is_cancelled(&self) -> bool {
         matches!(
             self.finished.as_ref(),
             Some(Err(
@@ -196,7 +196,7 @@ impl DownloadTask {
     }
 
     /// 已结束且不是取消 → 失败。
-    pub fn is_failed(&self) -> bool {
+    pub const fn is_failed(&self) -> bool {
         matches!(
             self.finished.as_ref(),
             Some(Err(FinishedReason::Failed { .. }))
@@ -206,8 +206,7 @@ impl DownloadTask {
     pub fn book_name(&self) -> &str {
         self.book_meta
             .as_ref()
-            .map(|b| b.book_name.as_str())
-            .unwrap_or(self.origin.book_name.as_str())
+            .map_or(self.origin.book_name.as_str(), |b| b.book_name.as_str())
     }
 
     /// 距开始的实时耗时。

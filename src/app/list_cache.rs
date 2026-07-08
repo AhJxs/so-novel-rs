@@ -128,6 +128,7 @@ pub fn filter_signature(parts: &[&str]) -> u64 {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
     use super::*;
 
     #[test]

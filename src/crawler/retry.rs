@@ -2,12 +2,12 @@
 //!
 //! 与 Java 端相同的语义：
 //! - 第一次失败后再尝试 `max_attempts` 次（即总共最多执行 `max_attempts + 1` 次）；
-//! - 每次失败前 sleep 一段（由调用方提供 sleep_fn，便于单元测试用 zero sleep）；
+//! - 每次失败前 sleep 一段（由调用方提供 `sleep_fn，便于单元测试用` zero sleep）；
 //! - 任何一次成功立即返回 `Ok`；
 //! - 全部失败时返回最后一次的 `Err`。
 //!
 //! 操作 op 是个返回 future 的 async 闭包；调用方在 `download_book`
-//! 里直接喂 `parse_chapter(...)` future（async parser，不再走 spawn_blocking）。
+//! 里直接喂 `parse_chapter(...)` future（async parser，不再走 `spawn_blocking`）。
 
 /// 跑一次操作；失败后按 `max_attempts` 重试。
 ///
@@ -40,14 +40,15 @@ where
     // 上面循环至少跑一次（`0..=max_attempts` 至少含 0），如果走到这里说明
     // op 从未返回 Ok → last_err 必为 Some。`expect` 也对，但 match 让 clippy
     // 不报 `clippy::expect_used` 提示且语义更清晰。
-    match last_err {
-        Some(e) => Err(e),
-        None => unreachable!("retry loop always runs at least once"),
-    }
+    last_err.map_or_else(
+        || unreachable!("retry loop always runs at least once"),
+        |e| Err(e),
+    )
 }
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
     use super::*;
     use std::cell::RefCell;
     use std::rc::Rc;

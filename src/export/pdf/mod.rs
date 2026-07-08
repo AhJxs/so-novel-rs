@@ -1,9 +1,9 @@
-//! PDF 导出 (PR #17 重构, 2026-07-08). 对应 Java `handle.PdfMergeHandler`.
+//! PDF 导出  对应 Java `handle.PdfMergeHandler`.
 //!
 //! # 子模块
 //!
 //! - [`document`] — `PdfExporter` + `Paginator` + 排版常量 (主流程)
-//! - [`chapters`] — HTML → 结构化内容 (extract_chapter_content / html_to_text / wrap_text 等)
+//! - [`chapters`] — HTML → 结构化内容 (`extract_chapter_content` / `html_to_text` / `wrap_text` 等)
 //! - [`fonts`] — CJK 字体发现 + `Measurer` 字宽量宽器
 //!
 //! # 行为

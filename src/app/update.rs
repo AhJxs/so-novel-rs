@@ -1,6 +1,6 @@
-//! `AppModel` 版本更新方法 (PR #17 拆分, 2026-07-08).
+//! `AppModel` 版本更新方法
 //!
-//! 1 个方法: spawn_update_check.
+//! 1 个方法: `spawn_update_check`.
 //! 手动触发 GitHub release 检查, 跟启动期自动检查走同一 `ops::spawn_update_check` 路径。
 
 use std::sync::Arc;

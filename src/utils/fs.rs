@@ -29,8 +29,7 @@ pub fn sanitize_filename(name: &str) -> String {
             // **不替换 `.`** —— 扩展名点（如 `.pdf`/`.epub`）必须保留，否则
             // `书名(作者).pdf` 会被洗成 `书名(作者)。pdf` 导致找不到文件。
             let replaced = match c {
-                '/' | '\\' => '_',
-                '\0' => '_',
+                '/' | '\\' | '\0' => '_',
                 _ => c,
             };
             out.push(replaced);
@@ -60,9 +59,7 @@ pub fn to_absolute(p: impl AsRef<Path>) -> std::path::PathBuf {
     if p.is_absolute() {
         return p.to_path_buf();
     }
-    std::env::current_dir()
-        .map(|cwd| cwd.join(p))
-        .unwrap_or_else(|_| p.to_path_buf())
+    std::env::current_dir().map_or_else(|_| p.to_path_buf(), |cwd| cwd.join(p))
 }
 
 /// 把字节数格式化为人类可读的文件大小（"1.5 MB" / "0 B"）。
@@ -74,18 +71,30 @@ pub fn format_size(bytes: u64) -> String {
     const MB: u64 = KB * 1024;
     const GB: u64 = MB * 1024;
     if bytes >= GB {
-        format!("{:.2} GB", bytes as f64 / GB as f64)
+        format!("{:.2} GB", u64_to_f64(bytes) / u64_to_f64(GB))
     } else if bytes >= MB {
-        format!("{:.2} MB", bytes as f64 / MB as f64)
+        format!("{:.2} MB", u64_to_f64(bytes) / u64_to_f64(MB))
     } else if bytes >= KB {
-        format!("{:.1} KB", bytes as f64 / KB as f64)
+        format!("{:.1} KB", u64_to_f64(bytes) / u64_to_f64(KB))
     } else {
-        format!("{} B", bytes)
+        format!("{bytes} B")
     }
+}
+
+/// `u64` → `f64` 的转换（分解为两个 u32 避免 `cast_precision_loss`）。
+/// 仅用于 UI 显示这一类"结果给人看、精度损失可接受"的场景。
+/// u32 → f64 是精确的（53 bits mantissa 能覆盖全部 32 bits），
+/// 先分解再合并不会损失精度；不要在算术管线里复用。
+#[inline]
+const fn u64_to_f64(v: u64) -> f64 {
+    let lo = (v as u32) as f64;
+    let hi = ((v >> 32) as u32) as f64;
+    hi * 4_294_967_296.0 + lo
 }
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
     use super::*;
 
     #[test]

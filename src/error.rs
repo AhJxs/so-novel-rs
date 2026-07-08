@@ -1,4 +1,4 @@
-//! 全局错误根类型 (PR #2, 2026-07-08)
+//! 全局错误根类型
 //!
 //! # 设计原则
 //!
@@ -96,6 +96,15 @@ pub enum AppError {
     Internal(String),
 }
 
+// 手写 `PartialEq`：跨域类型（`ExportError` / `io::Error` / `serde_json::Error` /
+// `toml_edit::TomlError`）未实现 `PartialEq`，所以 `derive` 不能用。
+// 比较策略：消息文本相同即视为相等 —— 消息是稳定可观测的输出。
+impl PartialEq for AppError {
+    fn eq(&self, other: &Self) -> bool {
+        self.message() == other.message()
+    }
+}
+
 /// 业务层标准 `Result` 别名。所有 service/dao 编排函数应返回 `AppResult<T>`。
 pub type AppResult<T> = Result<T, AppError>;
 
@@ -155,7 +164,7 @@ impl AppError {
 
     /// IO 错误加业务前缀。`std::io::Error` 已 `#[from]`, 但业务侧常需要
     /// "读取文件失败: No such file" 这种带前缀的字符串, 一次性收口。
-    pub fn io_msg(e: std::io::Error, prefix: impl AsRef<str>) -> Self {
+    pub fn io_msg(e: &std::io::Error, prefix: impl AsRef<str>) -> Self {
         Self::Internal(format!("{}: {e}", prefix.as_ref()))
     }
 
@@ -236,7 +245,10 @@ mod tests {
         assert!(matches!(AppError::db("a"), AppError::Db(_)));
         assert!(matches!(AppError::js("a"), AppError::Js(_)));
         assert!(matches!(AppError::business("a"), AppError::Business(_)));
-        assert!(matches!(AppError::invalid("a"), AppError::InvalidArgument(_)));
+        assert!(matches!(
+            AppError::invalid("a"),
+            AppError::InvalidArgument(_)
+        ));
         assert!(matches!(AppError::not_found("a"), AppError::NotFound(_)));
         assert!(matches!(AppError::conflict("a"), AppError::Conflict(_)));
         assert!(matches!(AppError::internal("a"), AppError::Internal(_)));
@@ -245,7 +257,8 @@ mod tests {
     #[test]
     fn app_result_alias_works() {
         let ok: AppResult<u32> = Ok(42);
-        assert_eq!(ok.unwrap(), 42);
+        // 构造时已经是 Ok, 解包只是断言 identity, 不会被 clippy 误判成可失败解包。
+        assert!(matches!(ok, Ok(42)));
 
         let err: AppResult<u32> = Err(AppError::invalid("bad"));
         assert!(err.is_err());

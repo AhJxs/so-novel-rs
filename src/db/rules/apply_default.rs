@@ -1,4 +1,4 @@
-//! 默认值填充 (PR #17 拆分, 2026-07-08).
+//! 默认值填充
 //!
 //! 给一条 `Rule` 填默认值。等价于 Java `util.SourceUtils#applyDefaultRule`:
 //! - `language` 空 → 用系统检测到的 locale;
@@ -10,8 +10,8 @@ use crate::config::LangType;
 use crate::models::Rule;
 
 use super::constants::{
-    META_AUTHOR, META_BOOK_NAME, META_CATEGORY, META_COVER_URL, META_INTRO, META_LATEST_CHAPTER,
-    META_LATEST_CHAPTER_URL, META_LAST_UPDATE_TIME, META_STATUS,
+    META_AUTHOR, META_BOOK_NAME, META_CATEGORY, META_COVER_URL, META_INTRO, META_LAST_UPDATE_TIME,
+    META_LATEST_CHAPTER, META_LATEST_CHAPTER_URL, META_STATUS,
 };
 
 /// 给一条 `Rule` 填默认值。
@@ -34,7 +34,7 @@ pub fn apply_default_rule(rule: &mut Rule, system_lang: LangType) {
 
     if let Some(s) = rule.search.as_mut() {
         if s.base_uri.is_empty() {
-            s.base_uri = url.clone();
+            s.base_uri.clone_from(&url);
         }
         if s.timeout.is_none() {
             s.timeout = Some(15);
@@ -42,7 +42,7 @@ pub fn apply_default_rule(rule: &mut Rule, system_lang: LangType) {
     }
     if let Some(b) = rule.book.as_mut() {
         if b.base_uri.is_empty() {
-            b.base_uri = url.clone();
+            b.base_uri.clone_from(&url);
         }
         if b.timeout.is_none() {
             b.timeout = Some(15);
@@ -78,7 +78,7 @@ pub fn apply_default_rule(rule: &mut Rule, system_lang: LangType) {
     }
     if let Some(t) = rule.toc.as_mut() {
         if t.base_uri.is_empty() {
-            t.base_uri = url.clone();
+            t.base_uri.clone_from(&url);
         }
         if t.timeout.is_none() {
             t.timeout = Some(60);
@@ -86,7 +86,7 @@ pub fn apply_default_rule(rule: &mut Rule, system_lang: LangType) {
     }
     if let Some(c) = rule.chapter.as_mut() {
         if c.base_uri.is_empty() {
-            c.base_uri = url.clone();
+            c.base_uri = url;
         }
         if c.timeout.is_none() {
             c.timeout = Some(15);

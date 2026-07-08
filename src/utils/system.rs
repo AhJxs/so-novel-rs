@@ -29,7 +29,7 @@ pub fn open_path(path: &Path) -> Result<()> {
         Command::new("cmd")
             .args(["/C", "start", "", path_str])
             .spawn()
-            .with_context(|| format!("start {}", path_str))?;
+            .with_context(|| format!("start {path_str}"))?;
         Ok(())
     }
 
@@ -107,6 +107,7 @@ pub fn reveal_in_folder(path: &Path) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
     use super::*;
 
     #[test]

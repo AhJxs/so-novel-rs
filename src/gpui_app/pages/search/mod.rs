@@ -8,7 +8,7 @@
 //! - `range_dialog` — 选章 Dialog body + 起止输入框 clamp helper。
 //! - `delegate` — `SearchDelegate` + `ListDelegate` impl（虚拟滚动）。
 //!
-//! 布局：PageHeader（无 action）→ Toolbar → SourceStatusBar → ResultList → Pagination。
+//! 布局：PageHeader（无 action）→ Toolbar → `SourceStatusBar` → `ResultList` → Pagination。
 
 use std::num::NonZeroUsize;
 use std::sync::Arc;
@@ -59,7 +59,7 @@ mod toolbar;
 pub struct SearchPage {
     model: Entity<AppModel>,
 
-    /// struct 字段持有（InputState / SelectState / ListState）—— owner 持有避免
+    /// struct 字段持有（InputState / `SelectState` / `ListState`）—— owner 持有避免
     /// click / focus 丢失。placeholder 在 `new()` 一次性设好，language setter 走
     /// "重启进程"路径，新进程重建时自然拿新 locale。
     keyword: Entity<InputState>,
@@ -70,8 +70,8 @@ pub struct SearchPage {
     current_page: usize,
 
     /// 书源下拉 items 的上一次快照（值为 "all" / "rule:{id}"），用来 render 差量
-    /// 检测。SourcesPage 改禁用 / 删除 / 重命名书源后 `model.rules` 变化但 SelectState
-    /// 不会自动重读 —— render 检测到快照不一致就重建 items 并 set_items / 调整选中。
+    /// 检测。SourcesPage 改禁用 / 删除 / 重命名书源后 `model.rules` 变化但 `SelectState`
+    /// 不会自动重读 —— render 检测到快照不一致就重建 items 并 `set_items` / 调整选中。
     /// 与 `SettingsPage::sync_theme_items` 同套路（observer 拿不到 Window，差量
     /// 更新走 render）。
     last_source_items: Vec<SharedString>,
@@ -90,17 +90,17 @@ pub struct SearchPage {
 
     /// 选章下载 Dialog 的状态（起止输入框 + 当前 target + 初始化标志）。
     ///
-    /// 流程：点"选章" → `spawn_resolve_toc` 拉章节列表（写 toc_cache）→ 弹 confirm
-    /// Dialog 反应式读 toc_cache，TOC 回来后初始化起止输入框（1 / N）+ 显示预览。
+    /// 流程：点"选章" → `spawn_resolve_toc` 拉章节列表（写 `toc_cache`）→ 弹 confirm
+    /// Dialog 反应式读 `toc_cache，TOC` 回来后初始化起止输入框（1 / N）+ 显示预览。
     /// 用户改输入框 / 按 +/- → 本页订阅 `InputEvent::Change` + `NumberInputEvent::Step`，
-    /// clamp 到 [1, N] 后 set_value 写回。
+    /// clamp 到 [1, N] 后 `set_value` 写回。
     range_start_input: Entity<InputState>,
     range_end_input: Entity<InputState>,
     /// Dialog 当前为哪条搜索结果服务（None = 没开）。点击不同结果时更新；
-    /// TOC 用 `(source_id, url)` 在 toc_cache 里查。
+    /// TOC 用 `(source_id, url)` 在 `toc_cache` 里查。
     range_target: Option<SearchResult>,
-    /// 是否已为当前 target 初始化过输入框（set_value 1 / N）。
-    /// 防 TOC 每帧重渲时反复 set_value 覆盖用户输入。
+    /// 是否已为当前 target `初始化过输入框（set_value` 1 / N）。
+    /// 防 TOC 每帧重渲时反复 `set_value` 覆盖用户输入。
     range_initialized: bool,
 }
 
@@ -109,14 +109,14 @@ impl SearchPage {
         let keyword = cx.new(|cx| {
             InputState::new(window, cx).placeholder(ts("Search.filter.placeholder").to_string())
         });
-        cx.subscribe_in(&keyword, window, |this, _state, ev, _w, cx| {
+        cx.subscribe_in(&keyword, window, |this, _state, ev, w, cx| {
             match ev {
                 InputEvent::Change => {
                     let v = this.keyword.read(cx).value().to_string();
                     this.model.update(cx, |m, _cx| m.search.keyword = v);
                 }
                 // Enter 直接触发搜索（关键词空 / 已在跑时 run_search 自身兜底）。
-                InputEvent::PressEnter { .. } => this.run_search(_w, cx),
+                InputEvent::PressEnter { .. } => this.run_search(w, cx),
                 _ => {}
             }
         })
@@ -144,7 +144,7 @@ impl SearchPage {
         })
         .detach();
 
-        let page_handle = cx.entity().clone();
+        let page_handle = cx.entity();
         let delegate = SearchDelegate::new(page_handle);
         let list_state = cx.new(|cx| ListState::new(delegate, window, cx));
 
@@ -167,10 +167,10 @@ impl SearchPage {
         cx.subscribe_in(
             &range_start_input,
             window,
-            |this, _state, ev, window, cx| match ev {
-                InputEvent::Change => {
+            |this, _state, ev: &InputEvent, window, cx| {
+                if matches!(ev, InputEvent::Change) {
                     let cur = this.range_start_input.read(cx).value().to_string();
-                    let v = clamp_range_value(this, cur.clone().into(), cx);
+                    let v = clamp_range_value(this, &cur.clone().into(), cx);
                     if v == 0 {
                         // 空字符串 → 用户正在清空输入框，不要重置。
                         return;
@@ -182,18 +182,16 @@ impl SearchPage {
                         cx.notify();
                     }
                 }
-                InputEvent::PressEnter { .. } => {}
-                _ => {}
             },
         )
         .detach();
         cx.subscribe_in(
             &range_end_input,
             window,
-            |this, _state, ev, window, cx| match ev {
-                InputEvent::Change => {
+            |this, _state, ev: &InputEvent, window, cx| {
+                if matches!(ev, InputEvent::Change) {
                     let cur = this.range_end_input.read(cx).value().to_string();
-                    let v = clamp_range_value(this, cur.clone().into(), cx);
+                    let v = clamp_range_value(this, &cur.clone().into(), cx);
                     if v == 0 {
                         // 空字符串 → 用户正在清空输入框，不要重置。
                         return;
@@ -205,19 +203,17 @@ impl SearchPage {
                         cx.notify();
                     }
                 }
-                InputEvent::PressEnter { .. } => {}
-                _ => {}
             },
         )
         .detach();
 
         // Step 订阅（+/-）。
         cx.subscribe_in(
-            &range_start_input,
+            &range_end_input,
             window,
             |this, _state, ev: &NumberInputEvent, window, cx| {
                 let NumberInputEvent::Step(action) = ev;
-                let cur = clamp_range_value(this, this.range_start_input.read(cx).value(), cx);
+                let cur = clamp_range_value(this, &this.range_start_input.read(cx).value(), cx);
                 let v = match action {
                     StepAction::Decrement => cur.saturating_sub(1).max(1),
                     StepAction::Increment => cur.saturating_add(1),
@@ -237,7 +233,7 @@ impl SearchPage {
             window,
             |this, _state, ev: &NumberInputEvent, window, cx| {
                 let NumberInputEvent::Step(action) = ev;
-                let cur = clamp_range_value(this, this.range_end_input.read(cx).value(), cx);
+                let cur = clamp_range_value(this, &this.range_end_input.read(cx).value(), cx);
                 let v = match action {
                     StepAction::Decrement => cur.saturating_sub(1).max(1),
                     StepAction::Increment => cur.saturating_add(1),
@@ -303,18 +299,18 @@ impl SearchPage {
     /// 每次 render 拍一次快照（仅保留 `value` 字符串 = "all" / "rule:{id}"），与
     /// `last_source_items` 对比；无变化 → 0 开销返回；变化 → 重建 items、
     /// 按当前 `model.search.source_id` 重新计算选中位置、`set_items` + `set_selected_index`
-    /// 推到 SelectState。
+    /// 推到 `SelectState`。
     ///
     /// 覆盖的触发场景：
-    /// - SourcesPage 切换某条规则的 `disabled`
-    /// - SourcesPage 删除 / 导入一条规则
+    /// - `SourcesPage` 切换某条规则的 `disabled`
+    /// - `SourcesPage` 删除 / 导入一条规则
     /// - 规则重命名（item.title 变了）
     ///
-    /// 复用 `Rule::is_search_enabled()` 谓词，与 `spawn_search` 派发时的 target_sources
+    /// 复用 `Rule::is_search_enabled()` 谓词，与 `spawn_search` 派发时的 `target_sources`
     /// 列表保持一致 —— 下拉里看到的 = 实际会发请求的。
     ///
     /// 选中位置在选中的源被禁用 / 删除后会回到 `None`（`position()` 找不到），让
-    /// SelectState 落到默认项；`spawn_search` 那边 `source_id` 仍是 stale 值，但会
+    /// `SelectState` 落到默认项；`spawn_search` 那边 `source_id` 仍是 stale 值，但会
     /// 因为 id 不匹配任一规则而派发空列表——用户改下拉时 Confirm 处理器会写回 None。
     fn sync_source_items(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let aggregate_title = ts("Search.source.aggregate");
@@ -355,8 +351,7 @@ impl SearchPage {
             .read(cx)
             .search
             .source_id
-            .map(|id| format!("rule:{id}"))
-            .unwrap_or_else(|| "all".to_string());
+            .map_or_else(|| "all".to_string(), |id| format!("rule:{id}"));
         let cur_value = SharedString::from(cur_value);
         let sel =
             <SearchableVec<SourceSelectItem> as SelectDelegate>::position(&items_sv, &cur_value);
@@ -368,10 +363,10 @@ impl SearchPage {
 
     /// 点"选章"按钮 → 拉 TOC + 弹 confirm Dialog。
     ///
-    /// - `spawn_resolve_toc` 幂等（toc_cache 命中直接返回，见 `app/ops/download.rs`）。
+    /// - `spawn_resolve_toc` `幂等（toc_cache` 命中直接返回，见 `app/ops/download.rs`）。
     /// - 记 `range_target`，重置 `range_initialized=false`（让 Dialog 渲染时等 TOC 回来
-    ///   再 set_value 1 / N 初始化，避免覆盖用户输入）。
-    /// - 弹反应式 confirm Dialog：builder 每帧读 toc_cache，TOC 回来后自动出现输入框 +
+    ///   再 `set_value` 1 / N 初始化，避免覆盖用户输入）。
+    /// - 弹反应式 confirm Dialog：builder 每帧读 `toc_cache，TOC` 回来后自动出现输入框 +
     ///   章节名预览；`on_ok` 校验范围后 `spawn_download_range` 派下载。
     fn open_range_dialog(
         &mut self,
@@ -384,11 +379,11 @@ impl SearchPage {
         self.range_target = Some(target);
         self.range_initialized = false;
 
-        let page = cx.entity().clone();
+        let page = cx.entity();
         window.open_dialog(cx, move |dialog: Dialog, window, cx| {
             // builder 是 Fn（每帧重调）→ 每帧 clone page 进当帧闭包。
             let page = page.clone();
-            let body = range_dialog::content(page.clone(), window, cx);
+            let body = range_dialog::content(&page, window, cx);
             dialog
                 .title(ts("Search.range.title"))
                 .w(px(520.))
@@ -405,7 +400,7 @@ impl SearchPage {
                 // page.update 内部拿不到 Window（只有 Context），所以下载派发放 update 里、
                 // 通知用 window 在这层发，用 RangeOutcome 枚举传结果出来。
                 .on_ok(move |_, window, cx| {
-                    let outcome = page.update(cx, |p, cx| p.confirm_range_download(cx));
+                    let outcome = page.update(cx, Self::confirm_range_download);
                     match outcome {
                         RangeOutcome::Done { book_name, count } => {
                             // 提示带书名 + 章节数（不用任务 id）。truncate 防超长书名撑爆 toast。
@@ -442,9 +437,9 @@ impl SearchPage {
     }
 
     /// confirm Dialog 的 OK 回调：校验起止范围 → 切片章节 → `spawn_download_range`。
-    /// 返回 `RangeOutcome`，由调用方（on_ok 闭包，持有 Window）据此发通知 + 决定是否关 Dialog。
+    /// 返回 `RangeOutcome`，`由调用方（on_ok` 闭包，持有 Window）据此发通知 + 决定是否关 Dialog。
     /// 不接 `&mut Window`：`page.update` 内部只有 `Context<SearchPage>` 拿不到 Window，
-    /// 通知统一在 update 外、用 on_ok 自带的 window 发。
+    /// 通知统一在 update 外、用 `on_ok` 自带的 window 发。
     fn confirm_range_download(&mut self, cx: &mut Context<Self>) -> RangeOutcome {
         let Some(target) = self.range_target.clone() else {
             return RangeOutcome::Pending;
@@ -504,7 +499,7 @@ impl SearchPage {
     }
 }
 
-/// `confirm_range_download` 的返回：on_ok 闭包据此发通知 + 决定是否关 Dialog。
+/// `confirm_range_download` `的返回：on_ok` 闭包据此发通知 + 决定是否关 Dialog。
 enum RangeOutcome {
     /// 下载已派发（书名 + 章节数）。关 Dialog。
     Done { book_name: String, count: usize },
@@ -552,15 +547,15 @@ impl Render for SearchPage {
 
         let total = results.len();
         let w = compute_page_window(total, &mut self.current_page);
-        let page_items: Vec<(usize, SearchResult)> = if !w.is_empty() {
+        let page_items: Vec<(usize, SearchResult)> = if w.is_empty() {
+            Vec::new()
+        } else {
             results[w.start..w.end]
                 .iter()
                 .cloned()
                 .enumerate()
                 .map(|(i, r)| (w.start + i, r))
                 .collect()
-        } else {
-            Vec::new()
         };
         self.list_state.update(cx, |state, _cx| {
             state.delegate_mut().page_items = page_items;
@@ -619,9 +614,9 @@ impl Render for SearchPage {
                 this.child(Pagination::new(
                     self.current_page,
                     w.page_count,
-                    cx.listener(|this, &new_page, _window, _cx| {
+                    cx.listener(|this, &new_page, _window, cx| {
                         this.current_page = new_page;
-                        _cx.notify();
+                        cx.notify();
                     }),
                 ))
             })

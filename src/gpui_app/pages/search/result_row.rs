@@ -1,9 +1,9 @@
 //! 搜索结果列表行渲染（6 列：序号 / 书名 / 元信息 / 源 id / 详情 / 选章 / 全本）。
 //!
 //! 跟 `library.rs::render_row` / `sources.rs::render_source_row` 同模式：固定宽度列 +
-//! flex_1 撑满剩余 + ListItem 内部选中样式。
+//! `flex_1` 撑满剩余 + `ListItem` 内部选中样式。
 //!
-//! `page: Entity<SearchPage>` 转发用：全本 / 详情 / 选章 按钮 on_click 调
+//! `page: Entity<SearchPage>` 转发用：全本 / 详情 / 选章 按钮 `on_click` 调
 //! `page.update` 拿 `&mut AppModel`。
 
 use gpui::{App, Entity, IntoElement, ParentElement, Styled, div, px};
@@ -28,7 +28,7 @@ pub(super) fn render(
     idx: usize,
     r: &SearchResult,
     page: Entity<SearchPage>,
-    cx: &mut App,
+    cx: &App,
 ) -> impl IntoElement {
     let name = truncate(&r.book_name, 50);
     let author_display = r
@@ -43,7 +43,7 @@ pub(super) fn render(
     let source_name_display = if r.source_name.is_empty() {
         ts_cached("Search.result.unknown_source").to_string()
     } else {
-        truncate(&r.source_name, 20).to_string()
+        truncate(&r.source_name, 20)
     };
 
     // 全本按钮要 clone result 进闭包（on_click 是 Fn，可多次触发）—— 在闭包
@@ -59,7 +59,7 @@ pub(super) fn render(
     let url_for_detail = r.url.clone();
     // 选章按钮：page clone 进 on_click → open_range_dialog。
     let result_for_range = r.clone();
-    let page_for_range = page.clone();
+    let page_for_range = page;
 
     h_flex()
         // 不要 .id(...)：外层 ListItem::new(ix) 已经给了 id，自己再加会和 List 的
@@ -167,10 +167,10 @@ pub(super) fn render(
                             .title(ts_cached("Search.detail.title"))
                             .w(px(640.))
                             .child(detail_dialog::content(
-                                r,
-                                page,
+                                &r,
+                                &page,
                                 source_id,
-                                url,
+                                &url,
                                 cx,
                             ))
                     });
@@ -211,7 +211,7 @@ pub(super) fn render(
                     window.push_notification(
                         Notification::new()
                             .title(ts_cached("Search.action.download_started"))
-                            .message(truncate(&result_for_whole.book_name, 50).to_string())
+                            .message(truncate(&result_for_whole.book_name, 50))
                             .with_type(NotificationType::Success)
                             .autohide(true),
                         cx,

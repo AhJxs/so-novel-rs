@@ -35,18 +35,20 @@ pub struct HealthInfo {
 /// 锁失败 → `0`, 记 warn; 监控不应因为锁抖动而误报。
 #[tracing::instrument(name = "web::health", skip_all)]
 pub async fn health(State(state): State<SharedState>) -> Json<HealthInfo> {
-    let rules_count = state.rules.read().map(|r| r.len()).unwrap_or_else(|e| {
-        tracing::warn!("health: rules RwLock poisoned: {e}");
-        0
-    });
-    let active_tasks = state
-        .tasks
-        .lock()
-        .map(|t| t.iter().filter(|t| t.finished.is_none()).count())
-        .unwrap_or_else(|e| {
+    let rules_count = state.rules.read().map_or_else(
+        |e| {
+            tracing::warn!("health: rules RwLock poisoned: {e}");
+            0
+        },
+        |r| r.len(),
+    );
+    let active_tasks = state.tasks.lock().map_or_else(
+        |e| {
             tracing::warn!("health: tasks Mutex poisoned: {e}");
             0
-        });
+        },
+        |t| t.iter().filter(|t| t.finished.is_none()).count(),
+    );
 
     Json(HealthInfo {
         status: "ok",

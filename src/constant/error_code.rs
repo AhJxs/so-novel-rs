@@ -1,4 +1,4 @@
-//! 错误码表 (PR #3, 2026-07-08)
+//! 错误码表
 //!
 //! # 设计
 //!
@@ -10,7 +10,7 @@
 //! | 维度 | 类型 | 用途 |
 //! |---|---|---|
 //! | 是什么错误 | [`ErrorCode`] (数字) | 业务侧唯一标识, 日志检索, 前端按码分流 |
-//! | HTTP 怎么渲染 | `WebErrorKind` (枚举) | HTTP 状态码 + snake_case 短码 |
+//! | HTTP 怎么渲染 | `WebErrorKind` (枚举) | HTTP 状态码 + `snake_case` 短码 |
 //!
 //! # 编号规则
 //!
@@ -79,11 +79,11 @@ pub enum ErrorCode {
     CrawlerClient = 2013,
     /// 2014: 任务文件 IO 失败。
     CrawlerIo = 2014,
-    /// 2015: 导出失败 (聚合自 ExportError)。
+    /// 2015: 导出失败 (聚合自 `ExportError`)。
     CrawlerExport = 2015,
-    /// 2016: 书源解析失败 (聚合自 BookError, 嵌套源不展开)。
+    /// 2016: 书源解析失败 (聚合自 `BookError`, 嵌套源不展开)。
     CrawlerBookAggregate = 2016,
-    /// 2017: 目录解析失败 (聚合自 TocError, 嵌套源不展开)。
+    /// 2017: 目录解析失败 (聚合自 `TocError`, 嵌套源不展开)。
     CrawlerTocAggregate = 2017,
 
     // ─────────── 3xxx 资源 ───────────
@@ -217,7 +217,6 @@ impl ErrorCode {
             1000..=1999 => ErrorCategory::Rule,
             2000..=2999 => ErrorCategory::Parse,
             3000..=3999 => ErrorCategory::Resource,
-            4000..=4999 => ErrorCategory::Internal,
             5000..=5999 => ErrorCategory::Export,
             _ => ErrorCategory::Internal,
         }
@@ -247,6 +246,7 @@ impl fmt::Display for ErrorCode {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
     use super::*;
 
     #[test]
@@ -263,8 +263,7 @@ mod tests {
             assert_eq!(
                 variant.code_str(),
                 variant.code().to_string(),
-                "code_str/code drift at {:?}",
-                variant
+                "code_str/code drift at {variant:?}"
             );
         }
     }

@@ -31,7 +31,10 @@ pub fn load_tasks_from_file(path: &Path) -> (Vec<DownloadTask>, u64) {
 
     // 如果有中断的任务，重新保存到文件
     if need_rewrite {
-        let records: Vec<_> = tasks.iter().map(|t| t.to_record()).collect();
+        let records: Vec<_> = tasks
+            .iter()
+            .map(super::download_task::DownloadTask::to_record)
+            .collect();
         if let Err(e) = crate::db::save_tasks(path, &records) {
             tracing::warn!("rewrite interrupted tasks failed: {e}");
         }

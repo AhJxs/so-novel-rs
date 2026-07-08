@@ -1,4 +1,4 @@
-//! 单章正文解析 (PR #17 拆分, 2026-07-08). 对应 Java `parse.ChapterParser`。
+//! 单章正文解析  对应 Java `parse.ChapterParser`。
 //!
 //! # 能力 (与 Java 端等价子集)
 //!
@@ -23,7 +23,7 @@
 //!
 //! - [`parse`] — `ChapterError` + `parse_chapter` (公共异步入口) + `parse_chapter_html` (离线测试) +
 //!   单页抓取 + cf-fallback typed-error 包装
-//! - [`pagination`] — 分页循环 + 终止判定 + NextStep + resolve_next_url / is_last_page
+//! - [`pagination`] — 分页循环 + 终止判定 + `NextStep` + `resolve_next_url` / `is_last_page`
 
 pub mod pagination;
 pub mod parse;

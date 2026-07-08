@@ -55,9 +55,9 @@ use anyhow::Result;
 use tokio::runtime::Runtime;
 
 use crate::config::{AppConfig, ConfigPaths, load_config};
+use crate::db::SourcesConfig;
 use crate::http::HttpClients;
 use crate::models::Rule;
-use crate::db::SourcesConfig;
 use events::{WakeupHandle, WakeupReceiver};
 use ops::OpsCtx;
 
@@ -78,7 +78,7 @@ pub struct AppModel {
     pub runtime: &'static Runtime,
 
     /// 共享 HTTP client 集合。一次性构造，跨所有爬取任务复用
-    /// 连接池 + TLS session cache —— 改 proxy / unsafe_ssl 时
+    /// 连接池 + TLS session cache —— 改 proxy / `unsafe_ssl` 时
     /// `HttpClients::rebuild_proxy` 会整体替换实例。
     pub http: Arc<HttpClients>,
 
@@ -114,8 +114,8 @@ pub struct AppModel {
     /// 详见 `crate::app::list_cache`。
     pub list_cache: ListCache,
 
-    /// 后台 → drain_loop 的唤醒信号 sender。后台 producer 写入新数据时
-    /// `notify()` 一下，让 drain_loop 立刻醒过来排空 + notify()，不必等
+    /// 后台 → `drain_loop` 的唤醒信号 sender。后台 producer 写入新数据时
+    /// `notify()` 一下，让 `drain_loop` 立刻醒过来排空 + notify()，不必等
     /// 100ms 兜底。详见 `crate::app::events::WakeupHandle`。
     pub wakeup: WakeupHandle,
 }
@@ -201,7 +201,7 @@ impl AppModel {
         })
     }
 
-    /// 构造 AppModel + 配套的 `WakeupReceiver`。
+    /// 构造 `AppModel` + 配套的 `WakeupReceiver`。
     ///
     /// 调用方（`gpui_app::run`）拿到 `WakeupReceiver` 后传给 `drain_loop`，
     /// 才能让 wakeup 通路生效。`AppModel::new` 内部建好 sender 后**丢弃**

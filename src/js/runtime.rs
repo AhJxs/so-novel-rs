@@ -1,17 +1,18 @@
-//! boa_engine 包装。
+//! `boa_engine` 包装。
 //!
-//! Java 端 `JsCaller` 用 ThreadLocal 维护一个 V8Runtime，反复执行
+//! Java 端 `JsCaller` 用 `ThreadLocal` 维护一个 V8Runtime，反复执行
 //! `function func(r){<body>; return r;}` 然后 `func(input)`。
 //!
 //! Rust 这里**每次调用都新建一个 boa Context**：boa 的 Context 不是 Send，
 //! 而我们将来在多线程下载场景下不能共享同一个；boa Context 创建只是分配
 //! 一组 vec/map，开销远小于一次 HTTP 请求，是可接受的代价。
 //!
-//! 如果将来发现 JS 是热点，再做 ThreadLocal pool。
+//! 如果将来发现 JS 是热点，再做 `ThreadLocal` pool。
 
 use anyhow::{Context as _, Result};
 use boa_engine::vm::RuntimeLimits;
 use boa_engine::{Context, Source};
+use std::fmt::Write as _;
 
 /// JS 规则执行的资源护栏。
 ///
@@ -38,12 +39,12 @@ fn apply_runtime_limits(ctx: &mut Context) {
 /// `console.log` 不会把整段脚本中断（boa 默认没有 `console` 全局对象）。
 fn install_console_shim(ctx: &mut Context) {
     let _ = ctx.eval(Source::from_bytes(
-        r#"
+        r"
         var console = console || {
             log: function(){}, info: function(){}, warn: function(){},
             error: function(){}, debug: function(){}, trace: function(){}
         };
-        "#,
+        ",
     ));
 }
 
@@ -131,7 +132,9 @@ fn json_quote_for_js(s: &str) -> String {
             '\t' => out.push_str(r"\t"),
             '\u{0008}' => out.push_str(r"\b"),
             '\u{000C}' => out.push_str(r"\f"),
-            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c if (c as u32) < 0x20 => {
+                let _ = write!(out, "\\u{:04x}", c as u32);
+            }
             c => out.push(c),
         }
     }
@@ -141,6 +144,7 @@ fn json_quote_for_js(s: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
     use super::*;
     use std::path::PathBuf;
 
@@ -154,7 +158,7 @@ mod tests {
 
     #[test]
     fn replace_string_literal() {
-        let body = r#"r = r.replace('作者：', '')"#;
+        let body = r"r = r.replace('作者：', '')";
         let out = post_process(body, "作者：苹果").unwrap();
         assert_eq!(out, "苹果");
     }
@@ -162,7 +166,7 @@ mod tests {
     #[test]
     fn regex_replace_with_function_callback() {
         // main.json 里有：r=r.replace(/\(\d+\/\d+\)/, '');
-        let body = r#"r = r.replace(/\(\d+\/\d+\)/, '')"#;
+        let body = r"r = r.replace(/\(\d+\/\d+\)/, '')";
         let out = post_process(body, "第1章 标题(1/3)").unwrap();
         assert_eq!(out, "第1章 标题");
     }
@@ -170,14 +174,14 @@ mod tests {
     #[test]
     fn url_concatenation_pattern() {
         // main.json 第三条："coverUrl": "meta[...]@js:r='http://www.mcxs.info'+r"
-        let body = r#"r = 'http://www.mcxs.info' + r"#;
+        let body = r"r = 'http://www.mcxs.info' + r";
         let out = post_process(body, "/cover/123.jpg").unwrap();
         assert_eq!(out, "http://www.mcxs.info/cover/123.jpg");
     }
 
     #[test]
     fn handles_input_with_quotes_and_newlines() {
-        let body = r#"r = r.toUpperCase()"#;
+        let body = r"r = r.toUpperCase()";
         let input = "say \"hi\"\nnext";
         let out = post_process(body, input).unwrap();
         assert_eq!(out, "SAY \"HI\"\nNEXT");
@@ -194,7 +198,7 @@ mod tests {
     #[test]
     fn return_url_concatenation_pattern() {
         // 模拟 proxy-required.json quanben5 搜索 URL 的 @js: 表达式
-        let body = r#"return 'https://example.com/?q=' + r"#;
+        let body = r"return 'https://example.com/?q=' + r";
         let out = post_process(body, "测试").unwrap();
         assert_eq!(out, "https://example.com/?q=测试");
     }

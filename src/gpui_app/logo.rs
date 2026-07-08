@@ -42,12 +42,14 @@ fn decode_logo_image(bytes: &[u8]) -> Option<Arc<RenderImage>> {
 /// 解码失败 → 返回空 div 占位, 不让 UI 崩。`size` 走 `px()` 显式像素而非 rem:
 /// logo 是图标资源, 不跟字号缩放。
 pub(super) fn render_logo(size: gpui::Pixels) -> AnyElement {
-    match LOGO_IMAGE.as_ref() {
-        Some(rendered) => img(ImageSource::Render(rendered.clone()))
-            .object_fit(ObjectFit::Contain)
-            .size(size)
-            .flex_shrink_0()
-            .into_any_element(),
-        None => div().size(size).flex_shrink_0().into_any_element(),
-    }
+    LOGO_IMAGE.as_ref().map_or_else(
+        || div().size(size).flex_shrink_0().into_any_element(),
+        |rendered| {
+            img(ImageSource::Render(rendered.clone()))
+                .object_fit(ObjectFit::Contain)
+                .size(size)
+                .flex_shrink_0()
+                .into_any_element()
+        },
+    )
 }

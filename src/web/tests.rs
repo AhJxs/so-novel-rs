@@ -2,16 +2,21 @@
 //!
 //! 构造一个 `SharedState` → 调用 `routes::build_router` → 用
 //! `tower::ServiceExt::oneshot` 跑 axum 请求，验证响应。不发任何网络请求，
-//! 全部跑在内存里 + tempfile 做 tasks.json / sources_config.json 的隔离。
+//! 全部跑在内存里 + tempfile 做 tasks.json / `sources_config.json` 的隔离。
 //!
 //! 关注点：
 //! - 不依赖外网书源状态 —— rule 用 `make_rule()` 构造（id/name/url/disabled）
-//! - session_store 走 `SessionStore::<SessionNullPool>` 默认内存实现
+//! - `session_store` 走 `SessionStore::<SessionNullPool>` 默认内存实现
 //! - 失败原因（lock poison / 业务 4xx）作为已知信号验证，**不**与"返回 200"混同
 
 #![cfg(feature = "web")]
+#![allow(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    clippy::panic,
+    clippy::too_many_lines
+)]
 
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use axum::body::{Body, to_bytes};
@@ -19,15 +24,15 @@ use axum::http::{Request, StatusCode};
 use tower::ServiceExt;
 
 use crate::config::AppConfig;
+use crate::db::SourcesConfig;
 use crate::http::HttpClients;
 use crate::models::Rule;
-use crate::db::SourcesConfig;
 use crate::web::{SharedState, WebInitParams, WebState};
 
 use super::routes;
 
 /// 构造最小可路由 SharedState：默认配置 + 空 rules + 空 tasks。
-async fn build_test_state_with(dir: PathBuf) -> SharedState {
+fn build_test_state_with(dir: &std::path::Path) -> SharedState {
     let cfg = AppConfig::default();
     let http = HttpClients::new(&cfg).expect("HttpClients::new ok with default cfg");
     let rules = Vec::<Rule>::new();
@@ -41,8 +46,8 @@ async fn build_test_state_with(dir: PathBuf) -> SharedState {
     Arc::new(WebState::new(cfg, http.into(), rules, params))
 }
 
-/// 构造带初始 rules 的 SharedState。
-async fn build_test_state_with_rules(dir: PathBuf, rules: Vec<Rule>) -> SharedState {
+/// 构造带初始 rules 的 `SharedState`。
+fn build_test_state_with_rules(dir: &std::path::Path, rules: Vec<Rule>) -> SharedState {
     let cfg = AppConfig::default();
     let http = HttpClients::new(&cfg).expect("HttpClients::new ok");
     let params = WebInitParams {
@@ -104,7 +109,7 @@ async fn read_json(resp: axum::response::Response) -> serde_json::Value {
 #[tokio::test]
 async fn health_returns_ok_and_zero_counts() {
     let tmp = tempfile::tempdir().expect("tempdir");
-    let state = build_test_state_with(tmp.path().to_path_buf()).await;
+    let state = build_test_state_with(tmp.path());
     let app = build_test_router(state).await;
 
     let resp = dispatch(
@@ -133,7 +138,7 @@ async fn sources_list_returns_rules_with_enabled_flag() {
         make_rule(1, "A", "https://example.com/a", false),
         make_rule(2, "B", "https://example.com/b", true),
     ];
-    let state = build_test_state_with_rules(tmp.path().to_path_buf(), rules).await;
+    let state = build_test_state_with_rules(tmp.path(), rules);
     let app = build_test_router(state).await;
 
     let resp = dispatch(
@@ -158,7 +163,7 @@ async fn sources_list_returns_rules_with_enabled_flag() {
 #[tokio::test]
 async fn sources_list_empty_when_no_rules() {
     let tmp = tempfile::tempdir().expect("tempdir");
-    let state = build_test_state_with(tmp.path().to_path_buf()).await;
+    let state = build_test_state_with(tmp.path());
     let app = build_test_router(state).await;
     let resp = dispatch(
         app,
@@ -170,7 +175,7 @@ async fn sources_list_empty_when_no_rules() {
     .await;
     assert_eq!(resp.status(), StatusCode::OK);
     let json = read_json(resp).await;
-    assert_eq!(json.as_array().map(|a| a.len()), Some(0));
+    assert_eq!(json.as_array().map(std::vec::Vec::len), Some(0));
 }
 
 // ── /api/sources/{id}/toggle ─────────────────────────────────────────────
@@ -178,9 +183,9 @@ async fn sources_list_empty_when_no_rules() {
 #[tokio::test]
 async fn source_toggle_flips_disabled_and_persists() {
     let tmp = tempfile::tempdir().expect("tempdir");
-    let dir = tmp.path().to_path_buf();
+    let dir = tmp.path();
     let rules = vec![make_rule(42, "X", "https://example.com/x", false)];
-    let state = build_test_state_with_rules(dir.clone(), rules).await;
+    let state = build_test_state_with_rules(dir, rules);
 
     // 第一下：false → true（禁用）
     let app = build_test_router(Arc::clone(&state)).await;
@@ -219,7 +224,7 @@ async fn source_toggle_flips_disabled_and_persists() {
 #[tokio::test]
 async fn source_toggle_404_on_unknown_id() {
     let tmp = tempfile::tempdir().expect("tempdir");
-    let state = build_test_state_with(tmp.path().to_path_buf()).await;
+    let state = build_test_state_with(tmp.path());
     let app = build_test_router(state).await;
 
     let resp = dispatch(
@@ -240,7 +245,7 @@ async fn source_toggle_404_on_unknown_id() {
 #[tokio::test]
 async fn settings_put_rejects_empty_download_path() {
     let tmp = tempfile::tempdir().expect("tempdir");
-    let state = build_test_state_with(tmp.path().to_path_buf()).await;
+    let state = build_test_state_with(tmp.path());
     let app = build_test_router(state).await;
 
     let body = serde_json::json!({ "download_path": "" });
@@ -260,7 +265,7 @@ async fn settings_put_rejects_empty_download_path() {
 #[tokio::test]
 async fn settings_put_rejects_non_existing_directory() {
     let tmp = tempfile::tempdir().expect("tempdir");
-    let state = build_test_state_with(tmp.path().to_path_buf()).await;
+    let state = build_test_state_with(tmp.path());
     let app = build_test_router(state).await;
 
     let body = serde_json::json!({
@@ -282,7 +287,7 @@ async fn settings_put_rejects_non_existing_directory() {
 #[tokio::test]
 async fn settings_get_round_trips() {
     let tmp = tempfile::tempdir().expect("tempdir");
-    let state = build_test_state_with(tmp.path().to_path_buf()).await;
+    let state = build_test_state_with(tmp.path());
     let app = build_test_router(state).await;
 
     let resp = dispatch(
@@ -303,7 +308,7 @@ async fn settings_get_round_trips() {
 #[tokio::test]
 async fn tasks_list_empty_initially() {
     let tmp = tempfile::tempdir().expect("tempdir");
-    let state = build_test_state_with(tmp.path().to_path_buf()).await;
+    let state = build_test_state_with(tmp.path());
     let app = build_test_router(state).await;
 
     let resp = dispatch(
@@ -316,13 +321,13 @@ async fn tasks_list_empty_initially() {
     .await;
     assert_eq!(resp.status(), StatusCode::OK);
     let json = read_json(resp).await;
-    assert_eq!(json.as_array().map(|a| a.len()), Some(0));
+    assert_eq!(json.as_array().map(std::vec::Vec::len), Some(0));
 }
 
 #[tokio::test]
 async fn task_delete_404_on_unknown_id() {
     let tmp = tempfile::tempdir().expect("tempdir");
-    let state = build_test_state_with(tmp.path().to_path_buf()).await;
+    let state = build_test_state_with(tmp.path());
     let app = build_test_router(state).await;
 
     let resp = dispatch(
@@ -340,7 +345,7 @@ async fn task_delete_404_on_unknown_id() {
 #[tokio::test]
 async fn task_cancel_404_on_unknown_id() {
     let tmp = tempfile::tempdir().expect("tempdir");
-    let state = build_test_state_with(tmp.path().to_path_buf()).await;
+    let state = build_test_state_with(tmp.path());
     let app = build_test_router(state).await;
 
     let resp = dispatch(
@@ -362,7 +367,7 @@ async fn library_list_handles_missing_dir_gracefully() {
     // 默认 download_path 指向用户家目录下的 .sonovel —— 测试机不一定存在。
     // 关键诉求：路由能命中、不 panic；返回 200 + 数组就是合格。
     let tmp = tempfile::tempdir().expect("tempdir");
-    let state = build_test_state_with(tmp.path().to_path_buf()).await;
+    let state = build_test_state_with(tmp.path());
     let app = build_test_router(state).await;
     let resp = dispatch(
         app,

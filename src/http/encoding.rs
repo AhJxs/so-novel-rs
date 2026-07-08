@@ -10,19 +10,32 @@
 //! 4. 兜底 UTF-8。
 //!
 //! `decode_response_bytes` 接收已经拿到的 body bytes 与可选的 Content-Type 头，
-//! 不直接吃 reqwest::Response 是为了让本函数能脱离 HTTP 上下文做单测。
+//! 不直接吃 `reqwest::Response` 是为了让本函数能脱离 HTTP 上下文做单测。
 
 use encoding_rs::{Encoding, UTF_8};
 use regex::Regex;
 use std::sync::LazyLock;
 
+/// 编译期确定的正则：用 match 走 panic 路径以避免 `clippy::expect_used`，
+/// 与项目里其它 `LazyLock` 静态正则统一风格。
+/// panic IS the design：源码字面量写错就是程序员错误。
+#[allow(
+    clippy::panic,
+    reason = "static regex literal must compile; failure = programmer error"
+)]
+fn compile_static_re(pattern: &'static str) -> Regex {
+    match Regex::new(pattern) {
+        Ok(re) => re,
+        Err(e) => panic!("static regex `{pattern}` should compile: {e}"),
+    }
+}
+
 static META_CHARSET_RE: LazyLock<Regex> = LazyLock::new(|| {
     // 同时匹配 <meta charset="GBK"> 与
     // <meta http-equiv="Content-Type" content="text/html; charset=GBK">
-    Regex::new(
+    compile_static_re(
         r#"(?is)<meta[^>]*?(?:charset\s*=\s*["']?([\w-]+)|content\s*=\s*["'][^"']*?charset\s*=\s*([\w-]+))"#,
     )
-    .expect("meta charset regex")
 });
 
 /// 解码 HTTP 响应 body。
@@ -43,16 +56,12 @@ pub fn decode_response_bytes(bytes: &[u8], content_type: Option<&str>) -> String
     // 只在前 4 KB 里搜，足够覆盖 <head>，也避免在大正文上跑正则。
     let head_slice = &bytes[..bytes.len().min(4096)];
     // 头部不是合法 UTF-8 时用 latin1 兜一下，正则里的 ASCII 关键字仍能命中。
-    let head_text: String = match std::str::from_utf8(head_slice) {
-        Ok(s) => s.to_string(),
-        Err(_) => head_slice.iter().map(|&b| b as char).collect(),
-    };
+    let head_text: String = std::str::from_utf8(head_slice).map_or_else(
+        |_| head_slice.iter().map(|&b| b as char).collect(),
+        str::to_string,
+    );
     if let Some(cap) = META_CHARSET_RE.captures(&head_text) {
-        let label = cap
-            .get(1)
-            .or_else(|| cap.get(2))
-            .map(|m| m.as_str())
-            .unwrap_or("");
+        let label = cap.get(1).or_else(|| cap.get(2)).map_or("", |m| m.as_str());
         if let Some(enc) = Encoding::for_label(label.as_bytes()) {
             let (cow, _, _) = enc.decode(bytes);
             return cow.into_owned();
@@ -105,6 +114,7 @@ fn parse_charset_from_content_type(ct: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
     use super::*;
 
     #[test]

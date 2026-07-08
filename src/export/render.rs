@@ -9,10 +9,10 @@
 //!    - `Txt`：从 `<p>...</p>` 抽出每段文字加全角缩进 + `\n`，标题在最上面（与 Java 一致）。
 //!    - `Html` / `Epub`：套对应模板。
 //!    - `Pdf`：阶段 1 锁定为不实现，调用方应在 UI 层禁用；本函数若被传入 Pdf
-//!      会回落到 Html 模板（与 Java 端 PDF 模板内容相似度高）+ tracing::warn，
+//!      会回落到 Html 模板（与 Java 端 PDF 模板内容相似度高）+ `tracing::warn`，
 //!      不让用户的下载流程崩。
 //!
-//! 模板内嵌：避免拉 FreeMarker 等价物。仅 `${title}` / `${content}` 两个占位。
+//! 模板内嵌：避免拉 `FreeMarker` 等价物。仅 `${title}` / `${content}` 两个占位。
 
 use crate::config::{ExportFormat, LangType};
 use crate::models::{Chapter, RuleChapter};
@@ -31,20 +31,20 @@ pub enum RenderTarget {
 impl From<ExportFormat> for RenderTarget {
     fn from(f: ExportFormat) -> Self {
         match f {
-            ExportFormat::Txt => RenderTarget::Txt,
-            ExportFormat::Html => RenderTarget::Html,
-            ExportFormat::Epub => RenderTarget::Epub,
-            ExportFormat::Pdf => RenderTarget::Pdf,
+            ExportFormat::Txt => Self::Txt,
+            ExportFormat::Html => Self::Html,
+            ExportFormat::Epub => Self::Epub,
+            ExportFormat::Pdf => Self::Pdf,
         }
     }
 }
 
 /// 把抓取到的原始章节渲染为目标格式的字符串。
 ///
-/// 入参 `chapter` 是 ChapterParser 拿到的 `(url, title, content=原 HTML, order)`；
+/// 入参 `chapter` 是 `ChapterParser` 拿到的 `(url, title, content=原 HTML, order)`；
 /// `rule_chapter` 提供 filterTxt / filterTag / paragraphTagClosed / paragraphTag。
-/// `source_lang_raw` 是 `Rule.language`（书源自带的语言标记，如 "zh_CN" / "zh_TW" /
-/// "zh_Hant"），用于判断是否需要简繁转换；`target_lang` 是用户在 Settings 选的目标
+/// `source_lang_raw` 是 `Rule.language`（书源自带的语言标记，如 "`zh_CN`" / "`zh_TW`" /
+/// "`zh_Hant"），用于判断是否需要简繁转换`；`target_lang` 是用户在 Settings 选的目标
 /// 语言。source == target 或 source 解析失败 → 跳过转换。
 ///
 /// 返回 `(title, body)` — 调用方负责落盘（阶段 3b 导出层）。返回的 `title`
@@ -54,7 +54,7 @@ pub fn render_chapter(
     rule_chapter: &RuleChapter,
     target: RenderTarget,
     source_lang_raw: &str,
-    target_lang: &LangType,
+    target_lang: LangType,
 ) -> (String, String) {
     let filtered = filter_chapter(chapter, rule_chapter);
     let formatted_html = format_chapter(&filtered.content, rule_chapter);
@@ -84,20 +84,20 @@ fn maybe_convert_chinese(
     body: String,
     target: RenderTarget,
     source_lang_raw: &str,
-    target_lang: &LangType,
+    target_lang: LangType,
 ) -> (String, String) {
     use crate::utils::zhconv::{convert_html_body, convert_text};
     let Some(source) = LangType::parse(source_lang_raw) else {
         return (title, body);
     };
-    if source == *target_lang {
+    if source == target_lang {
         return (title, body);
     }
-    let new_title = convert_text(&title, target_lang);
+    let new_title = convert_text(&title, &target_lang);
     let new_body = match target {
-        RenderTarget::Txt => convert_text(&body, target_lang),
+        RenderTarget::Txt => convert_text(&body, &target_lang),
         RenderTarget::Html | RenderTarget::Epub | RenderTarget::Pdf => {
-            convert_html_body(&body, target_lang)
+            convert_html_body(&body, &target_lang)
         }
     };
     (new_title, new_body)
@@ -109,8 +109,20 @@ fn render_txt(title: &str, p_html: &str) -> String {
     use regex::Regex;
     use std::sync::LazyLock;
 
-    static P_RE: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"(?s)<p>(.*?)</p>").expect("p tag re"));
+    /// 编译期确定的正则：用 match 走 panic 路径以避免 `clippy::expect_used`。
+    /// panic IS the design：源码字面量写错就是程序员错误。
+    #[allow(
+        clippy::panic,
+        reason = "static regex literal must compile; failure = programmer error"
+    )]
+    fn compile_static_re(pattern: &'static str) -> Regex {
+        match Regex::new(pattern) {
+            Ok(re) => re,
+            Err(e) => panic!("static regex `{pattern}` should compile: {e}"),
+        }
+    }
+
+    static P_RE: LazyLock<Regex> = LazyLock::new(|| compile_static_re(r"(?s)<p>(.*?)</p>"));
 
     // 全角空格，与 Java 端 `　` 一致
     let indent = "\u{3000}\u{3000}";
@@ -121,7 +133,7 @@ fn render_txt(title: &str, p_html: &str) -> String {
     let mut matched = false;
     for cap in P_RE.captures_iter(p_html) {
         matched = true;
-        let inner = cap.get(1).map(|m| m.as_str()).unwrap_or("");
+        let inner = cap.get(1).map_or("", |m| m.as_str());
         sb.push_str(indent);
         sb.push_str(inner);
         sb.push('\n');
@@ -139,11 +151,17 @@ fn render_txt(title: &str, p_html: &str) -> String {
 }
 
 /// 用给定模板渲染章节 HTML。两个模板（HTML / EPUB）仅文件不同，逻辑一致。
+// 占位符为 `$` + 标识符 形式；用 const 提出来避免 clippy::literal_string_with_formatting_args
+// 误认为 `${title}` 之类是 format! 的格式化参数。
+// const 必须先于函数体中所有 statement 声明, 避免 `items_after_statements`。
+const TITLE_PLACEHOLDER: &str = "${title}";
+const CONTENT_PLACEHOLDER: &str = "${content}";
+
 fn render_template(title: &str, content_html: &str, template: &str) -> String {
     let title_esc = html_escape_attr(title);
     template
-        .replace("${title}", &title_esc)
-        .replace("${content}", content_html)
+        .replace(TITLE_PLACEHOLDER, &title_esc)
+        .replace(CONTENT_PLACEHOLDER, content_html)
 }
 
 /// 简单 HTML 文本/属性转义（章节标题用）：&、<、>、"、'。
@@ -165,6 +183,7 @@ fn html_escape_attr(s: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
     use super::*;
 
     fn rule_closed_with_ad() -> RuleChapter {
@@ -182,14 +201,14 @@ mod tests {
         rule_chapter: &RuleChapter,
         target: RenderTarget,
     ) -> (String, String) {
-        render_chapter(chapter, rule_chapter, target, "", &LangType::ZhCn)
+        render_chapter(chapter, rule_chapter, target, "", LangType::ZhCn)
     }
 
     fn raw_chapter() -> Chapter {
         Chapter {
             url: "https://x/c1.html".into(),
             title: "第1章 起航".into(),
-            content: r#"<h1>第1章 起航</h1><p>段一</p><p>段二</p><p>(本章完)</p>"#.into(),
+            content: r"<h1>第1章 起航</h1><p>段一</p><p>段二</p><p>(本章完)</p>".into(),
             order: 1,
         }
     }
@@ -324,7 +343,7 @@ mod tests {
 
     // ---------- 简繁转换集成 ----------
 
-    /// 端到端：源 zh_CN + 目标 zh_TW → TXT body 简体转繁体（含台湾用词）。
+    /// 端到端：源 `zh_CN` + 目标 `zh_TW` → TXT body 简体转繁体（含台湾用词）。
     #[test]
     fn render_converts_simplified_to_traditional_tw_for_txt() {
         let raw = Chapter {
@@ -338,7 +357,7 @@ mod tests {
             &RuleChapter::default(),
             RenderTarget::Txt,
             "zh_CN",
-            &LangType::ZhTw,
+            LangType::ZhTw,
         );
         // 简体"软件" → 台湾繁体"軟體"
         assert_eq!(title, "軟體");
@@ -347,9 +366,9 @@ mod tests {
         assert!(body.contains("顏色"), "got: {body}");
     }
 
-    /// 端到端：源 zh_TW + 目标 zh_CN → HTML body 繁体转简体（标签保护）。
+    /// 端到端：源 `zh_TW` + 目标 `zh_CN` → HTML body 繁体转简体（标签保护）。
     /// 注：zhconv 的 t2s 是字面繁→简（"軟體"→"软体"），不会反向做台湾用词→大陆用词
-    /// 的映射（这是 OpenCC 算法的限制，不算 bug —— 用户拿到"软体"在大陆可读）。
+    /// 的映射（这是 `OpenCC` 算法的限制，不算 bug —— 用户拿到"软体"在大陆可读）。
     #[test]
     fn render_converts_traditional_to_simplified_for_html() {
         let raw = Chapter {
@@ -363,7 +382,7 @@ mod tests {
             &RuleChapter::default(),
             RenderTarget::Html,
             "zh_TW",
-            &LangType::ZhCn,
+            LangType::ZhCn,
         );
         assert_eq!(title, "软体");
         // 标签外中文转简体（"<p class="c">..." 被模板再包一层 <p>，所以查子串）
@@ -393,7 +412,7 @@ mod tests {
             &RuleChapter::default(),
             RenderTarget::Txt,
             "zh_CN",
-            &LangType::ZhCn,
+            LangType::ZhCn,
         );
         assert_eq!(title, "头发");
         assert!(body.contains("头发"), "should be unchanged: {body}");
@@ -413,7 +432,7 @@ mod tests {
             &RuleChapter::default(),
             RenderTarget::Txt,
             "garbage_lang",
-            &LangType::ZhCn,
+            LangType::ZhCn,
         );
         assert_eq!(title, "头发");
         assert!(body.contains("头发"), "should be unchanged: {body}");

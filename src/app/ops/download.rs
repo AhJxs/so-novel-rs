@@ -24,12 +24,12 @@ use crate::utils::time::now_unix_secs;
 
 /// spawn 共享上下文：提取 `rules` / `config` / `http` / `runtime` 四个参数，
 /// 消除 `spawn_download` / `spawn_download_range` / `spawn_resolve_toc` 的重复参数列表。
-pub(crate) struct OpsCtx<'a> {
+pub struct OpsCtx<'a> {
     pub rules: &'a [Rule],
     pub config: &'a AppConfig,
     pub http: Arc<HttpClients>,
     pub runtime: &'a tokio::runtime::Runtime,
-    /// 唤醒信号 sender：producer 写入 mpsc 后调 `notify()` 让 drain_loop
+    /// 唤醒信号 sender：producer 写入 mpsc 后调 `notify()` 让 `drain_loop`
     /// 立即排空，不必等 100ms 兜底。详见 `crate::app::events::WakeupHandle`。
     pub wakeup: &'a WakeupHandle,
 }
@@ -56,7 +56,7 @@ pub fn spawn_resolve_toc(
         source_id = source_id,
         %book_url,
     );
-    let span_for_instrument = span.clone();
+    let span_for_instrument = span;
     let wakeup = ctx.wakeup.clone();
 
     ctx.runtime.spawn(
@@ -183,7 +183,7 @@ pub fn spawn_download_range(
         %book_url,
         total_chapters = total,
     );
-    let span_for_instrument = span.clone();
+    let span_for_instrument = span;
     let started = std::time::Instant::now();
     let book_name = target.book_name.clone();
 
@@ -266,7 +266,7 @@ pub fn spawn_download(
         book = %target.book_name,
         %book_url,
     );
-    let span_for_instrument = span.clone();
+    let span_for_instrument = span;
     let started = std::time::Instant::now();
     let book_name = target.book_name.clone();
     let wakeup_inner = ctx.wakeup.clone();
@@ -326,7 +326,7 @@ pub fn spawn_download(
 /// 清掉所有已结束的任务（完成 / 失败 / 取消）。运行中的任务保留。
 pub fn clear_finished_tasks(tasks: &mut Vec<DownloadTask>) {
     let before = tasks.len();
-    tasks.retain(|t| t.is_running());
+    tasks.retain(super::super::download_task::DownloadTask::is_running);
     let removed = before - tasks.len();
     if removed > 0 {
         tracing::info!("已清除 {removed} 条任务");

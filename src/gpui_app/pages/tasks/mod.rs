@@ -7,10 +7,10 @@
 //! - 结果列表：`gpui-component::List` + `TasksDelegate`（虚拟滚动）。
 //!   每条任务卡片含书名 / 元信息 / 状态徽章 / 进度条 / 失败折叠 / 动作按钮。
 //!   已结束任务（完成 / 失败 / 已取消）显示「删除」按钮 → 弹 confirm Dialog 二次确认
-//!   （复用 library.rs prompt_delete 模式）→ `AppModel::delete_task`。
+//!   （复用 library.rs `prompt_delete` 模式）→ `AppModel::delete_task`。
 //!
 //! 子模块：
-//! - `summary` — `TaskSummary`（避开 DownloadTask 不可 Clone）+ `TaskFilter` + 过滤/排序 helper
+//! - `summary` — `TaskSummary`（避开 `DownloadTask` 不可 Clone）+ `TaskFilter` + 过滤/排序 helper
 //! - `toolbar` — 5-Button 状态过滤组
 //! - `delegate` — `TasksDelegate` + `ListDelegate` impl
 //! - `row` — 单条任务行渲染（卡片式）
@@ -57,7 +57,7 @@ pub struct TasksPage {
 
 impl TasksPage {
     pub fn new(model: Entity<AppModel>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let page_handle = cx.entity().clone();
+        let page_handle = cx.entity();
         let delegate = TasksDelegate::new(page_handle);
         let list_state = cx.new(|cx| ListState::new(delegate, window, cx));
         Self {
@@ -68,7 +68,7 @@ impl TasksPage {
         }
     }
 
-    pub(super) fn cancel(&mut self, task_id: u64, cx: &mut Context<Self>) {
+    pub(super) fn cancel(&self, task_id: u64, cx: &mut Context<Self>) {
         self.model.update(cx, |m, _cx| {
             if let Some(t) = m.tasks.iter_mut().find(|t| t.id == task_id) {
                 if let Some(cancel) = t.cancel.take() {
@@ -80,7 +80,7 @@ impl TasksPage {
         cx.notify();
     }
 
-    pub(super) fn retry(&mut self, task_id: u64, cx: &mut Context<Self>) {
+    pub(super) fn retry(&self, task_id: u64, cx: &mut Context<Self>) {
         // 重新下载 = 重新派一个新任务（保留原始 SearchResult）。
         let origin = self
             .model
@@ -149,7 +149,6 @@ impl TasksPage {
     /// （gpui-component `list.rs`），Accordion 展开撑高会被裁掉。把可变高度内容
     /// 移出虚拟列表行，放进 Dialog（`.alert()` 单 OK 按钮 + 可滚动列表）。
     pub(super) fn show_failures(
-        &self,
         failures: Vec<(u32, String, String)>,
         book_name: String,
         window: &mut Window,
@@ -239,10 +238,10 @@ impl Render for TasksPage {
 
         // ---- 4. 分页切片 + 兜底（过滤后 current_page 越界 → 回卷）----
         let w = compute_page_window(total, &mut self.current_page);
-        let page_items: Vec<TaskSummary> = if !w.is_empty() {
-            summaries[w.start..w.end].to_vec()
-        } else {
+        let page_items: Vec<TaskSummary> = if w.is_empty() {
             Vec::new()
+        } else {
+            summaries[w.start..w.end].to_vec()
         };
         // 推给 delegate，List 渲染时读到。
         self.list_state.update(cx, |state, _cx| {
@@ -291,9 +290,9 @@ impl Render for TasksPage {
                 this.child(Pagination::new(
                     self.current_page,
                     w.page_count,
-                    cx.listener(|this, &new_page, _window, _cx| {
+                    cx.listener(|this, &new_page, _window, cx| {
                         this.current_page = new_page;
-                        _cx.notify();
+                        cx.notify();
                     }),
                 ))
             })

@@ -1,9 +1,9 @@
-//! 下载控制选项 (PR #17 拆分, 2026-07-08).
+//! 下载控制选项
 //!
 //! `DownloadOptions` 是 `download_*` 函数的入参壳, 包含:
 //! - `progress`: 进度事件发送端 (mpsc, 一次构造后可 clone)
 //! - `cancel`: 取消令牌 (UI / CLI 共享, 内部 `Arc<AtomicBool>`)
-//! - `notify`: 可选 wakeup 回调, 每次 progress.send() 后立即触发,
+//! - `notify`: 可选 wakeup 回调, 每次 `progress.send()` 后立即触发,
 //!   让 GPUI `drain_loop` 不等 100ms poll 周期
 
 use std::sync::Arc;
@@ -42,10 +42,12 @@ pub struct DownloadOptions {
 /// # Examples
 ///
 /// ```
+/// use so_novel_rs::crawler::download_options::CancelToken;
 /// let ct = CancelToken::new();
 /// let ct2 = ct.clone();
-/// tokio::spawn(async move { ct2.cancel(); });
-/// ct.wait_cancelled().await;  // 立即返回
+/// assert!(!ct.is_cancelled());
+/// ct2.cancel();
+/// assert!(ct.is_cancelled());
 /// ```
 #[derive(Clone)]
 pub struct CancelToken {

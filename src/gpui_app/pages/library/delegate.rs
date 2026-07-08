@@ -1,4 +1,4 @@
-//! LibraryDelegate: gpui-component List delegate，持有 page handle + 当前页 (index, LibraryEntry)。
+//! `LibraryDelegate`: gpui-component List delegate，持有 page handle + 当前页 (index, `LibraryEntry`)。
 
 use gpui::{App, Context, Entity, ParentElement, Styled, Window, px};
 use gpui_component::list::{ListItem, ListState};
@@ -19,7 +19,7 @@ pub(super) struct LibraryDelegate {
 }
 
 impl LibraryDelegate {
-    pub(super) fn new(page: Entity<LibraryPage>) -> Self {
+    pub(super) const fn new(page: Entity<LibraryPage>) -> Self {
         Self {
             page,
             page_items: Vec::new(),
@@ -47,7 +47,7 @@ impl ListDelegate for LibraryDelegate {
                 .selected(Some(ix) == self.selected_index)
                 .rounded(cx.theme().radius)
                 .mb(px(4.))
-                .child(row::render_row(global_index, &entry, &self.page, &mut *cx)),
+                .child(row::render_row(global_index, &entry, &self.page, &*cx)),
         )
     }
 

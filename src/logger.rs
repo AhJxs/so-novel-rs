@@ -6,12 +6,12 @@
 //! - **JSON 模式**: `LOG_FORMAT=json` 环境变量切换, 生产/容器环境用, 便于聚合栈 (Loki / ELK) parse
 //! - **env filter**: `RUST_LOG=info,so_novel_rs=debug` 走 `tracing_subscriber::EnvFilter`
 //! - **init 一次**: `tracing_subscriber::init()` 全局唯一; 二次 init 会 panic,
-//!   caller 需自行保证 (CLI 启动期 + startup::dispatch 模式已分流)
+//!   caller 需自行保证 (CLI 启动期 + `startup::dispatch` 模式已分流)
 //!
 //! # 调用方
 //!
 //! - `cli::run` 内部: `--verbose` 时 init
-//! - `startup::dispatch` Web 路径: attach_console 后 init
+//! - `startup::dispatch` Web 路径: `attach_console` 后 init
 //! - `startup::dispatch` Gui 路径: 直接 init
 //!
 //! # 不在本模块
@@ -120,6 +120,7 @@ pub fn init_compat_legacy() {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
     use super::*;
 
     #[test]

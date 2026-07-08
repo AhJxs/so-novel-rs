@@ -1,6 +1,6 @@
-//! `AppModel` 任务管理方法 (PR #17 拆分, 2026-07-08).
+//! `AppModel` 任务管理方法
 //!
-//! 2 个方法: clear_finished_tasks / delete_task.
+//! 2 个方法: `clear_finished_tasks` / `delete_task`.
 //! 操作内存 `self.tasks` Vec, 改完调 `save_tasks_to_file` 落盘。
 
 use crate::i18n::ts_fmt;

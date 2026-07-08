@@ -3,7 +3,7 @@
 //! 从 `crate::app::events` 搬过来 —— 它 100% 是 GPUI 桥（`gpui::AsyncApp` /
 //! `cx.spawn().detach()` / `background_executor().timer()` / `update_entity`），
 //! 不属于"业务层与 UI 框架解耦"的 `crate::app`。原 `events.rs` 现在只保留
-//! 纯排空逻辑（drain channels + push UIEvent）。
+//! 纯排空逻辑（drain channels + push `UIEvent`）。
 //!
 //! 流程：
 //! 1. `gpui_app::run` 启动时调一次（见 `crate::gpui_app::run`）；
@@ -18,7 +18,7 @@
 //!
 //! 搜索/详情/封面/TOC/下载进度/书源健康检查/更新检查 7 条后台通道都走这个
 //! 循环统一推动 UI 重绘。100ms 粒度用户感知不到延迟，**而且**作为兜底防止
-//! wakeup 通道丢失信号（比如外部代码忘了 try_send）时 UI 永远不刷新。
+//! wakeup 通道丢失信号（比如外部代码忘了 `try_send）时` UI 永远不刷新。
 //!
 //! ## wakeup 通道类型
 //!
@@ -35,13 +35,13 @@ use crate::app::AppModel;
 use crate::app::events::{WakeupReceiver, drain};
 
 /// 在 GPUI app 启动时调一次：`spawn` 一个循环任务，按 100ms tick + wakeup 信号
-/// 排空 AppModel。
+/// 排空 `AppModel`。
 ///
 /// 调用上下文：必须在 `Application::run(|cx: &mut App| { ... })` 的闭包内，
 /// 在 `open_window` 前后调都可以。
 ///
 /// 任务 detached：返回 `()`，不暴露 Task handle，进程退出时随 executor 终止。
-pub fn spawn_drain_loop(model: Entity<AppModel>, mut wakeup: WakeupReceiver, cx: &mut App) {
+pub fn spawn_drain_loop(model: Entity<AppModel>, wakeup: WakeupReceiver, cx: &App) {
     cx.spawn(async move |async_cx: &mut gpui::AsyncApp| {
         loop {
             // 等待：要么被 wakeup 唤醒，要么兜底 100ms tick。

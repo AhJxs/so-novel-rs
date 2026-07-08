@@ -1,4 +1,4 @@
-//! 选书源下拉的自定义 SelectItem。
+//! 选书源下拉的自定义 `SelectItem`。
 //!
 //! 为什么需要：gpui-component 0.5.1 的内置 `SelectItem` impls（`String` / `SharedString` /
 //! `&'static str`）都强制 `value() == title() == self`，无法让 value 是 `"rule:1"`、

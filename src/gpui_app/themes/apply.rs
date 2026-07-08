@@ -20,7 +20,7 @@ use super::embedded::{FONT_SIZE_MAX, FONT_SIZE_MIN};
 ///
 /// `Theme::global_mut` 返回的是 `&mut Theme` 原地改, **不会**触发
 /// `observe_global::<Theme>` observer, 所以必须显式 `cx.refresh_windows()` 让
-/// `Root::render` 重跑拿到新 rem_size.
+/// `Root::render` 重跑拿到新 `rem_size`.
 ///
 /// `size` 会被钳到 `[FONT_SIZE_MIN, FONT_SIZE_MAX]`, 防止配置被手改成越界值后 UI 失控。
 #[tracing::instrument(name = "themes::apply_font_size", skip_all, fields(size))]
@@ -47,10 +47,10 @@ fn lookup_theme(name: &str, cx: &App) -> Option<Rc<ThemeConfig>> {
 /// - **Dynamic**: `dyn_light` / `dyn_dark` 分别装进两槽 (找不到/空 → registry 默认),
 ///   再按 `dyn_mode` 调 `Theme::change` 选激活槽; `system` 走 `sync_system_appearance` 跟 OS。
 ///
-/// **关键: 双槽都装 + Theme::change**, 不能只 apply_config 单槽 —— 否则 `Theme::change`
+/// **关键: 双槽都装 + `Theme::change`**, 不能只 `apply_config` 单槽 —— 否则 `Theme::change`
 /// 读的是槽引用, 没装就 fallback 默认主题, 且残留另一槽引用。
 ///
-/// `window`: 启动 on_load 拿不到 → 传 `None` (`cx.window_appearance()` 兜底);
+/// `window`: 启动 `on_load` 拿不到 → 传 `None` (`cx.window_appearance()` 兜底);
 /// 设置页实时改时传 `Some(window)` 拿到精确 appearance.
 ///
 /// 找不到的主题名静默 fallback 到 registry 默认主题, 不 panic。
@@ -97,9 +97,7 @@ pub fn apply_theme_pref(pref: &ThemePref, window: Option<&mut Window>, cx: &mut 
                 .filter(|c| !c.mode.is_dark())
                 .unwrap_or_else(|| {
                     if !pref.dyn_light.is_empty()
-                        && lookup_theme(&pref.dyn_light, cx)
-                            .map(|c| c.mode.is_dark())
-                            .unwrap_or(false)
+                        && lookup_theme(&pref.dyn_light, cx).is_some_and(|c| c.mode.is_dark())
                     {
                         // 用户给浅槽选了个深色主题 → 过滤掉, 回落默认浅色 (设置页 UI 也会
                         // 过滤, 这里是防御性兜底)。
@@ -114,9 +112,7 @@ pub fn apply_theme_pref(pref: &ThemePref, window: Option<&mut Window>, cx: &mut 
                 .filter(|c| c.mode.is_dark())
                 .unwrap_or_else(|| {
                     if !pref.dyn_dark.is_empty()
-                        && lookup_theme(&pref.dyn_dark, cx)
-                            .map(|c| !c.mode.is_dark())
-                            .unwrap_or(false)
+                        && lookup_theme(&pref.dyn_dark, cx).is_some_and(|c| !c.mode.is_dark())
                     {
                         tracing::info!(
                             "dyn_dark '{}' is a light theme; using default dark",

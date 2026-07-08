@@ -28,7 +28,7 @@ const TITLE_DISPLAY_MAX: usize = 24;
 // + 注释留说明；后续若 CLI 子命令数再涨或共享调用方出现，再抽 struct（与 GUI 侧
 // `spawn_download_range` 加 `#[allow(clippy::too_many_arguments)]` 同款取舍）。
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn run_download(
+pub fn run_download(
     cfg: &AppConfig,
     paths: &ConfigPaths,
     url: String,
@@ -44,29 +44,27 @@ pub(crate) fn run_download(
     if sources.is_empty() {
         anyhow::bail!("没有可用的书源");
     }
-    let chosen = match source {
-        Some(id) => sources
+    let chosen = if let Some(id) = source {
+        sources
             .into_iter()
             .find(|s| s.rule.id == id)
-            .with_context(|| format!("找不到 ID={id} 的书源"))?,
-        None => {
-            // 按 URL 自动匹配：找出 URL 所属网站对应的书源
-            let url_matched = url::Url::parse(&url).ok().and_then(|parsed| {
-                let origin = parsed.origin();
-                sources
-                    .iter()
-                    .find(|s| {
-                        url::Url::parse(&s.rule.url)
-                            .ok()
-                            .map(|u| u.origin() == origin)
-                            .unwrap_or(false)
-                    })
-                    .cloned()
-            });
-            match url_matched {
-                Some(s) => s,
-                None => sources.into_iter().next().context("没有可用的书源")?,
-            }
+            .with_context(|| format!("找不到 ID={id} 的书源"))?
+    } else {
+        // 按 URL 自动匹配：找出 URL 所属网站对应的书源
+        let url_matched = url::Url::parse(&url).ok().and_then(|parsed| {
+            let origin = parsed.origin();
+            sources
+                .iter()
+                .find(|s| {
+                    url::Url::parse(&s.rule.url)
+                        .ok()
+                        .is_some_and(|u| u.origin() == origin)
+                })
+                .cloned()
+        });
+        match url_matched {
+            Some(s) => s,
+            None => sources.into_iter().next().context("没有可用的书源")?,
         }
     };
 
@@ -85,9 +83,9 @@ pub(crate) fn run_download(
     let is_range = from.is_some() || to.is_some();
 
     // 后台跑下载，主线程排空进度打印到 stderr。
-    let cfg_for_task = cfg.clone();
-    let url_for_task = url.clone();
-    let source_for_task = chosen.clone();
+    let cfg_for_task = cfg;
+    let url_for_task = url;
+    let source_for_task = chosen;
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .thread_name("so-novel-cli")
@@ -137,7 +135,7 @@ pub(crate) fn run_download(
     // Ctrl-C → cancel：让 crawler 走 Cancelled 事件干净退出，而非硬杀进程。
     // 仅在 TTY 下注册（管道 / 后台跑时 Ctrl-C 通常是给父 shell 的）。
     if stderr_is_tty {
-        let cancel_for_signal = cancel.clone();
+        let cancel_for_signal = cancel;
         rt.spawn(async move {
             if tokio::signal::ctrl_c().await.is_ok() {
                 cancel_for_signal.cancel();
@@ -231,11 +229,11 @@ pub(crate) fn run_download(
     Ok(())
 }
 
-/// 范围下载：先 resolve_book 拿全 TOC，按 from/to 切片，再走 download_chapters。
+/// 范围下载：先 `resolve_book` 拿全 TOC，按 from/to 切片，再走 `download_chapters`。
 ///
 /// 与 `crawler::download_book`（全本）的区别：
 /// 1. 这里多走一次切片；
-/// 2. BookResolved 事件携带的是**切片后**的章数（让 progress 百分比准确）；
+/// 2. `BookResolved` 事件携带的是**切片后**的章数（让 progress 百分比准确）；
 /// 3. 切片前先打一行"📖 全 M 章，下载 A-B（共 C 章）"让用户看到全本规模 + 范围。
 async fn run_range_download(
     cfg: &AppConfig,

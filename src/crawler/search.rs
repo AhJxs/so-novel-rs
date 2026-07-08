@@ -5,7 +5,7 @@
 //! `crate::parser::filter_sort`（对应 Java `SearchResultsHandler`）。
 //!
 //! parser 是 async 的（基于 `reqwest::Client`），这里直接 spawn async task，
-//! 不再走 spawn_blocking。
+//! 不再走 `spawn_blocking`。
 
 use std::sync::Arc;
 
@@ -43,7 +43,7 @@ pub async fn search_aggregated(
     limit: Option<usize>,
     cf_bypass_base: Option<String>,
 ) -> Vec<SourceSearchOutcome> {
-    let mut set = spawn_search_tasks(http, sources, keyword, limit, cf_bypass_base);
+    let mut set = spawn_search_tasks(&http, sources, keyword, limit, cf_bypass_base);
 
     let mut out = Vec::with_capacity(set.len());
     while let Some(joined) = set.join_next().await {
@@ -71,7 +71,7 @@ pub async fn search_streaming(
     cf_bypass_base: Option<String>,
     tx: mpsc::UnboundedSender<SourceSearchOutcome>,
 ) {
-    let mut set = spawn_search_tasks(http, sources, keyword, limit, cf_bypass_base);
+    let mut set = spawn_search_tasks(&http, sources, keyword, limit, cf_bypass_base);
 
     while let Some(joined) = set.join_next().await {
         match joined {
@@ -91,7 +91,7 @@ pub async fn search_streaming(
 /// 调用方决定如何消费结果（收集到 Vec 或逐个推送 channel）。
 /// 共享逻辑：日志、Client 复用、per-source 计时、结果包装。
 fn spawn_search_tasks(
-    http: Arc<HttpClients>,
+    http: &Arc<HttpClients>,
     sources: Vec<Source>,
     keyword: String,
     limit: Option<usize>,
@@ -100,7 +100,7 @@ fn spawn_search_tasks(
     let mut set: JoinSet<SourceSearchOutcome> = JoinSet::new();
 
     let concurrency = compute_search_concurrency(sources.len());
-    let http = Arc::clone(&http);
+    let http = Arc::clone(http);
     let kw = Arc::new(keyword);
     let cf = Arc::new(cf_bypass_base);
     let semaphore = Arc::new(Semaphore::new(concurrency));
@@ -125,7 +125,7 @@ fn spawn_search_tasks(
                 }
             };
             let client = http.for_rule(&src.rule);
-            let cf_borrow: Option<&str> = cf.as_ref().as_ref().map(|s| s.as_str());
+            let cf_borrow: Option<&str> = cf.as_ref().as_ref().map(std::string::String::as_str);
             let result = search_one(&client, &src.rule, kw.as_str(), limit, cf_borrow).await;
             drop(permit);
             SourceSearchOutcome {
@@ -141,6 +141,7 @@ fn spawn_search_tasks(
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
     use super::*;
     use crate::config::AppConfig;
     use crate::models::Rule;

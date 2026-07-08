@@ -1,8 +1,8 @@
-//! 详情页 HTML 解析 + 主流程 (PR #17 拆分, 2026-07-08).
+//! 详情页 HTML 解析 + 主流程
 //!
 //! 来自原 `parser/book.rs`:
 //! - [`BookError`] 错误枚举
-//! - [`parse_book_detail`] 公共入口 (抓 + 解析 + CoverUpdater)
+//! - [`parse_book_detail`] 公共入口 (抓 + 解析 + `CoverUpdater`)
 //! - [`parse_book_html`] 离线同步解析 (便于测试)
 //! - [`content_type_for`] / [`optional_field`] 内部 helper
 //!
@@ -16,8 +16,8 @@ use std::sync::LazyLock;
 use thiserror::Error;
 
 use crate::crawler::cover_updater;
-use crate::http::{FetchRequest, HttpMethod, fetch, fetch_via_cf_bypass, has_cloudflare};
 use crate::http::abs_url;
+use crate::http::{FetchRequest, HttpMethod, fetch, fetch_via_cf_bypass, has_cloudflare};
 use crate::models::{Book, Rule};
 use crate::parser::dom::{SelectError, select_and_invoke_js};
 
@@ -44,11 +44,11 @@ pub enum BookError {
 /// 抓取 + 解析详情页。
 ///
 /// `cf_bypass_base` 同 `search_one`: CF 命中时若非空则自动重试 bypass 服务。
-/// `qidian_cookie` 是全局 `AppConfig.qidian_cookie` —— **仅供 CoverUpdater 使用**,
-/// 详情页 fetch 本身**不附** Cookie 头 (与 Java 端语义一致; cookie 只在 CoverUpdater
+/// `qidian_cookie` 是全局 `AppConfig.qidian_cookie` —— **仅供 `CoverUpdater` 使用**,
+/// 详情页 fetch 本身**不附** Cookie 头 (与 Java 端语义一致; cookie 只在 `CoverUpdater`
 /// 跑起点站搜索时才用得上)。
 ///
-/// 末尾 `!rule.need_proxy` 时调 3 站 CoverUpdater 拿更高清封面 (与 Java
+/// 末尾 `!rule.need_proxy` 时调 3 站 `CoverUpdater` 拿更高清封面 (与 Java
 /// `BookParser.parse()` line 71 行为对齐)。
 ///
 /// # Examples
@@ -98,18 +98,15 @@ pub async fn parse_book_detail(
 
     let cf_hit = has_cloudflare(&response.html);
     let html_after_cf = if cf_hit {
-        match cf_bypass_base.filter(|s| !s.trim().is_empty()) {
-            Some(base) => {
-                // `source_id` + `url` 已在 span 里 —— 事件文本只补"做了什么"。
-                tracing::info!("详情页命中 Cloudflare, 尝试 cf-bypass");
-                fetch_via_cf_bypass(client, base, url)
-                    .await
-                    .map_err(|e| BookError::Http(format!("cf-bypass: {e:#}")))?
-            }
-            None => {
-                tracing::warn!("详情页命中 Cloudflare 但未配置 cf-bypass");
-                return Err(BookError::Cloudflare(response.final_url.clone()));
-            }
+        if let Some(base) = cf_bypass_base.filter(|s| !s.trim().is_empty()) {
+            // `source_id` + `url` 已在 span 里 —— 事件文本只补"做了什么"。
+            tracing::info!("详情页命中 Cloudflare, 尝试 cf-bypass");
+            fetch_via_cf_bypass(client, base, url)
+                .await
+                .map_err(|e| BookError::Http(format!("cf-bypass: {e:#}")))?
+        } else {
+            tracing::warn!("详情页命中 Cloudflare 但未配置 cf-bypass");
+            return Err(BookError::Cloudflare(response.final_url.clone()));
         }
     } else {
         response.html
@@ -125,7 +122,7 @@ pub async fn parse_book_detail(
         // `source_id` 已在 span 里 —— 只补新字段 `book` 和 `has_qidian_cookie`。
         tracing::debug!(
             book = %book.book_name,
-            has_qidian_cookie = qidian_cookie.map(|s| !s.trim().is_empty()).unwrap_or(false),
+            has_qidian_cookie = qidian_cookie.is_some_and(|s| !s.trim().is_empty()),
             "触发 CoverUpdater (3 站 fan-out)"
         );
         let new_cover = cover_updater::fetch_cover(
@@ -195,7 +192,15 @@ pub fn parse_book_html(html: &str, base_url: &str, rule: &Rule) -> Result<Book, 
     let last_update_time = optional_field(&document, &book_rule.last_update_time)?.map(|s| {
         // Java 端 BookParser: lastUpdateTime.replaceAll("(更新时间|最后更新): ", "")
         static RE: LazyLock<Regex> = LazyLock::new(|| {
-            Regex::new(r"^(更新时间|最后更新)[::]?\s*").expect("lastUpdateTime prefix re")
+            // panic IS the design：源码字面量写错就是程序员错误。
+            #[allow(
+                clippy::panic,
+                reason = "static regex literal must compile; failure = programmer error"
+            )]
+            match Regex::new(r"^(更新时间|最后更新)[::]?\s*") {
+                Ok(re) => re,
+                Err(e) => panic!("static regex should compile: {e}"),
+            }
         });
         RE.replace(&s, "").into_owned()
     });
@@ -235,6 +240,7 @@ fn optional_field(document: &Html, query: &str) -> Result<Option<String>, BookEr
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
     use super::*;
     use crate::config::LangType;
     use crate::db::apply_default_rule;
@@ -243,13 +249,13 @@ mod tests {
     /// 我们保留这个拼写以保持兼容。
     fn rule_22biqu() -> Rule {
         let mut r: Rule = serde_json::from_str(
-            r##"{
+            r#"{
                 "url": "https://www.22biqu.com/",
                 "name": "笔趣阁22",
                 "book": {
                     "latestChapter": "meta[property=\"og:novel:lastest_chapter_name\"]"
                 }
-            }"##,
+            }"#,
         )
         .expect("rule should parse");
         r.id = 5;
@@ -262,7 +268,7 @@ mod tests {
     /// 所以默认填充会把 bookName / author / intro / category / coverUrl 等
     /// 全部回退到 meta 查询。
     fn fake_book_html() -> String {
-        r##"<!doctype html>
+        r#"<!doctype html>
 <html><head>
 <title>书名 - 笔趣阁22</title>
 <meta property="og:novel:book_name" content="测试书名">
@@ -275,7 +281,7 @@ mod tests {
 <meta name="description" content="一段简介">
 </head><body>
 <div id="info"><h1>测试书名</h1></div>
-</body></html>"##
+</body></html>"#
             .to_string()
     }
 
@@ -304,9 +310,9 @@ mod tests {
     fn missing_book_name_or_author_returns_typed_error() {
         let rule = rule_22biqu();
         // 没有 og:novel:book_name 的 HTML
-        let html = r##"<html><head>
+        let html = r#"<html><head>
             <meta property="og:novel:author" content="某人">
-            </head><body></body></html>"##;
+            </head><body></body></html>"#;
         let err = parse_book_html(html, "https://www.22biqu.com/x/", &rule).unwrap_err();
         assert!(matches!(err, BookError::MissingTitleOrAuthor), "{err}");
     }
@@ -315,26 +321,26 @@ mod tests {
     fn book_name_via_explicit_selector_overrides_meta_default() {
         // 模拟一条规则: bookName 不走 meta, 而走显式 CSS 选择器
         let mut rule: Rule = serde_json::from_str(
-            r##"{
+            r#"{
                 "url": "https://demo.test/",
                 "name": "demo",
                 "book": {
                     "bookName": "h1.book-title",
                     "author": ".info .author"
                 }
-            }"##,
+            }"#,
         )
         .unwrap();
         rule.id = 99;
         apply_default_rule(&mut rule, LangType::ZhCn);
 
-        let html = r##"<html><head>
+        let html = r#"<html><head>
             <meta property="og:novel:book_name" content="META书名">
             <meta property="og:novel:author" content="META作者">
         </head><body>
             <h1 class="book-title">真书名</h1>
             <div class="info"><span class="author">真作者</span></div>
-        </body></html>"##;
+        </body></html>"#;
 
         let book = parse_book_html(html, "https://demo.test/", &rule).expect("should parse");
         // 显式选择器优先于 meta
@@ -347,23 +353,23 @@ mod tests {
         // main.json mcxs 真实规则:
         //   "coverUrl": "meta[property=\"og:image\"]@js:r='http://www.mcxs.info'+r"
         let mut rule: Rule = serde_json::from_str(
-            r##"{
+            r#"{
                 "url": "http://www.mcxs.info/",
                 "name": "mcxs",
                 "book": {
                     "coverUrl": "meta[property=\"og:image\"]@js:r='http://www.mcxs.info'+r"
                 }
-            }"##,
+            }"#,
         )
         .unwrap();
         rule.id = 3;
         apply_default_rule(&mut rule, LangType::ZhCn);
 
-        let html = r##"<html><head>
+        let html = r#"<html><head>
             <meta property="og:novel:book_name" content="书">
             <meta property="og:novel:author" content="人">
             <meta property="og:image" content="/img/123.jpg">
-        </head><body></body></html>"##;
+        </head><body></body></html>"#;
         let book = parse_book_html(html, "http://www.mcxs.info/n/123/", &rule).unwrap();
         assert_eq!(
             book.cover_url.as_deref(),
@@ -394,7 +400,7 @@ mod tests {
 
         // 先搜一下, 拿到第一个结果的 URL。
         let mut search_rule: Rule = serde_json::from_str(
-            r##"{
+            r#"{
                 "url": "https://www.22biqu.com/",
                 "name": "笔趣阁22",
                 "search": {
@@ -411,7 +417,7 @@ mod tests {
                 "book": {
                     "latestChapter": "meta[property=\"og:novel:lastest_chapter_name\"]"
                 }
-            }"##,
+            }"#,
         )
         .unwrap();
         search_rule.id = 5;

@@ -23,9 +23,23 @@ use std::sync::LazyLock;
 use crate::models::RuleChapter;
 use crate::parser::dom::clear_all_attributes;
 
+/// 编译期确定的正则：用 match + panic 避免 `clippy::expect_used`，与项目里
+/// 其它 `LazyLock` 静态正则统一风格。
+/// panic IS the design：源码字面量写错就是程序员错误。
+#[allow(
+    clippy::panic,
+    reason = "static regex literal must compile; failure = programmer error"
+)]
+fn compile_static_re(pattern: &'static str) -> Regex {
+    match Regex::new(pattern) {
+        Ok(re) => re,
+        Err(e) => panic!("static regex `{pattern}` should compile: {e}"),
+    }
+}
+
 static NON_P_PAIR_RE: LazyLock<Regex> = LazyLock::new(|| {
     // 匹配一对开闭标签（不要求名字一致；见模块文档解释）。
-    Regex::new(r"<([A-Za-z][A-Za-z0-9]*)>([\s\S]*?)</[A-Za-z][A-Za-z0-9]*>").expect("non-p pair re")
+    compile_static_re(r"<([A-Za-z][A-Za-z0-9]*)>([\s\S]*?)</[A-Za-z][A-Za-z0-9]*>")
 });
 
 /// 把规则化清洗后的章节内容整形为"一段一行 `<p>` 的 HTML"。
@@ -46,7 +60,7 @@ pub fn format_chapter(content: &str, rule_chapter: &RuleChapter) -> String {
 fn format_closed(html: &str) -> String {
     NON_P_PAIR_RE
         .replace_all(html, |caps: &regex::Captures<'_>| {
-            let inner = caps.get(2).map(|m| m.as_str()).unwrap_or("");
+            let inner = caps.get(2).map_or("", |m| m.as_str());
             format!("<p>{inner}</p>")
         })
         .into_owned()
@@ -88,6 +102,7 @@ fn wrap_p_if_nonblank(s: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
     use super::*;
 
     fn closed_rule() -> RuleChapter {

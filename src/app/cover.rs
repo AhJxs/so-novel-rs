@@ -19,42 +19,39 @@ pub enum CoverEntry {
 
 /// 把后台下载的字节构造为 `CoverEntry`。
 /// 失败（空 body / 解码错误）时给出中文短文案，UI 仍会显示一行小字提示。
-pub(crate) fn cover_entry_from_bytes(
+pub fn cover_entry_from_bytes(
     source_id: i32,
     cover_url: &str,
     bytes: Option<Vec<u8>>,
 ) -> CoverEntry {
-    match bytes {
-        None => {
+    bytes.map_or_else(
+        || {
             tracing::warn!(source_id = source_id, cover_url = %cover_url, "封面字节为空（下载失败或网络中断）");
             CoverEntry::Failed("下载为空或失败".to_string())
-        }
-        Some(b) => {
+        },
+        |b| {
             // 提前用 image::ImageReader 验证字节是真的图片（避免 lazy 解码时 ui.add 失败）。
             let probe = image::ImageReader::new(std::io::Cursor::new(&b))
                 .with_guessed_format()
                 .ok()
                 .and_then(|r| r.decode().ok());
-            match probe {
-                Some(_) => {
-                    let uri = format!("cover://{source_id}/{}", hash_short(cover_url));
-                    CoverEntry::Ready { bytes: b, uri }
-                }
-                None => {
-                    tracing::warn!(source_id = source_id, cover_url = %cover_url, size = b.len(), "封面字节解码失败（非有效图片或格式不支持）");
-                    CoverEntry::Failed("图片解码失败（非有效图片或格式不支持）".to_string())
-                }
+            if probe.is_some() {
+                let uri = format!("cover://{source_id}/{}", hash_short(cover_url));
+                CoverEntry::Ready { bytes: b, uri }
+            } else {
+                tracing::warn!(source_id = source_id, cover_url = %cover_url, size = b.len(), "封面字节解码失败（非有效图片或格式不支持）");
+                CoverEntry::Failed("图片解码失败（非有效图片或格式不支持）".to_string())
             }
-        }
-    }
+        },
+    )
 }
 
 /// 短哈希（fnv-like 64-bit → 16 hex），仅用于 URI 去重 key，**不是**密码学用途。
 pub fn hash_short(s: &str) -> String {
-    let mut h: u64 = 0xcbf29ce484222325;
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
     for b in s.as_bytes() {
         h ^= *b as u64;
-        h = h.wrapping_mul(0x100000001b3);
+        h = h.wrapping_mul(0x100_0000_01b3);
     }
     format!("{h:016x}")
 }
@@ -68,8 +65,8 @@ mod cover_tests {
     fn make_png_bytes() -> Vec<u8> {
         let img = image::RgbaImage::from_pixel(2, 2, image::Rgba([255, 0, 0, 255]));
         let mut buf = Vec::new();
-        img.write_to(&mut Cursor::new(&mut buf), image::ImageFormat::Png)
-            .expect("write png");
+        // 小图写入内存 cursor 不会失败; 失败时仍返回空 buf 让测试失败
+        let _ = img.write_to(&mut Cursor::new(&mut buf), image::ImageFormat::Png);
         buf
     }
 
@@ -82,7 +79,7 @@ mod cover_tests {
             CoverEntry::Ready { bytes: _, uri: _ } => {
                 // bytes 持有原图字节，uri 用于 GPUI 纹理缓存去重。
             }
-            CoverEntry::Failed(e) => panic!("期望 Ready，实际 Failed: {e}"),
+            CoverEntry::Failed(e) => unreachable!("期望 Ready，实际 Failed: {e}"),
         }
     }
 
@@ -95,7 +92,7 @@ mod cover_tests {
         );
         match entry {
             CoverEntry::Failed(msg) => assert!(msg.contains("解码失败"), "错误文案: {msg}"),
-            CoverEntry::Ready { .. } => panic!("垃圾字节不应成功解码"),
+            CoverEntry::Ready { .. } => unreachable!("垃圾字节不应成功解码"),
         }
     }
 

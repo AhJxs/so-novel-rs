@@ -1,4 +1,4 @@
-//! `AppModel` 书源管理方法 (PR #17 拆分, 2026-07-08).
+//! `AppModel` 书源管理方法
 //!
 //! 4 个方法: 切换禁用 / 导入 / 删除 / 切换活跃文件。
 
@@ -23,7 +23,7 @@ impl AppModel {
     pub fn add_sources_from_file(&mut self, path: &Path) {
         match ops::add_sources_from_file(
             &self.paths.rules_dir,
-            &mut self.sources_config,
+            &self.sources_config,
             &mut self.rules,
             &mut self.rule_load_error,
             path,
@@ -45,7 +45,8 @@ impl AppModel {
             }
             Err(e) => {
                 let msg = e.message();
-                if msg.starts_with("文件内容为空") || msg.starts_with("文件中未找到有效") {
+                if msg.starts_with("文件内容为空") || msg.starts_with("文件中未找到有效")
+                {
                     self.push_warning(msg);
                 } else {
                     self.push_error(msg);
@@ -64,7 +65,7 @@ impl AppModel {
             source_url,
         ) {
             Ok(true) => {
-                self.push_success(ts_fmt("Toasts.delete_source_ok", &[("url", source_url)]))
+                self.push_success(ts_fmt("Toasts.delete_source_ok", &[("url", source_url)]));
             }
             Ok(false) => self.push_warning(ts("Toasts.delete_source_missing")),
             Err(e) => self.push_error(e.message()),

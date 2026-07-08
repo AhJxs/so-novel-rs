@@ -8,7 +8,7 @@
 //!
 //! Java/hutool 反序列化布尔时容忍字符串（`"paragraphTagClosed": "true"` 在
 //! `bundle/rules/no-search.json` 中真实存在）。Rust serde 严格，所以本模块
-//! 为所有 bool 字段统一用 `lenient_bool` 的 deserialize_with，接受 `true/false`
+//! 为所有 bool 字段统一用 `lenient_bool` 的 `deserialize_with，接受` `true/false`
 //! 与 `"true"/"false"/"1"/"0"`。
 
 use serde::{Deserialize, Deserializer, Serialize};
@@ -19,7 +19,7 @@ fn lenient_bool<'de, D: Deserializer<'de>>(d: D) -> Result<bool, D::Error> {
     use std::fmt;
 
     struct V;
-    impl<'de> Visitor<'de> for V {
+    impl Visitor<'_> for V {
         type Value = bool;
         fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
             f.write_str("bool 或 \"true\"/\"false\"/\"1\"/\"0\"")
@@ -85,7 +85,7 @@ impl Rule {
     /// false 且 `RuleSearch.disabled` 也为 false（`RuleSearch` 不存在视为 false）。
     /// 搜索页书源下拉和派发共用此谓词，避免下拉里出现但实际不发请求的不一致。
     pub fn is_search_enabled(&self) -> bool {
-        !self.disabled && self.search.as_ref().map(|s| !s.disabled).unwrap_or(false)
+        !self.disabled && self.search.as_ref().is_some_and(|s| !s.disabled)
     }
 }
 
@@ -235,8 +235,8 @@ pub struct EffectiveCrawl {
 }
 
 impl EffectiveCrawl {
-    pub fn derive(cfg: &AppConfig, rule: &Rule) -> Self {
-        let mut eff = EffectiveCrawl {
+    pub const fn derive(cfg: &AppConfig, rule: &Rule) -> Self {
+        let mut eff = Self {
             concurrency: cfg.crawl.concurrency,
             min_interval_ms: cfg.crawl.min_interval,
             max_interval_ms: cfg.crawl.max_interval,
@@ -248,7 +248,9 @@ impl EffectiveCrawl {
 
         if let Some(c) = rule.crawl.as_ref() {
             if let Some(v) = c.concurrency {
-                eff.concurrency = Some(v as i32);
+                // const fn 中不能用 `i32::try_from` (尚非 const trait, issue #143874);
+                // u32 → i64 → i32: i64 截断对 i32 是 `cast_possible_truncation` (globally allowed)。
+                eff.concurrency = Some((v as i64) as i32);
             }
             if let Some(v) = c.min_interval {
                 eff.min_interval_ms = v;
@@ -278,9 +280,9 @@ pub struct Source {
 }
 
 impl Source {
-    pub fn from(rule: Rule, cfg: &AppConfig) -> Self {
+    pub const fn from(rule: Rule, cfg: &AppConfig) -> Self {
         let effective_crawl = EffectiveCrawl::derive(cfg, &rule);
-        Source {
+        Self {
             rule,
             effective_crawl,
         }
@@ -289,6 +291,7 @@ impl Source {
 
 #[cfg(test)]
 mod source_tests {
+    #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
     use super::*;
     use crate::models::{Rule, RuleCrawl};
 

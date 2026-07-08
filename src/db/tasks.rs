@@ -98,6 +98,7 @@ pub fn save_with_trim(path: &Path, tasks: &mut Vec<DownloadTaskRecord>) -> anyho
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
     use super::*;
     use crate::models::{FinishedReason, SearchResult};
 
@@ -213,7 +214,7 @@ mod tests {
                     i,
                     Some(Ok(std::path::PathBuf::from(format!("/tmp/{i}.epub")))),
                 );
-                rec.finished_at_unix = Some(1_700_000_000 + i as i64);
+                rec.finished_at_unix = Some(1_700_000_000 + i64::try_from(i).unwrap_or(0));
                 rec
             })
             .collect();

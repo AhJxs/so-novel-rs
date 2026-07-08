@@ -1,11 +1,11 @@
-//! 单章分页正文抓取 (PR #17 拆分, 2026-07-08).
+//! 单章分页正文抓取
 //!
 //! 来自原 `parser/chapter.rs`:
 //! - [`fetch_paginated_content`] 循环抓 + 拼 + 判定终止
 //! - [`NextStep`] 把 Html 析出 await 之外用的辅助 enum
 //! - [`resolve_next_url`] 找下一页 URL (nextPageInJs / nextPage 二选一)
 //! - [`is_last_page`] 终止判定 (nextChapterLink 正则 / 通用文本兜底)
-//! - [`PAGINATION_URL_RE`] / [`NEXT_CHAPTER_TEXT_RE`] LazyLock 静态正则
+//! - [`PAGINATION_URL_RE`] / [`NEXT_CHAPTER_TEXT_RE`] `LazyLock` 静态正则
 //!
 //! 入口 [`super::parse::parse_chapter`]。
 
@@ -67,14 +67,13 @@ pub(super) async fn fetch_paginated_content(
             } else {
                 crate::parser::cache::cached_selector(&chapter_rule.next_page).ok()
             };
-            let next_els: Vec<scraper::ElementRef<'_>> = match &next_sel {
-                Some(s) => document.select(s).collect(),
-                None => Vec::new(),
-            };
+            let next_els: Vec<scraper::ElementRef<'_>> = next_sel
+                .as_ref()
+                .map_or_else(Vec::new, |s| document.select(s).collect());
 
             let candidate_next =
                 resolve_next_url(&document, &next_els, chapter_rule, &current_url)?;
-            let step = if is_last_page(&candidate_next, &next_els, chapter_rule) {
+            let step = if is_last_page(candidate_next.as_deref(), &next_els, chapter_rule) {
                 NextStep::Stop
             } else {
                 match candidate_next {
@@ -140,7 +139,7 @@ pub(super) fn resolve_next_url(
 /// 1. `chapter.next_chapter_link` 正则命中 → 终止 (说明已经跳到下一章);
 /// 2. 兜底: URL 不再像 `*[-_]数字.html`, 且按钮文本含 `下一章/没有了/>>/书末页`。
 pub(super) fn is_last_page(
-    candidate: &Option<String>,
+    candidate: Option<&str>,
     next_els: &[scraper::ElementRef<'_>],
     chapter_rule: &RuleChapter,
 ) -> bool {
@@ -168,13 +167,27 @@ pub(super) fn is_last_page(
     !url_is_pagination && mentions_next_chapter
 }
 
-static PAGINATION_URL_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#".*[-_]\d\.html"#).expect("pagination url re"));
+/// 编译期确定的正则：用 match 走 panic 路径以避免 `clippy::expect_used`，
+/// 与项目里其它 `LazyLock` 静态正则统一风格。
+/// panic IS the design：源码字面量写错就是程序员错误。
+#[allow(
+    clippy::panic,
+    reason = "static regex literal must compile; failure = programmer error"
+)]
+fn compile_static_re(pattern: &'static str) -> Regex {
+    match Regex::new(pattern) {
+        Ok(re) => re,
+        Err(e) => panic!("static regex `{pattern}` should compile: {e}"),
+    }
+}
+
+static PAGINATION_URL_RE: LazyLock<Regex> = LazyLock::new(|| compile_static_re(r".*[-_]\d\.html"));
 static NEXT_CHAPTER_TEXT_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(下一章|没有了|>>|书末页)").expect("next chapter text re"));
+    LazyLock::new(|| compile_static_re(r"(下一章|没有了|>>|书末页)"));
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
     use super::*;
     use crate::config::LangType;
     use crate::db::apply_default_rule;
@@ -203,23 +216,23 @@ mod tests {
     #[test]
     fn is_last_page_when_no_candidate() {
         let chapter_rule = rule_22biqu_chapter().chapter.unwrap();
-        assert!(is_last_page(&None, &[], &chapter_rule));
+        assert!(is_last_page(None, &[], &chapter_rule));
     }
 
     #[test]
     fn is_last_page_when_candidate_matches_next_chapter_regex() {
         let mut chapter_rule = rule_22biqu_chapter().chapter.unwrap();
         chapter_rule.next_chapter_link = r"^https://demo\.test/n/\d+\.html$".to_string();
-        let candidate = Some("https://demo.test/n/2.html".to_string());
-        assert!(is_last_page(&candidate, &[], &chapter_rule));
+        let candidate = Some("https://demo.test/n/2.html");
+        assert!(is_last_page(candidate, &[], &chapter_rule));
     }
 
     #[test]
     fn not_last_page_when_url_is_pagination() {
         let chapter_rule = rule_22biqu_chapter().chapter.unwrap();
         // 形如 https://x/c_2.html 视为还在分页内
-        let candidate = Some("https://demo.test/c_2.html".to_string());
-        assert!(!is_last_page(&candidate, &[], &chapter_rule));
+        let candidate = Some("https://demo.test/c_2.html");
+        assert!(!is_last_page(candidate, &[], &chapter_rule));
     }
 
     #[test]
@@ -230,8 +243,8 @@ mod tests {
         let doc = Html::parse_document(html);
         let sel = Selector::parse("a").unwrap();
         let els: Vec<_> = doc.select(&sel).collect();
-        let candidate = Some("https://demo.test/n/3.html".to_string());
-        assert!(is_last_page(&candidate, &els, &chapter_rule));
+        let candidate = Some("https://demo.test/n/3.html");
+        assert!(is_last_page(candidate, &els, &chapter_rule));
     }
 
     // ---------- nextPageInJs 模拟 ----------
@@ -243,19 +256,19 @@ mod tests {
     // 这里只验证：在 resolve_next_url 中走 nextPageInJs 路径能拿到正确 URL。
     #[test]
     fn next_page_in_js_extracts_url_from_script() {
-        let html = r##"<html><body>
+        let html = r#"<html><body>
             <div id="readbg">
                 <script>var a = 1;</script>
                 <script>var b = 2;</script>
                 <script>var c = 3;</script>
                 <script>var nextpage = "/n/123/2.html";</script>
             </div>
-        </body></html>"##;
+        </body></html>"#;
         let document = Html::parse_document(html);
 
         let mut chapter_rule = rule_22biqu_chapter().chapter.unwrap();
         chapter_rule.next_page_in_js =
-            r##"//*[@id="readbg"]/script[4]@js:r=r.match(/nextpage = "(.*?)"/)[1];"##.into();
+            r#"//*[@id="readbg"]/script[4]@js:r=r.match(/nextpage = "(.*?)"/)[1];"#.into();
 
         let candidate = resolve_next_url(
             &document,

@@ -1,4 +1,4 @@
-//! 目录解析 (PR #17 拆分, 2026-07-08). 对应 Java `parse.TocParser`.
+//! 目录解析  对应 Java `parse.TocParser`.
 //!
 //! # 能力 (与 Java 端等价子集)
 //!

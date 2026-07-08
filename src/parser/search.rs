@@ -29,6 +29,11 @@ use crate::http::{
 use crate::models::{ContentType, Rule, SearchResult};
 use crate::parser::dom::{SelectError, select_and_invoke_js_within, split_js};
 
+#[cfg(test)]
+use crate::config::AppConfig;
+#[cfg(test)]
+use crate::http::client::{ClientOptions, build_async_client};
+
 #[derive(Debug, Error)]
 pub enum SearchError {
     #[error("书源未启用搜索")]
@@ -215,9 +220,8 @@ fn push_search_result(
     out: &mut Vec<SearchResult>,
 ) {
     // bookName 是必填字段；空则跳过该条（Java 端 `bookName.isEmpty() continue`）
-    let book_name = match select_and_invoke_js_within(el, &s.book_name, ContentType::Text) {
-        Ok(v) => v,
-        Err(_) => return,
+    let Ok(book_name) = select_and_invoke_js_within(el, &s.book_name, ContentType::Text) else {
+        return;
     };
     if book_name.is_empty() {
         return;
@@ -272,6 +276,7 @@ fn optional_field(el: scraper::ElementRef<'_>, query: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
     use super::*;
     use crate::config::LangType;
     use crate::db::apply_default_rule;
@@ -279,7 +284,7 @@ mod tests {
     /// 用 main.json 中"笔趣阁22"的真实搜索规则构造一条 Rule。
     fn rule_22biqu() -> Rule {
         let mut r: Rule = serde_json::from_str(
-            r##"{
+            r#"{
                 "url": "https://www.22biqu.com/",
                 "name": "笔趣阁22",
                 "search": {
@@ -293,7 +298,7 @@ mod tests {
                     "latestChapter": "span.s3",
                     "lastUpdateTime": "span.s5"
                 }
-            }"##,
+            }"#,
         )
         .expect("rule json should parse");
         r.id = 5;
@@ -304,7 +309,7 @@ mod tests {
     /// 仿制一段 22biqu 真实搜索响应的极简骨架。结构与现网一致：
     /// `body > div.container > div > div > ul > li`。
     fn fake_22biqu_search_html() -> String {
-        r##"<!doctype html>
+        r#"<!doctype html>
 <html><head><title>搜索结果</title></head><body>
 <div class="container"><div><div><ul>
   <li>
@@ -327,7 +332,7 @@ mod tests {
     <span class="s4">无名氏</span>
   </li>
 </ul></div></div></div>
-</body></html>"##
+</body></html>"#
             .to_string()
     }
 
@@ -398,7 +403,7 @@ mod tests {
         // 仿一条规则：搜索页 author 字段需要去掉"作者："前缀
         // （来自 main.json 鸟书网的真实规则模式）
         let mut rule: Rule = serde_json::from_str(
-            r##"{
+            r#"{
                 "url": "https://demo.test/",
                 "name": "demo",
                 "search": {
@@ -408,18 +413,18 @@ mod tests {
                     "bookName": "h4 > a",
                     "author": "div.author@js:r=r.replace('作者：', '');"
                 }
-            }"##,
+            }"#,
         )
         .unwrap();
         rule.id = 99;
         apply_default_rule(&mut rule, LangType::ZhCn);
 
-        let html = r##"<html><body>
+        let html = r#"<html><body>
             <div class="item">
               <h4><a href="/b/1">某书</a></h4>
               <div class="author">作者：某人</div>
             </div>
-        </body></html>"##;
+        </body></html>"#;
 
         let results = parse_search_results(html, "https://demo.test/", &rule, None).unwrap();
         assert_eq!(results.len(), 1);
@@ -427,7 +432,7 @@ mod tests {
         assert_eq!(results[0].author.as_deref(), Some("某人"));
     }
 
-    /// 端到端：跑 `search_one` 走真实网络（offline mock 不可行 —— search_one 把
+    /// 端到端：跑 `search_one` 走真实网络（offline mock 不可行 —— `search_one` 把
     /// fetch + parse 绑死），断言 span 字段里出现 `url=` / `method=` / `final_url=`，
     /// 且 keyword 替换 %s 后出现在 URL 里。
     ///
@@ -435,7 +440,7 @@ mod tests {
     /// 网络失败时 soft-skip：行内打印错误就 return，不让 CI 红。
     ///
     /// 实现：用 `MakeWriter` 把 fmt layer 的输出全部 capture 起来，
-    /// 然后断言"url= / method= / final_url="三个字段都出现过。
+    /// 然后断言"url= / method= / `final_url="三个字段都出现过`。
     #[tokio::test]
     #[ignore = "live network: depends on 22biqu availability"]
     async fn search_one_span_records_url_method_final_url() {
@@ -454,12 +459,14 @@ mod tests {
             }
         }
         impl<'a> MakeWriter<'a> for Capture {
-            type Writer = Capture;
+            type Writer = Self;
             fn make_writer(&'a self) -> Self::Writer {
                 self.clone()
             }
         }
         let cap = Capture::default();
+
+        // (items must stay before any later statement)
 
         // 关键：开 span events = active（默认是 full）—— 没有事件触发，
         // fmt layer 就不会调 writer，capture 永远空。
@@ -477,9 +484,7 @@ mod tests {
             .finish();
         let _g = tracing::subscriber::set_default(subscriber);
 
-        use crate::config::AppConfig;
-        use crate::http::client::{ClientOptions, build_async_client};
-
+        // (rest of tests below)
         let cfg = AppConfig::default();
         let client = build_async_client(&cfg, &ClientOptions::default()).unwrap();
         let rule = rule_22biqu();
@@ -489,8 +494,10 @@ mod tests {
             return;
         }
 
-        let buf = cap.0.lock().unwrap();
-        let s = String::from_utf8_lossy(&buf);
+        let s = {
+            let buf = cap.0.lock().unwrap();
+            String::from_utf8_lossy(&buf).into_owned()
+        };
         // 断言三个动态字段都被记上了
         assert!(s.contains("url="), "missing url= in: {s}");
         assert!(s.contains("method="), "missing method= in: {s}");

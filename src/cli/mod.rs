@@ -41,7 +41,7 @@ use self::args::{PKG_NAME, VERSION_STRING, build_localized_command, subcommand_n
 /// 具体：
 /// 1. argv 不含 --help / -h → 直接 `try_parse_from`，错误照旧向上抛
 ///    （用户拼写错误 / 必填缺失照常报）。
-/// 2. argv 含 --help / -h → 剥掉 help flag 再 try_parse，错误时给一个
+/// 2. argv 含 --help / -h → 剥掉 help flag 再 `try_parse，错误时给一个`
 ///    `command: None` 的空 Cli + `help: true`，让 `run` 走 help 分发。
 fn parse_or_help_fallback() -> Result<Cli> {
     let argv: Vec<String> = std::env::args().collect();

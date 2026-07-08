@@ -1,6 +1,6 @@
 //! 单条书源行渲染（4 列：序号 / name + lang tag / URL / 健康状态 / Switch）。
 //!
-//! 跟 library.rs::render_row 同模式：固定宽 + flex_1 撑满剩余的列布局。
+//! 跟 `library.rs::render_row` 同模式：固定宽 + `flex_1` 撑满剩余的列布局。
 
 use gpui::prelude::FluentBuilder as _;
 use gpui::{App, Entity, IntoElement, ParentElement, SharedString, Styled, div, px};
@@ -21,7 +21,7 @@ pub(super) fn render(
     rule: &Rule,
     health: Option<&SourceHealth>,
     page: Entity<SourcesPage>,
-    cx: &mut App,
+    cx: &App,
 ) -> impl IntoElement {
     let name = truncate(&rule.name, 30);
     let lang_display = if rule.language.is_empty() {
@@ -91,15 +91,15 @@ pub(super) fn render(
         )
         // ---- 健康状态 Badge ----
         .child(div().w(px(150.)).justify_end().child({
-            let (badge_kind, label) = match health {
-                None => (StatusKind::Neutral, ts_cached("Sources.health.not_tested").to_string()),
-                Some(h) => (health_status_kind_from(h.classify()), h.label()),
-            };
+            let (badge_kind, label) = health.map_or_else(
+                || (StatusKind::Neutral, ts_cached("Sources.health.not_tested").to_string()),
+                |h| (health_status_kind_from(h.classify()), h.label()),
+            );
             StatusBadge::new(badge_kind, label)
         }))
         // ---- 启用开关 ----
         .child({
-            let page_for_switch = page.clone();
+            let page_for_switch = page;
             let rule_url = rule.url.clone();
             Switch::new(("src-switch", index as u64))
                 .checked(!rule.disabled)
@@ -119,16 +119,15 @@ pub(super) fn render(
         })
 }
 
-/// HealthStatus (domain) → StatusKind (UI theme) 映射。
+/// `HealthStatus` (domain) → `StatusKind` (UI theme) 映射。
 ///
 /// `crawler::health` 不依赖 `gpui_app`（layering 解耦），所以这层映射留在 UI 侧。
-fn health_status_kind_from(status: HealthStatus) -> StatusKind {
+const fn health_status_kind_from(status: HealthStatus) -> StatusKind {
     use HealthStatus as H;
     match status {
         H::Ok => StatusKind::Success,
         H::Redirect => StatusKind::Info,
-        H::BadResponse => StatusKind::Warning,
+        H::BadResponse | H::NetworkError => StatusKind::Warning,
         H::ProbeError => StatusKind::Error,
-        H::NetworkError => StatusKind::Warning,
     }
 }

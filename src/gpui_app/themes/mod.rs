@@ -1,4 +1,4 @@
-//! 主题加载 + 应用 + 列表 (PR #19 拆分, 2026-07-08).
+//! 主题加载 + 应用 + 列表
 //!
 //! ## 策略
 //!
@@ -32,8 +32,8 @@
 //!
 //! - [`embedded`] — 21 个主题 JSON 编译期嵌入
 //! - [`user_dir`] — 用户目录同步 (创建 / 补缺失 / 不覆盖)
-//! - [`apply`] — 主题应用 (theme_pref / font_size / list)
-//! - [`init`] — 启动入口, 串起 user_dir + apply
+//! - [`apply`] — 主题应用 (`theme_pref` / `font_size` / list)
+//! - [`init`] — 启动入口, 串起 `user_dir` + apply
 
 pub mod apply;
 pub mod embedded;

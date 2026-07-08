@@ -17,17 +17,7 @@ use super::embedded::embedded_themes;
 ///
 /// - `std::io::Error` — 创建目录 / 写入文件失败
 pub(super) fn ensure_user_themes_dir(path: &Path) -> std::io::Result<()> {
-    if !path.exists() {
-        std::fs::create_dir_all(path)?;
-        for (name, content) in embedded_themes() {
-            std::fs::write(path.join(name), content)?;
-        }
-        tracing::info!(
-            "created themes dir at {:?} with {} embedded themes",
-            path,
-            embedded_themes().len()
-        );
-    } else {
+    if path.exists() {
         let mut added = 0usize;
         for (name, content) in embedded_themes() {
             let target = path.join(name);
@@ -39,12 +29,23 @@ pub(super) fn ensure_user_themes_dir(path: &Path) -> std::io::Result<()> {
         if added > 0 {
             tracing::info!("added {} new themes to existing {:?}", added, path);
         }
+    } else {
+        std::fs::create_dir_all(path)?;
+        for (name, content) in embedded_themes() {
+            std::fs::write(path.join(name), content)?;
+        }
+        tracing::info!(
+            "created themes dir at {:?} with {} embedded themes",
+            path,
+            embedded_themes().len()
+        );
     }
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
     use super::*;
 
     /// 首次调用 → 创建目录 + 写入 21 个 embed 主题。
@@ -59,7 +60,7 @@ mod tests {
         assert!(path.is_dir(), "should create dir");
         let count = std::fs::read_dir(&path)
             .unwrap()
-            .filter_map(|e| e.ok())
+            .filter_map(std::result::Result::ok)
             .filter(|e| e.path().extension().and_then(|s| s.to_str()) == Some("json"))
             .count();
         assert_eq!(count, 21, "should write all 21 embedded themes");
@@ -69,7 +70,7 @@ mod tests {
             let p = entry.path();
             let s = std::fs::read_to_string(&p).expect("read back");
             let _: serde_json::Value =
-                serde_json::from_str(&s).unwrap_or_else(|e| panic!("bad json {:?}: {e}", p));
+                serde_json::from_str(&s).unwrap_or_else(|e| panic!("bad json {p:?}: {e}"));
         }
     }
 
@@ -112,6 +113,10 @@ mod tests {
             "missing embedded theme should be re-added"
         );
         let content = std::fs::read_to_string(&removed).expect("read back");
-        assert_eq!(content, super::super::embedded::THEME_ADVENTURE, "should match embedded content");
+        assert_eq!(
+            content,
+            super::super::embedded::THEME_ADVENTURE,
+            "should match embedded content"
+        );
     }
 }

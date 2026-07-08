@@ -39,14 +39,14 @@ pub enum NavPage {
 }
 
 impl NavPage {
-    /// NavPage → i18n key (`i18n::tr` 用)。
-    pub(super) fn label_key(self) -> &'static str {
+    /// `NavPage` → i18n key (`i18n::tr` 用)。
+    pub(super) const fn label_key(self) -> &'static str {
         match self {
-            NavPage::Search => "Nav.search",
-            NavPage::Tasks => "Nav.tasks",
-            NavPage::Library => "Nav.library",
-            NavPage::Sources => "Nav.sources",
-            NavPage::Settings => "Nav.settings",
+            Self::Search => "Nav.search",
+            Self::Tasks => "Nav.tasks",
+            Self::Library => "Nav.library",
+            Self::Sources => "Nav.sources",
+            Self::Settings => "Nav.settings",
         }
     }
 
@@ -56,23 +56,23 @@ impl NavPage {
         ts(self.label_key())
     }
 
-    pub(super) fn icon(self) -> IconName {
+    pub(super) const fn icon(self) -> IconName {
         match self {
-            NavPage::Search => IconName::Search,
-            NavPage::Tasks => IconName::Inbox,
-            NavPage::Library => IconName::BookOpen,
-            NavPage::Sources => IconName::Globe,
-            NavPage::Settings => IconName::Settings,
+            Self::Search => IconName::Search,
+            Self::Tasks => IconName::Inbox,
+            Self::Library => IconName::BookOpen,
+            Self::Sources => IconName::Globe,
+            Self::Settings => IconName::Settings,
         }
     }
 
     /// 5 个 page 循环顺序: Search → Tasks → Library → Sources → Settings → Search。
-    pub(super) const ALL: [NavPage; 5] = [
-        NavPage::Search,
-        NavPage::Tasks,
-        NavPage::Library,
-        NavPage::Sources,
-        NavPage::Settings,
+    pub(super) const ALL: [Self; 5] = [
+        Self::Search,
+        Self::Tasks,
+        Self::Library,
+        Self::Sources,
+        Self::Settings,
     ];
 
     /// 下一个 page (循环)。

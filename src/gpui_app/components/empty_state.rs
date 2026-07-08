@@ -26,6 +26,7 @@ impl EmptyState {
         }
     }
 
+    #[must_use]
     pub fn subtitle(mut self, subtitle: impl Into<SharedString>) -> Self {
         self.subtitle = Some(subtitle.into());
         self

@@ -1,7 +1,7 @@
-//! 分页 URL 收集 (PR #17 拆分, 2026-07-08).
+//! 分页 URL 收集
 //!
 //! 来自原 `parser/toc.rs`, 关注"找全所有分页 URL":
-//! - 模式 1 (option 下拉): 在 first_html 上一次解析
+//! - 模式 1 (option 下拉): 在 `first_html` 上一次解析
 //! - 模式 2 (递归翻页): 循环抓下一页
 //!
 //! 主流程 [`parse_toc`] 在 [`super::single`]。
@@ -34,7 +34,7 @@ use super::utils::{TocError, resolve_base_for_join};
 /// # Errors
 ///
 /// - `TocError::Parse` — 选择器无效
-/// - `TocError::Http` / `TocError::Cloudflare` — 抓取失败 (来自 fetch_with_cf_fallback)
+/// - `TocError::Http` / `TocError::Cloudflare` — 抓取失败 (来自 `fetch_with_cf_fallback`)
 pub(super) async fn collect_pagination_urls(
     client: &Client,
     first_html: &str,

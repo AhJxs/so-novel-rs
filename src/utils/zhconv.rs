@@ -1,6 +1,6 @@
 //! 简繁中文转换的薄包装。
 //!
-//! 底层用 [`zhconv`]（OpenCC + MediaWiki 词表 + Aho-Corasick 匹配，编译期嵌入）。
+//! 底层用 [`zhconv`]（`OpenCC` + `MediaWiki` 词表 + Aho-Corasick 匹配，编译期嵌入）。
 //! 我们只暴露按目标语言转换的入口 + HTML 标签保护。
 
 use zhconv::{Variant, zhconv};
@@ -11,9 +11,9 @@ use crate::models::Book;
 /// 把 `LangType` 映射到 `zhconv` 的目标变体。
 ///
 /// zhconv 会基于文本内容自动判断源（简/繁），无需我们传源；只决定目标。
-/// LangType::ZhCn → ZhHans（简体）；ZhTw → ZhTW（台湾繁体，含用词差异，如"软体"）；
-/// ZhHant → ZhHant（标准繁体）。
-pub fn lang_to_variant(target: &LangType) -> Variant {
+/// `LangType::ZhCn` → ZhHans（简体）；ZhTw → ZhTW（台湾繁体，含用词差异，如"软体"）；
+/// `ZhHant` → ZhHant（标准繁体）。
+pub const fn lang_to_variant(target: &LangType) -> Variant {
     match target {
         LangType::ZhCn => Variant::ZhHans,
         LangType::ZhTw => Variant::ZhTW,
@@ -33,7 +33,7 @@ pub fn convert_text(text: &str, target: &LangType) -> String {
 /// - `book_name` / `author` 走 `convert_text`（纯文本，规则里按 TEXT 模式抽）；
 /// - `intro` 走 `convert_html_body`（保留 `<script>`/`<style>` 块，对纯文本也安全——
 ///   zhconv 不改 ASCII，无 script/style 时整串即整串转）；
-/// - 其它字段（category / cover_url / latest_chapter / last_update_time / status）含
+/// - 其它字段（category / `cover_url` / `latest_chapter` / `last_update_time` / status）含
 ///   非中文内容（URL、状态枚举、时间戳）多，原样保留。
 ///
 /// 返回新 `Book`（克隆 + 转换字段），不修改入参。
@@ -116,6 +116,7 @@ pub fn convert_html_body(body: &str, target: &LangType) -> String {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
     use super::*;
 
     #[test]
@@ -184,10 +185,10 @@ mod tests {
         }
     }
 
-    /// 源 zh_CN + 目标 zh_TW：书名 / 作者 / 简介 全部转换，简介的 script 块原样保留。
+    /// 源 `zh_CN` + 目标 `zh_TW：书名` / 作者 / 简介 全部转换，简介的 script 块原样保留。
     ///
     /// 注：zhconv 是字符级映射，"发" → "發"（不是"髮"）；后者是上下文感知结果，
-    /// OpenCC 词表里有但 zhconv 默认不启用。本测试只断言字符级转换结果。
+    /// `OpenCC` 词表里有但 zhconv 默认不启用。本测试只断言字符级转换结果。
     #[test]
     fn convert_book_meta_simplified_to_traditional_tw() {
         let book = sample_book_cn();
@@ -208,7 +209,7 @@ mod tests {
         assert_eq!(out.category, book.category);
     }
 
-    /// 源 zh_TW + 目标 zh_CN：繁体转简体（含"軟體"→"软体"）。
+    /// 源 `zh_TW` + 目标 `zh_CN：繁体转简体（含"軟體"→"软体`"）。
     #[test]
     fn convert_book_meta_traditional_to_simplified() {
         let book = Book {

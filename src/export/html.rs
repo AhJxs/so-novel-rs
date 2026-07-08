@@ -3,7 +3,7 @@
 //! 行为：
 //! - `chapters_dir` 下每章一个 `NNN_.html` 文件（已由 `write_chapter_files` 写好）；
 //! - 生成 `0_目录.txt`，列出 `文件名\t\t章节名`；
-//! - 把整个 chapters_dir 打包成 zip 放到 out_dir 下，文件名 `<书名>(<作者>).zip`。
+//! - 把整个 `chapters_dir` 打包成 zip 放到 `out_dir` 下，文件名 `<书名>(<作者>).zip`。
 //!
 //! 与 Java 端差异：
 //! - Java 还会下载封面（HTTP）；为了让阶段 3b 不引入网络依赖（封面下载属
@@ -70,14 +70,25 @@ impl Exporter for HtmlExporter {
 fn is_chapter_html(p: &Path) -> bool {
     p.extension()
         .and_then(|e| e.to_str())
-        .map(|e| e.eq_ignore_ascii_case("html"))
-        .unwrap_or(false)
+        .is_some_and(|e| e.eq_ignore_ascii_case("html"))
 }
 
 /// 从单章 HTML 里提取 `<title>...</title>` 文本。
 fn extract_title(html: &str) -> Option<String> {
+    /// 编译期确定的正则：用 match 走 panic 路径以避免 `clippy::expect_used`。
+    /// panic IS the design：源码字面量写错就是程序员错误。
+    #[allow(
+        clippy::panic,
+        reason = "static regex literal must compile; failure = programmer error"
+    )]
+    fn compile_static_re(pattern: &'static str) -> Regex {
+        match Regex::new(pattern) {
+            Ok(re) => re,
+            Err(e) => panic!("static regex `{pattern}` should compile: {e}"),
+        }
+    }
     static TITLE_RE: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"(?is)<title[^>]*>(.*?)</title>").expect("title re"));
+        LazyLock::new(|| compile_static_re(r"(?is)<title[^>]*>(.*?)</title>"));
     TITLE_RE
         .captures(html)
         .and_then(|c| c.get(1))
@@ -121,6 +132,7 @@ fn zip_directory(src: &Path, dst: &Path) -> Result<(), ExportError> {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
     use super::*;
     use crate::config::ExportFormat;
     use crate::export::exporter::{RenderedChapter, write_chapter_files};

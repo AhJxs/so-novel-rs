@@ -1,4 +1,4 @@
-//! 应用关心的几条文件路径（`config.toml` / themes / rules / sources_config / tasks）。
+//! 应用关心的几条文件路径（`config.toml` / themes / rules / `sources_config` / tasks）。
 
 use std::path::PathBuf;
 
@@ -14,7 +14,7 @@ pub struct ConfigPaths {
     pub rules_dir: PathBuf,
     /// 书源配置文件 `~/.sonovel/sources_config.json`：管理活跃书源文件和禁用列表。
     pub sources_config: PathBuf,
-    /// 下载任务文件 `~/.sonovel/tasks.json`：替代 SQLite 管理下载任务。
+    /// 下载任务文件 `~/.sonovel/tasks.json`：替代 `SQLite` 管理下载任务。
     pub tasks_file: PathBuf,
 }
 
@@ -36,8 +36,9 @@ impl ConfigPaths {
 }
 
 /// 获取用户主目录，回落到当前工作目录。
-pub(crate) fn home_dir() -> PathBuf {
-    directories::BaseDirs::new()
-        .map(|d| d.home_dir().to_path_buf())
-        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
+pub fn home_dir() -> PathBuf {
+    directories::BaseDirs::new().map_or_else(
+        || std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+        |d| d.home_dir().to_path_buf(),
+    )
 }

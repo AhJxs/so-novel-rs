@@ -46,8 +46,8 @@ impl WakeupHandle {
 }
 
 impl WakeupReceiver {
-    /// 非阻塞尝试拿一个信号。无信号时立刻返回 `None`，不阻塞 drain_loop。
-    pub fn try_recv(&mut self) -> Option<()> {
+    /// 非阻塞尝试拿一个信号。无信号时立刻返回 `None`，不阻塞 `drain_loop`。
+    pub fn try_recv(&self) -> Option<()> {
         match self.rx.try_recv() {
             Ok(()) => Some(()),
             Err(_) => None,
@@ -66,7 +66,7 @@ pub fn new_wakeup() -> (WakeupHandle, WakeupReceiver) {
 /// 副作用：
 /// - 更新 `search` / `tasks` / `sources_state` / `update_state` 的累积字段。
 /// - 完成的任务自动保存到文件。
-/// - 派发 `search.pending_cover_prefetch`（详情后端返回 cover_url 时挂的）。
+/// - 派发 `search.pending_cover_prefetch`（详情后端返回 `cover_url` 时挂的）。
 /// - `update_state` 完成时按结果推 `UIEvent`（成功 / 失败 / 新版本 / 已是最新），
 ///   推到 `model.pending_notifications` 由 `RootView::render` 翻译成
 ///   `gpui_component::notification::Notification` 真正弹 toast。
@@ -192,6 +192,7 @@ use crate::app::UIEvent;
 
 #[cfg(all(test, feature = "gui"))]
 mod tests {
+    #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
     use super::*;
 
     /// 单元测试覆盖：
@@ -206,8 +207,8 @@ mod tests {
     fn drain_on_empty_appmodel_does_not_panic() {
         // 编译期断言 `drain` 签名接 `&mut AppModel`。
         // 真实运行验证留给集成测试 / GUI 启动观察。
-        fn _check(_m: &mut AppModel) -> bool {
-            drain(_m)
+        fn _check(m: &mut AppModel) -> bool {
+            drain(m)
         }
         // 让 trait bound 在测试中显式被使用。
         let _ = _check as fn(&mut AppModel) -> bool;

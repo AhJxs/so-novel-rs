@@ -1,4 +1,4 @@
-//! 3 站 CoverUpdater —— 对应 Java `core.CoverUpdater`。
+//! 3 站 `CoverUpdater` —— 对应 Java `core.CoverUpdater`。
 //!
 //! 起点在详情页抽出的 `coverUrl` 经常是 150×200 的占位小图。Java 端做法：并行
 //! 去 起点 / 纵横 / 七猫 三个"原始书源"按书名搜同名同作者的那条，各自抽出
@@ -32,7 +32,7 @@ use url::Url;
 use crate::http::ua::random_ua;
 use crate::models::Book;
 
-/// 起点 CDN 的占位默认封面，规则里没给 coverUrl / CoverUpdater 全部失败时用。
+/// 起点 CDN 的占位默认封面，规则里没给 coverUrl / `CoverUpdater` 全部失败时用。
 const DEFAULT_COVER: &str = "https://bookcover.yuewen.com/qdbimg/no-cover";
 
 /// 单次抓取超时（Java 端 `TIMEOUT = 3000ms`；我们拉到 5s 给慢站一些缓冲）。
@@ -106,24 +106,24 @@ pub async fn fetch_cover(
     // 收集候选 + 测分辨率（同步串行，避免 3 张大图同时打满带宽）。
     let mut best: Option<(String, u64)> = None;
     let mut measured = 0usize;
-    for url in [qd, zh, qm].into_iter().flatten() {
+    let candidates: [Option<String>; 3] = (qd, zh, qm).into();
+    for url in candidates.into_iter().flatten() {
         if !is_valid_cover(&url) {
             continue;
         }
-        match measure_resolution(client, &url).await {
-            Some(area) => {
-                measured += 1;
-                if best.as_ref().is_none_or(|(_, a)| area > *a) {
-                    best = Some((url.clone(), area));
-                }
-                tracing::debug!(url = %url, area = area, "CoverUpdater: 候选测得分辨率");
+        if let Some(area) = measure_resolution(client, &url).await {
+            measured += 1;
+            if best.as_ref().is_none_or(|(_, a)| area > *a) {
+                best = Some((url.clone(), area));
             }
-            None => warn!("CoverUpdater: {} 下载/解码失败", url),
+            tracing::debug!(url = %url, area = area, "CoverUpdater: 候选测得分辨率");
+        } else {
+            warn!("CoverUpdater: {} 下载/解码失败", url);
         }
     }
 
     let had_fanout = best.is_some();
-    let chosen = best.map(|(u, _)| u).unwrap_or_else(|| fallback.clone());
+    let chosen = best.map_or_else(|| fallback.clone(), |(u, _)| u);
     let source_label = if had_fanout { "fanout" } else { "fallback" };
     tracing::info!(
         book = %book.book_name,
@@ -173,11 +173,7 @@ async fn fetch_qidian(client: &Client, book: &Book, cookie: &str) -> Option<Stri
         let name = extract_text(&el, ".book-mid-info > .book-info-title > a");
         let author1 = extract_text(&el, ".book-mid-info > .author > .name");
         let author2 = extract_text(&el, ".book-mid-info > .author > i");
-        let author = if !author1.is_empty() {
-            author1
-        } else {
-            author2
-        };
+        let author = if author1.is_empty() { author2 } else { author1 };
         if match_book(book, &name, &author) {
             let cover = extract_attr(&el, ".book-img-box > a > img", "src");
             if cover.is_empty() {
@@ -248,7 +244,10 @@ async fn fetch_qimao(client: &Client, book: &Book) -> Option<String> {
         let name = item.get("title")?.as_str()?;
         let author = item.get("author")?.as_str()?;
         if match_book(book, name, author) {
-            return item.get("image_link")?.as_str().map(|s| s.to_string());
+            return item
+                .get("image_link")?
+                .as_str()
+                .map(std::string::ToString::to_string);
         }
     }
     None
@@ -280,7 +279,7 @@ fn extract_attr(el: &scraper::ElementRef, sel: &str, attr: &str) -> String {
 /// 简化版同名同作者匹配。
 ///
 /// Java 端用 `HanLP.convertToSimplifiedChinese` 把候选和源都转成简体再比
-/// —— 防止起点搜出来繁体、详情页抓到简体的漏匹配。我们没接 HanLP：
+/// —— 防止起点搜出来繁体、详情页抓到简体的漏匹配。我们没接 `HanLP`：
 /// 99% 情况源站搜索结果和详情页来源一致，不会出现简繁差异，先按 `==` 直比；
 /// 出现再扩（zhconv crate 已有，复用 `util::zhconv::convert_text` 即可）。
 ///
@@ -334,6 +333,7 @@ async fn measure_resolution(client: &Client, url: &str) -> Option<u64> {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
     use super::*;
     use crate::config::AppConfig;
     use crate::http::client::{ClientOptions, build_async_client};
@@ -424,7 +424,7 @@ mod tests {
 
     // ---------- fetch_cover 入口 ----------
 
-    /// book_name 空 → 直接返回 fallback（不联网）。
+    /// `book_name` 空 → 直接返回 fallback（不联网）。
     #[tokio::test]
     async fn fetch_cover_returns_fallback_when_bookname_empty() {
         let cfg = AppConfig::default();
@@ -434,7 +434,7 @@ mod tests {
         assert_eq!(got, "https://orig.com/c.jpg");
     }
 
-    /// book_name 空 + fallback None → DEFAULT_COVER。
+    /// `book_name` 空 + fallback None → `DEFAULT_COVER`。
     #[tokio::test]
     async fn fetch_cover_empty_bookname_falls_back_to_default() {
         let cfg = AppConfig::default();
@@ -444,7 +444,7 @@ mod tests {
         assert_eq!(got, DEFAULT_COVER);
     }
 
-    /// cookie 为空 + 正常 book_name：3 站中 qidian 退化为 None（不跑），
+    /// cookie 为空 + 正常 `book_name：3` 站中 qidian 退化为 None（不跑），
     /// 纵横/七猫 联网失败 → 走 fallback。live 网络测试用 `#[ignore]` 标记。
     #[tokio::test]
     #[ignore = "live network: depends on zongheng / qimao availability"]

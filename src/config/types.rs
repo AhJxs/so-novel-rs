@@ -18,21 +18,21 @@ pub enum ExportFormat {
 }
 
 impl ExportFormat {
-    pub fn as_lower(self) -> &'static str {
+    pub const fn as_lower(self) -> &'static str {
         match self {
-            ExportFormat::Epub => "epub",
-            ExportFormat::Txt => "txt",
-            ExportFormat::Html => "html",
-            ExportFormat::Pdf => "pdf",
+            Self::Epub => "epub",
+            Self::Txt => "txt",
+            Self::Html => "html",
+            Self::Pdf => "pdf",
         }
     }
 
     pub fn parse(s: &str) -> Self {
         match s.trim().to_ascii_lowercase().as_str() {
-            "txt" => ExportFormat::Txt,
-            "html" => ExportFormat::Html,
-            "pdf" => ExportFormat::Pdf,
-            _ => ExportFormat::Epub,
+            "txt" => Self::Txt,
+            "html" => Self::Html,
+            "pdf" => Self::Pdf,
+            _ => Self::Epub,
         }
     }
 }
@@ -49,28 +49,30 @@ pub enum LangType {
 }
 
 impl LangType {
-    pub fn as_str(self) -> &'static str {
+    pub const fn as_str(self) -> &'static str {
         match self {
-            LangType::ZhCn => "zh-CN",
-            LangType::ZhTw => "zh-TW",
-            LangType::ZhHant => "zh-Hant",
+            Self::ZhCn => "zh-CN",
+            Self::ZhTw => "zh-TW",
+            Self::ZhHant => "zh-Hant",
         }
     }
 
     pub fn parse(s: &str) -> Option<Self> {
         match s.trim() {
-            "zh_CN" | "zh-CN" | "zh-Hans" | "zh_Hans" => Some(LangType::ZhCn),
-            "zh_TW" | "zh-TW" => Some(LangType::ZhTw),
-            "zh_Hant" | "zh-Hant" => Some(LangType::ZhHant),
+            "zh_CN" | "zh-CN" | "zh-Hans" | "zh_Hans" => Some(Self::ZhCn),
+            "zh_TW" | "zh-TW" => Some(Self::ZhTw),
+            "zh_Hant" | "zh-Hant" => Some(Self::ZhHant),
             _ => None,
         }
     }
 }
 
-/// **应用语言**（与 `LangType` 区分：`LangType` 是 zhconv 用的目标语言变体；
-/// `Language` 是**应用**语言，决定 Sidebar placeholder / Select placeholder /
-/// Dialog OK|Cancel 等所有 gpui-component `t!("...")` 调用的文案，同时也决定
-/// 下载章节正文的目标语言 —— 见 `Language::to_book_target_lang`）。
+/// **应用语言**。
+///
+/// 与 `LangType` 区分：`LangType` 是 zhconv 用的目标语言变体；`Language` 是
+/// **应用**语言，决定 Sidebar placeholder / Select placeholder / Dialog OK|Cancel
+/// 等所有 gpui-component `t!("...")` 调用的文案，同时也决定下载章节正文的目标语言
+/// —— 见 `Language::to_book_target_lang`。
 ///
 /// 三种：简体中文 / 繁體中文 / English。存到 TOML `[global].language`
 /// （旧名 `[global].app-lang` 仍可加载 —— 仅做向后兼容）。
@@ -86,23 +88,19 @@ pub enum Language {
 }
 
 impl Language {
-    pub fn as_str(self) -> &'static str {
+    pub const fn as_str(self) -> &'static str {
         match self {
-            Language::SimplifiedChinese => "zh-CN",
-            Language::TraditionalChinese => "zh-TW",
-            Language::English => "en",
+            Self::SimplifiedChinese => "zh-CN",
+            Self::TraditionalChinese => "zh-TW",
+            Self::English => "en",
         }
     }
 
     pub fn parse(s: &str) -> Option<Self> {
         match s.trim() {
-            "zh-CN" | "zh_CN" | "zh-cn" | "zh-Hans" | "zh_Hans" => {
-                Some(Language::SimplifiedChinese)
-            }
-            "zh-TW" | "zh_TW" | "zh-tw" | "zh-Hant" | "zh_Hant" => {
-                Some(Language::TraditionalChinese)
-            }
-            "en" | "en-US" | "English" => Some(Language::English),
+            "zh-CN" | "zh_CN" | "zh-cn" | "zh-Hans" | "zh_Hans" => Some(Self::SimplifiedChinese),
+            "zh-TW" | "zh_TW" | "zh-tw" | "zh-Hant" | "zh_Hant" => Some(Self::TraditionalChinese),
+            "en" | "en-US" | "English" => Some(Self::English),
             _ => None,
         }
     }
@@ -110,16 +108,16 @@ impl Language {
     /// 把界面语言映射到下载书籍的目标语言（zhconv 用的 `LangType`）。
     ///
     /// 合并设置后，**用户只设一个 `Language`**，下载时的简繁转换目标语言从这里推：
-    /// - 简体中文界面 → 下载正文用简体中文（LangType::ZhCn）
-    /// - 繁體中文界面 → 下载正文用繁體中文（LangType::ZhTw，台湾用词）
-    /// - 英文 / 其它  → 回落简体中文（LangType::ZhCn）
+    /// - 简体中文界面 → `下载正文用简体中文（LangType::ZhCn`）
+    /// - 繁體中文界面 → `下载正文用繁體中文（LangType::ZhTw，台湾用词`）
+    /// - 英文 / 其它  → `回落简体中文（LangType::ZhCn`）
     ///
     /// 注意：`LangType::ZhHant`（通用繁体）不再从 UI 暴露 —— 之前的 Source language
     /// 下拉被合并掉了。如果用户想要"通用繁体"输出，得改用其它工具后处理。
-    pub fn to_book_target_lang(self) -> LangType {
+    pub const fn to_book_target_lang(self) -> LangType {
         match self {
-            Language::SimplifiedChinese | Language::English => LangType::ZhCn,
-            Language::TraditionalChinese => LangType::ZhTw,
+            Self::SimplifiedChinese | Self::English => LangType::ZhCn,
+            Self::TraditionalChinese => LangType::ZhTw,
         }
     }
 }
@@ -135,17 +133,17 @@ pub enum ThemeKind {
 }
 
 impl ThemeKind {
-    pub fn as_str(self) -> &'static str {
+    pub const fn as_str(self) -> &'static str {
         match self {
-            ThemeKind::Dynamic => "dynamic",
-            ThemeKind::Static => "static",
+            Self::Dynamic => "dynamic",
+            Self::Static => "static",
         }
     }
 
     pub fn parse(s: &str) -> Self {
         match s.trim() {
-            "static" => ThemeKind::Static,
-            _ => ThemeKind::Dynamic,
+            "static" => Self::Static,
+            _ => Self::Dynamic,
         }
     }
 }
@@ -163,19 +161,19 @@ pub enum ThemeDynMode {
 }
 
 impl ThemeDynMode {
-    pub fn as_str(self) -> &'static str {
+    pub const fn as_str(self) -> &'static str {
         match self {
-            ThemeDynMode::System => "system",
-            ThemeDynMode::Light => "light",
-            ThemeDynMode::Dark => "dark",
+            Self::System => "system",
+            Self::Light => "light",
+            Self::Dark => "dark",
         }
     }
 
     pub fn parse(s: &str) -> Self {
         match s.trim() {
-            "light" => ThemeDynMode::Light,
-            "dark" => ThemeDynMode::Dark,
-            _ => ThemeDynMode::System,
+            "light" => Self::Light,
+            "dark" => Self::Dark,
+            _ => Self::System,
         }
     }
 }
@@ -218,11 +216,11 @@ pub struct ThemePref {
 /// download-path = "..."
 /// ```
 ///
-/// 读取流程 (`toml_io::load_config`) 按章节用 toml_edit 解析, 不直接走 serde
+/// 读取流程 (`toml_io::load_config`) 按章节用 `toml_edit` 解析, 不直接走 serde
 /// 反序列化 (要做旧键迁移、字段夹值、i18n 兜底等); 这里只声明结构与默认值。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
-    /// 配置 schema 版本。`env!("CARGO_PKG_VERSION")` 在 with_defaults 时填。
+    /// 配置 schema 版本。`env!("CARGO_PKG_VERSION")` 在 `with_defaults` 时填。
     pub version: String,
 
     /// `[global]` 章节: 主题偏好 / 语言 / 代理 / 字号。
@@ -271,7 +269,7 @@ pub struct GlobalCfg {
 }
 
 /// `[download]` 章节。下载路径 / 导出格式 / 编码 / 章节缓存策略。
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DownloadCfg {
     /// 默认下载目录 (由 `defaults::default_download_path` 决定)。
     pub download_path: String,
@@ -284,7 +282,7 @@ pub struct DownloadCfg {
 }
 
 /// `[source]` 章节。书源搜索限制 / 过滤开关。
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SourceCfg {
     /// 单次搜索最多返回结果数。`None` 表示未指定 (用书源默认)。
     pub search_limit: Option<i32>,
@@ -293,7 +291,7 @@ pub struct SourceCfg {
 }
 
 /// `[crawl]` 章节。并发数 / 间隔 / 重试参数。
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CrawlCfg {
     /// 全局并发抓取上限。`None` = 由运行时按 CPU 数自动算。
     pub concurrency: Option<i32>,
@@ -312,14 +310,14 @@ pub struct CrawlCfg {
 }
 
 /// `[cookie]` 章节。站点专用 cookie。
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CookieCfg {
     /// 起点中文网 cookie (订阅章节用)。
     pub qidian_cookie: String,
 }
 
 /// `[proxy]` 章节。HTTP 代理配置。
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ProxyCfg {
     /// 是否启用 HTTP 代理。
     pub proxy_enabled: bool,
@@ -424,7 +422,7 @@ impl AppConfig {
     }
 }
 
-/// 配置校验错误 (PR #6, 2026-07-08)
+/// 配置校验错误
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
     /// 字段值超出合法范围。

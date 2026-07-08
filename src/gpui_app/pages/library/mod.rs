@@ -45,7 +45,7 @@ use self::watcher::{WatcherCmd, WatcherCmdTx};
 pub struct LibraryPage {
     model: Entity<AppModel>,
 
-    /// struct 字段持有（InputState / ListState）—— owner 持有避免 click / focus 丢失。
+    /// struct 字段持有（InputState / `ListState`）—— owner 持有避免 click / focus 丢失。
     filter_input: Entity<InputState>,
     list_state: Entity<ListState<LibraryDelegate>>,
 
@@ -83,13 +83,14 @@ impl LibraryPage {
 
         // delegate 持有 `Entity<LibraryPage>`（不是 WeakEntity）—— Entity 永驻
         // (`RootView` 持有)，`render_item` 需要调 `prompt_delete` 拿 `Context<LibraryPage>`。
-        let page_handle = cx.entity().clone();
+        let page_handle = cx.entity();
         let delegate = LibraryDelegate::new(page_handle);
         let list_state = cx.new(|cx| ListState::new(delegate, window, cx));
 
         // Watcher 主循环见 `watcher::run`（debounce + SetPath 重 arm 详情在 watcher.rs 顶部）。
         let (watcher_cmd_tx, watcher_cmd_rx) = smol::channel::bounded::<WatcherCmd>(8);
-        let initial_path = std::path::PathBuf::from(model.read(cx).config.download.download_path.clone());
+        let initial_path =
+            std::path::PathBuf::from(model.read(cx).config.download.download_path.clone());
         let page_weak = cx.entity().downgrade();
         let model_for_watcher = model.clone();
 
@@ -125,15 +126,12 @@ impl LibraryPage {
     }
 
     /// 首次进入 / 下载目录变化时自动扫一次 + 通知 watcher 切目标。
-    /// 过滤变化（filter_text / filter_ext）不走这里 —— 不改变路径。
+    /// `过滤变化（filter_text` / `filter_ext）不走这里` —— 不改变路径。
     fn maybe_auto_scan(&mut self, cx: &mut Context<Self>) {
         let download_path =
             std::path::PathBuf::from(self.model.read(cx).config.download.download_path.clone());
         let already_scanned = self.model.read(cx).library.scanned_dir.clone();
-        let need_scan = match &already_scanned {
-            None => true,
-            Some(p) => p != &download_path,
-        };
+        let need_scan = already_scanned.as_ref().is_none_or(|p| p != &download_path);
         if need_scan {
             self.model.update(cx, |m, _cx| m.refresh_library_async());
             // 让 watcher 重建监听目标。`try_send` 不阻塞，cap=8 不会满；
@@ -322,9 +320,9 @@ impl Render for LibraryPage {
                 this.child(Pagination::new(
                     self.current_page,
                     w.page_count,
-                    cx.listener(|this, &new_page, _window, _cx| {
+                    cx.listener(|this, &new_page, _window, cx| {
                         this.current_page = new_page;
-                        _cx.notify();
+                        cx.notify();
                     }),
                 ))
             })

@@ -40,7 +40,7 @@ static REGEX_CACHE: OnceLock<Mutex<HashMap<String, Arc<Regex>>>> = OnceLock::new
 /// 加锁并自动从 Mutex 中毒里恢复（保留旧值）。中毒通常源于持锁线程 panic，
 /// `into_inner()` 让我们继续使用旧数据并就地覆盖坏条目，不会让后续所有调用
 /// 一起 panic。
-fn lock_or_recover<'a, T>(mutex: &'a Mutex<T>) -> MutexGuard<'a, T> {
+fn lock_or_recover<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     match mutex.lock() {
         Ok(g) => g,
         Err(p) => p.into_inner(),
@@ -113,6 +113,7 @@ pub fn cached_regex(pat: &str) -> Result<Arc<Regex>, regex::Error> {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
     use super::*;
     use std::sync::Barrier;
 

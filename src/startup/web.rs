@@ -26,8 +26,8 @@ pub(super) fn parse_arg_value_pub(args: &[String], key: &str) -> Option<String> 
 #[cfg(feature = "web")]
 pub fn run(host: String, port: u16) -> anyhow::Result<()> {
     use crate::config::{ConfigPaths, load_config};
-    use crate::http::HttpClients;
     use crate::db::{SourcesConfig, init_rules_dir, load_active_rules};
+    use crate::http::HttpClients;
     use anyhow::Context;
 
     let paths = ConfigPaths::discover();

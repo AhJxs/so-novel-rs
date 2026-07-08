@@ -1,4 +1,4 @@
-//! 搜索相关业务方法：spawn_search / select_search_result。
+//! `搜索相关业务方法：spawn_search` / `select_search_result`。
 
 use std::sync::Arc;
 
@@ -39,21 +39,24 @@ pub fn spawn_search(
     search.received = 0;
     search.selected = None;
 
-    let target_sources: Vec<Source> = if let Some(id) = search.source_id {
-        rules
-            .iter()
-            .filter(|r| r.id == id)
-            .cloned()
-            .map(|r| Source::from(r, config))
-            .collect()
-    } else {
-        rules
-            .iter()
-            .filter(|r| r.is_search_enabled())
-            .cloned()
-            .map(|r| Source::from(r, config))
-            .collect()
-    };
+    let target_sources: Vec<Source> = search.source_id.map_or_else(
+        || {
+            rules
+                .iter()
+                .filter(|r| r.is_search_enabled())
+                .cloned()
+                .map(|r| Source::from(r, config))
+                .collect()
+        },
+        |id| {
+            rules
+                .iter()
+                .filter(|r| r.id == id)
+                .cloned()
+                .map(|r| Source::from(r, config))
+                .collect()
+        },
+    );
 
     if target_sources.is_empty() {
         search.last_error = Some("没有可用的书源（请在 [书源管理] 检查规则文件）".to_string());
@@ -131,7 +134,7 @@ pub fn spawn_search(
                         cf_bypass,
                         inner_tx,
                     )
-                    .await
+                    .await;
                 }
                 .instrument(span),
             );
@@ -169,9 +172,7 @@ pub fn spawn_search(
                         let _ = tx.send(SourceSearchEvent {
                             source_id: *id,
                             source_name: name.clone(),
-                            result: Err(crate::error::AppError::internal(
-                                "后台任务异常退出",
-                            )),
+                            result: Err(crate::error::AppError::internal("后台任务异常退出")),
                         });
                         wakeup.notify();
                     }
@@ -220,9 +221,7 @@ pub fn select_search_result(
         return;
     };
 
-    search
-        .detail_cache
-        .insert(key.clone(), DetailState::Pending);
+    search.detail_cache.insert(key, DetailState::Pending);
 
     let (tx, rx) = mpsc::unbounded_channel();
     search.detail_rx = Some(rx);
@@ -256,7 +255,7 @@ pub fn select_search_result(
     // `tracing::Span` 是 `!Send` 的，但 `.instrument(...)` 包装后的 future 仍是
     // `Send` 的（Instrumented 实现里处理了 Send-ness），所以 spawn 没问题。
 
-    let span_for_task = span.clone();
+    let span_for_task = span;
     let task = async move {
         let url_for_event = url.clone();
         let cf = cf_bypass.clone();

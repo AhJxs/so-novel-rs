@@ -1,11 +1,11 @@
-//! 目录解析主流程 + 单页抽取 (PR #17 拆分, 2026-07-08).
+//! 目录解析主流程 + 单页抽取
 //!
 //! 来自原 `parser/toc.rs`:
 //! - [`parse_toc`] 公共入口: 抓分页 + 抽章节
-//! - [`parse_one_toc_page`] 从一页 HTML 抽章节 (含 is_desc 倒序逻辑)
+//! - [`parse_one_toc_page`] 从一页 HTML 抽章节 (含 `is_desc` 倒序逻辑)
 //! - [`parse_items_from_fragment`] / [`push_chapter`] 内部 helper
 //!
-//! 分页收集在 [`super::paginated`], 工具 + TocError 在 [`super::utils`]。
+//! 分页收集在 [`super::paginated`], 工具 + `TocError` 在 [`super::utils`]。
 
 use anyhow::Result;
 use reqwest::Client;
@@ -103,13 +103,13 @@ pub async fn parse_toc(
         let mut set = tokio::task::JoinSet::new();
         for (idx, page_url) in page_urls.iter().enumerate() {
             if idx == 0 {
-                htmls[0] = first_html.clone();
+                htmls[0].clone_from(&first_html);
                 continue;
             }
             let client = client.clone();
             let url = page_url.clone();
             let timeout = toc_rule.timeout;
-            let cf = cf_bypass_base.map(|s| s.to_string());
+            let cf = cf_bypass_base.map(std::string::ToString::to_string);
             let sem = sem.clone();
             set.spawn(async move {
                 // `acquire_owned` 在 Semaphore 不被 close 的情况下永远成功;
@@ -178,7 +178,9 @@ pub fn parse_one_toc_page(
         .map_err(|e| TocError::Parse(format!("无效的 item 选择器 `{}`: {e:?}", toc_rule.item)))?;
 
     // 当 toc.list 配置时 (极少数书源), 先把 list 的 inner_html 当成新文档处理。
-    let elements: Vec<scraper::ElementRef<'_>> = if !toc_rule.list.is_empty() {
+    let elements: Vec<scraper::ElementRef<'_>> = if toc_rule.list.is_empty() {
+        document.select(&item_selector).collect()
+    } else {
         // 取出 list 选中元素的 HTML, 作为新 fragment 解析后再选 item。
         // Java 端原代码也是这么做的: `JsoupUtils.selectAndInvokeJs(document, r.getList(), HTML)`
         let inner = select_and_invoke_js(&document, &toc_rule.list, ContentType::Html)?;
@@ -187,9 +189,12 @@ pub fn parse_one_toc_page(
         // 再统一解析; 但更简单的做法: 在 fragment 上直接选。
         // ⚠️ 这里需要把 fragment 转借出 'static 不可能, 所以走"再克隆 HTML"路径。
         // 我们退而求其次: 在 fragment 上选完直接产生 Chapter 数据后退出。
-        return parse_items_from_fragment(&frag, &item_selector, base_for_href, order_counter);
-    } else {
-        document.select(&item_selector).collect()
+        return Ok(parse_items_from_fragment(
+            &frag,
+            &item_selector,
+            base_for_href,
+            order_counter,
+        ));
     };
 
     let mut chapters = Vec::with_capacity(elements.len());
@@ -199,7 +204,7 @@ pub fn parse_one_toc_page(
             push_chapter(el, base_for_href, order_counter, &mut chapters);
         }
     } else {
-        for el in elements.iter() {
+        for el in &elements {
             push_chapter(el, base_for_href, order_counter, &mut chapters);
         }
     }
@@ -211,12 +216,12 @@ fn parse_items_from_fragment(
     sel: &std::sync::Arc<Selector>,
     base_for_href: &str,
     order_counter: &mut u32,
-) -> Result<Vec<Chapter>, TocError> {
+) -> Vec<Chapter> {
     let mut chapters = Vec::new();
     for el in frag.select(sel) {
         push_chapter(&el, base_for_href, order_counter, &mut chapters);
     }
-    Ok(chapters)
+    chapters
 }
 
 fn push_chapter(
@@ -245,6 +250,7 @@ fn push_chapter(
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
     use super::*;
     use crate::config::LangType;
     use crate::db::apply_default_rule;
@@ -294,14 +300,14 @@ mod tests {
 
     #[test]
     fn parses_single_page_toc_in_order() {
-        let html = r##"<html><body>
+        let html = r#"<html><body>
             <div></div><div></div><div></div>
             <div><ul>
                 <li><a href="/biqu5/c1.html">第1章 起航</a></li>
                 <li><a href="/biqu5/c2.html">第2章 风波</a></li>
                 <li><a href="/biqu5/c3.html">第3章 归来</a></li>
             </ul></div>
-        </body></html>"##;
+        </body></html>"#;
 
         let rule = rule_22biqu();
         let mut order: u32 = 1;
@@ -320,12 +326,12 @@ mod tests {
 
     #[test]
     fn is_desc_reverses_order() {
-        let html = r##"<html><body>
+        let html = r#"<html><body>
             <div id="catalog"><ul>
                 <li><a href="/book/123/c10.htm">第10章 终章</a></li>
                 <li><a href="/book/123/c9.htm">第9章 倒数</a></li>
                 <li><a href="/book/123/c1.htm">第1章 楔子</a></li>
-            </ul></div></body></html>"##;
+            </ul></div></body></html>"#;
         let rule = rule_69shuba();
         let mut order: u32 = 1;
         let chapters =
@@ -377,13 +383,13 @@ mod tests {
     #[test]
     fn collects_option_dropdown_pagination_urls() {
         // 仿 22biqu / wxsy.net 真实下拉结构
-        let html = r##"<html><body>
+        let html = r#"<html><body>
             <select id="indexselect">
                 <option value="/biqu5/">第1-100章</option>
                 <option value="/biqu5/p2.html">第101-200章</option>
                 <option selected value="/biqu5/p3.html">第201-300章</option>
             </select>
-        </body></html>"##;
+        </body></html>"#;
 
         // 不发请求; 直接用 helper (option 模式不需要二次抓取)。
         let document = Html::parse_document(html);

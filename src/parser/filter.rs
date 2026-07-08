@@ -9,7 +9,7 @@
 //!      不支持的语法（backreference `\1`、lookahead `(?=...)`、possessive `*+` 等）。
 //!      我们已修复 `bundle/rules/main.json` 里书海阁的 `\(([^)]+)\)\1`
 //!      → `\([^)]+\)`（捕获组 1 vs 2 内容本就不同，`\1` 是无效语法噪声）。
-//!    - 兜底策略：**编译失败时降级为不替换 + tracing::warn**，不阻塞整章下载。
+//!    - 兜底策略：**编译失败时降级为不替换 + `tracing::warn`**，不阻塞整章下载。
 //!      这是去广告功能，不是关键路径；为剩下的边角 case 拉 `fancy-regex` 大依赖
 //!      收益过低（warn 日志也方便日后 grep 出仍需手工改的规则）。
 //! 4. **filterTag 节点删除**：复用 `parser::dom::remove_tags`。
@@ -27,20 +27,37 @@ use crate::http::clean_invisible_chars;
 use crate::models::{Chapter, RuleChapter};
 use crate::parser::dom::remove_tags;
 
-static HTML_ENTITY_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"&[^;]+;").expect("html entity re"));
+/// 编译期确定的正则：用 match + panic 避免 `clippy::expect_used`，与项目里
+/// 其它 `LazyLock` 静态正则统一风格。
+/// panic IS the design：源码字面量写错就是程序员错误。
+#[allow(
+    clippy::panic,
+    reason = "static regex literal must compile; failure = programmer error"
+)]
+fn compile_static_re(pattern: &'static str) -> Regex {
+    match Regex::new(pattern) {
+        Ok(re) => re,
+        Err(e) => panic!("static regex `{pattern}` should compile: {e}"),
+    }
+}
+
+static HTML_ENTITY_RE: LazyLock<Regex> = LazyLock::new(|| compile_static_re(r"&[^;]+;"));
 static EMPTY_TAG_RE: LazyLock<Regex> = LazyLock::new(|| {
     // 反复运行直到稳定（嵌套空 tag）。每次匹配一个最内层的 <tag></tag>。
-    Regex::new(r"<([A-Za-z][A-Za-z0-9]*)\b[^>]*>\s*</\s*([A-Za-z][A-Za-z0-9]*)\s*>")
-        .expect("empty tag re")
+    compile_static_re(r"<([A-Za-z][A-Za-z0-9]*)\b[^>]*>\s*</\s*([A-Za-z][A-Za-z0-9]*)\s*>")
 });
 static TITLE_NUMBER_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^(\d+)\s*\.\s*(.+)$").expect("title number re"));
+    LazyLock::new(|| compile_static_re(r"^(\d+)\s*\.\s*(.+)$"));
 
 /// 清洗一个章节，返回新的 Chapter（不修改入参）。
 ///
 /// `rule_chapter` 提供 filterTxt / filterTag 配置；其它字段（content/title/url/order）
 /// 来自入参 `chapter`。
+///
+/// # Panics
+///
+/// 若 `TITLE_NUMBER_RE` 静态正则字面量改坏 (捕获组数量不再为 2) 会在标题重写时
+/// panic; regex 改动者立即定位。
 pub fn filter_chapter(chapter: &Chapter, rule_chapter: &RuleChapter) -> Chapter {
     let mut content = chapter.content.clone();
     let mut title = chapter.title.clone();
@@ -78,8 +95,25 @@ pub fn filter_chapter(chapter: &Chapter, rule_chapter: &RuleChapter) -> Chapter 
 
     // 6. `1.章节名` → `第1章 章节名`
     if let Some(cap) = TITLE_NUMBER_RE.captures(&title) {
-        let n = cap.get(1).unwrap().as_str();
-        let rest = cap.get(2).unwrap().as_str();
+        // TITLE_NUMBER_RE regex `^(\d+)\s*\.\s*(.+)$` 固定两个捕获组; match 成功
+        // 时 group 1/2 一定存在。这里显式 panic 让未来 regex 改动能定位。
+        // panic IS the design：regex 改变未同步更新 group 数量时立即炸出来。
+        #[allow(
+            clippy::panic,
+            reason = "regex match success guarantees group exists; panic = programmer error on regex change"
+        )]
+        let n = cap.get(1).map_or_else(
+            || panic!("TITLE_NUMBER_RE group 1 (number) missing — 修改上方 regex 时必须保留"),
+            |m| m.as_str(),
+        );
+        #[allow(
+            clippy::panic,
+            reason = "regex match success guarantees group exists; panic = programmer error on regex change"
+        )]
+        let rest = cap.get(2).map_or_else(
+            || panic!("TITLE_NUMBER_RE group 2 (rest) missing — 修改上方 regex 时必须保留"),
+            |m| m.as_str(),
+        );
         title = format!("第{n}章 {rest}");
     }
 
@@ -140,6 +174,7 @@ fn strip_empty_tags(html: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
     use super::*;
 
     fn rule_with(filter_txt: &str, filter_tag: &str) -> RuleChapter {
@@ -179,7 +214,7 @@ mod tests {
     #[test]
     fn applies_filter_txt_regex() {
         // main.json 燃文小说网真实模式（精简）
-        let r = rule_with(r#"\(本章完\)"#, "");
+        let r = rule_with(r"\(本章完\)", "");
         let c = ch("第1章", "<p>正文</p><p>(本章完)</p>");
         let out = filter_chapter(&c, &r);
         assert!(out.content.contains("正文"));
@@ -189,7 +224,7 @@ mod tests {
     #[test]
     fn unsupported_regex_does_not_panic() {
         // 含 Rust regex 不支持的 backreference（书海阁真实模式精简）
-        let r = rule_with(r#"喜欢(.+?)\1"#, "");
+        let r = rule_with(r"喜欢(.+?)\1", "");
         let c = ch("第1章", "<p>喜欢abcabc其他</p>");
         // 不崩；广告片段保留（降级行为）
         let out = filter_chapter(&c, &r);
@@ -205,7 +240,7 @@ mod tests {
         //  且原写法捕获组 1 vs 2 内容本就不同，`\1` 等价于无用语法噪声。
         //  注意末尾是字面 `。` 锚定，不会跨段落吃正文 —— 见下方"不吞段落"断言。）
         let r = rule_with(
-            r#"本小章还未完.+|小主.+|这章没有结束.+|喜欢.+?请大家收藏：\([^)]+\)书海阁小说网更新速度全网最快。|\(本章完\)"#,
+            r"本小章还未完.+|小主.+|这章没有结束.+|喜欢.+?请大家收藏：\([^)]+\)书海阁小说网更新速度全网最快。|\(本章完\)",
             "",
         );
         let c = ch(
@@ -304,7 +339,7 @@ mod tests {
     #[test]
     fn end_to_end_main_json_22biqu_pattern() {
         // 模拟 main.json 笔趣阁22 风格：filterTxt = (本章完)
-        let r = rule_with(r#"\(本章完\)"#, "");
+        let r = rule_with(r"\(本章完\)", "");
         let c = ch(
             "第1章 起航",
             "<h1>第1章 起航</h1><p>正文一</p><p>正文二</p><p>(本章完)</p>",

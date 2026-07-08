@@ -1,8 +1,8 @@
 //! 常规页（gpui-component `Settings` 左侧 sidebar 第 1 项）。
 //!
 //! 3 个 group：
-//! - 外观：主题模式（dropdown） / 按模式条件渲染的主题 item（theme_mode_items）/
-//!   语言（dropdown，after_set 弹重启 dialog）/ 字号（Slider）
+//! - 外观：主题模式（dropdown） / 按模式条件渲染的主题 `item（theme_mode_items`）/
+//!   `语言（dropdown，after_set` 弹重启 dialog）/ 字号（Slider）
 //! - 网络：GitHub 代理 / Cloudflare bypass（Input）
 //! - 下载：下载目录（Input + 「浏览」suffix Button，调 rfd）/ 默认格式（dropdown）/
 //!   TXT 编码（dropdown）/ 保留章节缓存 / 启用下载进度条（switch）
@@ -119,7 +119,9 @@ pub(super) fn build(ctx: &PageCtx<'_>, cx: &App) -> SettingPage {
                             dropdown_field(
                                 language_options,
                                 &m,
-                                move |model| SharedString::from(model.config.global.language.as_str()),
+                                move |model| {
+                                    SharedString::from(model.config.global.language.as_str())
+                                },
                                 move |model, val| {
                                     let Some(lang) = Language::parse(&val) else {
                                         tracing::warn!("language setter: 未知语言值 {val}");
@@ -246,7 +248,7 @@ pub(super) fn build(ctx: &PageCtx<'_>, cx: &App) -> SettingPage {
                                             .icon(IconName::FolderOpen)
                                             .xsmall()
                                             .on_click(move |ev, window, app| {
-                                                listener(ev, window, app)
+                                                listener(ev, window, app);
                                             })
                                     });
                                 // horizontal layout → 固定 256px（与 `SettingField::input`
@@ -267,7 +269,9 @@ pub(super) fn build(ctx: &PageCtx<'_>, cx: &App) -> SettingPage {
                         dropdown_field(
                             ext_options,
                             &m,
-                            move |model| SharedString::from(ext_value(model.config.download.ext_name)),
+                            move |model| {
+                                SharedString::from(ext_value(model.config.download.ext_name))
+                            },
                             move |model, val| {
                                 let Some(ext) = ext_from_str(&val) else {
                                     return;
@@ -284,7 +288,9 @@ pub(super) fn build(ctx: &PageCtx<'_>, cx: &App) -> SettingPage {
                         dropdown_field(
                             encoding_options,
                             &m,
-                            move |model| SharedString::from(model.config.download.txt_encoding.clone()),
+                            move |model| {
+                                SharedString::from(model.config.download.txt_encoding.clone())
+                            },
                             move |model, val| {
                                 model.config.download.txt_encoding = val.to_string();
                             },
@@ -353,7 +359,9 @@ fn theme_mode_items(ctx: &PageCtx<'_>, kind: ThemeKind, m: &Entity<AppModel>) ->
                         ),
                     ],
                     m,
-                    move |model| SharedString::from(model.config.global.theme_pref.dyn_mode.as_str()),
+                    move |model| {
+                        SharedString::from(model.config.global.theme_pref.dyn_mode.as_str())
+                    },
                     move |model, val| {
                         let mode = ThemeDynMode::parse(&val);
                         model.config.global.theme_pref.dyn_mode = mode;
@@ -397,7 +405,7 @@ fn theme_mode_items(ctx: &PageCtx<'_>, kind: ThemeKind, m: &Entity<AppModel>) ->
     }
 }
 
-/// theme_kind / theme_dyn_mode setter 写完字段后的副作用：
+/// `theme_kind` / `theme_dyn_mode` setter 写完字段后的副作用：
 /// 1. `apply_theme_pref` 读最新 pref + 应用到全局 Theme；
 /// 2. `apply_font_size` 重新设字号（`apply_config` 会重置字号）。
 ///
@@ -415,18 +423,18 @@ fn after_theme_kind(m: &Entity<AppModel>, cx: &mut App) {
 /// `cx.windows().next().update(|.., window, cx| open_dialog)`
 /// 中转会 `Err(window not found)`（2026-06-19 日志）——
 /// 根因是 `AnyWindowHandle::update` 内部 `cx.windows.get_mut(id).take()`
-/// 把窗口从 SlotMap 临时挪到调用栈，而我们 setter 是从 dropdown
+/// 把窗口从 `SlotMap` 临时挪到调用栈，而我们 setter 是从 dropdown
 /// Confirm 同步触发的，此时 root view 的 `update_window` 回调栈
-/// 还没退出，再次 `take()` 同一窗口 → SlotMap 里为 None →
+/// 还没退出，再次 `take()` 同一窗口 → `SlotMap` 里为 None →
 /// 报 "window not found"。
 ///
 /// 解法：`cx.defer(closure)` —— 把闭包作为 Effect 推到
 /// flush 队列（gpui 0.2.2 app.rs:1434），下一次 `flush_effects`
-/// 时跑（届时窗口已放回 SlotMap），不再受 update_window 嵌套
-/// take 影响。代价 1 帧延迟 ≈ 16ms，跟 GPApp 内部调度同步，
+/// 时跑（届时窗口已放回 SlotMap），不再受 `update_window` 嵌套
+/// take 影响。代价 1 帧延迟 ≈ 16ms，跟 `GPApp` 内部调度同步，
 /// 用户无感。
 ///
-/// 不污染 AppModel、不需要给 SettingsPage 加 flag、也不动 RootView。
+/// 不污染 AppModel、不需要给 `SettingsPage` 加 flag、也不动 `RootView`。
 fn after_language(_m: &Entity<AppModel>, cx: &mut App) {
     cx.defer(|cx| {
         tracing::info!("language setter: defer 触发, 调 open_dialog");

@@ -74,6 +74,7 @@ impl SourcesConfig {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
     use super::*;
 
     /// 测试辅助：检查书源是否被禁用。

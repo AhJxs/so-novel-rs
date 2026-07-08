@@ -3,11 +3,11 @@
 use std::path::Path;
 use std::sync::Arc;
 
+use crate::db::SourcesConfig;
 use crate::error::AppError;
 use crate::error::AppResult;
 use crate::http::HttpClients;
 use crate::models::Rule;
-use crate::db::SourcesConfig;
 
 use super::super::sources_state::SourcesState;
 
@@ -36,7 +36,7 @@ pub fn toggle_source_disabled(
 /// 失败：返回 `Err(AppError)`，调用方用 `e.message()` 渲染 toast notification。
 pub fn add_sources_from_file(
     rules_dir: &Path,
-    sources_config: &mut SourcesConfig,
+    sources_config: &SourcesConfig,
     rules: &mut Vec<Rule>,
     rule_load_error: &mut Option<String>,
     source_path: &Path,
@@ -48,7 +48,7 @@ pub fn add_sources_from_file(
         .to_string();
 
     // 验证文件内容是否有效
-    let bytes = std::fs::read(source_path).map_err(|e| AppError::io_msg(e, "读取文件失败"))?;
+    let bytes = std::fs::read(source_path).map_err(|e| AppError::io_msg(&e, "读取文件失败"))?;
     let text = String::from_utf8_lossy(&bytes);
 
     let _: Vec<Rule> = serde_json::from_str::<Vec<Rule>>(&text)
@@ -59,7 +59,7 @@ pub fn add_sources_from_file(
 
     // 复制文件到 rules 目录（重名则覆盖）
     let dest = rules_dir.join(&filename);
-    std::fs::copy(source_path, &dest).map_err(|e| AppError::io_msg(e, "复制文件失败"))?;
+    std::fs::copy(source_path, &dest).map_err(|e| AppError::io_msg(&e, "复制文件失败"))?;
 
     tracing::info!("已导入书源文件: {}", dest.display());
 
@@ -165,6 +165,7 @@ pub fn switch_active_file(
 }
 
 /// 派一个连通性检测任务到后台。
+#[allow(clippy::needless_pass_by_value)]
 pub fn spawn_health_check(
     rules: &[Rule],
     http: Arc<HttpClients>,

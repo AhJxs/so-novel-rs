@@ -1,16 +1,17 @@
 //! GUI 栈：GPUI + gpui-component。
 //!
 //! 架构：
-//! - `RootView` 是顶层窗口视图，含 TitleBar + 可折叠 Sidebar + 内容区 + 覆盖层（dialog / sheet / notification）。
+//! - `RootView` 是顶层窗口视图，含 `TitleBar` + 可折叠 Sidebar + 内容区 + 覆盖层（dialog / sheet / notification）。
 //! - 5 个一级页面（Library / Sources / Tasks / Settings / Search）在 `pages/`，各自持有 `Entity<AppModel>`。
-//! - 共享组件（EmptyState / PageHeader / StatusBadge / Pagination）在 `components/`。
+//! - 共享组件（EmptyState / `PageHeader` / `StatusBadge` / Pagination）在 `components/`。
 //! - 后台通道 → UI 重绘由 `drain_loop::spawn_drain_loop` 每 100ms 排空 + `cx.notify()` 驱动。
 //!
 //! 本模块仅依赖 GPUI + gpui-component + 业务模块（`crate::app`）。
 
 use anyhow::Result;
 use gpui::{
-    App, AppContext, Bounds, WindowBackgroundAppearance, WindowBounds, WindowOptions, actions,
+    App, AppContext, Bounds, WindowBackgroundAppearance, WindowBounds, WindowOptions, actions, px,
+    size,
 };
 use gpui_component::{Root, TitleBar};
 
@@ -31,6 +32,15 @@ actions!(
         ToggleSidebar,
     ]
 );
+// 为 actions! 生成的 PartialEq 单元结构体补充 Eq 实现。
+impl Eq for ShowSearch {}
+impl Eq for ShowTasks {}
+impl Eq for ShowLibrary {}
+impl Eq for ShowSources {}
+impl Eq for ShowSettings {}
+impl Eq for NextPage {}
+impl Eq for PrevPage {}
+impl Eq for ToggleSidebar {}
 
 pub mod components;
 mod drain_loop;
@@ -53,7 +63,7 @@ pub use root::RootView;
 /// - `TraditionalChinese` → `"zh-HK"` （传统中文；gpui-component 没有 `zh-TW`，fallback 用 `zh-HK`）
 /// - `English`            → `"en"`   （精确匹配）
 ///
-/// 不在列表内的 locale rust_i18n 自动 fallback 到 `en`，所以传 `zh-TW` 也会显示英文
+/// 不在列表内的 locale `rust_i18n` 自动 fallback 到 `en`，所以传 `zh-TW` 也会显示英文
 /// —— 显式映射到 `zh-HK` 让传统中文用户能直接看到中文 UI（gpui-component
 /// 内部 zh-CN/zh-HK 的简体/繁体翻译完全一样）。
 ///
@@ -78,12 +88,12 @@ use crate::i18n::locale_for;
 /// 2. 创建 `Entity<AppModel>` — UI 中立的领域状态；
 /// 3. `root::register_key_bindings(cx)` — 绑定 cmd-1..5 + Tab 切页快捷键；
 /// 4. 启动 [`events::spawn_drain_loop`] — 每 100ms 排空后台通道 + `cx.notify()`；
-/// 5. 打开窗口（**自定义 TitleBar** + native 拖拽 + 3 按钮）：
-///    root 是 `Root`（包裹 [`RootView`]，持有 `AppModel` + sidebar + TitleBar + actions）。
+/// 5. 打开窗口（**自定义 `TitleBar`** + native 拖拽 + 3 按钮）：
+///    root 是 `Root`（包裹 [`RootView`]，持有 `AppModel` + sidebar + `TitleBar` + actions）。
 ///
 /// 参考官方 `gpui-component` example — 用 `TitleBar::title_bar_options()`
 /// 配置 `WindowOptions.titlebar`：
-/// - `title: None` — OS 任务栏仍会显示 "So Novel"（由 `RootView` 内的 TitleBar child 渲染标题）
+/// - `title: None` — OS 任务栏仍会显示 "So Novel"（由 `RootView` 内的 `TitleBar` child 渲染标题）
 /// - `appears_transparent: true` — 告诉 OS 不画原生 chrome；GPUI 接管所有视觉和事件
 ///   （关键：触发 `hide_title_bar = true`，让 Windows 平台响应 `WM_NCHITTEST`
 ///   返回 HTCLOSE / HTMINBUTTON / HTMAXBUTTON，从而触发 3 个按钮的点击处理）
@@ -91,6 +101,13 @@ use crate::i18n::locale_for;
 /// 注意：不要同时设 `window_decorations: Some(WindowDecorations::Client)` — 与
 /// `appears_transparent: true` 组合会破坏 Windows 平台的事件处理。GPUI 通过
 /// `titlebar.appears_transparent` 已经能正确处理所有平台（macOS / Windows / Linux）。
+///
+/// # Panics
+///
+/// `cx.open_window` 失败时（极少见，仅在 `WindowOptions` 非法或 GPU 已满载时），
+/// 内部会通过 `rfd::MessageDialog` 弹错误对话框后直接 `return` 退出 GPUI 启动流程，
+/// 不会 panic。GPUI 0.2.2 在初始化失败的窗口上几乎不会 `Err`，但保留显式处理
+/// 防止无声失败（避免用户看到空白窗口以为还在加载）。
 pub fn run() -> Result<()> {
     let app = gpui::Application::new().with_assets(gpui_component_assets::Assets);
     app.run(move |cx: &mut App| {
@@ -145,7 +162,6 @@ pub fn run() -> Result<()> {
         gpui_component::set_locale(locale_for(model.read(cx).config.global.language));
 
         // 6. 居中开窗 + 最小尺寸 + 自定义 TitleBar 配置。
-        use gpui::{px, size};
         let window_size = size(px(1200.0), px(800.0));
         let min_size = size(px(900.0), px(600.0));
         #[allow(unused_mut)] // mut 仅 Linux cfg 块使用
@@ -170,11 +186,20 @@ pub fn run() -> Result<()> {
         }
 
         // 7. Root 包装 RootView（持有 AppModel + sidebar + TitleBar）。
-        cx.open_window(opts, |window, cx| {
+        //    GPUI 0.2.2 在初始化失败的窗口上几乎不会 `Err`，但万一出错
+        //    （如 `WindowOptions` 非法 / GPU 已满载）显式弹错误对话框退出，
+        //    而不是无声返回 → 用户看到空白窗口还以为在加载。
+        if let Err(e) = cx.open_window(opts, |window, cx| {
             let view = cx.new(|cx| RootView::new(model.clone(), window, cx));
             cx.new(|cx| Root::new(view, window, cx))
-        })
-        .expect("open_window failed");
+        }) {
+            tracing::error!("open_window 失败: {e:#}");
+            rfd::MessageDialog::new()
+                .set_title("So Novel 启动失败")
+                .set_description(format!("无法打开主窗口：\n\n{e:#}"))
+                .set_level(rfd::MessageLevel::Error)
+                .show();
+        }
     });
 
     Ok(())

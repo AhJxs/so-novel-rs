@@ -1,6 +1,6 @@
-//! `AppModel` 本地书库方法 (PR #17 拆分, 2026-07-08).
+//! `AppModel` 本地书库方法
 //!
-//! 3 个方法: refresh_library / refresh_library_async / delete_library_entry.
+//! 3 个方法: `refresh_library` / `refresh_library_async` / `delete_library_entry`.
 
 use std::path::{Path, PathBuf};
 
@@ -79,7 +79,11 @@ impl AppModel {
 
     /// 真正删除一个本地文件。
     pub fn delete_library_entry(&mut self, path: &Path) {
-        match ops::delete_library_entry(&mut self.library, &self.config.download.download_path, path) {
+        match ops::delete_library_entry(
+            &mut self.library,
+            &self.config.download.download_path,
+            path,
+        ) {
             Ok(msg) if !msg.is_empty() => self.push_success(msg),
             Ok(_) => {}
             Err(e) => self.push_error(e.message()),

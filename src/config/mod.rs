@@ -11,7 +11,7 @@
 //!
 //! 本文件作为 **re-export 门面**，是唯一对外暴露的入口（外部仍 `use crate::config::*`）。
 //!
-//! ## 全局单例 (PR #6, 2026-07-08)
+//! ## 全局单例
 //!
 //! 启动时通过 [`set_global`] 注入 `AppConfig`, 之后所有模块通过 [`global`]
 //! 读, 避免重复加载 / 重复解析 / 路径漂移。单例由 `std::sync::LazyLock` 保护,
@@ -25,8 +25,8 @@ mod types;
 pub use paths::ConfigPaths;
 pub use toml_io::{load_config, save_config};
 pub use types::{
-    AppConfig, ConfigError, CookieCfg, CrawlCfg, DownloadCfg, GlobalCfg, ProxyCfg, SourceCfg,
-    ExportFormat, LangType, Language, ThemeDynMode, ThemeKind, ThemePref,
+    AppConfig, ConfigError, CookieCfg, CrawlCfg, DownloadCfg, ExportFormat, GlobalCfg, LangType,
+    Language, ProxyCfg, SourceCfg, ThemeDynMode, ThemeKind, ThemePref,
 };
 
 use std::sync::{LazyLock, OnceLock};
@@ -40,15 +40,16 @@ static GLOBAL: OnceLock<AppConfig> = OnceLock::new();
 ///
 /// **警告**: 这只是个 **读视图**, 不要尝试通过这里修改 `AppConfig` —
 /// 改全局 mutable 配置是反模式, 应该走 `save_config()` + 重启模式。
-static GLOBAL_VIEW: LazyLock<&'static AppConfig> = LazyLock::new(|| {
-    GLOBAL.get_or_init(|| AppConfig::with_defaults())
-});
+static GLOBAL_VIEW: LazyLock<&'static AppConfig> =
+    LazyLock::new(|| GLOBAL.get_or_init(AppConfig::with_defaults));
 
 /// 注入全局配置。仅在启动期 (`main` / `startup` 模块) 调一次。
 ///
 /// 重复调用会返回 `Err`, 由调用方决定如何处理 (panic / warn-and-ignore)。
 pub fn set_global(cfg: AppConfig) -> Result<(), &'static str> {
-    GLOBAL.set(cfg).map_err(|_| "AppConfig 全局已初始化, 重复 set_global")
+    GLOBAL
+        .set(cfg)
+        .map_err(|_| "AppConfig 全局已初始化, 重复 set_global")
 }
 
 /// 获取全局配置。第一次读时若未显式 [`set_global`], 用 `with_defaults()` 兜底。

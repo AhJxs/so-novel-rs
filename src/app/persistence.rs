@@ -1,6 +1,6 @@
-//! `AppModel` 持久化方法 (PR #17 拆分, 2026-07-08).
+//! `AppModel` 持久化方法
 //!
-//! 3 个方法: save_tasks_to_file / save_sources_config / persist_settings.
+//! 3 个方法: `save_tasks_to_file` / `save_sources_config` / `persist_settings`.
 //! 不依赖 `ops`, 直接调 `crate::db` / `crate::config::save_config`.
 
 use super::AppModel;
@@ -9,7 +9,7 @@ impl AppModel {
     /// 保存所有任务到文件, 并自动清理超额的已完成任务。
     ///
     /// 性能改造: 原实现把所有 `std::fs::*` + `fsync` 同步跑在调用线程上
-    /// (通常是 UI 线程 / drain_loop), 下载密集时一次 fsync 可让 UI 顿
+    /// (通常是 UI 线程 / `drain_loop`), 下载密集时一次 fsync 可让 UI 顿
     /// 几十毫秒。现改为:
     /// 1. UI 线程: 把 `tasks` 转为 `DownloadTaskRecord` Vec, clone 出来
     ///    (仅 `origin` 里有 `String` / 路径, 深拷贝代价不大);
@@ -24,8 +24,11 @@ impl AppModel {
     /// 这个权衡是值得的 — 顿 UI 比显示一帧 stale 数据更糟。
     pub fn save_tasks_to_file(&mut self) {
         // 1. UI 线程: 构造 record Vec (clone) 并 spawn 异步保存。
-        let records: Vec<crate::models::DownloadTaskRecord> =
-            self.tasks.iter().map(|t| t.to_record()).collect();
+        let records: Vec<crate::models::DownloadTaskRecord> = self
+            .tasks
+            .iter()
+            .map(super::download_task::DownloadTask::to_record)
+            .collect();
         let path = self.paths.tasks_file.clone();
 
         self.runtime.spawn(async move {
@@ -62,7 +65,7 @@ impl AppModel {
     ///
     /// 每个 setter 改完字段后立即调本方法 (auto-save), 无需「立即保存」按钮。
     /// 如果以后想加 debounce 写入 (比如连续拖动 number input), 可以在 setter 里加
-    /// cx.spawn(timer 500ms) 合并多次 persist_settings 调用 — 单次写盘本来就很快
+    /// cx.spawn(timer 500ms) 合并多次 `persist_settings` 调用 — 单次写盘本来就很快
     /// (小 TOML 几 ms), 目前不做 debounce。
     pub fn persist_settings(&mut self) {
         if let Err(e) =

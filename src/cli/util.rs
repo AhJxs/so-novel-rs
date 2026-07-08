@@ -4,11 +4,11 @@
 use anyhow::{Context, Result};
 
 use crate::config::{AppConfig, ConfigPaths, ExportFormat};
-use crate::models::Source;
 use crate::db::{SourcesConfig, load_active_rules};
+use crate::models::Source;
 
 /// 把 `--output` / `--format` 覆盖合并进 AppConfig（仅 download 用）。
-pub(crate) fn effective_cfg(
+pub fn effective_cfg(
     mut cfg: AppConfig,
     output: Option<String>,
     format: Option<String>,
@@ -23,7 +23,7 @@ pub(crate) fn effective_cfg(
 }
 
 /// 读 `sources_config.json` + rules dir，返回所有启用的 `Source`。
-pub(crate) fn load_active_sources(cfg: &AppConfig, paths: &ConfigPaths) -> Result<Vec<Source>> {
+pub fn load_active_sources(cfg: &AppConfig, paths: &ConfigPaths) -> Result<Vec<Source>> {
     let sources_config = SourcesConfig::load(&paths.sources_config);
     let rules = load_active_rules(&paths.rules_dir, &sources_config).context("加载规则失败")?;
     Ok(rules
@@ -43,7 +43,7 @@ pub(crate) fn load_active_sources(cfg: &AppConfig, paths: &ConfigPaths) -> Resul
 /// - `from` / `to` 任一为 `None` → 默认 `from=1` / `to=total`
 ///
 /// 返回 `(from, to_clamped)`，可直接用于切片。
-pub(crate) fn validate_range(
+pub fn validate_range(
     from: Option<usize>,
     to: Option<usize>,
     total: usize,
@@ -63,6 +63,7 @@ pub(crate) fn validate_range(
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
     use super::*;
 
     // ----- validate_range -----

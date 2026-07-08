@@ -1,11 +1,11 @@
-//! 单章正文解析主流程 (PR #17 拆分, 2026-07-08).
+//! 单章正文解析主流程
 //!
 //! 来自原 `parser/chapter.rs`:
 //! - [`ChapterError`] 错误枚举
 //! - [`parse_chapter`] 公共异步入口: 抓 + 解析 + 派发单页/分页
 //! - [`parse_chapter_html`] 离线同步解析 (便于测试)
 //! - [`fetch_single_page_content`] 单页抓取 (无 `nextPage` 规则时)
-//! - [`fetch_with_cf_fallback`] http::fetch_with_cf_fallback 的 typed-error 包装
+//! - [`fetch_with_cf_fallback`] `http::fetch_with_cf_fallback` 的 typed-error 包装
 //!
 //! 分页循环 + 终止判定在 [`super::pagination`]。
 
@@ -138,7 +138,7 @@ pub(super) async fn fetch_single_page_content(
     parse_chapter_html(&html, rule)
 }
 
-/// typed-error 包装的 cf-fallback 抓取。pagination 与 single_page 都通过这一层
+/// typed-error 包装的 cf-fallback 抓取。pagination 与 `single_page` 都通过这一层
 /// 走 `crate::http::fetch_with_cf_fallback`。
 pub(super) async fn fetch_with_cf_fallback(
     client: &Client,
@@ -158,6 +158,7 @@ pub(super) async fn fetch_with_cf_fallback(
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
     use super::*;
     use crate::config::LangType;
     use crate::db::apply_default_rule;
@@ -184,13 +185,13 @@ mod tests {
 
     #[test]
     fn parses_single_page_chapter_content() {
-        let html = r##"<html><body>
+        let html = r#"<html><body>
             <div class="title">第1章 起航</div>
             <div id="content">
                 <p>第一段</p>
                 <p>第二段</p>
             </div>
-        </body></html>"##;
+        </body></html>"#;
         let rule = rule_22biqu_chapter();
         let content = parse_chapter_html(html, &rule).unwrap();
         // content 走 HTML，内含两段 <p>
@@ -202,9 +203,9 @@ mod tests {
 
     #[test]
     fn empty_content_returns_typed_error() {
-        let html = r##"<html><body>
+        let html = r#"<html><body>
             <div class="title">无正文</div>
-        </body></html>"##;
+        </body></html>"#;
         let rule = rule_22biqu_chapter();
         let err = parse_chapter_html(html, &rule).unwrap_err();
         assert!(matches!(err, ChapterError::EmptyContent(_)));

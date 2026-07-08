@@ -5,7 +5,7 @@
 //! - **可 grep**：每个顶层操作 mint 一个 `u64`；日志文件里 `trace_id=42` 即可
 //!   还原一次完整调用的全部阶段。
 //! - **细粒度子事件**用 `sub=` 字段表达（`sub=chapter:142` / `sub=source:5`），
-//!   不另起 trace_id，保持父子关系简单。
+//!   不另起 `trace_id，保持父子关系简单`。
 //!
 //! 调用入口在 `app/ops/search.rs` / `app/ops/download.rs` 的 4 个 `spawn_*` 处。
 //! `#[tracing::instrument]` 在 crawler / parser 入口处接管，把 `trace_id` 透传
@@ -20,7 +20,7 @@ static NEXT: AtomicU64 = AtomicU64::new(1);
 ///
 /// 复制成本 = 8 字节（`Copy`），可在 `.instrument(span)` 之间随意 clone。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) struct TraceId(u64);
+pub struct TraceId(u64);
 
 impl TraceId {
     /// 分配一个新的全局唯一 ID。线程安全，单调递增。
@@ -29,7 +29,7 @@ impl TraceId {
     }
 
     #[cfg(test)]
-    pub(crate) fn raw(self) -> u64 {
+    pub(crate) const fn raw(self) -> u64 {
         self.0
     }
 }
@@ -50,7 +50,7 @@ impl From<u64> for TraceId {
 ///
 /// 搜索：每源完成时 `sub = format!("source:{id}", id = source_id)`。
 /// 下载：章节失败时 `sub = format!("chapter:{order}")`。
-pub(crate) mod sub {
+pub mod sub {
     pub const SEARCH: &str = "search";
     pub const DETAIL: &str = "detail";
     pub const TOC: &str = "toc";
@@ -59,6 +59,7 @@ pub(crate) mod sub {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
     use super::*;
     use std::collections::HashSet;
     use std::sync::Arc;
@@ -107,7 +108,7 @@ mod tests {
         assert_ne!(id, TraceId::from(43u64));
     }
 
-    /// 端到端验证：mint 一个 trace_id，挂到 span 上，
+    /// 端到端验证：mint 一个 `trace_id，挂到` span 上，
     /// 在 span 内部用 `tracing::info!` 触发事件，
     /// 校验 `trace_id=N` 出现在事件字段里 —— 这是 grep 流程的核心假设。
     #[test]
@@ -128,7 +129,7 @@ mod tests {
             }
         }
         impl<'a> MakeWriter<'a> for Capture {
-            type Writer = Capture;
+            type Writer = Self;
             fn make_writer(&'a self) -> Self::Writer {
                 self.clone()
             }
@@ -153,9 +154,9 @@ mod tests {
         // 校验 trace_id 出现在 capture 的输出里 —— 完整断言字段格式比较脆，
         // 这里只检查"trace_id=<数字>"这个 token 在日志里。
         let needle = format!("trace_id={}", id.raw());
-        assert!(
-            s.contains(&needle),
-            "expected log to contain {needle:?}, got:\n{s}"
-        );
+        let contains_needle = s.contains(&needle);
+        let msg = format!("expected log to contain {needle:?}, got:\n{s}");
+        drop(buf);
+        assert!(contains_needle, "{msg}");
     }
 }

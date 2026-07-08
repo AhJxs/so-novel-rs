@@ -1,16 +1,16 @@
 //! `sources` 子命令：list / enable / disable。
 //!
 //! 启用/禁用通过读写 `~/.sonovel/sources_config.json` 的 `disabled_urls` 实现
-//! （URL 为 key，因为 ID 在不同书源文件里可能不同 — 见 persistent::sources_config）。
+//! （URL 为 key，因为 ID 在不同书源文件里可能不同 — 见 `persistent::sources_config`）。
 
 use anyhow::{Context, Result};
 
 use crate::config::ConfigPaths;
-use crate::models::Rule;
 use crate::db::{SourcesConfig, load_active_rules};
+use crate::models::Rule;
 
 /// 列出当前激活书源（人类可读 / JSON 两种格式）。
-pub(crate) fn run_list(paths: &ConfigPaths, json: bool) -> Result<()> {
+pub fn run_list(paths: &ConfigPaths, json: bool) -> Result<()> {
     let sources_config = SourcesConfig::load(&paths.sources_config);
     let rules: Vec<Rule> =
         load_active_rules(&paths.rules_dir, &sources_config).context("加载规则失败")?;
@@ -33,12 +33,12 @@ pub(crate) fn run_list(paths: &ConfigPaths, json: bool) -> Result<()> {
     for r in &rules {
         let mark = if r.disabled { "✗" } else { "✓" };
         let proxy = if r.need_proxy { " [proxy]" } else { "" };
-        let lang = if !r.language.is_empty() {
-            format!(" [{}]", r.language)
-        } else {
+        let lang = if r.language.is_empty() {
             String::new()
+        } else {
+            format!(" [{}]", r.language)
         };
-        let search = if r.search.as_ref().map(|s| !s.disabled).unwrap_or(false) {
+        let search = if r.search.as_ref().is_some_and(|s| !s.disabled) {
             " [search]"
         } else {
             ""
@@ -56,7 +56,7 @@ pub(crate) fn run_list(paths: &ConfigPaths, json: bool) -> Result<()> {
 /// - `disable=false` → 从 `disabled_urls` 移除并写回磁盘
 ///
 /// 找不到 ID / 已是目标状态：都按幂等处理（前者错误，后者早退）。
-pub(crate) fn run_set_disabled(paths: &ConfigPaths, id: i32, disable: bool) -> Result<()> {
+pub fn run_set_disabled(paths: &ConfigPaths, id: i32, disable: bool) -> Result<()> {
     let mut sources_config = SourcesConfig::load(&paths.sources_config);
     let rules: Vec<Rule> =
         load_active_rules(&paths.rules_dir, &sources_config).context("加载规则失败")?;
@@ -94,11 +94,12 @@ pub(crate) fn run_set_disabled(paths: &ConfigPaths, id: i32, disable: bool) -> R
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
     use super::*;
     use crate::config::ConfigPaths;
 
-    /// 临时目录 + 一个 minimal rules.json（含 2 条规则） + ConfigPaths。
-    /// 跳过 ConfigPaths::discover()（它会读用户主目录），直接拼路径。
+    /// 临时目录 + 一个 minimal rules.json（含 2 条规则） + `ConfigPaths`。
+    /// 跳过 `ConfigPaths::discover()（它会读用户主目录），直接拼路径`。
     fn setup_two_sources() -> (tempfile::TempDir, ConfigPaths) {
         let dir = tempfile::tempdir().unwrap();
         let rules_dir = dir.path().join("rules");
@@ -122,7 +123,7 @@ mod tests {
         let paths = ConfigPaths {
             config_file: dir.path().join("config.toml"),
             themes_dir: dir.path().join("themes"),
-            rules_dir: rules_dir.clone(),
+            rules_dir,
             sources_config: dir.path().join("sources_config.json"),
             tasks_file: dir.path().join("tasks.json"),
         };

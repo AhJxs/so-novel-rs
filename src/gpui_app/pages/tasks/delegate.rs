@@ -1,4 +1,4 @@
-//! TasksDelegate: gpui-component List delegate，持有 page handle + 当前页 TaskSummary。
+//! `TasksDelegate`: gpui-component List delegate，持有 page handle + 当前页 `TaskSummary`。
 
 use gpui::{App, Context, Entity, ParentElement, Styled, Window};
 use gpui_component::list::{ListItem, ListState};
@@ -14,12 +14,12 @@ pub(super) struct TasksDelegate {
     pub(super) page_items: Vec<TaskSummary>,
     /// 当前选中项。`None` = 未选中。
     pub(super) selected_index: Option<IndexPath>,
-    /// 拿 TasksPage handle 用于动作按钮 → 转发回 page。
+    /// 拿 `TasksPage` handle 用于动作按钮 → 转发回 page。
     pub(super) page_handle: Entity<TasksPage>,
 }
 
 impl TasksDelegate {
-    pub(super) fn new(page_handle: Entity<TasksPage>) -> Self {
+    pub(super) const fn new(page_handle: Entity<TasksPage>) -> Self {
         Self {
             page_items: Vec::new(),
             selected_index: None,
@@ -47,7 +47,7 @@ impl ListDelegate for TasksDelegate {
                 .selected(Some(ix) == self.selected_index)
                 .rounded(cx.theme().radius)
                 .mb(gpui::px(4.))
-                .child(row::render(task, self.page_handle.clone(), &mut *cx)),
+                .child(row::render(&task, &self.page_handle, cx)),
         )
     }
 

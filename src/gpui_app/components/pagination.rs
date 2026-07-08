@@ -53,7 +53,7 @@ pub struct PageSlice {
 }
 
 impl PageSlice {
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.start >= self.end
     }
 }
@@ -82,7 +82,7 @@ pub fn compute_page_window(total: usize, current_page: &mut usize) -> PageSlice 
     }
 }
 
-/// 分页组件 on_change 回调的 trait alias：调用方传 `Rc<dyn Fn(...)>` —— `Rc<dyn Fn>`
+/// 分页组件 `on_change` 回调的 trait alias：调用方传 `Rc<dyn Fn(...)>` —— `Rc<dyn Fn>`
 /// 自身 `Clone`（Rc 总是 Clone），调用方捕获的 listener 即使不是 `Clone + 'static`
 /// 也能塞进来（wrap 一层 Rc 即可）。
 ///
@@ -131,7 +131,7 @@ impl IntoElement for Pagination {
 
 impl RenderOnce for Pagination {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
-        let Pagination {
+        let Self {
             current,
             total,
             on_change,
@@ -180,12 +180,7 @@ impl RenderOnce for Pagination {
             .items_center()
             .gap_1()
             .child(prev_btn)
-            .children(render_page_buttons(
-                current,
-                total_pages,
-                cx,
-                Rc::clone(&on_change),
-            ))
+            .children(render_page_buttons(current, total_pages, cx, &on_change))
             .child(next_btn)
     }
 }
@@ -195,7 +190,7 @@ fn render_page_buttons(
     current: usize,
     total_pages: usize,
     cx: &App,
-    on_change: Rc<PaginationOnChange>,
+    on_change: &Rc<PaginationOnChange>,
 ) -> Vec<AnyElement> {
     // 简单策略：≤ 7 页全显示；> 7 页显示 1 … current-1 current current+1 … N。
     let pages: Vec<usize> = if total_pages <= 7 {
@@ -230,7 +225,7 @@ fn render_page_buttons(
                     .child("…")
                     .into_any_element()
             } else {
-                let on_change = Rc::clone(&on_change);
+                let on_change = on_change.clone();
                 Button::new(("page-n", p as u64))
                     .ghost()
                     .small()

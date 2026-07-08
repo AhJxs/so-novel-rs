@@ -3,6 +3,13 @@
 //! 历史上 `config/loader.rs` 单文件 917 行既含实现又含测试。
 //! 拆分子模块后，测试统一搬到这里。`super::*` 拿到所有 re-export 的公共 API。
 
+#![allow(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    clippy::panic,
+    clippy::too_many_lines
+)]
+
 use std::path::PathBuf;
 
 use crate::config::{
@@ -26,10 +33,16 @@ fn font_size_accepts_int_and_float_literal() {
     let path = dir.path().join("config.toml");
     // 整数形式（模板默认写法）
     std::fs::write(&path, "[global]\nfont-size = 18\n").unwrap();
-    assert_eq!(load_config(&path).unwrap().global.font_size, 18.0);
+    assert!(
+        (load_config(&path).unwrap().global.font_size - 18.0).abs() < f32::EPSILON,
+        "font-size should round-trip 18",
+    );
     // 浮点形式
     std::fs::write(&path, "[global]\nfont-size = 20.5\n").unwrap();
-    assert_eq!(load_config(&path).unwrap().global.font_size, 20.5);
+    assert!(
+        (load_config(&path).unwrap().global.font_size - 20.5).abs() < f32::EPSILON,
+        "font-size should round-trip 20.5",
+    );
 }
 
 #[test]
@@ -56,7 +69,6 @@ fn round_trip_through_save_and_load() {
             ext_name: ExportFormat::Txt,
             txt_encoding: "GBK".to_string(),
             preserve_chapter_cache: true,
-            ..DownloadCfg::default()
         },
         source: SourceCfg {
             search_limit: Some(50),
@@ -70,11 +82,9 @@ fn round_trip_through_save_and_load() {
             proxy_enabled: true,
             proxy_host: "10.0.0.1".to_string(),
             proxy_port: 1080,
-            ..ProxyCfg::default()
         },
         cookie: CookieCfg {
             qidian_cookie: String::new(),
-            ..CookieCfg::default()
         },
         ..AppConfig::default()
     };
@@ -98,7 +108,7 @@ fn round_trip_through_save_and_load() {
     assert_eq!(loaded.global.language, Language::English);
     assert_eq!(loaded.global.theme_pref, cfg.global.theme_pref);
     assert!(loaded.global.sidebar_collapsed);
-    assert_eq!(loaded.global.font_size, 20.0);
+    assert!((loaded.global.font_size - 20.0).abs() < f32::EPSILON);
 }
 
 #[test]
@@ -137,9 +147,9 @@ fn missing_optional_int_keys_become_none() {
     let path = dir.path().join("config.toml");
     std::fs::write(
         &path,
-        r#"[source]
+        r"[source]
                 search-filter = true
-            "#,
+            ",
     )
     .unwrap();
 
@@ -171,9 +181,9 @@ fn load_ignores_orphan_source_language_key() {
     let path = dir.path().join("config.toml");
     std::fs::write(
         &path,
-        r#"[source]
+        r"[source]
                 search-filter = true
-            "#,
+            ",
     )
     .unwrap();
 
@@ -193,7 +203,7 @@ fn save_config_overwrites_existing_without_leaving_tmp() {
     let original = std::fs::read_to_string(&path).unwrap();
 
     // 改一个字段再写（覆盖已存在文件）
-    let mut cfg2 = cfg.clone();
+    let mut cfg2 = cfg;
     cfg2.global.font_size = 22.0;
     save_config(&path, &cfg2).unwrap();
     let updated = std::fs::read_to_string(&path).unwrap();
@@ -212,7 +222,10 @@ fn save_config_overwrites_existing_without_leaving_tmp() {
     assert!(
         leftover.is_empty(),
         "atomic write should not leave .tmp.* files: {:?}",
-        leftover.iter().map(|e| e.file_name()).collect::<Vec<_>>()
+        leftover
+            .iter()
+            .map(std::fs::DirEntry::file_name)
+            .collect::<Vec<_>>()
     );
 
     // load 回来确实拿到新值（兼容性：原子写后的文件能被 load_config 正确解析）。
@@ -229,5 +242,5 @@ fn save_config_writes_to_new_path() {
     assert!(path.exists());
     // 反向解析：load_config 应能读回 default
     let cfg = load_config(&path).unwrap();
-    assert_eq!(cfg.global.font_size, AppConfig::default().global.font_size);
+    assert!((cfg.global.font_size - AppConfig::default().global.font_size).abs() < f32::EPSILON);
 }

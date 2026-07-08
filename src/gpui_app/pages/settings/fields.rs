@@ -4,7 +4,7 @@
 //! `m.update(cx, |model, _| { model.config.X = ...; model.persist_settings(); })`。
 //! 抽成 helper 后每个 call site 只写「字段 getter」+「字段 setter」2 行闭包。
 //!
-//! 3 个有副作用的 setter（theme_kind / theme_dyn_mode / language）走 `dropdown_field`
+//! 3 个有副作用的 `setter（theme_kind` / `theme_dyn_mode` / language）走 `dropdown_field`
 //! + `after_set: Option<fn(...)>` —— `fn` 指针（不是 `FnMut`）让 helper 内部能 clone
 //!   出 `'static`，避开闭包生命周期问题。
 //!
@@ -19,7 +19,7 @@ use crate::config::ExportFormat;
 
 /// String 字段（Input）—— getter 返回 `SharedString`，setter 拿到新 `String`。
 ///
-/// 用于 gh_proxy / cf_bypass / proxy_host / qidian_cookie。
+/// 用于 `gh_proxy` / `cf_bypass` / `proxy_host` / `qidian_cookie`。
 pub(super) fn string_field<G, S>(
     m: &Entity<AppModel>,
     getter: G,
@@ -46,7 +46,7 @@ where
     )
 }
 
-/// bool 字段（Switch）—— 5 处（search_filter / preserve_chapter_cache / enable_retry / proxy_enabled）。
+/// bool 字段（Switch）—— 5 `处（search_filter` / `preserve_chapter_cache` / `enable_retry` / `proxy_enabled`）。
 pub(super) fn bool_field<G, S>(
     m: &Entity<AppModel>,
     getter: G,
@@ -75,7 +75,7 @@ where
 
 /// `Option<i32>` 字段（number_input，-1 sentinel 表示"不限制"）。
 ///
-/// 用于 search_limit / concurrency。`getter` 返 `None` → UI 显示 -1；
+/// 用于 `search_limit` / concurrency。`getter` 返 `None` → UI 显示 -1；
 /// `setter` 拿到 `None` 时 caller 写 `model.config.X = None`。
 pub(super) fn number_field_option_i32<G, S>(
     m: &Entity<AppModel>,
@@ -92,7 +92,7 @@ where
         {
             let m = m.clone();
             move |cx: &App| {
-                getter(m.read(cx)).map(|v| v as f64).unwrap_or(-1.0) // sentinel: None → -1
+                getter(m.read(cx)).map_or(-1.0, |v| v as f64) // sentinel: None → -1
             }
         },
         {
@@ -108,9 +108,9 @@ where
     )
 }
 
-/// `u32` 字段（number_input，val 钳到 ≥0）。
+/// `u32` `字段（number_input，val` 钳到 ≥0）。
 ///
-/// 用于 min_interval / max_interval / max_retries / retry_min_interval / retry_max_interval。
+/// 用于 `min_interval` / `max_interval` / `max_retries` / `retry_min_interval` / `retry_max_interval`。
 /// `val.max(0.0) as u32` —— 负数向上 saturate。
 pub(super) fn number_field_u32_clamped<G, S>(
     m: &Entity<AppModel>,
@@ -141,9 +141,9 @@ where
     )
 }
 
-/// `u16` 字段（number_input，val as u16）。
+/// `u16` `字段（number_input，val` as u16）。
 ///
-/// 仅 proxy_port 一处。范围在 `NumberFieldOptions { min: 1.0, max: 65535.0 }` 由 caller 控制。
+/// 仅 `proxy_port` 一处。范围在 `NumberFieldOptions { min: 1.0, max: 65535.0 }` 由 caller 控制。
 pub(super) fn number_field_u16<G, S>(
     m: &Entity<AppModel>,
     opts: NumberFieldOptions,
@@ -173,10 +173,10 @@ where
     )
 }
 
-/// Dropdown 字段 —— 5 处共用（encoding / ext_name / theme_kind / theme_dyn_mode / language）。
+/// Dropdown 字段 —— 5 处共用（encoding / `ext_name` / `theme_kind` / `theme_dyn_mode` / language）。
 ///
 /// `after_set: Option<fn(&Entity<AppModel>, &mut App)>` —— setter body 写完后
-/// 触发的副作用（reapply_theme / cx.defer 弹 dialog）。`fn` 指针 (不是闭包) 让
+/// `触发的副作用（reapply_theme` / cx.defer 弹 dialog）。`fn` 指针 (不是闭包) 让
 /// helper 内部能 clone 出 `'static`；caller 用模块内 `fn` 或 `let after: fn(...) = ...`。
 pub(super) fn dropdown_field<G, S>(
     options: Vec<(SharedString, SharedString)>,
@@ -210,10 +210,10 @@ where
     )
 }
 
-/// `ExportFormat` ↔ `&'static str` 转换 —— 用于 ext_name dropdown。
+/// `ExportFormat` ↔ `&'static str` 转换 —— 用于 `ext_name` dropdown。
 ///
 /// 4 个值用 match 而不是 `as_ref()`，避免依赖 `Display` 顺序。
-pub(super) fn ext_value(e: ExportFormat) -> &'static str {
+pub(super) const fn ext_value(e: ExportFormat) -> &'static str {
     match e {
         ExportFormat::Epub => "epub",
         ExportFormat::Txt => "txt",

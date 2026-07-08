@@ -1,7 +1,7 @@
-//! 顶层 `RootView`: TitleBar + 可折叠 Sidebar + 内容区 + 覆盖层。
+//! 顶层 `RootView`: `TitleBar` + 可折叠 Sidebar + 内容区 + 覆盖层。
 //!
 //! - 左侧 `Sidebar`: `SidebarMenuItem` × 5 (Search / Tasks / Library / Sources / Settings),
-//!   可折叠到 48px 图标宽度 (`SidebarCollapsible::Icon`, 200ms 缓动); 折叠按钮在 TitleBar
+//!   可折叠到 48px 图标宽度 (`SidebarCollapsible::Icon`, 200ms 缓动); 折叠按钮在 `TitleBar`
 //!   最左侧, `Cmd+B` 快捷键也可切换。**无 footer** — sidebar 只渲染 menu + header。
 //! - 右侧内容区: 按 `current_page` 渲染对应 page (`SettingsPage` 用 gpui-component
 //!   `Settings` 组件搭)。
@@ -42,9 +42,9 @@ pub struct RootView {
     current_page: NavPage,
     /// 初始值来自 `AppConfig.sidebar_collapsed`, 翻转后写回 config + 落盘, 重启保持。
     sidebar_collapsed: bool,
-    /// new() 里 `window.focus(&_focus)` 让 RootView 拥有初始焦点 —— `KEY_CONTEXT`
+    /// `new()` 里 `window.focus(&focus)` 让 `RootView` 拥有初始焦点 —— `KEY_CONTEXT`
     /// 绑定的快捷键 (`F6` / `Cmd+1..5`) 稳定 fire, 不依赖 focus 落到哪个子元素。
-    _focus: gpui::FocusHandle,
+    focus: gpui::FocusHandle,
 
     // 5 个 page entity 一次性创建, 跨切换保持内部状态 (输入框 / 滚动位置)。
     library_page: Entity<LibraryPage>,
@@ -56,8 +56,8 @@ pub struct RootView {
 
 impl RootView {
     pub fn new(model: Entity<AppModel>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let _focus = cx.focus_handle();
-        window.focus(&_focus);
+        let focus = cx.focus_handle();
+        window.focus(&focus);
 
         let library_page = cx.new(|cx| LibraryPage::new(model.clone(), window, cx));
         let search_page = cx.new(|cx| SearchPage::new(model.clone(), window, cx));
@@ -72,7 +72,7 @@ impl RootView {
             model,
             current_page: NavPage::default(),
             sidebar_collapsed,
-            _focus,
+            focus,
             library_page,
             search_page,
             tasks_page,
@@ -120,8 +120,8 @@ impl RootView {
     /// - **无 footer** — 不调 `.footer(...)`, gpui-component 内部 `when_some` 跳过。
     ///
     /// 200ms `ease_in_out_cubic` 缓动由 `gpui-component::Sidebar` 内部 `Transition` 提供。
-    /// 折叠按钮在 TitleBar 最左侧 (见 `render_title_bar`)。
-    fn render_sidebar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    /// 折叠按钮在 `TitleBar` 最左侧 (见 `render_title_bar`)。
+    fn render_sidebar(&self, cx: &Context<Self>) -> impl IntoElement {
         let collapsed = self.sidebar_collapsed;
 
         let items: Vec<SidebarMenuItem> = [
@@ -177,11 +177,11 @@ impl RootView {
     /// 渲染 gpui-component `TitleBar`。
     ///
     /// 最左侧 `SidebarToggleButton` (默认 small ghost 样式), 右侧自动 `WindowControls`。
-    /// TitleBar 按平台处理 (`WindowDecorations::Client` 在 `mod.rs` 设置):
+    /// `TitleBar` 按平台处理 (`WindowDecorations::Client` 在 `mod.rs` 设置):
     /// macOS traffic lights 自动 / Windows 自定义 34px 按钮 / Linux 自定义。
     /// 背景色 / 底边走 `cx.theme().title_bar[_border]`, 自动主题适配; 整个左半区域是
     /// drag area (toggle button 自己消费 mousedown, 不会触发拖动)。
-    fn render_title_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_title_bar(&self, cx: &Context<Self>) -> impl IntoElement {
         // `SidebarToggleButton::on_click` 收 `Fn(&ClickEvent, &mut Window, &mut App)`,
         // 没法直接用 cx.listener, 走 entity.update 桥接到 `toggle_sidebar`。
         let root_entity = cx.entity();
@@ -196,10 +196,10 @@ impl RootView {
         )
     }
 
-    /// 右侧内容区。按 current_page 渲染对应 page entity。
-    fn render_content(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    /// 右侧内容区。按 `current_page` 渲染对应 page entity。
+    fn render_content(&self, cx: &Context<Self>) -> impl IntoElement {
         div()
-            .track_focus(&self._focus)
+            .track_focus(&self.focus)
             .flex_1()
             .size_full()
             .overflow_hidden()
@@ -210,7 +210,8 @@ impl RootView {
 
     /// 8 个导航 action 的 listener 挂到传入的 div 上, 返回挂好后的 div。
     /// 抽出到独立方法, 避免 render 主体被 action 链淹没。
-    fn bind_nav_actions(&self, root: gpui::Div, cx: &mut Context<Self>) -> gpui::Div {
+    /// 不取 `&self` —— 只用 `cx` 就能 `cx.listener(...)`, 避免 `unused_self`。
+    fn bind_nav_actions(root: gpui::Div, cx: &Context<Self>) -> gpui::Div {
         root.on_action(
             cx.listener(|this, _: &ShowSearch, _, cx| this.navigate(NavPage::Search, cx)),
         )
@@ -252,7 +253,7 @@ impl Render for RootView {
             window.push_notification(ui_event_to_notification(ev), cx);
         }
 
-        self.bind_nav_actions(div().key_context(KEY_CONTEXT), cx)
+        Self::bind_nav_actions(div().key_context(KEY_CONTEXT), cx)
             .size_full()
             .flex()
             .flex_row()

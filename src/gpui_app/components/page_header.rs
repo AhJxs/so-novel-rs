@@ -23,6 +23,7 @@ impl PageHeader {
         }
     }
 
+    #[must_use]
     pub fn subtitle(mut self, subtitle: impl Into<SharedString>) -> Self {
         self.subtitle = Some(subtitle.into());
         self
@@ -30,6 +31,7 @@ impl PageHeader {
 
     /// 添加一个右侧 action。`Slot` 是 `gpui::Div` — 调用方自己 `Button::new(...)` 后
     /// `.into_any_element()` 转 `Div` 即可（gpui 的 Div 可以套任何 element）。
+    #[must_use]
     pub fn action(mut self, action: impl IntoElement) -> Self {
         self.actions.push(div().child(action));
         self

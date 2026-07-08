@@ -1,4 +1,4 @@
-//! SourcesDelegate: gpui-component List delegate，持有 page handle + 当前页 (index, Rule) + health map。
+//! `SourcesDelegate`: gpui-component List delegate，持有 page handle + 当前页 (index, Rule) + health map。
 
 use std::collections::HashMap;
 
@@ -56,7 +56,7 @@ impl ListDelegate for SourcesDelegate {
                     &rule,
                     health_status.as_ref(),
                     self.page_handle.clone(),
-                    &mut *cx,
+                    &*cx,
                 )),
         )
     }

@@ -19,10 +19,10 @@
 //! 3. 重启后新进程启动时 `mod.rs::run` 调 `gpui_component::set_locale(locale_for(language))`
 //!    写全局 locale，再开窗 —— 首次 render 就用新 locale
 //!
-//! 为什么不实时切换（set_locale + refresh_windows）？gpui-component 的 `InputState.placeholder`、
+//! `为什么不实时切换（set_locale` + refresh_windows）？gpui-component 的 `InputState.placeholder`、
 //! `SettingsState` 等很多翻译是一次性求值缓存在各 entity 里的，切语言当帧 `refresh_windows`
 //! 不会重求这些缓存值（下拉框已选值 / 输入框 placeholder 不更新）。早先用「render 里 sentinel
-//! 差量比对 + set_placeholder」逐个刷新，代价大且覆盖不全，故改成重启生效，彻底删掉 sentinel 机制。
+//! 差量比对 + `set_placeholder」逐个刷新，代价大且覆盖不全，故改成重启生效，彻底删掉` sentinel 机制。
 //!
 //! ## 模块位置历史
 //!
@@ -37,7 +37,7 @@ use crate::config::Language;
 /// 把 `Language` 映射到 `rust_i18n` 用的 locale 标签。
 ///
 /// **这是项目里 `Language → locale 字符串` 的唯一权威映射**。
-/// `Language::as_str()` 返回的是 toml_io 持久化用的 `"zh-TW"` —— 跟 `app.yml`
+/// `Language::as_str()` 返回的是 `toml_io` 持久化用的 `"zh-TW"` —— 跟 `app.yml`
 /// 实际的 locale 标签（`"zh-HK"`）不一致，所以 `load_config` 之后、任何
 /// `ts("Cli.xxx")` / `gpui_component::set_locale` 之前都要走这里。
 ///
@@ -50,7 +50,7 @@ use crate::config::Language;
 /// CLI 路径（web-only / 未来 cli-only 构建）不依赖 `gpui_app`，但 CLI 也要按
 /// `config.toml` 的 language 切帮助语言 —— 必须从 cfg gate 模块搬到中性 crate
 /// root 模块 `crate::i18n`。`gpui_app` 那边改成 `use crate::i18n::locale_for`。
-pub fn locale_for(lang: Language) -> &'static str {
+pub const fn locale_for(lang: Language) -> &'static str {
     match lang {
         Language::SimplifiedChinese => "zh-CN",
         Language::TraditionalChinese => "zh-HK",
@@ -66,7 +66,7 @@ pub type TStr = gpui::SharedString;
 #[cfg(not(feature = "gui"))]
 pub type TStr = String;
 
-/// 全局 TStr 缓存：key → 已翻译的 TStr。
+/// 全局 `TStr` 缓存：key → 已翻译的 `TStr`。
 ///
 /// **仅缓存无变量 key（`ts`）的结果**。`ts_fmt` 因 value 不可预测不进缓存。
 /// locale 变化（`set_locale`）时清空 —— 通过 `invalidate_cache` 在 `set_locale`
@@ -102,12 +102,11 @@ pub fn invalidate_cache() {
 pub fn ts(key: &'static str) -> TStr {
     let locale = rust_i18n::locale();
     crate::_rust_i18n_try_translate(&locale, key)
-        .map(|cow| TStr::from(cow.into_owned()))
-        .unwrap_or_else(|| TStr::from(key))
+        .map_or_else(|| TStr::from(key), |cow| TStr::from(cow.into_owned()))
 }
 
 /// 翻译查找的缓存版本。热路径（行 builder 每次 render 调）走这个：
-/// - 首次访问时查 rust_i18n，写入 `TS_CACHE`（全局 `OnceLock<Mutex<HashMap>>`）。
+/// - 首次访问时查 `rust_i18n，写入` `TS_CACHE`（全局 `OnceLock<Mutex<HashMap>>`）。
 /// - 后续访问直接 clone 共享的 `SharedString`（`SharedString` 内部 `Arc<str>`，
 ///   clone 只增引用计数，无 alloc）。
 ///
@@ -153,8 +152,7 @@ pub fn ts_cached(key: &'static str) -> TStr {
 pub fn ts_fmt(key: &'static str, vars: &[(&str, &str)]) -> TStr {
     let locale = rust_i18n::locale();
     let mut result = crate::_rust_i18n_try_translate(&locale, key)
-        .map(|cow| cow.into_owned())
-        .unwrap_or_else(|| key.to_string());
+        .map_or_else(|| key.to_string(), std::borrow::Cow::into_owned);
     for (name, value) in vars {
         // 占位符形式 `{name}` —— `format!("{{{}}}", name)` 转义出字面 `{name}`。
         result = result.replace(&format!("{{{name}}}"), value);
@@ -177,26 +175,18 @@ pub fn ts_fmt_cached(key: &'static str, vars: &[(&str, &str)]) -> TStr {
     let cache = TPL_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
 
     // 拿模板（缓存 miss 时回退到直接调 ts_fmt + 写回）
-    let template = if let Ok(g) = cache.lock() {
-        g.get(key).cloned()
-    } else {
-        None
-    };
-    let template = match template {
-        Some(t) => t,
-        None => {
-            // miss：复用 ts_fmt 算出一次完整结果作为模板（变量无关部分是模板本体）。
-            // 但 ts_fmt 已经替了占位符，这里手动走底层拿"未替"版本。
-            let locale = rust_i18n::locale();
-            let raw = crate::_rust_i18n_try_translate(&locale, key)
-                .map(|cow| cow.into_owned())
-                .unwrap_or_else(|| key.to_string());
-            if let Ok(mut g) = cache.lock() {
-                g.insert(key, raw.clone());
-            }
-            raw
+    let template = cache.lock().map_or(None, |g| g.get(key).cloned());
+    let template = template.unwrap_or_else(|| {
+        // miss：复用 ts_fmt 算出一次完整结果作为模板（变量无关部分是模板本体）。
+        // 但 ts_fmt 已经替了占位符，这里手动走底层拿"未替"版本。
+        let locale = rust_i18n::locale();
+        let raw = crate::_rust_i18n_try_translate(&locale, key)
+            .map_or_else(|| key.to_string(), std::borrow::Cow::into_owned);
+        if let Ok(mut g) = cache.lock() {
+            g.insert(key, raw.clone());
         }
-    };
+        raw
+    });
 
     if vars.is_empty() {
         // 常见 case：UI 上很多 "已翻译" 标签走 `ts_fmt(key, &[])` —— 实际等于 `ts_cached`。
@@ -212,6 +202,7 @@ pub fn ts_fmt_cached(key: &'static str, vars: &[(&str, &str)]) -> TStr {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
     use super::*;
 
     /// 精简版：只验证 `ts` / `ts_fmt` 两个方法在三 locale 下行为正确（翻译返回、

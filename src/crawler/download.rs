@@ -1,9 +1,9 @@
-//! 阶段二: 章节下载 + 导出 (PR #17 拆分, 2026-07-08).
+//! 阶段二: 章节下载 + 导出
 //!
 //! 主流程: `download_book` 调 `resolve_book` 拿到 Book + 章节列表,
 //! 然后调 `download_chapters` 并发抓取 + 导出。
 //!
-//! 关键路径: Semaphore 限并发 / per-task write / 取消用 tokio::select
+//! 关键路径: Semaphore 限并发 / per-task write / 取消用 `tokio::select`
 //! 配合 reqwest future drop 实现零延迟中断。
 
 use std::path::PathBuf;
@@ -14,9 +14,7 @@ use rand::RngExt;
 use tokio::sync::Semaphore;
 
 use crate::config::AppConfig;
-use crate::export::{
-    RenderTarget, build_book_dir_name, exporter_for, write_single_chapter,
-};
+use crate::export::{RenderTarget, build_book_dir_name, exporter_for, write_single_chapter};
 use crate::models::{Book, Chapter, Source};
 use crate::parser::{ChapterError, TocError, parse_chapter};
 
@@ -76,13 +74,13 @@ pub async fn download_book(
         total_chapters: toc.len(),
     });
     if let Some(ref n) = notify {
-        n()
+        n();
     }
 
     if cancel.is_cancelled() {
         let _ = progress.send(Progress::Cancelled);
         if let Some(ref n) = notify {
-            n()
+            n();
         }
         return Err(CrawlerError::Cancelled);
     }
@@ -172,7 +170,7 @@ pub async fn download_chapters(
             cleanup_chapters_dir_if_empty(&chapters_dir);
             let _ = progress.send(Progress::Cancelled);
             if let Some(ref n) = notify {
-                n()
+                n();
             }
             return Err(CrawlerError::Cancelled);
         }
@@ -219,8 +217,8 @@ pub async fn download_chapters(
             };
             tokio::select! {
                 biased;
-                _ = cancel.wait_cancelled() => return ChapterOutcome::Cancelled,
-                _ = tokio::time::sleep(Duration::from_millis(interval)) => {}
+                () = cancel.wait_cancelled() => return ChapterOutcome::Cancelled,
+                () = tokio::time::sleep(Duration::from_millis(interval)) => {}
             }
 
             if cancel.is_cancelled() {
@@ -263,7 +261,7 @@ pub async fn download_chapters(
 
             let result = tokio::select! {
                 biased;
-                _ = cancel.wait_cancelled() => {
+                () = cancel.wait_cancelled() => {
                     return ChapterOutcome::Cancelled;
                 }
                 r = fetch_future => r,
@@ -276,7 +274,7 @@ pub async fn download_chapters(
                         &rule_chapter,
                         render_target,
                         &rule_lang,
-                        &target_lang,
+                        target_lang,
                     );
                     // per-chapter write: persist immediately
                     if let Err(e) = write_single_chapter(
@@ -291,10 +289,10 @@ pub async fn download_chapters(
                     }
                     let _ = progress.send(Progress::ChapterDone {
                         index: order,
-                        title: final_title.clone(),
+                        title: final_title,
                     });
                     if let Some(ref n) = ch_notify {
-                        n()
+                        n();
                     }
                     ChapterOutcome::Done
                 }
@@ -315,7 +313,7 @@ pub async fn download_chapters(
                         reason,
                     });
                     if let Some(ref n) = ch_notify {
-                        n()
+                        n();
                     }
                     ChapterOutcome::Failed
                 }
@@ -331,8 +329,7 @@ pub async fn download_chapters(
         for h in &mut handles {
             match h.await {
                 Ok(ChapterOutcome::Done) => rendered_count += 1,
-                Ok(ChapterOutcome::Failed) => {}
-                Ok(ChapterOutcome::Cancelled) => {}
+                Ok(ChapterOutcome::Failed | ChapterOutcome::Cancelled) => {}
                 Err(join_err) => {
                     tracing::warn!("章节任务 join 失败: {join_err}");
                 }
@@ -342,7 +339,7 @@ pub async fn download_chapters(
 
     tokio::select! {
         biased;
-        _ = cancel.wait_cancelled() => {
+        () = cancel.wait_cancelled() => {
             // 主动 abort 还在跑的章节 — 它们的 future 被 drop 后 reqwest 立刻关连接
             for h in &handles {
                 h.abort();
@@ -361,7 +358,7 @@ pub async fn download_chapters(
         cleanup_chapters_dir_if_empty(&chapters_dir);
         let _ = progress.send(Progress::Cancelled);
         if let Some(ref n) = notify {
-            n()
+            n();
         }
         return Err(CrawlerError::Cancelled);
     }
@@ -399,7 +396,7 @@ pub async fn download_chapters(
         output_path: final_path.clone(),
     });
     if let Some(ref n) = notify {
-        n()
+        n();
     }
 
     // 终态日志已由 ops/download.rs 的 `下载任务终止 outcome=ok` 覆盖;
@@ -495,6 +492,7 @@ async fn download_cover(client: &reqwest::Client, cover_url: Option<&str>) -> Op
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
     use super::*;
     use crate::models::{Rule, RuleCrawl};
 

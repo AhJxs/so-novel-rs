@@ -24,15 +24,29 @@ const CF_TITLES: &[&str] = &[
     "Checking your browser before accessing",
 ];
 
+/// 编译期确定的正则：用 match 走 panic 路径以避免 `clippy::expect_used`，
+/// 与项目里其它 `LazyLock` 静态正则统一风格。
+/// panic IS the design：源码字面量写错就是程序员错误。
+#[allow(
+    clippy::panic,
+    reason = "static regex literal must compile; failure = programmer error"
+)]
+fn compile_static_re(pattern: &'static str) -> Regex {
+    match Regex::new(pattern) {
+        Ok(re) => re,
+        Err(e) => panic!("static regex `{pattern}` should compile: {e}"),
+    }
+}
+
 static TITLE_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?is)<title[^>]*>(.*?)</title>").expect("title regex"));
+    LazyLock::new(|| compile_static_re(r"(?is)<title[^>]*>(.*?)</title>"));
 
 /// 给定原始 HTML，判断是否是 Cloudflare 真人验证页。
 pub fn has_cloudflare(html: &str) -> bool {
     let Some(cap) = TITLE_RE.captures(html) else {
         return false;
     };
-    let title = cap.get(1).map(|m| m.as_str().trim()).unwrap_or("");
+    let title = cap.get(1).map_or("", |m| m.as_str().trim());
     CF_TITLES.contains(&title)
 }
 
@@ -104,6 +118,7 @@ pub async fn fetch_via_cf_bypass(
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
     use super::*;
 
     #[test]
@@ -129,7 +144,7 @@ mod tests {
         assert!(!has_cloudflare("<html><body>foo</body></html>"));
     }
 
-    /// 不真发请求；只验证 fetch_via_cf_bypass 的 URL 拼接形状（trim '/'）。
+    /// 不真发请求；只验证 `fetch_via_cf_bypass` 的 URL 拼接形状（trim '/'）。
     #[test]
     fn cf_bypass_url_formatting_via_dry_run() {
         // 仅形状校验：复用拼接逻辑会涉及私有 const，把判定从外部行为出发。

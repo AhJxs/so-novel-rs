@@ -1,4 +1,4 @@
-//! `AppModel` 搜索相关方法 (PR #17 拆分, 2026-07-08).
+//! `AppModel` 搜索相关方法
 //!
 //! 全部 thin delegator, 实际逻辑在 `crate::app::ops::search`.
 

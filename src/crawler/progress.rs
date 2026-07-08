@@ -1,4 +1,4 @@
-//! 下载进度事件 (PR #17 拆分, 2026-07-08).
+//! 下载进度事件
 //!
 //! `Progress` 是调度层 → UI 的消息协议, 通过 `mpsc::UnboundedSender<Progress>`
 //! 推送, UI 端 ([`crate::app::events`]) 排空后触发重绘。

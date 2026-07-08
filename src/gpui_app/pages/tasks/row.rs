@@ -20,7 +20,7 @@ use super::TasksPage;
 use super::summary::TaskSummary;
 
 /// 渲染一条任务行（卡片式：序号 / 标题行 / 进度条 / 失败折叠 / 动作按钮）。
-pub(super) fn render(task: TaskSummary, page: Entity<TasksPage>, cx: &mut App) -> impl IntoElement {
+pub(super) fn render(task: &TaskSummary, page: &Entity<TasksPage>, cx: &App) -> impl IntoElement {
     let running = task.is_running();
     let succeeded = matches!(task.finished, Some(Ok(_)));
     let failed = task.is_failed();
@@ -41,10 +41,12 @@ pub(super) fn render(task: TaskSummary, page: Entity<TasksPage>, cx: &mut App) -
     );
 
     let progress_pct = if total > 0 {
-        (completed as f32 / total as f32).clamp(0.0, 1.0) * 100.0
+        let total_u32 = u32::try_from(total).unwrap_or(0);
+        (f64::from(completed) / f64::from(total_u32)).clamp(0.0, 1.0) * 100.0_f64
     } else {
-        0.0
+        0.0_f64
     };
+    let progress_pct = progress_pct as f32;
 
     let status = if running {
         StatusKind::Info
@@ -79,16 +81,16 @@ pub(super) fn render(task: TaskSummary, page: Entity<TasksPage>, cx: &mut App) -
                 .as_deref()
                 .filter(|s| !s.trim().is_empty())
         });
-        match raw {
-            Some(s) => SharedString::from(truncate(s, 30).to_string()),
-            None => ts_cached("Tasks.fallback_unknown_author"),
-        }
+        raw.map_or_else(
+            || ts_cached("Tasks.fallback_unknown_author"),
+            |s| SharedString::from(truncate(s, 30)),
+        )
     };
     // 书源名：直接用结果自带的 source_name（数据，不译），空走 fallback。
     let source_name_display: SharedString = if task.origin.source_name.trim().is_empty() {
         ts_cached("Tasks.fallback_unknown_book")
     } else {
-        SharedString::from(truncate(&task.origin.source_name, 20).to_string())
+        SharedString::from(truncate(&task.origin.source_name, 20))
     };
 
     // 书名行：书名 · 作者 · 书源名（作者 / 书源名 muted、xs，紧贴书名右侧）。
@@ -106,7 +108,7 @@ pub(super) fn render(task: TaskSummary, page: Entity<TasksPage>, cx: &mut App) -
             div()
                 .text_xs()
                 .text_color(cx.theme().muted_foreground)
-                .child(format!("{} · {}", author_display, source_name_display)),
+                .child(format!("{author_display} · {source_name_display}")),
         );
 
     // 进度条上的章节信息：N/M 章 · 失败 n（走 ts_fmt 占位符，避免切语言乱序）。
@@ -284,16 +286,16 @@ pub(super) fn render(task: TaskSummary, page: Entity<TasksPage>, cx: &mut App) -
                                                 // Fn handler：每次点击重新 clone 给 update 闭包。
                                                 let failures = failures.clone();
                                                 let book_name = book_name.clone();
-                                                page_for_fails.update(cx, |p, cx| {
-                                                    p.show_failures(failures, book_name, window, cx);
+                                                page_for_fails.update(cx, |_p, cx| {
+                                                    TasksPage::show_failures(failures, book_name, window, cx);
                                                 });
                                             }),
                                     )
                                 })
                                 // 打开 / 位置（仅成功）
-                                .when_some(output_path.clone(), |this, path| {
+                                .when_some(output_path, |this, path| {
                                     let path_open = path.clone();
-                                    let path_reveal = path.clone();
+                                    let path_reveal = path;
                                     let task_id = task.id;
                                     this.child(
                                         Button::new(("task-open", task_id))

@@ -65,6 +65,7 @@ pub(super) fn embedded_themes() -> Vec<(&'static str, &'static str)> {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
     use super::*;
 
     /// 21 个 embed JSON 全部合法、文件名 *.json、含 `themes[]` + `name`。
@@ -74,7 +75,10 @@ mod tests {
         let themes = embedded_themes();
         assert_eq!(themes.len(), 21, "expect 21 embedded theme files");
         for (name, content) in &themes {
-            assert!(name.ends_with(".json"), "filename must end .json: {name}");
+            assert!(
+                name.to_lowercase().ends_with(".json"),
+                "filename must end .json: {name}"
+            );
             assert!(!content.is_empty(), "empty content: {name}");
             let v: serde_json::Value = serde_json::from_str(content)
                 .unwrap_or_else(|e| panic!("invalid JSON in {name}: {e}"));

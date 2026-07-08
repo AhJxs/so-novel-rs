@@ -41,7 +41,7 @@ pub(super) fn build(ctx: &PageCtx<'_>, _cx: &App) -> SettingPage {
                     SettingItem::new(
                         ts("Settings.item.check_update"),
                         SettingField::render({
-                            let m = m.clone();
+                            let m = m;
                             move |_opts, _window, cx| {
                                 // 网络请求在跑时 → Button::loading(true) 自动显示
                                 // spinner + 屏蔽 click（gpui-component 0.5.1 button.rs:365：

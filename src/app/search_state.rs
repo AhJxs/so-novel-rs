@@ -47,14 +47,14 @@ pub struct SearchState {
 
     /// 上次搜索的关键词（用于结果列表的标题展示，知道是哪次搜的）。
     pub last_keyword: Option<String>,
-    /// 已收到的结果（按 source_id 升序）。
+    /// 已收到的结果（按 `source_id` 升序）。
     pub results: Vec<SearchResult>,
     /// `results` 改动的单调递增版本号：`drain` 写入新结果时 +1。
     /// UI 渲染用 `(results_version, filter_hash, page_index)` 缓存过滤/排序结果，
     /// 避免每帧重算 + clone —— 详见 `crate::app::list_cache`。
     pub results_version: u64,
     /// 各源的搜索状态：true = 跑完，false = 还在跑。
-    /// 用 (source_id, source_name, status) 让 UI 显示哪个源还在等。
+    /// 用 (`source_id`, `source_name`, status) 让 UI 显示哪个源还在等。
     pub source_status: Vec<(i32, String, SourceStatus)>,
     /// 整体是否在跑（true 时禁用搜索按钮）。
     pub running: bool,
@@ -70,15 +70,15 @@ pub struct SearchState {
 
     /// 当前选中的搜索结果（行索引）；用于右侧详情面板。
     pub selected: Option<usize>,
-    /// 详情缓存：(source_id, url) → DetailState。后台 spawn 后回写。
+    /// `详情缓存：(source_id`, url) → DetailState。后台 spawn 后回写。
     pub detail_cache: HashMap<(i32, String), DetailState>,
     /// 详情后台任务的接收端（每条结果一个事件）。
     pub detail_rx: Option<mpsc::UnboundedReceiver<DetailEvent>>,
 
-    /// spawn_search 时拷自 cfg.search_filter；全部源返回后用它决定是否调用 filter_sort。
+    /// `spawn_search` 时拷自 `cfg.search_filter；全部源返回后用它决定是否调用` `filter_sort`。
     pub filter_after_done: bool,
 
-    /// TOC 预取缓存：(source_id, url) → TocState。
+    /// TOC `预取缓存：(source_id`, url) → `TocState`。
     pub toc_cache: HashMap<(i32, String), TocState>,
     /// TOC 预取后台任务的接收端。
     pub toc_rx: Option<mpsc::UnboundedReceiver<TocEvent>>,
@@ -92,7 +92,7 @@ pub struct SearchState {
     pub cover_tx: Option<mpsc::UnboundedSender<CoverEvent>>,
     /// 封面下载完成通道的接收端。
     pub cover_rx: Option<mpsc::UnboundedReceiver<CoverEvent>>,
-    /// 封面结果缓存：(source_id, cover_url) → CoverEntry。
+    /// `封面结果缓存：(source_id`, `cover_url`) → `CoverEntry`。
     ///
     /// **LRU 上限 `COVER_CACHE_CAPACITY`（64）**：长会话累积所有查看过的
     /// 封面的旧实现（`HashMap` 无界）会被这个 LRU 取代，超额自动驱逐。
@@ -100,7 +100,7 @@ pub struct SearchState {
     pub cover_cache: LruCache<(i32, String), CoverEntry>,
     /// 正在下载中的封面 URL；防止重复 spawn。
     pub cover_in_flight: HashSet<(i32, String)>,
-    /// drain_detail 期间收集到的待 prefetch 封面 URL，drain 后由 AppModel 取出统一派发。
+    /// `drain_detail` 期间收集到的待 prefetch 封面 URL，drain 后由 `AppModel` 取出统一派发。
     pub pending_cover_prefetch: Vec<(i32, String)>,
 }
 
@@ -147,7 +147,7 @@ impl DetailState {
     /// 仅当 Loaded 状态可取书；Pending/Failed 返回 None。
     pub fn book(&self) -> Option<&Book> {
         match self {
-            DetailState::Loaded(b) => Some(b),
+            Self::Loaded(b) => Some(b),
             _ => None,
         }
     }
@@ -352,7 +352,7 @@ impl SearchState {
     }
 
     /// 派一个封面下载任务。已有缓存 / 正在下载 / url 为空时直接返回（幂等）。
-    /// `client` 是共享 HTTP client 集合，封面下载固定走 safe 通道（unsafe_ssl=false
+    /// `client` 是共享 HTTP client 集合，封面下载固定走 safe `通道（unsafe_ssl=false`
     /// 的常规请求），不复用 `cfg` 自己造 client。
     pub fn spawn_cover_download(
         &mut self,
@@ -371,16 +371,15 @@ impl SearchState {
         if self.cover_cache.peek(&key).is_some() || self.cover_in_flight.contains(&key) {
             return;
         }
-        self.cover_in_flight.insert(key.clone());
+        self.cover_in_flight.insert(key);
 
-        let tx = match self.cover_tx.as_ref() {
-            Some(t) => t.clone(),
-            None => {
-                let (t, r) = mpsc::unbounded_channel();
-                self.cover_tx = Some(t.clone());
-                self.cover_rx = Some(r);
-                t
-            }
+        let tx = if let Some(t) = self.cover_tx.as_ref() {
+            t.clone()
+        } else {
+            let (t, r) = mpsc::unbounded_channel();
+            self.cover_tx = Some(t.clone());
+            self.cover_rx = Some(r);
+            t
         };
 
         let url_owned = url.to_string();
@@ -404,10 +403,7 @@ impl SearchState {
             {
                 Ok(r) => {
                     let status = r.status();
-                    if !status.is_success() {
-                        tracing::warn!("封面下载失败（已忽略）: HTTP {} for {}", status, url_owned);
-                        None
-                    } else {
+                    if status.is_success() {
                         match r.bytes().await {
                             Ok(b) if !b.is_empty() => Some(b.to_vec()),
                             Ok(_) => {
@@ -419,6 +415,9 @@ impl SearchState {
                                 None
                             }
                         }
+                    } else {
+                        tracing::warn!("封面下载失败（已忽略）: HTTP {} for {}", status, url_owned);
+                        None
                     }
                 }
                 Err(e) => {
@@ -438,6 +437,7 @@ impl SearchState {
 
 #[cfg(test)]
 mod search_state_tests {
+    #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
     use super::*;
     use crate::config::AppConfig;
 
@@ -498,7 +498,7 @@ mod search_state_tests {
         assert!(s.cover_in_flight.is_empty());
     }
 
-    /// 回归测试：跑完 spawn 后 drop multi_thread runtime 不应触发
+    /// 回归测试：跑完 spawn 后 drop `multi_thread` runtime 不应触发
     /// "Cannot drop a runtime in a context where blocking is not allowed"。
     #[test]
     fn cover_runtime_drop_does_not_panic() {

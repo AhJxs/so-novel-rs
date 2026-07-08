@@ -1,10 +1,10 @@
 //! 搜索结果详情 Dialog body 渲染：左侧封面 + 右侧字段列表。
 //!
 //! 布局 `h_flex`：左封面固定 `COVER_W × COVER_H`，右字段 `flex_1`。Dialog body 自带
-//! `overflow_y_scrollbar`（见 gpui-component Dialog::render），字段多 / 简介长可滚动查看。
+//! `overflow_y_scrollbar`（见 gpui-component `Dialog::render），字段多` / 简介长可滚动查看。
 //!
 //! 封面是反应式的：`render_detail_cover` 每帧重读 live `cover_cache`，封面到达后自动刷新
-//! （drain loop 100ms notify → RootView 重 render → Dialog builder 重调本函数）。
+//! （drain loop 100ms notify → `RootView` 重 render → Dialog builder 重调本函数）。
 
 use std::io::Cursor;
 use std::sync::Arc;
@@ -29,10 +29,10 @@ const COVER_H: f32 = 170.0;
 
 /// 渲染详情 Dialog 的 body：左侧封面 + 右侧字段列表。
 pub(super) fn content(
-    r: SearchResult,
-    page: Entity<SearchPage>,
+    r: &SearchResult,
+    page: &Entity<SearchPage>,
     source_id: i32,
-    url: String,
+    url: &str,
     cx: &mut App,
 ) -> impl IntoElement {
     // 详情是再次请求拿的完整字段（intro / category / status / latest / last_update / author），
@@ -44,7 +44,7 @@ pub(super) fn content(
         .read(cx)
         .search
         .detail_cache
-        .get(&(source_id, url.clone()))
+        .get(&(source_id, url.to_string()))
         .and_then(|s| s.book().cloned());
     let b = book.as_ref();
 
@@ -164,7 +164,7 @@ pub(super) fn content(
     h_flex()
         .gap_4()
         .items_start()
-        .child(render_detail_cover(page, source_id, &url, cx))
+        .child(render_detail_cover(page, source_id, url, cx))
         .child(fields.flex_1().min_w_0())
 }
 
@@ -176,7 +176,7 @@ fn detail_opt(v: Option<&str>) -> SharedString {
     }
 }
 
-/// 详情 Dialog 的「label + value」行：label 固定 84px、muted、xs；value flex_1、可换行。
+/// 详情 Dialog 的「label + value」行：label 固定 84px、muted、xs；value `flex_1、可换行`。
 ///
 /// `max_h`：长内容字段（如简介）传 `Some(px)` 给 value 区设最大高度 + 内部滚动条，
 /// 避免单个字段把整个 Dialog 撑得超高。
@@ -266,10 +266,10 @@ fn decode_cover_image(bytes: &[u8]) -> Option<Arc<RenderImage>> {
 /// - 有 `cover_url` 但 `cover_cache` 还没到 / `Failed` → 「封面加载中…」/「封面获取失败」
 /// - `CoverEntry::Ready` → 命中本页解码缓存就渲染，未命中就解码 + 写缓存再渲染
 ///
-/// `page: Entity<SearchPage>`：本页 `cover_images` 缓存是 `&mut self` 字段，必须通过
+/// `page: &Entity<SearchPage>`：本页 `cover_images` 缓存是 `&mut self` 字段，必须通过
 /// `page.update` 拿可变借用写缓存。读 model 也走 `page.model`，避免在已借 `model` 时再借。
 fn render_detail_cover(
-    page: Entity<SearchPage>,
+    page: &Entity<SearchPage>,
     source_id: i32,
     url: &str,
     cx: &mut App,
@@ -311,21 +311,13 @@ fn render_detail_cover(
                     Some(CoverEntry::Ready { bytes, uri }) => {
                         // 命中本页解码缓存就复用；否则解码 + 写缓存。
                         if let Some(cached) = p.cover_images.get(uri.as_str()).cloned() {
-                            match cached {
-                                Some(img) => CoverView::Image(img),
-                                None => CoverView::Failed,
-                            }
+                            cached.map_or(CoverView::Failed, CoverView::Image)
+                        } else if let Some(img) = decode_cover_image(bytes) {
+                            p.cover_images.put(uri.clone(), Some(img.clone()));
+                            CoverView::Image(img)
                         } else {
-                            match decode_cover_image(bytes) {
-                                Some(img) => {
-                                    p.cover_images.put(uri.clone(), Some(img.clone()));
-                                    CoverView::Image(img)
-                                }
-                                None => {
-                                    p.cover_images.put(uri.clone(), None);
-                                    CoverView::Failed
-                                }
-                            }
+                            p.cover_images.put(uri.clone(), None);
+                            CoverView::Failed
                         }
                     }
                     Some(CoverEntry::Failed(_)) => CoverView::Failed,

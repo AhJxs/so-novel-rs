@@ -22,10 +22,10 @@ use gpui_component::{
 };
 
 use crate::app::{AppModel, SourcesFilterStatus};
+use crate::db::list_rule_files;
 use crate::gpui_app::components::{EmptyState, PageHeader, Pagination, compute_page_window};
 use crate::i18n::ts;
 use crate::models::Rule;
-use crate::db::list_rule_files;
 
 use self::delegate::SourcesDelegate;
 
@@ -81,7 +81,7 @@ impl SourcesPage {
             window,
             move |_this, _state, ev, _w, cx| {
                 if let SelectEvent::Confirm(Some(value)) = ev {
-                    let filename = value.to_string();
+                    let filename = value.clone();
                     model_for_select.update(cx, |m, _cx| {
                         m.switch_active_file(&filename);
                     });
@@ -92,7 +92,7 @@ impl SourcesPage {
         .detach();
 
         // 3. List + Delegate。
-        let page_handle = cx.entity().clone();
+        let page_handle = cx.entity();
         let delegate = SourcesDelegate::new(page_handle);
         let list_state = cx.new(|cx| ListState::new(delegate, window, cx));
 
@@ -107,7 +107,7 @@ impl SourcesPage {
     }
 
     /// 调 `rfd` 文件选择器选 JSON 文件，调 `add_sources_from_file`。
-    fn pick_and_add(&mut self, cx: &mut Context<Self>) {
+    fn pick_and_add(&self, cx: &Context<Self>) {
         let model = self.model.clone();
         let page_handle = cx.entity().downgrade();
         cx.spawn(async move |_weak, async_cx| {
@@ -137,12 +137,12 @@ impl SourcesPage {
         .detach();
     }
 
-    fn run_health_check(&mut self, cx: &mut Context<Self>) {
+    fn run_health_check(&self, cx: &mut Context<Self>) {
         self.model.update(cx, |m, _cx| m.spawn_health_check());
         cx.notify();
     }
 
-    /// 设置状态过滤（全部 / 启用 / 禁用）。跳回第 1 页（同 library ext_filter 行为）。
+    /// 设置状态过滤（全部 / 启用 / 禁用）。跳回第 1 页（同 library `ext_filter` 行为）。
     pub(super) fn set_status_filter(
         &mut self,
         new_status: SourcesFilterStatus,
@@ -213,7 +213,7 @@ impl Render for SourcesPage {
         // 同步活跃书源文件下拉框选项。
         // 每次 render 都重新读取 rules_dir（用户可能手动添加/删除了文件）。
         let rule_files = list_rule_files(&rules_dir);
-        let items: SearchableVec<String> = rule_files.clone().into();
+        let items: SearchableVec<String> = rule_files.into();
         let sel = active_file;
         let pos = <SearchableVec<String> as gpui_component::select::SelectDelegate>::position(
             &items, &sel,
@@ -240,8 +240,8 @@ impl Render for SourcesPage {
         };
 
         // 推给 delegate（包括 health map，让 row 渲染时拿到健康状态）。
-        let health_for_delegate = health.clone();
-        let page_handle = cx.entity().clone();
+        let health_for_delegate = health;
+        let page_handle = cx.entity();
         self.list_state.update(cx, |state, _cx| {
             let d = state.delegate_mut();
             d.page_items = page_items;
@@ -376,9 +376,9 @@ impl Render for SourcesPage {
                 this.child(Pagination::new(
                     self.current_page,
                     w.page_count,
-                    cx.listener(|this, &new_page, _window, _cx| {
+                    cx.listener(|this, &new_page, _window, cx| {
                         this.current_page = new_page;
-                        _cx.notify();
+                        cx.notify();
                     }),
                 ))
             })

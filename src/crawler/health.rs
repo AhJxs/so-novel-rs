@@ -1,7 +1,7 @@
 //! 书源连通性检测。对应 Java
 //! `util.SourceUtils#getActivatedSourcesWithAvailabilityCheck`。
 //!
-//! 行为：每源发一个 `HEAD` 请求带 5s 超时；记录 (延迟 ms, http_status, error)；
+//! 行为：每源发一个 `HEAD` 请求带 5s 超时；记录 (延迟 ms, `http_status`, error)；
 //! 通过 mpsc 把单源结果实时推回 UI（先返回的源先点亮）。
 
 use std::sync::Arc;
@@ -28,7 +28,7 @@ pub struct SourceHealth {
     pub error: Option<String>,
 }
 
-/// 单源健康判定（domain-level，UI 自行映射到主题色 / StatusKind）。
+/// 单源健康判定（domain-level，UI 自行映射到主题色 / `StatusKind`）。
 ///
 /// 跟 GUI 层的 `gpui_app::components::StatusKind` 解耦——`crawler` 不应依赖 `gpui_app`。
 /// `sources` page 拿 `HealthStatus` 后再做 1 行 `match` 转成 `StatusKind`。
@@ -92,9 +92,9 @@ impl SourceHealth {
     }
 }
 
-/// 并发探测一组规则；每源结果通过 `tx` 实时回推（顺序不保证，UI 用 source_id 关联）。
+/// 并发探测一组规则；每源结果通过 `tx` 实时回推（顺序不保证，UI 用 `source_id` 关联）。
 ///
-/// 完成后通道关闭（tx drop），UI 端 try_recv 看到 Disconnected 即知道全部跑完。
+/// 完成后通道关闭（tx drop），UI 端 `try_recv` 看到 Disconnected 即知道全部跑完。
 ///
 /// # Examples
 ///
@@ -174,6 +174,7 @@ fn short_err(e: &reqwest::Error) -> String {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
     use super::*;
     use crate::config::AppConfig;
     use crate::models::Rule;

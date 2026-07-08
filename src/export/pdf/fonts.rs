@@ -1,4 +1,4 @@
-//! CJK 字体发现 + 字宽量宽器 (PR #17 拆分, 2026-07-08).
+//! CJK 字体发现 + 字宽量宽器
 //!
 //! 跨系统找一份 CJK 字体 (TTC/TTF/OTF), 找不到时降级到启发式量宽 (CJK=1em, ASCII=0.55em)。
 
@@ -28,7 +28,7 @@ impl Measurer {
     /// 单字符宽度 (pt)。
     pub fn char_w(&self, ch: char, size: f32) -> f32 {
         match self {
-            Measurer::Embedded { font, width_cache } => {
+            Self::Embedded { font, width_cache } => {
                 let cp = ch as u32;
                 // 字形原始宽度 (0–1000 units), 与 size 无关, 缓存 u32 键。
                 let raw = *width_cache
@@ -37,7 +37,7 @@ impl Measurer {
                     .or_insert_with(|| font.char_width(cp) as f32);
                 raw * size / 1000.0
             }
-            Measurer::Heuristic => {
+            Self::Heuristic => {
                 if ch == ' ' {
                     0.3 * size
                 } else if ch.is_ascii() {
@@ -101,10 +101,9 @@ pub fn find_cjk_font() -> Option<Vec<u8>> {
                 tracing::debug!("使用 CJK 字体: {}", p.display());
                 return Some(bytes);
             }
-            Ok(_) => continue,
+            Ok(_) => {}
             Err(e) => {
                 tracing::debug!("读 CJK 字体 {} 失败: {}", p.display(), e);
-                continue;
             }
         }
     }

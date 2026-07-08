@@ -1,6 +1,6 @@
-//! `AppModel` 书源连通性检测方法 (PR #17 拆分, 2026-07-08).
+//! `AppModel` 书源连通性检测方法
 //!
-//! 1 个方法: spawn_health_check.
+//! 1 个方法: `spawn_health_check`.
 //! 通过 `crawler::health::check_sources_health` 对所有书源并发发 HEAD 请求。
 
 use std::sync::Arc;

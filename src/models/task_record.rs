@@ -26,22 +26,19 @@ impl FinishedReason {
     /// 给 UI 用的错误消息文案（仅 `Failed` 有内容）。
     pub fn user_message(&self) -> Option<&str> {
         match self {
-            FinishedReason::Failed { message } => Some(message.as_str()),
-            FinishedReason::UserCancelled | FinishedReason::AppRestarted => None,
+            Self::Failed { message } => Some(message.as_str()),
+            Self::UserCancelled | Self::AppRestarted => None,
         }
     }
 
     /// 用户取消 或 应用重启中断（"非真正的失败"）。
-    pub fn is_cancelled(&self) -> bool {
-        matches!(
-            self,
-            FinishedReason::UserCancelled | FinishedReason::AppRestarted
-        )
+    pub const fn is_cancelled(&self) -> bool {
+        matches!(self, Self::UserCancelled | Self::AppRestarted)
     }
 }
 
 /// 任务表持久化形态。所有字段对应 `DownloadTask` 里需要落盘的部分；
-/// 运行时字段（rx / cancel / started_at Instant）不存。
+/// 运行时字段（rx / cancel / `started_at` Instant）不存。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DownloadTaskRecord {
     pub id: u64,

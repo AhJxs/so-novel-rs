@@ -1,4 +1,4 @@
-//! SearchDelegate: gpui-component List delegate，持有 page handle + 当前页 (index, SearchResult)。
+//! `SearchDelegate`: gpui-component List delegate，持有 page handle + 当前页 (index, `SearchResult`)。
 
 use gpui::{App, Context, Entity, ParentElement, Styled, Window, px};
 use gpui_component::list::{ListItem, ListState};
@@ -9,7 +9,7 @@ use crate::models::SearchResult;
 use super::SearchPage;
 use super::result_row;
 
-/// `gpui-component::List` 的 delegate —— 把当前过滤下的 (index, SearchResult) 列表渲染成行。
+/// `gpui-component::List` 的 delegate —— 把当前过滤下的 (index, `SearchResult`) 列表渲染成行。
 ///
 /// 完全对齐 `library::LibraryDelegate` / `tasks::TasksDelegate` / `sources::SourcesDelegate` 模式：
 /// - `page_items` 由 `SearchPage::render` 在每帧 render 前写入；`render_item` 直接取。
@@ -22,12 +22,12 @@ pub(super) struct SearchDelegate {
     /// 当前选中项。`None` = 未选中。`set_selected_index` 写入，`render_item` 读出来
     /// 给 `ListItem::selected(...)` 用。
     pub(super) selected_index: Option<IndexPath>,
-    /// 拿 SearchPage handle 用于按钮 on_click → 转发回 page。
+    /// 拿 `SearchPage` handle 用于按钮 `on_click` → 转发回 page。
     pub(super) page: Entity<SearchPage>,
 }
 
 impl SearchDelegate {
-    pub(super) fn new(page: Entity<SearchPage>) -> Self {
+    pub(super) const fn new(page: Entity<SearchPage>) -> Self {
         Self {
             page_items: Vec::new(),
             selected_index: None,
@@ -56,7 +56,7 @@ impl ListDelegate for SearchDelegate {
                 .selected(Some(ix) == self.selected_index)
                 .rounded(cx.theme().radius)
                 .mb(px(4.))
-                .child(result_row::render(global_index, &result, page, &mut *cx)),
+                .child(result_row::render(global_index, &result, page, &*cx)),
         )
     }
 

@@ -1,8 +1,8 @@
 //! HTTP 抓取层。对应 Java `core.OkHttpClientFactory` + `util.CrawlUtils`
 //! + `util.RandomUA` + `util.HttpClientContext`。
 //!
-//! 提供 `build_async_client` 异步 reqwest::Client，供 crawler 层（tokio runtime）用。
-//! blocking client 路径已移除（reqwest blocking 在 tokio spawn_blocking 里 drop 会 panic）。
+//! 提供 `build_async_client` 异步 `reqwest::Client，供` crawler 层（tokio runtime）用。
+//! blocking client 路径已移除（reqwest blocking 在 tokio `spawn_blocking` 里 drop 会 panic）。
 
 pub mod cf;
 pub mod client;

@@ -5,7 +5,7 @@ use clap::{Arg, ArgAction, Command, Parser, Subcommand};
 use crate::config::Language;
 
 /// 主入口元信息：`name` / `version` 由 `--version` 自动注入。
-pub(crate) const PKG_NAME: &str = "so-novel-rs";
+pub const PKG_NAME: &str = "so-novel-rs";
 
 /// 顶层 `so-novel-rs` 描述（短）。clap 在 usage 行尾 / 简略模式用。
 const ABOUT_SHORT: &str = "So Novel — 简繁小说批量下载（CLI / GUI / WEB 三模）";
@@ -29,7 +29,7 @@ So Novel — 简繁小说批量下载（CLI / GUI / WEB 三模）
 
 /// `--version` 输出格式：clap 默认在版本号前自动加二进制名（"so-novel-rs 0.3.2"），
 /// 这里只传版本号本身即可，不要重复写包名。
-pub(crate) const VERSION_STRING: &str = env!("CARGO_PKG_VERSION");
+pub const VERSION_STRING: &str = env!("CARGO_PKG_VERSION");
 
 /// so-novel-rs — 小说下载器（CLI）。
 #[derive(Debug, Parser)]
@@ -158,13 +158,13 @@ pub enum SourcesAction {
         #[arg(long)]
         json: bool,
     },
-    /// 启用指定 ID 的书源（写回 sources_config.json）
+    /// 启用指定 ID 的书源（写回 `sources_config.json`）
     Enable {
         /// 书源 ID
         #[arg(value_name = "ID")]
         id: i32,
     },
-    /// 禁用指定 ID 的书源（写回 sources_config.json）
+    /// 禁用指定 ID 的书源（写回 `sources_config.json`）
     Disable {
         /// 书源 ID
         #[arg(value_name = "ID")]
@@ -198,7 +198,7 @@ pub enum SourcesAction {
 /// **测试守住正确性**：`src/cli/tests.rs::localized_command_matches_derive_structure`
 /// 断言 `build_localized_command(en)` 的 arg IDs / subcommand 名称集合与
 /// `Cli::command()` 相等；任何结构偏离都会被该测试抓住。
-pub(crate) fn build_localized_command(lang: Language) -> Command {
+pub fn build_localized_command(lang: Language) -> Command {
     // 切到目标 locale，并清空 `ts()` 缓存（缓存里的旧 locale 翻译要失效）。
     rust_i18n::set_locale(crate::i18n::locale_for(lang));
     crate::i18n::invalidate_cache();
@@ -370,7 +370,7 @@ pub(crate) fn build_localized_command(lang: Language) -> Command {
 /// 把 `cli.command` 映射到子命令名（用于 `build_localized_command` 之后的
 /// `find_subcommand_mut(name).print_long_help()`）。派生 derive `Cmd` 的
 /// variant 与子命令名一一对应。
-pub(crate) fn subcommand_name(cmd: &Cmd) -> &'static str {
+pub const fn subcommand_name(cmd: &Cmd) -> &'static str {
     match cmd {
         Cmd::Search { .. } => "search",
         Cmd::Download { .. } => "download",

@@ -1,4 +1,4 @@
-//! PDF HTML → 结构化内容 (PR #17 拆分, 2026-07-08).
+//! PDF HTML → 结构化内容
 //!
 //! 负责把章节 HTML 抽成 `(title, Vec<paragraph>)` 元组, 给 `document.rs` 的
 //! `Paginator` 喂纯文本。包含 5 个 fn:
@@ -6,14 +6,27 @@
 //! - [`html_to_text`]: HTML 片段 → 纯文本
 //! - [`decode_entities`]: HTML 实体解码
 //! - [`extract_body`]: 剥外层 html/head, 取 body
-//! - [`strip_nav_bar`]: 删翻页按钮栏
-//! - [`wrap_text`]: 中文字符友好换行 (Paginator 复用)
+//! - [`strip_nav_bar`][]: 删翻页按钮栏
+//! - [`wrap_text`][]: 中文字符友好换行 (Paginator 复用)
 
 use std::sync::LazyLock;
 
 use regex::Regex;
 
 use super::fonts::Measurer;
+
+/// 编译期确定的正则：用 match 走 panic 路径以避免 `clippy::expect_used`。
+/// panic IS the design：源码字面量写错就是程序员错误。
+#[allow(
+    clippy::panic,
+    reason = "static regex literal must compile; failure = programmer error"
+)]
+fn compile_static_re(pattern: &'static str) -> Regex {
+    match Regex::new(pattern) {
+        Ok(re) => re,
+        Err(e) => panic!("static regex `{pattern}` should compile: {e}"),
+    }
+}
 
 /// 从章节 body HTML 抽 (标题, 段落列表)。
 ///
@@ -31,9 +44,8 @@ use super::fonts::Measurer;
 /// 无错误返回 (Regex 编译失败会让程序启动 panic, 见 `static` 内部)
 pub fn extract_chapter_content(body_html: &str) -> (Option<String>, Vec<String>) {
     static H1_RE: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"(?is)<h1[^>]*>(.*?)</h1>").expect("h1 re"));
-    static P_RE: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"(?is)<p[^>]*>(.*?)</p>").expect("p re"));
+        LazyLock::new(|| compile_static_re(r"(?is)<h1[^>]*>(.*?)</h1>"));
+    static P_RE: LazyLock<Regex> = LazyLock::new(|| compile_static_re(r"(?is)<p[^>]*>(.*?)</p>"));
 
     let title = H1_RE
         .captures(body_html)
@@ -43,7 +55,7 @@ pub fn extract_chapter_content(body_html: &str) -> (Option<String>, Vec<String>)
 
     let paras = P_RE
         .captures_iter(body_html)
-        .map(|c| html_to_text(c.get(1).map(|m| m.as_str()).unwrap_or("")))
+        .map(|c| html_to_text(c.get(1).map_or("", |m| m.as_str())))
         .filter(|s| !s.is_empty())
         .collect();
 
@@ -52,9 +64,9 @@ pub fn extract_chapter_content(body_html: &str) -> (Option<String>, Vec<String>)
 
 /// HTML 片段 → 纯文本: `<br>` 转空格 → 剥所有标签 → 解码实体 → 折叠空白。
 pub fn html_to_text(html: &str) -> String {
-    static BR_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)<br\s*/?>").expect("br re"));
-    static TAG_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?s)<[^>]+>").expect("tag re"));
-    static WS_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\s+").expect("ws re"));
+    static BR_RE: LazyLock<Regex> = LazyLock::new(|| compile_static_re(r"(?i)<br\s*/?>"));
+    static TAG_RE: LazyLock<Regex> = LazyLock::new(|| compile_static_re(r"(?s)<[^>]+>"));
+    static WS_RE: LazyLock<Regex> = LazyLock::new(|| compile_static_re(r"\s+"));
 
     let no_br = BR_RE.replace_all(html, " ");
     let no_tag = TAG_RE.replace_all(&no_br, "");
@@ -65,7 +77,7 @@ pub fn html_to_text(html: &str) -> String {
 /// 解码常见 HTML 实体 + 数字实体 (`&#NN;` / `&#xHH;`)。
 pub fn decode_entities(s: &str) -> String {
     static ENT_RE: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"&#(x?)([0-9a-fA-F]+);|&([a-zA-Z]+);").expect("ent re"));
+        LazyLock::new(|| compile_static_re(r"&#(x?)([0-9a-fA-F]+);|&([a-zA-Z]+);"));
     ENT_RE
         .replace_all(s, |caps: &regex::Captures| {
             // 数字实体 &#NN; / &#xHH;
@@ -104,7 +116,7 @@ pub fn decode_entities(s: &str) -> String {
 /// 找不到 `<body>` 时返回 `None` (由 caller 兜底用原文)。
 pub fn extract_body(html: &str) -> Option<String> {
     static BODY_RE: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"(?is)<body[^>]*>(.*)</body>").expect("body re"));
+        LazyLock::new(|| compile_static_re(r"(?is)<body[^>]*>(.*)</body>"));
     BODY_RE
         .captures(html)
         .and_then(|c| c.get(1))
@@ -115,7 +127,7 @@ pub fn extract_body(html: &str) -> Option<String> {
 /// 删掉网页模板自带的翻页按钮栏 `<div class="bottom-bar">…上一页…下一页…</div>`。
 pub fn strip_nav_bar(body_html: &str) -> String {
     static NAV_RE: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r#"(?is)<div[^>]*class="[^"]*bottom-bar[^"]*"[^>]*>.*?</div>"#).expect("nav re")
+        compile_static_re(r#"(?is)<div[^>]*class="[^"]*bottom-bar[^"]*"[^>]*>.*?</div>"#)
     });
     NAV_RE.replace_all(body_html, "").into_owned()
 }
@@ -191,11 +203,12 @@ pub fn wrap_text(s: &str, max_w: f32, size: f32, m: &Measurer) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
     use super::*;
 
     #[test]
     fn extract_chapter_content_pulls_h1_and_ps() {
-        let html = r##"<h1>第1章</h1><p>第一段</p><p>第二段</p>"##;
+        let html = r"<h1>第1章</h1><p>第一段</p><p>第二段</p>";
         let (title, paras) = extract_chapter_content(html);
         assert_eq!(title.as_deref(), Some("第1章"));
         assert_eq!(paras, vec!["第一段", "第二段"]);
@@ -203,7 +216,7 @@ mod tests {
 
     #[test]
     fn extract_chapter_content_no_h1_returns_none_title() {
-        let html = r##"<p>只有段落</p>"##;
+        let html = r"<p>只有段落</p>";
         let (title, paras) = extract_chapter_content(html);
         assert!(title.is_none());
         assert_eq!(paras, vec!["只有段落"]);
@@ -223,7 +236,7 @@ mod tests {
 
     #[test]
     fn extract_body_strips_outer_html() {
-        let html = r##"<!DOCTYPE html><html><head></head><body><h1>Hi</h1></body></html>"##;
+        let html = r"<!DOCTYPE html><html><head></head><body><h1>Hi</h1></body></html>";
         let body = extract_body(html).unwrap();
         assert!(body.contains("<h1>Hi</h1>"));
         assert!(!body.contains("<html"));
@@ -231,7 +244,7 @@ mod tests {
 
     #[test]
     fn strip_nav_bar_removes_bottom_bar() {
-        let html = r##"<p>keep</p><div class="bottom-bar">上一页 下一页</div><p>after</p>"##;
+        let html = r#"<p>keep</p><div class="bottom-bar">上一页 下一页</div><p>after</p>"#;
         let result = strip_nav_bar(html);
         assert!(!result.contains("bottom-bar"));
         assert!(!result.contains("上一页"));
@@ -260,7 +273,7 @@ mod tests {
 
     #[test]
     fn extract_chapter_content_handles_entities_in_para() {
-        let body = r#"<h1>T</h1><p>a&amp;b</p>"#;
+        let body = r"<h1>T</h1><p>a&amp;b</p>";
         let (_, paras) = extract_chapter_content(body);
         assert_eq!(paras, vec!["a&b"]);
     }

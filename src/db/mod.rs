@@ -1,9 +1,9 @@
-//! 持久化层 (PR #11 文档化, 2026-07-08): 所有 `~/.sonovel/` 下的 JSON 文件读写。
+//! 持久化层 : 所有 `~/.sonovel/` 下的 JSON 文件读写。
 //!
 //! # 子模块
 //!
-//! - `tasks` — 下载任务 `tasks.json` 的 CRUD (load / save / trim_completed)
-//! - `sources_config` — 书源配置 `sources_config.json` 的读写 (SourcesConfig)
+//! - `tasks` — 下载任务 `tasks.json` 的 CRUD (load / save / `trim_completed`)
+//! - `sources_config` — 书源配置 `sources_config.json` 的读写 (`SourcesConfig`)
 //! - `rules` — 规则目录 `rules/` 的初始化与加载 (含 META_* 常量, load/apply/init)
 //! - `mod.rs` — 公共 helper (`write_atomically` 原子写) + 顶层 `DaoError`
 //!
@@ -43,7 +43,7 @@ pub use tasks::{load as load_tasks, save as save_tasks, save_with_trim};
 
 use std::path::{Path, PathBuf};
 
-/// 顶层 dao 错误 (PR #11, 2026-07-08).
+/// 顶层 dao 错误
 ///
 /// 业务层用 `?` 一步透传到 [`crate::error::AppError::Db`]。`RulesError` 仍保留
 /// (有路径 + 原因, 不能丢), 通过 `From<RulesError> for DaoError` 自动归一。
@@ -135,6 +135,7 @@ pub fn write_atomically(path: &Path, data: &[u8]) -> std::io::Result<()> {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
     use super::*;
     use std::io::Read;
 
@@ -144,7 +145,10 @@ mod tests {
         let path = dir.path().join("data.json");
         write_atomically(&path, b"hello").unwrap();
         let mut s = String::new();
-        std::fs::File::open(&path).unwrap().read_to_string(&mut s).unwrap();
+        std::fs::File::open(&path)
+            .unwrap()
+            .read_to_string(&mut s)
+            .unwrap();
         assert_eq!(s, "hello");
     }
 
@@ -175,14 +179,12 @@ mod tests {
             .filter(|e| {
                 e.file_name()
                     .to_str()
-                    .map(|n| n.starts_with(".data.json.tmp."))
-                    .unwrap_or(false)
+                    .is_some_and(|n| n.starts_with(".data.json.tmp."))
             })
             .collect();
         assert!(
             leftover.is_empty(),
-            "tmp files should be cleaned, found: {:?}",
-            leftover
+            "tmp files should be cleaned, found: {leftover:?}"
         );
     }
 

@@ -10,7 +10,7 @@
 //! - Java 用 hutool `FileAppender` 一次次 append；Rust 这里用 `BufWriter` 按片段
 //!   编码写入，避免超长小说整本内容同时驻留内存。
 //! - Java 用 `HtmlUtil.cleanHtmlTag(intro)` 去 HTML 标签；
-//!   Rust 用一个简单正则去标签 + 去掉 HTML 实体（`&xxx;`），与 ChapterFilter 用法一致。
+//!   Rust 用一个简单正则去标签 + 去掉 HTML 实体（`&xxx;`），与 `ChapterFilter` 用法一致。
 
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
@@ -141,6 +141,7 @@ impl Exporter for TxtExporter {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
     use super::*;
     use crate::config::ExportFormat;
     use crate::export::exporter::{RenderedChapter, write_chapter_files};

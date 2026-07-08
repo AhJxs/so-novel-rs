@@ -16,8 +16,8 @@ use toml_edit::DocumentMut;
 /// 取不到（极端环境无 home）时回落到相对路径 `downloads`，与历史行为保持一致 —
 /// 至少程序还能跑，写到 cwd 下的 `downloads/`。
 ///
-/// 返回字符串而非 PathBuf：`AppConfig.download_path` 字段就是 String，
-/// 字符串能被设置页直接放到 TextEdit 里编辑，也能直接序列化进 TOML。
+/// 返回字符串而非 `PathBuf`：`AppConfig.download_path` 字段就是 String，
+/// 字符串能被设置页直接放到 `TextEdit` 里编辑，也能直接序列化进 TOML。
 pub fn default_download_path() -> String {
     use directories::UserDirs;
     if let Some(user_dirs) = UserDirs::new() {
@@ -30,6 +30,14 @@ pub fn default_download_path() -> String {
 }
 
 /// 第一次启动 / 模板 / 文件被破坏时使用的默认 TOML 文档。
+///
+/// 模板是源码内 `&'static str` 字面量，解析失败只可能是源码写错，
+/// 此时 `panic!` 是把"程序员错误"尽早暴露到启动期，避免后续读到
+/// 半残 `DocumentMut` 引发更难诊断的二次失败。
+#[allow(
+    clippy::panic,
+    reason = "static template literal must parse; failure = programmer error"
+)]
 pub fn default_template_doc() -> DocumentMut {
     let template = r#"# So Novel 配置文件
 [global]
@@ -84,5 +92,8 @@ enabled = false
 host = "127.0.0.1"
 port = 7890
     "#;
-    template.parse().expect("default template must parse")
+    match template.parse() {
+        Ok(doc) => doc,
+        Err(e) => panic!("default template must parse: {e}"),
+    }
 }

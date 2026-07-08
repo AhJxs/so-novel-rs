@@ -15,7 +15,8 @@ use crate::models::{SearchResult, Source};
 
 use super::util::load_active_sources;
 
-pub(crate) fn run_search(
+#[allow(clippy::needless_pass_by_value)]
+pub fn run_search(
     cfg: &AppConfig,
     paths: &ConfigPaths,
     keyword: String,
@@ -44,7 +45,8 @@ pub(crate) fn run_search(
 
     // 与 GUI（app/ops/search.rs:71-74）一致：--limit 优先；否则用 config.search_limit。
     let limit = limit.or_else(|| {
-        cfg.source.search_limit
+        cfg.source
+            .search_limit
             .map(|v| v.max(0) as usize)
             .filter(|v| *v > 0)
     });
@@ -67,7 +69,7 @@ pub(crate) fn run_search(
         let http = std::sync::Arc::clone(&http);
         let kw = keyword.clone();
         async move {
-            crawler::search::search_streaming(http, target_sources, kw, limit, cf_bypass, tx).await
+            crawler::search::search_streaming(http, target_sources, kw, limit, cf_bypass, tx).await;
         }
     });
 
@@ -167,11 +169,12 @@ pub(crate) fn run_search(
 /// - `quiet=true` → 完全跳过（脚本管道友好）。
 /// - 失败 ≤3 → 逐条打印 `✗ name#id 失败: err`。
 /// - 失败 >3 → 前 3 条逐条打印 + `… 还有 N 条失败` 摘要，避免刷屏。
+const TOP_N: usize = 3;
+
 fn print_failed_sources(failed: &[(i32, String, String)], quiet: bool) {
     if quiet || failed.is_empty() {
         return;
     }
-    const TOP_N: usize = 3;
     for (id, name, err) in failed.iter().take(TOP_N) {
         eprintln!("✗ {name}#{id} 失败: {err}");
     }

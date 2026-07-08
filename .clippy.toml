@@ -1,4 +1,4 @@
-# 企业级 clippy 配置 (PR #1, 2026-07-08)
+# 企业级 clippy 配置 
 # 与 Cargo.toml [lints.clippy] 配合, 此处只放阈值类参数。
 # 规则的 allow/warn 级别集中在 Cargo.toml, 便于单点扫描。
 

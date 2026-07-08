@@ -28,7 +28,7 @@ pub(super) type PickFolderListener = Rc<dyn Fn(&ClickEvent, &mut Window, &mut Ap
 
 /// 把 owner-cached entity 借给各 page 模块用。
 ///
-/// 8 个字段全是 `&'a` 借出（caller clone 出 owned Entity 进 SettingField 闭包，
+/// 8 个字段全是 `&'a` 借出（caller clone 出 owned Entity 进 `SettingField` 闭包，
 /// `Entity::clone` 是 refcount 增量，cheap）。`'a` 跟 `SettingsPage` 同生同死。
 pub(super) struct PageCtx<'a> {
     pub model: &'a Entity<AppModel>,

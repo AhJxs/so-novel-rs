@@ -12,7 +12,7 @@
 use std::path::Path;
 
 use anyhow::{Context, Result};
-use toml_edit::{DocumentMut, Item, value};
+use toml_edit::{DocumentMut, Item, Table, value};
 
 use super::defaults::default_template_doc;
 use super::types::{AppConfig, ExportFormat, Language, ThemeDynMode, ThemeKind, ThemePref};
@@ -33,16 +33,16 @@ pub fn t_table<'a>(doc: &'a DocumentMut, table: &str) -> Option<&'a toml_edit::T
 fn t_str(doc: &DocumentMut, table: &str, key: &str) -> Option<String> {
     t_item(doc, table, key)
         .and_then(|v| v.as_str())
-        .map(|s| s.to_string())
+        .map(std::string::ToString::to_string)
         .filter(|s| !s.trim().is_empty())
 }
 
 fn t_bool(doc: &DocumentMut, table: &str, key: &str) -> Option<bool> {
-    t_item(doc, table, key).and_then(|v| v.as_bool())
+    t_item(doc, table, key).and_then(toml_edit::Item::as_bool)
 }
 
 fn t_int(doc: &DocumentMut, table: &str, key: &str) -> Option<i64> {
-    t_item(doc, table, key).and_then(|v| v.as_integer())
+    t_item(doc, table, key).and_then(toml_edit::Item::as_integer)
 }
 
 /// 读浮点（兼容 TOML 里写成整数 `16` 或浮点 `16.0` 两种形式）。
@@ -50,7 +50,13 @@ fn t_float(doc: &DocumentMut, table: &str, key: &str) -> Option<f32> {
     let v = t_item(doc, table, key)?;
     v.as_float()
         .map(|f| f as f32)
-        .or_else(|| v.as_integer().map(|i| i as f32))
+        // i 已经 clamp 到 i32 范围（外层 `i32::try_from`），i32→f32 只丢 9 位精度；
+        // 配置值（端口 / 超时秒数）< 2^23 = 8388608 时无损。
+        .or_else(|| {
+            v.as_integer()
+                .and_then(|i| i32::try_from(i).ok())
+                .map(|i| (i as f64) as f32)
+        })
 }
 
 fn sat_i32(v: i64) -> i32 {
@@ -208,7 +214,7 @@ pub fn load_config(path: &Path) -> Result<AppConfig> {
 
 // ---------- save_config ----------
 
-/// 把 AppConfig 写回 TOML。如果原文件存在，就在它上面 in-place 改字段（保留注释）；
+/// 把 `AppConfig` 写回 TOML。如果原文件存在，就在它上面 in-place 改字段（保留注释）；
 /// 不存在则用统一模板生成。
 ///
 /// # Examples
@@ -234,7 +240,7 @@ pub fn save_config(path: &Path, cfg: &AppConfig) -> Result<()> {
 
     // 写一行 (table, key, value)。`value()` 自动处理 toml 类型。
     fn set_item(doc: &mut DocumentMut, table: &str, key: &str, v: impl Into<Item>) {
-        let t = doc.entry(table).or_insert(Item::Table(Default::default()));
+        let t = doc.entry(table).or_insert(Item::Table(Table::default()));
         if let Some(t) = t.as_table_mut() {
             t[key] = v.into();
         }
@@ -296,12 +302,7 @@ pub fn save_config(path: &Path, cfg: &AppConfig) -> Result<()> {
         "sidebar-collapsed",
         cfg.global.sidebar_collapsed,
     );
-    set_float(
-        &mut doc,
-        "global",
-        "font-size",
-        cfg.global.font_size as f64,
-    );
+    set_float(&mut doc, "global", "font-size", cfg.global.font_size as f64);
 
     // [download]
     set_str(
@@ -358,12 +359,7 @@ pub fn save_config(path: &Path, cfg: &AppConfig) -> Result<()> {
         "max-interval",
         cfg.crawl.max_interval as i64,
     );
-    set_bool(
-        &mut doc,
-        "crawl",
-        "enable-retry",
-        cfg.crawl.enable_retry,
-    );
+    set_bool(&mut doc, "crawl", "enable-retry", cfg.crawl.enable_retry);
     set_int(
         &mut doc,
         "crawl",

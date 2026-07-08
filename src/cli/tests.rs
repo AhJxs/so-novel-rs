@@ -4,6 +4,13 @@
 //! 拆分子模块后，测试统一搬到这里。`Cli` / `Cmd` 通过 `super::*` 拿到
 //! 公共 re-export，`effective_cfg` 是内部 helper，按模块路径直接取。
 
+#![allow(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    clippy::panic,
+    clippy::too_many_lines
+)]
+
 use clap::{CommandFactory, Parser};
 
 use crate::config::{AppConfig, DownloadCfg, ExportFormat, Language};

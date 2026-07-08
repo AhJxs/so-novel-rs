@@ -1,6 +1,6 @@
 //! Library 页工具栏：文件名过滤 Input + 6-Button 文件类型过滤组。
 //!
-//! 文件名过滤：placeholder 在 InputState 上（gpui-component 0.5.1 API 限制），
+//! 文件名过滤：placeholder 在 `InputState` 上（gpui-component 0.5.1 API 限制），
 //! 切语言靠重启生效。
 //!
 //! 文件类型过滤：不用 SelectState（持有 options 翻译字段，切语言失效）。
@@ -42,7 +42,7 @@ fn ext_filter_buttons(
     current_ext: Option<&str>,
     cx: &Context<'_, super::LibraryPage>,
 ) -> impl IntoElement {
-    h_flex().gap_1().items_center().children([
+    h_flex().gap_1().items_center().children(vec![
         ext_button(
             "ext-all",
             ts("Library.filter_option_all"),

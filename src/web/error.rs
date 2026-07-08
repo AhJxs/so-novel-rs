@@ -13,7 +13,7 @@
 //! ```
 //!
 //! 短码见 [`WebErrorKind::code`]，稳定不变（前端可以 switch 分支），message 是 i18n key
-//! 或短中文，前端可选用 t() 翻译或直接展示。
+//! 或短中文，前端可选用 `t()` 翻译或直接展示。
 //!
 //! 用法（迁移现有 handler）：
 //! ```ignore
@@ -56,8 +56,8 @@ pub enum WebErrorKind {
 /// Web API 错误包装。所有业务 handler 统一返 `Result<_, WebError>`。
 ///
 /// 设计：
-/// - 业务错误（BookError / TocError / 等）→ 对应分类
-/// - std::io::Error → Internal + 简短 "io_error" message
+/// - 业务错误（BookError / `TocError` / 等）→ 对应分类
+/// - `std::io::Error` → Internal + 简短 "`io_error`" message
 /// - 锁 poison / SSE 内部 stream 错误**不**走这里（lock.rs 维持 `(StatusCode, String)`,
 ///   那是不同语义:网络层 vs 业务层）
 #[allow(dead_code)] // Conflict / BadRequest 留作未来 task_cancel / settings_put 业务流用
@@ -86,7 +86,7 @@ pub enum WebError {
 }
 
 impl WebErrorKind {
-    /// 短码（snake_case，**稳定**）。
+    /// `短码（snake_case`，**稳定**）。
     pub const fn code(self) -> &'static str {
         match self {
             Self::BadRequest => "bad_request",
@@ -122,32 +122,29 @@ impl WebError {
             Self::Book(BookError::MissingTitleOrAuthor) => ErrorCode::MissingTitleOrAuthor,
             Self::Book(BookError::Http(_)) => ErrorCode::BookHttp,
             Self::Book(BookError::Cloudflare(_)) => ErrorCode::BookCloudflare,
-            Self::Book(BookError::Parse(_)) | Self::Book(BookError::Selector(_)) => {
-                ErrorCode::BookParse
-            }
+            Self::Book(BookError::Parse(_) | BookError::Selector(_)) => ErrorCode::BookParse,
 
             // TocError
             Self::Toc(TocError::TocRuleMissing) => ErrorCode::TocRuleMissing,
             Self::Toc(TocError::Http(_)) => ErrorCode::TocHttp,
             Self::Toc(TocError::Cloudflare(_)) => ErrorCode::TocCloudflare,
-            Self::Toc(TocError::Parse(_)) | Self::Toc(TocError::Selector(_)) => {
-                ErrorCode::TocParse
-            }
+            Self::Toc(TocError::Parse(_) | TocError::Selector(_)) => ErrorCode::TocParse,
 
             // ChapterError
             Self::Chapter(ChapterError::ChapterRuleMissing) => ErrorCode::ChapterRuleMissing,
             Self::Chapter(ChapterError::Http(_)) => ErrorCode::ChapterHttp,
             Self::Chapter(ChapterError::Cloudflare(_)) => ErrorCode::ChapterCloudflare,
             Self::Chapter(ChapterError::EmptyContent(_)) => ErrorCode::EmptyContent,
-            Self::Chapter(ChapterError::Parse(_))
-            | Self::Chapter(ChapterError::Selector(_)) => ErrorCode::ChapterParse,
+            Self::Chapter(ChapterError::Parse(_) | ChapterError::Selector(_)) => {
+                ErrorCode::ChapterParse
+            }
 
             // SearchError
             Self::Search(SearchError::SearchDisabled) => ErrorCode::SearchDisabled,
             Self::Search(SearchError::SourceDisabled) => ErrorCode::SourceDisabled,
             Self::Search(SearchError::Http(_)) => ErrorCode::SearchHttp,
             Self::Search(SearchError::Cloudflare(_)) => ErrorCode::SearchCloudflare,
-            Self::Search(SearchError::Parse(_)) | Self::Search(SearchError::Selector(_)) => {
+            Self::Search(SearchError::Parse(_) | SearchError::Selector(_)) => {
                 ErrorCode::SearchParse
             }
 
@@ -181,7 +178,7 @@ impl WebError {
     /// 文案走 [`crate::constant::error_code::ErrorCode::message`] 单点维护。
     ///
     /// 例外: `NotFound/Conflict/BadRequest/Internal` 4 个显式变体接受调用方传
-    /// 入的动态消息 (e.g. `"task_id=42 not found"`), 不进 ErrorCode 表。
+    /// 入的动态消息 (e.g. `"task_id=42 not found"`), 不进 `ErrorCode` 表。
     pub const fn message(&self) -> &'static str {
         match self {
             Self::NotFound(msg)
@@ -209,16 +206,15 @@ impl WebError {
 }
 
 impl WebError {
-    /// 把 WebError 分类到 HTTP 错误类型。
-    pub fn classify(&self) -> WebErrorKind {
+    /// 把 `WebError` 分类到 HTTP 错误类型。
+    pub const fn classify(&self) -> WebErrorKind {
         match self {
-            Self::Book(BookError::BookRuleMissing)
-            | Self::Book(BookError::MissingTitleOrAuthor)
+            Self::Book(BookError::BookRuleMissing | BookError::MissingTitleOrAuthor)
             | Self::Toc(TocError::TocRuleMissing)
-            | Self::Chapter(ChapterError::ChapterRuleMissing)
-            | Self::Chapter(ChapterError::EmptyContent(_))
+            | Self::Chapter(ChapterError::ChapterRuleMissing | ChapterError::EmptyContent(_))
             | Self::Search(SearchError::SearchDisabled)
-            | Self::Crawler(CrawlerError::InvalidRange(_)) => WebErrorKind::BadRequest,
+            | Self::Crawler(CrawlerError::InvalidRange(_))
+            | Self::BadRequest(_) => WebErrorKind::BadRequest,
             Self::Book(BookError::Http(_))
             | Self::Toc(TocError::Http(_))
             | Self::Chapter(ChapterError::Http(_))
@@ -229,7 +225,6 @@ impl WebError {
             | Self::Search(SearchError::Cloudflare(_)) => WebErrorKind::Cloudflare,
             Self::NotFound(_) => WebErrorKind::NotFound,
             Self::Conflict(_) => WebErrorKind::Conflict,
-            Self::BadRequest(_) => WebErrorKind::BadRequest,
             _ => WebErrorKind::Internal,
         }
     }
@@ -313,6 +308,7 @@ impl From<std::io::Error> for WebError {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
     use super::*;
 
     #[test]

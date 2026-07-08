@@ -1,4 +1,4 @@
-//! 详情页解析 (PR #17 拆分, 2026-07-08). 对应 Java `parse.BookParser`.
+//! 详情页解析  对应 Java `parse.BookParser`.
 //!
 //! # 能力 (与 Java 端等价子集)
 //!
@@ -8,7 +8,7 @@
 //! - 其余字段 (intro / category / coverUrl / latestChapter / lastUpdateTime /
 //!   status) 的字段查询字符串如果以 `meta[` 开头, 按 `ATTR_CONTENT` 抽, 否则按 `TEXT` 抽,
 //!   与 Java `BookParser#getContentType` 等价;
-//! - 选 coverUrl 时 attr_content 是相对路径的话, 用 `abs_url` 拼绝对 (Java 用 `absUrl`)。
+//! - 选 coverUrl 时 `attr_content` 是相对路径的话, 用 `abs_url` 拼绝对 (Java 用 `absUrl`)。
 //!
 //! # 不在本模块 (后续阶段)
 //!
@@ -19,7 +19,7 @@
 //! # 子模块
 //!
 //! - [`meta`] — `BookError` + `parse_book_detail` (主入口) + `parse_book_html` (离线测试)
-//! - [`cover`] — 封面 URL 抽取 + CoverUpdater 集成
+//! - [`cover`] — 封面 URL 抽取 + `CoverUpdater` 集成
 
 pub mod cover;
 pub mod meta;

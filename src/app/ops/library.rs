@@ -8,7 +8,7 @@ use super::super::library_state::{LibraryState, scan_library_dir};
 pub fn refresh_library(library: &mut LibraryState, download_path: &str) {
     let dir = PathBuf::from(download_path);
     let abs = if dir.is_absolute() {
-        dir.clone()
+        dir
     } else {
         std::env::current_dir()
             .map(|cwd| cwd.join(&dir))
@@ -51,7 +51,7 @@ pub fn delete_library_entry(
     path: &Path,
 ) -> crate::error::AppResult<String> {
     let result = match std::fs::remove_file(path) {
-        Ok(_) => {
+        Ok(()) => {
             let file_name = path
                 .file_name()
                 .and_then(|n| n.to_str())
@@ -60,7 +60,7 @@ pub fn delete_library_entry(
             let display = if file_name.is_empty() {
                 crate::i18n::ts("Toasts.library_delete_unknown").to_string()
             } else {
-                crate::utils::formatting::truncate(&file_name, 50).to_string()
+                crate::utils::formatting::truncate(&file_name, 50)
             };
             Ok(crate::i18n::ts_fmt("Toasts.library_delete_ok", &[("file", &display)]).to_string())
         }
@@ -81,8 +81,7 @@ pub fn delete_library_entry(
     // 把 entries.clear() 再 fill，制造"empty → 重新加载"闪一下。1s 覆盖 rescan 全程。
     let now_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0);
+        .map_or(0, |d| d.as_millis() as u64);
     library.watcher_skip_until_unix_ms = Some(now_ms + 1000);
     result
 }

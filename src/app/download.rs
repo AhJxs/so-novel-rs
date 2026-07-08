@@ -1,4 +1,4 @@
-//! `AppModel` 下载相关方法 (PR #17 拆分, 2026-07-08).
+//! `AppModel` 下载相关方法
 //!
 //! 全部 thin delegator, 实际逻辑在 `crate::app::ops::download`.
 //! 拆这里只是按职责分类, 不重复实现。
@@ -42,8 +42,7 @@ impl AppModel {
         chapters: Vec<Chapter>,
     ) -> u64 {
         let ctx = self.ops_ctx();
-        let (id, task) =
-            ops::spawn_download_range(&ctx, self.next_task_id, target, book, chapters);
+        let (id, task) = ops::spawn_download_range(&ctx, self.next_task_id, target, book, chapters);
         self.next_task_id += 1;
         self.tasks.push(task);
         self.save_tasks_to_file();

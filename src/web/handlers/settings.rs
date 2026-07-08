@@ -13,8 +13,8 @@ use axum::http::StatusCode;
 use serde::{Deserialize, Serialize};
 
 use crate::config::AppConfig;
+use crate::utils::lock::{rw_read_or, rw_write_or};
 use crate::web::SharedState;
-use crate::web::handlers::lock::{rw_read, rw_write};
 
 /// `GET /api/settings` 返回的脱敏 DTO。
 ///
@@ -23,7 +23,7 @@ use crate::web::handlers::lock::{rw_read, rw_write};
 /// - 用 `has_qidian_cookie: bool` 替代, 让 UI 仍能告知用户"已设置/未设置";
 /// - 字段顺序 / 命名与 `AppConfig` 完全一致, 前端按字段名取, 无破坏性变更。
 #[derive(Serialize)]
-pub(crate) struct PublicSettings {
+pub struct PublicSettings {
     pub version: String,
     pub theme_pref: crate::config::ThemePref,
     pub language: crate::config::Language,
@@ -83,7 +83,7 @@ impl From<&AppConfig> for PublicSettings {
 
 /// `PUT /api/settings` 入参: 全部字段 Option, 缺省表示不修改。
 #[derive(Deserialize)]
-pub(crate) struct SettingsUpdate {
+pub struct SettingsUpdate {
     pub download_path: Option<String>,
     pub ext_name: Option<String>,
     pub txt_encoding: Option<String>,
@@ -106,7 +106,8 @@ pub(crate) struct SettingsUpdate {
 pub async fn settings_get(
     State(state): State<SharedState>,
 ) -> Result<Json<PublicSettings>, (StatusCode, String)> {
-    let cfg = rw_read("settings_get", &state.config)?;
+    let cfg = rw_read_or("settings_get", &state.config)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
     Ok(Json(PublicSettings::from(&*cfg)))
 }
 
@@ -116,7 +117,7 @@ pub async fn settings_get(
 /// 目录存在性只能后端判断)。校验失败返回 400, 前端据此在字段下显示错误。
 ///
 /// 改 `proxy_*` 字段会触发 `state.http.rebuild_proxy(&cfg)` —— reqwest client 构造后
-/// 不能 in-place 改 proxy, 整体重建。gh_proxy 客户端不受影响。
+/// 不能 in-place 改 proxy, `整体重建。gh_proxy` 客户端不受影响。
 ///
 /// # Errors
 ///
@@ -138,7 +139,8 @@ pub async fn settings_put(
         }
     }
 
-    let mut cfg = rw_write("settings_put", &state.config)?;
+    let mut cfg = rw_write_or("settings_put", &state.config)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
 
     if let Some(v) = update.download_path {
         cfg.download.download_path = v.trim().to_string();

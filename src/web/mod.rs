@@ -19,9 +19,9 @@ use serde::Serialize;
 
 use crate::app::DownloadTask;
 use crate::config::AppConfig;
+use crate::db::SourcesConfig;
 use crate::http::HttpClients;
 use crate::models::Rule;
-use crate::db::SourcesConfig;
 
 // ── rust-embed：编译期把 web-ui/dist/ 嵌入二进制 ──────────────────────
 #[cfg(feature = "web")]
@@ -35,7 +35,7 @@ use axum::{
 use rust_embed::RustEmbed;
 
 /// 编译期嵌入 `web-ui/dist/` 下所有静态文件。
-/// `include-exclude` feature 会按 .gitignore 跳过 node_modules/src/ 等。
+/// `include-exclude` feature 会按 .gitignore 跳过 `node_modules/src`/ 等。
 #[cfg(feature = "web")]
 #[derive(RustEmbed)]
 #[folder = "web-ui/dist/"]
@@ -83,11 +83,11 @@ pub struct WebInitParams {
 /// 双 store 各自维护同一份数据但时序窗口不一致。
 ///
 /// 现在 web 跟 GPUI 一样只持一个 `Vec<DownloadTask>`：
-/// - 持久化字段全在 record-like fields 上（id / origin / started_at_unix / ...）
+/// - 持久化字段全在 record-like fields 上（id / origin / `started_at_unix` / ...）
 /// - 运行期字段 `rx` / `cancel` / `cancelling` 也只是这个 struct 的一部分
 /// - 每个下载一个 per-task drain tokio task 排空 mpsc rx（详见
 ///   `crate::web::handlers::download::spawn_task_drain`），同时负责
-///   "drain 到的事件 → SSE broadcast_tx"，把"状态更新"和"事件转发"合并到一处。
+///   "drain 到的事件 → SSE `broadcast_tx"，把"状态更新"和"事件转发"合并到一处`。
 ///
 /// `tasks_file` 只是磁盘路径，`save_tasks_to_file` 用它做原子写入。
 pub struct WebState {
@@ -159,7 +159,10 @@ impl WebState {
         // 这里吃掉 poison 错误 + log，不要再炸一次。
         let mut records: Vec<crate::models::DownloadTaskRecord> = match self.tasks.lock() {
             Ok(tasks) => {
-                let r = tasks.iter().map(|t| t.to_record()).collect();
+                let r = tasks
+                    .iter()
+                    .map(super::app::download_task::DownloadTask::to_record)
+                    .collect();
                 drop(tasks);
                 r
             }

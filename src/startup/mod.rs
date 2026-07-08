@@ -8,12 +8,12 @@
 //!   stdio 挂到父进程控制台（cmd / PowerShell），失败回退 `AllocConsole`。
 //! - `run_gui` —— cfg gate 内联在 `gpui_app::run` 调用点；缺 feature
 //!   时返回与原 main.rs 等价的 bail 信息。
-//! - `dispatch` —— 唯一调度入口：CLI 路径**先 attach_console** 再 `cli::run()`
+//! - `dispatch` —— 唯一调度入口：CLI 路径**先 `attach_console`** 再 `cli::run()`
 //!   （release GUI subsystem exe 默认 stdio 关到 NUL，不 attach 用户看不到任何
-//!   输出；CLI 内部自己决定是否 init_tracing，避免 `tracing_subscriber::init()`
-//!   双 init panic）；Web 路径 attach_console 后再 init_tracing 再分发；Gui 路径
-//!   **不** attach_console（GUI subsystem exe 启动时已无 console，避免 AllocConsole
-//!   fallback 在 Explorer 双击时弹黑窗），仅 init_tracing 后分发。
+//!   输出；CLI 内部自己决定是否 `init_tracing，避免` `tracing_subscriber::init()`
+//!   双 init panic）；Web 路径 `attach_console` 后再 `init_tracing` 再分发；Gui 路径
+//!   **不** `attach_console（GUI` subsystem exe 启动时已无 console，避免 `AllocConsole`
+//!   fallback 在 Explorer 双击时弹黑窗），仅 `init_tracing` 后分发。
 
 pub mod web;
 
@@ -52,9 +52,7 @@ pub fn detect(args: &[String]) -> LaunchMode {
         };
     }
     // 2. `SO_NOVEL_WEB` env
-    let env_web = std::env::var("SO_NOVEL_WEB")
-        .map(|v| v == "1" || v == "true")
-        .unwrap_or(false);
+    let env_web = std::env::var("SO_NOVEL_WEB").is_ok_and(|v| v == "1" || v == "true");
     if env_web {
         return LaunchMode::Web {
             host: "127.0.0.1".into(),

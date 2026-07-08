@@ -2,11 +2,11 @@
 //!
 //! 反应式读 `toc_cache[(source_id, url)]`：
 //! - `Pending` / 未拉到 → loading 占位（drain loop 100ms 后刷新）
-//! - `Loaded(book, chapters)` → 首次 set_value 初始化 1 / N，显示「共 N 章」+ 起止
-//!   NumberInput + 选中范围首尾章节名预览
+//! - `Loaded(book, chapters)` → 首次 `set_value` 初始化 1 / N，显示「共 N 章」+ 起止
+//!   `NumberInput` + 选中范围首尾章节名预览
 //! - `Failed` → 错误占位
 //!
-//! 就绪与否由 on_ok 通过 `confirm_range_download` 返回的 `RangeOutcome::Pending` 判定，
+//! 就绪与否由 `on_ok` 通过 `confirm_range_download` 返回的 `RangeOutcome::Pending` 判定，
 //! 这里只负责渲染。
 
 use gpui::{App, Entity, IntoElement, ParentElement, SharedString, Styled, Window, div, px};
@@ -23,7 +23,7 @@ use super::SearchPage;
 
 /// 渲染选章 Dialog 的 body。
 pub(super) fn content(
-    page: Entity<SearchPage>,
+    page: &Entity<SearchPage>,
     window: &mut Window,
     cx: &mut App,
 ) -> impl IntoElement {
@@ -168,7 +168,7 @@ pub(super) fn content(
                                     .whitespace_nowrap()
                                     .text_ellipsis()
                                     .overflow_x_hidden()
-                                    .child(format!("{}", start_title)),
+                                    .child(format!("{start_title}")),
                             ),
                         )
                         // 结束章名：truncate 防超长。
@@ -178,7 +178,7 @@ pub(super) fn content(
                                     .whitespace_nowrap()
                                     .text_ellipsis()
                                     .overflow_x_hidden()
-                                    .child(format!("{}", end_title)),
+                                    .child(format!("{end_title}")),
                             ),
                         ),
                 )
@@ -197,12 +197,12 @@ fn chapter_title_display(chapters: &[Chapter], n: usize) -> SharedString {
     }
 }
 
-/// 把输入框原始值规整到 `[1, N]`：N 取当前选章 Dialog 的 toc_cache Loaded 章节数。
+/// 把输入框原始值规整到 `[1, N]`：N 取当前选章 Dialog 的 `toc_cache` Loaded 章节数。
 /// 非数字 / 越界 → 1。N 取不到（TOC 没回来）时按 `[1, u32::MAX]`（任意正整数）。
 ///
 /// **空字符串返回 0**（sentinel，Change handler 据此识别"用户正在清空输入框，不要重置"）。
 /// free fn —— 4 个订阅共用它无需 clone。
-pub(super) fn clamp_range_value(this: &SearchPage, raw: SharedString, cx: &App) -> u32 {
+pub(super) fn clamp_range_value(this: &SearchPage, raw: &SharedString, cx: &App) -> u32 {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
         return 0;

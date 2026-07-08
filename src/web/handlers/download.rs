@@ -12,7 +12,7 @@
 //! - 每个下载一个 per-task drain tokio task (不依赖中心循环), spawn 后自生自灭
 //! - drain 既是单一 mpsc consumer (forward 引用全部权), 也是 broadcast producer
 //!   + 状态更新者, 三者合一 → 不再有"状态更新到了 / broadcast 没发" / 反过来的
-//!   漂移窗口
+//!     漂移窗口
 //! - SSE handler subscribe broadcast; 多个并发 SSE 客户端互不干扰
 
 use std::convert::Infallible;
@@ -33,8 +33,8 @@ use crate::models::{Chapter, SearchResult};
 use crate::utils::time::now_unix_secs;
 
 use super::super::SharedState;
-use super::lock::{mutex, rw_read};
 use super::tasks::spawn_task_drain;
+use crate::utils::lock::{mutex_or, rw_read_or};
 
 /// SSE 流的内部类型别名, 集中在这里以便一处修改。
 pub(super) type BoxedSseStream =
@@ -73,7 +73,7 @@ pub struct DownloadRequest {
 
 /// SSE `progress` 事件的 JSON 形态。
 ///
-/// 前端按 `kind` 字段分发 (book_resolved / chapter_done / chapter_failed /
+/// 前端按 `kind` 字段分发 (`book_resolved` / `chapter_done` / `chapter_failed` /
 /// finished / cancelled / failed), 其它字段按需取, 全部 Option 序列化。
 #[derive(Serialize, Default)]
 pub(super) struct ProgressEvent {
@@ -104,7 +104,7 @@ pub(super) struct ProgressEvent {
 /// 2. drain 收到 mpsc 断开 (crawler 退出) 时, 若 `finished.is_none()` 则标
 ///    `AppRestarted` 并 save (与 GPUI `DownloadTask::drain` 同语义)
 /// 3. 用户 cancel: `task.cancelling = true` 立即反映到 `tasks_list`;
-///    `Progress::Cancelled` 经 mpsc → drain → apply_progress 最终落 `UserCancelled`
+///    `Progress::Cancelled` 经 mpsc → drain → `apply_progress` 最终落 `UserCancelled`
 #[tracing::instrument(
     name = "web::download",
     skip_all,
@@ -121,9 +121,13 @@ pub async fn download(
 ) -> Sse<BoxedSseStream> {
     // Lock 失败也走 SSE 错误事件, 让前端看到稳定原因, 而不是连接哑断。
     let (config, rule) = match (|| -> Result<_, (StatusCode, String)> {
-        let cfg = rw_read("download:cfg", &state.config)?;
-        let rules = rw_read("download:rules", &state.rules)?;
-        let rule = rules.iter().find(|r| r.id == req.source_id).cloned();
+        let cfg = rw_read_or("download:cfg", &state.config)
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+        let rule = rw_read_or("download:rules", &state.rules)
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?
+            .iter()
+            .find(|r| r.id == req.source_id)
+            .cloned();
         Ok((cfg.clone(), rule))
     })() {
         Ok(v) => v,
@@ -146,9 +150,14 @@ pub async fn download(
 
     // 1. mint id —— push 到 state.tasks 之前必须先有 id (其它请求靠它找任务)
     let task_id = match (|| -> Result<_, (StatusCode, String)> {
-        let mut id = mutex("download:next_task_id", &state.next_task_id)?;
-        let current = *id;
-        *id += 1;
+        let current = {
+            let mut id = mutex_or("download:next_task_id", &state.next_task_id)
+                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+            let current = *id;
+            *id += 1;
+            drop(id);
+            current
+        };
         Ok(current)
     })() {
         Ok(v) => v,
@@ -168,34 +177,37 @@ pub async fn download(
 
     // 2. 任务先入 state.tasks —— `tasks_list` 在 SSE 返回前已经能列到这条记录
     if let Err((code, msg)) = (|| -> Result<(), (StatusCode, String)> {
-        let mut tasks = mutex("download:push_task", &state.tasks)?;
-        tasks.push(DownloadTask {
-            id: task_id,
-            origin: SearchResult {
-                source_id: source.rule.id,
-                source_name: source.rule.name.clone(),
-                url: req.url.clone(),
-                // 旧 web 这里写空串 → /tasks 返回 `book_name: null`。
-                // 改用请求里带的搜索书名 (前端可保证非空; 缺省时回退到空串,
-                // 后续 BookResolved 会被 drain 写入 book_meta, book_name() 仍可显示)。
-                book_name: req.book_name.clone().unwrap_or_default(),
-                ..Default::default()
-            },
-            // web 不在 struct 上挂 rx —— drain task 拥有它, drain 退出时丢。
-            rx: None,
-            cancel: Some(cancel.clone()),
-            cancelling: false,
-            started_at_unix: now_unix_secs(),
-            finished_at_unix: None,
-            book_meta: None,
-            total_chapters: 0,
-            completed: 0,
-            failed: 0,
-            last_chapter_title: String::new(),
-            finished: None,
-            failures: Vec::new(),
-            version: 0,
-        });
+        {
+            let mut tasks = mutex_or("download:push_task", &state.tasks)
+                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+            tasks.push(DownloadTask {
+                id: task_id,
+                origin: SearchResult {
+                    source_id: source.rule.id,
+                    source_name: source.rule.name.clone(),
+                    url: req.url.clone(),
+                    // 旧 web 这里写空串 → /tasks 返回 `book_name: null`。
+                    // 改用请求里带的搜索书名 (前端可保证非空; 缺省时回退到空串,
+                    // 后续 BookResolved 会被 drain 写入 book_meta, book_name() 仍可显示)。
+                    book_name: req.book_name.clone().unwrap_or_default(),
+                    ..Default::default()
+                },
+                // web 不在 struct 上挂 rx —— drain task 拥有它, drain 退出时丢。
+                rx: None,
+                cancel: Some(cancel.clone()),
+                cancelling: false,
+                started_at_unix: now_unix_secs(),
+                finished_at_unix: None,
+                book_meta: None,
+                total_chapters: 0,
+                completed: 0,
+                failed: 0,
+                last_chapter_title: String::new(),
+                finished: None,
+                failures: Vec::new(),
+                version: 0,
+            });
+        }
         Ok(())
     })() {
         return lock_failure_stream(code.as_u16(), &msg);
@@ -208,7 +220,7 @@ pub async fn download(
     // 4. spawn crawler (吃掉 crawler_tx + cancel 的所有权)
     let book_url = req.url.clone();
     let state_for_crawler = Arc::clone(&state);
-    let cancel_for_crawler = cancel.clone();
+    let cancel_for_crawler = cancel;
     let sse_tx_for_crawler = sse_tx.clone();
     let chapter_start = req.chapter_start;
     let chapter_end = req.chapter_end;
@@ -322,7 +334,7 @@ pub async fn download(
                         .data(data));
                     if is_done { break; }
                 }
-                Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(broadcast::error::RecvError::Lagged(_)) => {}
                 Err(broadcast::error::RecvError::Closed) => break,
             }
         }

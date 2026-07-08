@@ -9,7 +9,7 @@ use crate::models::Rule;
 pub struct UpdateState {
     /// 是否正在检查。
     pub checking: bool,
-    /// 最新版本号（GitHub release tag_name）。
+    /// 最新版本号（GitHub release `tag_name`）。
     pub latest_version: Option<String>,
     /// 检查失败的错误信息。
     pub error: Option<String>,
@@ -45,8 +45,8 @@ impl UpdateState {
         match rx.try_recv() {
             Ok(result) => {
                 self.checking = false;
-                self.latest_version = result.latest_version.clone();
-                self.error = result.error.clone();
+                self.latest_version.clone_from(&result.latest_version);
+                self.error.clone_from(&result.error);
                 self.rx = None;
                 Some(classify(&result))
             }
@@ -62,16 +62,15 @@ impl UpdateState {
     /// 检查完成后 `latest_version` 与当前版本不同时为 true —— Settings 页据此把
     /// "检查更新"按钮切换成"下载新版"。`v` 前缀按 `classify` 同款方式剥除。
     pub fn is_new_version_available(&self) -> bool {
-        match &self.latest_version {
-            Some(latest) => latest.trim_start_matches('v') != env!("CARGO_PKG_VERSION"),
-            None => false,
-        }
+        self.latest_version
+            .as_ref()
+            .is_some_and(|latest| latest.trim_start_matches('v') != env!("CARGO_PKG_VERSION"))
     }
 }
 
 /// 把后台回报的 [`UpdateCheckResult`] 分类成 [`UpdateOutcome`]。
 ///
-/// 优先级：error > latest_version（后台 contract 保证两者不会同时为 Some）。
+/// 优先级：error > `latest_version（后台` contract 保证两者不会同时为 Some）。
 /// `env!("CARGO_PKG_VERSION")` 是 build-time 常量，比较无副作用。
 fn classify(result: &UpdateCheckResult) -> UpdateOutcome {
     if let Some(err) = &result.error {
@@ -93,7 +92,7 @@ fn classify(result: &UpdateCheckResult) -> UpdateOutcome {
 /// **代理策略**（优先级从高到低）：
 /// 1. `HttpClients.gh_proxy_pair()` URL 非空 → 走预构建的 GH 镜像前向代理 client
 ///    （构造时已含 proxy + UA，启动时一次性 build，不重复创建连接池）。
-///    gh_proxy 检查频率极低（启动一次 + 用户手动），不构成热路径。
+///    `gh_proxy` 检查频率极低（启动一次 + 用户手动），不构成热路径。
 /// 2. 否则从共享 [`HttpClients`] 复用 `safe` client（按占位 rule 选）——
 ///    该 client 已包含 HTTP CONNECT 代理 / TLS session cache / 默认 headers。
 /// 3. 两者都空 → `safe` client 直接走，无代理直连。
@@ -104,9 +103,7 @@ pub async fn check_github_latest_release(http: &HttpClients) -> UpdateCheckResul
 
     // GitHub API 对无 UA 的请求返回 403；gh_proxy client 构造时已设 UA；
     // safe client 分支需显式带 UA header。
-    let result = if !gh_proxy_url.is_empty() {
-        gh_proxy_client.get(url).send().await
-    } else {
+    let result = if gh_proxy_url.is_empty() {
         // 共享 client 分支：复用 `safe` —— 用占位 rule（ignore_ssl=false），
         // 因为查询 GitHub API 不需要忽略证书校验。
         let client = http.for_rule(&Rule {
@@ -118,6 +115,8 @@ pub async fn check_github_latest_release(http: &HttpClients) -> UpdateCheckResul
             .header(reqwest::header::USER_AGENT, "so-novel-rs")
             .send()
             .await
+    } else {
+        gh_proxy_client.get(url).send().await
     };
 
     match result {
@@ -155,6 +154,7 @@ pub async fn check_github_latest_release(http: &HttpClients) -> UpdateCheckResul
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
     use super::*;
 
     #[test]
@@ -223,7 +223,7 @@ mod tests {
         assert!(s.is_new_version_available());
     }
 
-    /// 压缩 JSON（GitHub API 实际响应格式）能被正确解析 tag_name。
+    /// 压缩 JSON（GitHub API 实际响应格式）能被正确解析 `tag_name`。
     /// 旧实现按行匹配 pretty-print，找不到会误报 "(empty result)"。
     #[test]
     fn parse_tag_name_from_actual_github_response() {

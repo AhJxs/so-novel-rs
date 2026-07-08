@@ -21,13 +21,13 @@ use super::LibraryPage;
 
 /// 渲染一行 entry（5 列：序号 / 书名 / 时间 / 操作 3 按钮）。
 ///
-/// h_flex 5 个固定宽度的子节点，第 4 列 `flex_1` 占满剩余。
+/// `h_flex` 5 个固定宽度的子节点，第 4 列 `flex_1` 占满剩余。
 /// 删除按钮走 `LibraryPage::prompt_delete`（page 通过 Entity handle 转发）。
 pub(super) fn render_row(
     index: usize,
     entry: &LibraryEntry,
     page: &Entity<LibraryPage>,
-    cx: &mut App,
+    cx: &App,
 ) -> impl IntoElement {
     let path_open = entry.path.clone();
     let path_reveal = entry.path.clone();
@@ -45,7 +45,7 @@ pub(super) fn render_row(
     let stem_display = truncate(&stem, 30);
     let ext_upper = entry.ext.to_uppercase();
     let mod_time = crate::utils::formatting::format_local_unix_secs(
-        entry.modified_unix_secs as i64,
+        i64::try_from(entry.modified_unix_secs).unwrap_or(0),
         "Library.time.unknown",
         "Library.time.invalid",
         "Library.time.format_failed",

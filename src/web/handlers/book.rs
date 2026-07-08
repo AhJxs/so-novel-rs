@@ -13,7 +13,7 @@ use crate::parser;
 
 use super::super::SharedState;
 use super::super::error::WebError;
-use super::lock::rw_read;
+use crate::utils::lock::rw_read_or;
 
 #[derive(Deserialize)]
 pub struct BookDetailParams {
@@ -26,13 +26,17 @@ fn extract_config_and_rule(
     state: &SharedState,
     source_id: i32,
 ) -> Result<(AppConfig, Rule), (StatusCode, String)> {
-    let cfg = rw_read("book:cfg", &state.config)?;
-    let rules = rw_read("book:rules", &state.rules)?;
-    let rule = rules
-        .iter()
-        .find(|r| r.id == source_id)
-        .cloned()
-        .ok_or_else(|| (StatusCode::NOT_FOUND, "书源未找到".to_string()))?;
+    let cfg = rw_read_or("book:cfg", &state.config)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let rule = {
+        let rules = rw_read_or("book:rules", &state.rules)
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+        rules
+            .iter()
+            .find(|r| r.id == source_id)
+            .cloned()
+            .ok_or_else(|| (StatusCode::NOT_FOUND, "书源未找到".to_string()))?
+    };
     Ok((cfg.clone(), rule))
 }
 
@@ -46,8 +50,10 @@ pub async fn book_detail(
     let source = Source::from(rule, &config);
     let client = state.http.for_rule(&source.rule);
 
-    let cf = (!config.global.cf_bypass.trim().is_empty()).then_some(config.global.cf_bypass.as_str());
-    let qc = (!config.cookie.qidian_cookie.trim().is_empty()).then_some(config.cookie.qidian_cookie.as_str());
+    let cf =
+        (!config.global.cf_bypass.trim().is_empty()).then_some(config.global.cf_bypass.as_str());
+    let qc = (!config.cookie.qidian_cookie.trim().is_empty())
+        .then_some(config.cookie.qidian_cookie.as_str());
 
     let book = parser::parse_book_detail(&client, &source.rule, &params.url, cf, qc).await?;
 

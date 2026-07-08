@@ -1,4 +1,4 @@
-//! 规则目录初始化 (PR #17 拆分, 2026-07-08).
+//! 规则目录初始化
 //!
 //! 2 个公共 fn:
 //! - [`init_rules_dir`] — 首次启动创建目录 + 补齐内置规则文件 (不覆盖用户修改)
@@ -62,7 +62,13 @@ pub fn list_rule_files(rules_dir: &Path) -> Vec<String> {
                 if name_lower.starts_with("rule-template") {
                     continue;
                 }
-                if name_lower.ends_with(".json") || name_lower.ends_with(".json5") {
+                if path
+                    .extension()
+                    .is_some_and(|ext| ext.eq_ignore_ascii_case("json"))
+                    || path
+                        .extension()
+                        .is_some_and(|ext| ext.eq_ignore_ascii_case("json5"))
+                {
                     files.push(name.to_string());
                 }
             }
@@ -74,6 +80,7 @@ pub fn list_rule_files(rules_dir: &Path) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
     use super::*;
     use std::path::PathBuf;
 
@@ -107,7 +114,7 @@ mod tests {
         std::fs::create_dir_all(&rules_dir).unwrap();
 
         // 写一个 user-customized main.json
-        let user_content = r##"[{"url":"https://user-customized"}]"##;
+        let user_content = r#"[{"url":"https://user-customized"}]"#;
         std::fs::write(rules_dir.join("main.json"), user_content).unwrap();
 
         let created = init_rules_dir(&rules_dir).unwrap();

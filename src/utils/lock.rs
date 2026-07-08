@@ -80,6 +80,7 @@ pub fn rw_write_or<'a, T>(
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
     use super::*;
     use std::sync::Arc;
     use std::thread;
@@ -87,8 +88,8 @@ mod tests {
     #[test]
     fn mutex_or_happy_path() {
         let m = Mutex::new(42_u32);
-        let g = mutex_or("test", &m).unwrap();
-        assert_eq!(*g, 42);
+        let v = *mutex_or("test", &m).unwrap();
+        assert_eq!(v, 42);
     }
 
     #[test]
@@ -102,16 +103,18 @@ mod tests {
         })
         .join();
         // 主线程再 lock 必返 PoisonError
-        let res = mutex_or("test", &m);
-        assert!(res.is_err());
-        assert_eq!(res.unwrap_err(), "test lock poisoned");
+        let err = mutex_or("test", &m).unwrap_err();
+        assert_eq!(err, "test lock poisoned");
     }
 
     #[test]
     fn rw_read_or_happy_path() {
         let lk = RwLock::new(String::from("hello"));
-        let g = rw_read_or("test", &lk).unwrap();
-        assert_eq!(g.as_str(), "hello");
+        {
+            let s = rw_read_or("test", &lk).unwrap();
+            assert_eq!(s.as_str(), "hello");
+            drop(s);
+        }
     }
 
     #[test]
@@ -121,8 +124,8 @@ mod tests {
             let mut g = rw_write_or("test", &lk).unwrap();
             *g = 7;
         }
-        let g = rw_read_or("test", &lk).unwrap();
-        assert_eq!(*g, 7);
+        let v = *rw_read_or("test", &lk).unwrap();
+        assert_eq!(v, 7);
     }
 
     #[test]
@@ -134,8 +137,7 @@ mod tests {
             panic!("intentional");
         })
         .join();
-        let res = rw_write_or("test", &lk);
-        assert!(res.is_err());
-        assert_eq!(res.unwrap_err(), "test write lock poisoned");
+        let err = rw_write_or("test", &lk).unwrap_err();
+        assert_eq!(err, "test write lock poisoned");
     }
 }

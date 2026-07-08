@@ -51,7 +51,7 @@ pub struct SettingsPage {
     theme_state_dyn_light: Entity<SelectState<SearchableVec<SharedString>>>,
     theme_state_dyn_dark: Entity<SelectState<SearchableVec<SharedString>>>,
 
-    /// 主题名快照，用于差量同步到 SelectState。
+    /// 主题名快照，用于差量同步到 `SelectState`。
     ///
     /// 主题列表**不是**静态的：启动时 `ThemeRegistry::watch_dir` async 加载 21 个 embed，
     /// `SettingsPage::new` 跑时列表可能只有 gpui-component 默认 Light + Dark 两个。等
@@ -68,7 +68,7 @@ pub struct SettingsPage {
     /// 之前试过在 `SettingField::render` 闭包里现建，但拿不到 `Context<Self>` 调不了 `cx.listener`；
     /// 也试过 `page_handle.update(cx, |_page, ctx| ctx.spawn(...))` 桥接，但 GPUI 0.2.2 +
     /// gpui-component 0.5.1 下 click 不触发（suffix 内 button 被 Input 的 `on_mouse_down`
-    /// 抢 hit，或双重 update 后 WeakEntity 已 stale）。`sources.rs::pick_and_add` 的 working
+    /// 抢 hit，或双重 update 后 `WeakEntity` 已 stale）。`sources.rs::pick_and_add` 的 working
     /// pattern（`cx.listener` 绑到 entity，entity 方法内直接 `cx.spawn`）才稳。
     pick_folder_listener: PickFolderListener,
 }
@@ -236,8 +236,8 @@ impl SettingsPage {
     /// 把当前 `config.global.theme_pref` 应用到全局 Theme + 重应用字号。
     ///
     /// 抽出来给三处 Select Confirm 订阅 + kind/dyn-mode dropdown setter 复用，
-    /// 避免每个 setter 各写一遍「apply_theme_pref + apply_font_size」。
-    /// apply_theme_pref 内部会 apply_config（重置字号），所以字号必须在后面重应用。
+    /// 避免每个 setter `各写一遍「apply_theme_pref` + `apply_font_size`」。
+    /// `apply_theme_pref` 内部会 `apply_config（重置字号），所以字号必须在后面重应用`。
     fn reapply_theme(&self, window: Option<&mut Window>, cx: &mut App) {
         let pref = self.model.read(cx).config.global.theme_pref.clone();
         themes::apply_theme_pref(&pref, window, cx);
@@ -257,7 +257,7 @@ impl SettingsPage {
     ///
     /// `cur` 在 click handler 里同步读出再 move 进 async —— 别在 async 里
     /// `model.read(async_cx)`，那里只有 `&mut AsyncApp`，拿不到 `&App`。
-    fn pick_folder(&mut self, cx: &mut Context<Self>) {
+    fn pick_folder(&self, cx: &Context<Self>) {
         let cur = self.model.read(cx).config.download.download_path.clone();
         let title = ts("Settings.choose_download_dir_dialog_title");
         let model = self.model.clone();
@@ -282,7 +282,7 @@ impl SettingsPage {
         .detach();
     }
 
-    /// 主题列表变 → 同步到 SelectState。
+    /// 主题列表变 → 同步到 `SelectState`。
     ///
     /// 拿不到 `cx.observe_global::<ThemeRegistry>` 的 Window 参数（callback 只有
     /// `&mut Context<Self>`），改在 `Render::render` 里做差量更新：每次 render 重
@@ -320,7 +320,7 @@ impl SettingsPage {
         let new_dark = themes::list_theme_names_by_mode(cx, true);
         if new_dark != self.last_dark_names {
             let items: SearchableVec<SharedString> = new_dark.clone().into();
-            let cur = SharedString::from(pref.dyn_dark.clone());
+            let cur = SharedString::from(pref.dyn_dark);
             let sel = <SearchableVec<SharedString> as SelectDelegate>::position(&items, &cur);
             self.theme_state_dyn_dark.update(cx, |s, cx| {
                 s.set_items(items, window, cx);
@@ -335,7 +335,7 @@ impl SettingsPage {
     ///
     /// `InputState::set_value` 需要 `&mut Window`，observer 拿不到，走 render 路径
     /// —— 和 `sync_theme_items` 同套路。
-    fn sync_download_path(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    fn sync_download_path(&self, window: &mut Window, cx: &mut Context<Self>) {
         let model_val = self.model.read(cx).config.download.download_path.clone();
         let input_val = self.download_path_input.read(cx).value().to_string();
         if model_val == input_val {
@@ -346,7 +346,7 @@ impl SettingsPage {
         });
     }
 
-    /// 组装 4 个 SettingPage（page_general / page_crawl / page_proxy / page_about）。
+    /// 组装 4 个 `SettingPage（page_general` / `page_crawl` / `page_proxy` / `page_about`）。
     fn build_pages(&self, cx: &App) -> Vec<SettingPage> {
         let ctx = PageCtx {
             model: &self.model,

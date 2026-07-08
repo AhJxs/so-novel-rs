@@ -84,8 +84,7 @@ pub async fn fetch(client: &Client, req: &FetchRequest<'_>) -> Result<FetchRespo
     let referer = req
         .referer
         .filter(|s| !s.trim().is_empty())
-        .map(|s| s.to_string())
-        .unwrap_or_else(|| origin_or_self(req.url));
+        .map_or_else(|| origin_or_self(req.url), std::string::ToString::to_string);
     let ua = random_ua();
 
     let mut builder = match req.method {
@@ -119,7 +118,7 @@ pub async fn fetch(client: &Client, req: &FetchRequest<'_>) -> Result<FetchRespo
         .headers()
         .get(reqwest::header::CONTENT_TYPE)
         .and_then(|v| v.to_str().ok())
-        .map(|s| s.to_string());
+        .map(std::string::ToString::to_string);
 
     let bytes = resp
         .bytes()
@@ -137,6 +136,7 @@ pub async fn fetch(client: &Client, req: &FetchRequest<'_>) -> Result<FetchRespo
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
     use super::*;
     use crate::config::AppConfig;
     use crate::http::client::{ClientOptions, build_async_client};
@@ -147,27 +147,32 @@ mod tests {
     async fn fetch_request_struct_compiles() {
         let cfg = AppConfig::default();
         let _client = build_async_client(&cfg, &ClientOptions::default()).unwrap();
-        let _req = FetchRequest {
+        // 构造 FetchRequest（不调用 send），确保 builder 字段类型稳定。
+        // 用 `req` 命名 —— `_req` 触 `clippy::no_effect_underscore_binding`。
+        let req = FetchRequest {
             url: "https://example.com/",
             method: HttpMethod::Get,
             cookies: None,
             timeout_secs: Some(15),
             referer: None,
         };
-        // 不调用 send；只确保 API 形状稳定。
+        // 消费 req 一次以避免 unused_assignments（即便仅构造也要参与类型推导/单态化）。
+        let _ = req.url;
     }
 
     #[test]
     fn post_form_compiles() {
         let form: Vec<(String, String)> =
             vec![("k".into(), "v".into()), ("submit".into(), "Search".into())];
-        let _req = FetchRequest {
+        // 同上：构造即验证 builder 形状；用 `req` 命名避开 no_effect_underscore_binding。
+        let req = FetchRequest {
             url: "https://example.com/s/",
             method: HttpMethod::Post(&form),
             cookies: Some("a=1; b=2"),
             timeout_secs: Some(15),
             referer: None,
         };
+        let _ = req.url;
     }
 }
 

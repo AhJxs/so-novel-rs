@@ -47,7 +47,7 @@ pub struct LibraryState {
     pub watcher_skip_until_unix_ms: Option<u64>,
 }
 
-/// 扫描下载目录得到 LibraryEntry 列表。
+/// 扫描下载目录得到 `LibraryEntry` 列表。
 ///
 /// - 仅包含**直接子文件**（不递归子目录）。
 /// - 仅保留 `.epub / .txt / .zip / .html / .pdf` 五种扩展名。
@@ -79,8 +79,7 @@ pub fn scan_library_dir(dir: &Path) -> std::io::Result<Vec<LibraryEntry>> {
             .modified()
             .ok()
             .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
+            .map_or(0, |d| d.as_secs());
 
         out.push(LibraryEntry {
             path,

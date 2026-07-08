@@ -29,19 +29,20 @@ pub fn abs_url(base: &str, href: &str) -> Option<String> {
 /// 取一个 URL 的 origin（scheme://host[:port]/），用作 Referer 头。
 /// 解析失败时返回原串。
 pub fn origin_or_self(url: &str) -> String {
-    match Url::parse(url) {
-        Ok(u) => {
+    Url::parse(url).map_or_else(
+        |_| url.to_string(),
+        |u| {
             let origin = u.origin();
             // origin.unicode_serialization() 在 opaque origin 时返回 "null"；
             // 我们在书源场景下一定是 http(s)，可以用 ascii_serialization。
             origin.ascii_serialization()
-        }
-        Err(_) => url.to_string(),
-    }
+        },
+    )
 }
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
     use super::*;
 
     #[test]

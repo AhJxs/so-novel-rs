@@ -79,15 +79,15 @@ pub fn format_local_unix_secs(
     };
     let local =
         dt.to_offset(time::UtcOffset::current_local_offset().unwrap_or(time::UtcOffset::UTC));
-    local
-        .format(&Rfc3339)
-        .ok()
-        .map(|s| s[..16].replace('T', " "))
-        .unwrap_or_else(|| crate::i18n::ts(format_failed_key).to_string())
+    local.format(&Rfc3339).ok().map_or_else(
+        || crate::i18n::ts(format_failed_key).to_string(),
+        |s| s[..16].replace('T', " "),
+    )
 }
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
     use super::*;
 
     #[test]
@@ -142,7 +142,7 @@ mod tests {
     fn format_local_unix_secs_valid_returns_local_time() {
         // 2024-01-15 08:30:00 UTC
         let s = format_local_unix_secs(
-            1705307400,
+            1_705_307_400,
             "Library.time.unknown",
             "Library.time.invalid",
             "Library.time.format_failed",

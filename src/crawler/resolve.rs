@@ -1,4 +1,4 @@
-//! 阶段一: 详情 + 目录解析 (PR #17 拆分, 2026-07-08).
+//! 阶段一: 详情 + 目录解析
 //!
 //! 返回 `(Book, Vec<Chapter>)`, 供 UI 层展示章节列表, 让用户选择范围后再
 //! 调用 [`super::download::download_chapters`]。
@@ -13,9 +13,7 @@ use thiserror::Error;
 
 use crate::config::AppConfig;
 use crate::models::{Book, Chapter, Source};
-use crate::parser::{
-    BookError, SelectError, TocError, parse_book_detail, parse_toc,
-};
+use crate::parser::{BookError, SelectError, TocError, parse_book_detail, parse_toc};
 use crate::utils::zhconv::convert_book_meta;
 
 use super::download_options::CancelToken;
@@ -51,7 +49,7 @@ pub enum CrawlerError {
     /// HTTP 客户端构造失败 (reqwest builder 抛错)。
     #[error("HTTP 客户端构造失败: {0}")]
     Client(String),
-    /// 标准库 IO 错误 (写盘 / create_dir_all 等)。
+    /// 标准库 IO 错误 (写盘 / `create_dir_all` 等)。
     #[error("IO 错误: {0}")]
     Io(#[from] std::io::Error),
     /// 导出失败 (EPUB / TXT / PDF 等)。
@@ -117,7 +115,11 @@ pub async fn resolve_book(
     let cf_bypass_owned: Option<Arc<str>> = cf_bypass.map(Arc::from);
     let qidian_cookie_owned = qidian_cookie.map(String::from);
     let eff = source.effective_crawl.clone();
-    let max_attempts = if cfg.crawl.enable_retry { eff.max_retries } else { 0 };
+    let max_attempts = if cfg.crawl.enable_retry {
+        eff.max_retries
+    } else {
+        0
+    };
     // 两次 retry 各需一份 eff (sleep_fn 是 move 闭包)。
     let eff_for_book = eff.clone();
     let eff_for_toc = eff;
