@@ -204,13 +204,87 @@ cargo build --release --target aarch64-unknown-linux-gnu    # Linux ARM64
 | `F6` / `Shift+F6` | 翻页（避开 Input 的 Tab 绑定） |
 | `Escape` | 关闭 Dialog / Sheet / Notification |
 
+## 🛠 开发与质量门禁
+
+本项目对企业级工程标准有完整配置，提交前**必须**通过以下门禁：
+
+```sh
+# 1. 格式
+cargo fmt --all -- --check
+
+# 2. 严格 clippy (pedantic + nursery)
+cargo clippy --all-features --all-targets -- -D warnings
+
+# 3. 单元 + 集成测试
+cargo test --all-features --lib
+
+# 4. 文档检查
+cargo doc --no-deps --all-features
+```
+
+**Lint 规则** 在 `Cargo.toml [lints.rust]` + `[lints.clippy]` 集中声明：
+
+| 类别 | 等级 | 说明 |
+|------|------|------|
+| `unsafe_code` | deny | 全仓禁 `unsafe`（除非有 `// SAFETY:` 注释） |
+| `missing_docs` | warn | `pub` 项必须有 `///` 文档 |
+| `unwrap_used` / `expect_used` / `panic` | warn | 业务层禁裸 unwrap（测试模块除外） |
+| clippy `pedantic` + `nursery` | warn | 渐进式收紧，PR #1 起批量清 |
+
+完整 lint 阈值在 `.clippy.toml`（圈复杂度 25 / 函数参数 8 / 类型复杂度 300）。
+
+## ⚡ 性能要点
+
+| 场景 | 关键优化 | 文件 |
+|------|----------|------|
+| HTTP 连接复用 | 共享 `reqwest::Client`（连接池 + TLS session） | `src/http/clients.rs` |
+| 章节并发抓取 | `tokio::Semaphore` 限并发 + `JoinSet` 拉取 | `src/crawler/mod.rs` |
+| 指数退避重试 | `rand` 抖动 [min, max] 区间，避免雷鸣群 | `src/crawler/retry.rs` |
+| 增量文件监听 | `gpui_component` 0.5.1 自带 `notify` 7.0 + smol timer | `src/gpui_app/pages/library/watcher.rs` |
+| 简繁转换 | zhconv 词表 Aho-Corasick 编译期嵌入，零运行时 IO | `src/utils/zhconv.rs` |
+| 主题加载 | 21 个 JSON `include_str!` 嵌入二进制 | `src/gpui_app/themes.rs` |
+| PDF 生成 | `pdf_oxide` 直接拼文本，不走 HTML/CSS 渲染流水线 | `src/export/pdf.rs` |
+| 配置文件写 | tmp + fsync + rename 原子写，断电最坏"老文件还在" | `src/db/mod.rs::write_atomically` |
+
+## 🔧 排障指引
+
+| 症状 | 原因 | 处置 |
+|------|------|------|
+| 首次 `cargo run` 卡在 web UI build | `tsc --noEmit && vite build` 需要 Node.js | 装 Node 18+；或设 `SO_NOVEL_SKIP_WEB_BUILD=1` 跳过前端（仅 Rust 静态分析用） |
+| `unsafe_code` deny 触发 | 业务层新增 `unsafe` 块 | 写明 `// SAFETY: <理由>` 注释 + 在 `Cargo.toml` 申请豁免或 `#[allow(unsafe_code)]` 标注 |
+| GUI 启动 panic: `tokio::time::sleep` 在 smol executor | `gpui 0.2.2 cx.spawn` 跑在 smol, 不接 tokio reactor | 用 `cx.background_executor().timer(...)` 替代；channel 用 `smol::channel` |
+| 配置文件改完启动报错 "字段超出合法范围" | PR #6 加了 `AppConfig::validate()` 启动期校验 | 按报错改 `font_size ∈ [12,24]` / `min_interval <= max_interval` / `download_path` 非空 |
+| 书源搜不到结果但能 ping 通 | 命 Cloudflare 验证，搜索结果未登录态被截断 | 配 `cf-bypass = "http://your-bypass-host:port"`，或部署 CloudflareBypassForScraping 反代 |
+| `cargo clippy` 一堆 `unwrap_used` warning | PR #5a 起的 pedantic lint | 业务代码 `?` 透传；测试模块 `#[cfg(test)] mod tests` 已自动豁免；初始化常量 `expect("static")` 加 `// SAFETY:` |
+| 章节正文为空但书源能加载详情 | 规则 `chapter.filter` 把所有段落都过滤掉了，或源站就是空 | 用 `chapter-filter-rule = ""` 临时关掉过滤看原始内容；调整规则 |
+
+## 🏗 企业级架构改造记录 (2026-07)
+
+最近一次大规模重构，16 个 PR 分批落地：
+
+| PR | 主题 | 关键产出 |
+|----|------|----------|
+| #1 | 目录重命名 + lint 收紧 | `util→utils`、`persistent→db`、`.clippy.toml`、pedantic lint |
+| #2 | 错误体系根 | `AppError` 14 变体 + `AppResult<T>` + `From<ExportError/anyhow/io/Json/Toml>` |
+| #3 | 错误码表 | 41 变体 `ErrorCode` 数字码 (1xxx-5xxx)，`web::WebError::message` 委托 |
+| #4 | utils 文档化 | 模块总览 + 5 lock 测试 + 3 doctest |
+| #5 | 安全性 lint | `unwrap_used` / `expect_used` / `panic` warn，PR #5b/5c 待续 |
+| #6 | config 拆分 | `AppConfig` 拆 6 sub-struct + `ConfigError` + `LazyLock` 单例 |
+| #7-9 | AppError 迁移 | `app/ops/` 5 ops + 2 message fields → `AppResult<T>` |
+| #10 | model 文档化 | 34 字段加 /// 业务含义；PO+DTO 同体说明 |
+| #11 | db 职责收敛 | `DaoError` 根 + `tracing::instrument` + 6 测试 |
+| #12 | crawler 架构图 | ASCII 流程图 + 拒绝"service/ 抽出"过抽象 |
+
+**核心决策**：不颠覆业务、不改对外接口，仅做架构规整、错误体系统一、文档化、测试补齐。完整计划见 `docs/superpowers/plans/2026-07-08-so-novel-rs-refactor.md`。
+
 ## 🤝 贡献
 
 欢迎 PR！本项目采用 AGPL-3.0 协议，贡献即同意按该协议授权。
 
-* 提交前跑 `cargo fmt` + `cargo clippy --all-targets -- -D warnings` + `cargo test --lib`
+* 提交前跑 `cargo fmt --all -- --check` + `cargo clippy --all-features --all-targets -- -D warnings` + `cargo test --lib`
 * 新增 / 改动 UI 文案 → 同步 `locales/app.yml` 三语
 * 新增书源 → 走 `bundle/rules/` JSON，规则语法见 `rule-template.json5`（如存在）
+* 业务函数返回错误 → 用 `AppResult<T>` + `?` 透传；边界（CLI / Web）才转 `anyhow`
 
 ## 🙏 致谢
 
