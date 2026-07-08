@@ -54,9 +54,9 @@ pub fn build_router(state: SharedState, session_store: SessionStore<SessionNullP
         .route("/book/toc", get(handlers::book::book_toc))
         // 下载 + 任务
         .route("/download", post(handlers::download::download))
-        .route("/tasks", get(handlers::download::tasks_list))
-        .route("/tasks/{id}/cancel", post(handlers::download::task_cancel))
-        .route("/tasks/{id}", delete(handlers::download::task_delete))
+        .route("/tasks", get(handlers::tasks::tasks_list))
+        .route("/tasks/{id}/cancel", post(handlers::tasks::task_cancel))
+        .route("/tasks/{id}", delete(handlers::tasks::task_delete))
         // 书库 + 文件
         .route("/library", get(handlers::library::library_list))
         .route("/library/{filename}", delete(handlers::library::library_delete))
