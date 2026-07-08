@@ -4,7 +4,7 @@ use rand::RngExt;
 use regex::Regex;
 use std::sync::LazyLock;
 
-use crate::config::{AppConfig, CookieCfg, CrawlCfg, DownloadCfg, GlobalCfg, ProxyCfg, SourceCfg};
+use crate::config::AppConfig;
 use crate::models::EffectiveCrawl;
 
 /// 解析 hutool 风格的"宽松 JSON"字符串到键值对列表。

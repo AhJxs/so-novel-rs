@@ -3,8 +3,6 @@
 //! 全部 thin delegator, 实际逻辑在 `crate::app::ops::download`.
 //! 拆这里只是按职责分类, 不重复实现。
 
-use std::sync::Arc;
-
 use crate::models::{Book, Chapter, SearchResult};
 
 use super::{AppModel, ops};

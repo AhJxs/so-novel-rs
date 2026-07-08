@@ -1,6 +1,6 @@
 //! 配置持久化。
 
-use crate::config::{AppConfig, CookieCfg, CrawlCfg, DownloadCfg, GlobalCfg, ProxyCfg, SourceCfg};
+use crate::config::AppConfig;
 use crate::error::AppResult;
 
 /// 把当前 config 写回 config.toml。

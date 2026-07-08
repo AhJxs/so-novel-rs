@@ -12,7 +12,9 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 
-use crate::config::{AppConfig, CookieCfg, CrawlCfg, DownloadCfg, GlobalCfg, ProxyCfg, SourceCfg};
+#[cfg(test)]
+use crate::config::ProxyCfg;
+use crate::config::AppConfig;
 
 /// 控制 client 行为的小结构。
 ///

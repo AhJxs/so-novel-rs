@@ -18,7 +18,7 @@ use axum_session::{SessionConfig, SessionNullPool, SessionStore};
 use serde::Serialize;
 
 use crate::app::DownloadTask;
-use crate::config::{AppConfig, CookieCfg, CrawlCfg, DownloadCfg, GlobalCfg, ProxyCfg, SourceCfg};
+use crate::config::AppConfig;
 use crate::http::HttpClients;
 use crate::models::Rule;
 use crate::db::SourcesConfig;

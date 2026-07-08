@@ -56,8 +56,7 @@ use tokio::runtime::Runtime;
 
 use crate::config::{AppConfig, ConfigPaths, load_config};
 use crate::http::HttpClients;
-use crate::i18n::{ts, ts_fmt};
-use crate::models::{Rule, SearchResult};
+use crate::models::Rule;
 use crate::db::SourcesConfig;
 use events::{WakeupHandle, WakeupReceiver};
 use ops::OpsCtx;

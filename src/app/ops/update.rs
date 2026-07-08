@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use super::super::events::WakeupHandle;
 use super::super::update_state::UpdateState;
-use crate::config::{AppConfig, CookieCfg, CrawlCfg, DownloadCfg, GlobalCfg, ProxyCfg, SourceCfg};
+use crate::config::AppConfig;
 use crate::http::HttpClients;
 
 /// 手动检查 GitHub release 是否有新版本。

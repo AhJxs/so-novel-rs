@@ -7,7 +7,7 @@ use tokio::sync::mpsc;
 use tracing::Instrument;
 
 use crate::app::search_state::TocState;
-use crate::config::{AppConfig, CookieCfg, CrawlCfg, DownloadCfg, GlobalCfg, ProxyCfg, SourceCfg};
+use crate::config::AppConfig;
 use crate::crawler::{
     CancelToken, CrawlerError, DownloadOptions, Progress, download_book, download_chapters,
     resolve_book,

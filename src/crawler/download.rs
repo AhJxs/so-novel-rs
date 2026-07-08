@@ -12,7 +12,6 @@ use std::time::Duration;
 
 use rand::RngExt;
 use tokio::sync::Semaphore;
-use tokio::sync::mpsc;
 
 use crate::config::AppConfig;
 use crate::export::{
@@ -21,7 +20,6 @@ use crate::export::{
 use crate::models::{Book, Chapter, Source};
 use crate::parser::{ChapterError, TocError, parse_chapter};
 
-use super::download_options::CancelToken;
 use super::download_options::DownloadOptions;
 use super::progress::Progress;
 use super::resolve::{CrawlerError, resolve_book};

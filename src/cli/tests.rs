@@ -6,10 +6,7 @@
 
 use clap::{CommandFactory, Parser};
 
-use crate::config::{
-    AppConfig, CookieCfg, CrawlCfg, DownloadCfg, ExportFormat, GlobalCfg, Language, ProxyCfg,
-    SourceCfg,
-};
+use crate::config::{AppConfig, DownloadCfg, ExportFormat, Language};
 
 use super::{
     Cli, Cmd, SourcesAction, build_localized_command, subcommand_name, util::effective_cfg,

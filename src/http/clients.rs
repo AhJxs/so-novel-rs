@@ -35,7 +35,9 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 
-use crate::config::{AppConfig, CookieCfg, CrawlCfg, DownloadCfg, GlobalCfg, ProxyCfg, SourceCfg};
+#[cfg(test)]
+use crate::config::{GlobalCfg, ProxyCfg};
+use crate::config::AppConfig;
 use crate::http::client::{ClientOptions, build_async_client};
 use crate::models::Rule;
 use crate::utils::lock::{mutex_or, rw_read_or, rw_write_or};

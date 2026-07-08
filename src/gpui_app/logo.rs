@@ -12,7 +12,7 @@ use std::sync::{Arc, LazyLock};
 
 use gpui::{
     AnyElement, ImageSource, IntoElement, ObjectFit, RenderImage, Styled as _, StyledImage as _,
-    div, img, px,
+    div, img,
 };
 
 /// Sidebar header 用的小 logo (assets/logo.png 编译期嵌入)。

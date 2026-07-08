@@ -18,7 +18,7 @@ use thiserror::Error;
 use crate::crawler::cover_updater;
 use crate::http::{FetchRequest, HttpMethod, fetch, fetch_via_cf_bypass, has_cloudflare};
 use crate::http::abs_url;
-use crate::models::{Book, ContentType, Rule};
+use crate::models::{Book, Rule};
 use crate::parser::dom::{SelectError, select_and_invoke_js};
 
 use super::cover::{content_type_for, extract_cover_url, maybe_replace_cover};
@@ -385,7 +385,7 @@ mod tests {
     #[tokio::test]
     #[ignore = "live network: depends on 22biqu availability"]
     async fn live_22biqu_book_detail_parses() {
-        use crate::config::{AppConfig, CookieCfg, CrawlCfg, DownloadCfg, GlobalCfg, ProxyCfg, SourceCfg};
+        use crate::config::AppConfig;
         use crate::http::client::{ClientOptions, build_async_client};
         use crate::parser::search::search_one;
 

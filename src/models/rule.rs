@@ -219,7 +219,7 @@ pub struct RuleCrawl {
 // 原本在 `crate::rules::source`，合并到这里是因为它本质上只是 `Rule` 的
 // "派生视图" —— 跟 Rule 同模型层最自然，跨模块再 import 一层显得啰嗦。
 
-use crate::config::{AppConfig, CookieCfg, CrawlCfg, DownloadCfg, GlobalCfg, ProxyCfg, SourceCfg};
+use crate::config::AppConfig;
 
 /// 由 `AppConfig` 与 `Rule.crawl` 派生的有效抓取参数。
 /// 单位与 Java 端一致：interval 毫秒。

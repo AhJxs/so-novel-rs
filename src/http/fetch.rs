@@ -138,7 +138,7 @@ pub async fn fetch(client: &Client, req: &FetchRequest<'_>) -> Result<FetchRespo
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{AppConfig, CookieCfg, CrawlCfg, DownloadCfg, GlobalCfg, ProxyCfg, SourceCfg};
+    use crate::config::AppConfig;
     use crate::http::client::{ClientOptions, build_async_client};
 
     /// 这条测试只验证 fetch 函数能编译、能用 builder 模式调用；

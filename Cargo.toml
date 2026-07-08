@@ -217,7 +217,12 @@ strip = "symbols"
 # 集中在 `startup/mod.rs`, 加 `// SAFETY:` 注释。新增 unsafe 会被 deny 显式拒绝,
 # 但需 `#[allow(unsafe_code)]` 才能写, 强制评审。
 unsafe_code = "deny"
-missing_docs = "warn"
+# `missing_docs` 关掉: 项目约 200+ serde-derived struct field (`Rule` / `AppConfig` / `Book`
+# 等), 字段名跟 JSON 字段一一对应 —— 每个写 `/// XXX: T` 是噪声, 不增加信息。
+# 实际文档政策见 refactor plan: 重要 public fn 必带 `#[tracing::instrument]` + `# Errors` +
+# `# Examples` (由 PR #18–#20 覆盖), struct/enum 顶层 doc 由各模块顶部 //! 文档承担。
+# 模块层再加 `#[allow(missing_docs)]` 来标"这个文件无 docs policy 要求"。
+missing_docs = "allow"
 # 失效的 unsafe 标记 (2024 edition 新 lint; 项目无 unsafe 实际不会触发)
 invalid_value = "warn"
 # rust 2024 死代码裁剪; clippy 也有同源 lint, 保留 rust 官方更准确
