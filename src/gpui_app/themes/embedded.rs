@@ -10,28 +10,31 @@ pub const FONT_SIZE_MAX: f32 = 24.0;
 pub const FONT_SIZE_DEFAULT: f32 = 16.0;
 
 // ----- 21 个主题 JSON embed (编译期嵌入; `include_str!` 路径必须字面量) -----
+//
+// JSON 文件统一放在 [`data/`] 子目录, 与 .rs 源文件分离 — 主题资产 vs 代码
+// 各司其职, 升级主题不影响 Rust 编译产物。
 
-pub const THEME_ADVENTURE: &str = include_str!("../themes/adventure.json");
-pub const THEME_ALDUIN: &str = include_str!("../themes/alduin.json");
-pub const THEME_ASCIINEMA: &str = include_str!("../themes/asciinema.json");
-pub const THEME_AYU: &str = include_str!("../themes/ayu.json");
-pub const THEME_CATPPUCCIN: &str = include_str!("../themes/catppuccin.json");
-pub const THEME_EVERFOREST: &str = include_str!("../themes/everforest.json");
-pub const THEME_FAHRENHEIT: &str = include_str!("../themes/fahrenheit.json");
-pub const THEME_FLEXOKI: &str = include_str!("../themes/flexoki.json");
-pub const THEME_GRUVBOX: &str = include_str!("../themes/gruvbox.json");
-pub const THEME_HARPER: &str = include_str!("../themes/harper.json");
-pub const THEME_HYBRID: &str = include_str!("../themes/hybrid.json");
-pub const THEME_JELLYBEANS: &str = include_str!("../themes/jellybeans.json");
-pub const THEME_KIBBLE: &str = include_str!("../themes/kibble.json");
-pub const THEME_MACOS_CLASSIC: &str = include_str!("../themes/macos-classic.json");
-pub const THEME_MATRIX: &str = include_str!("../themes/matrix.json");
-pub const THEME_MELLIFLUOUS: &str = include_str!("../themes/mellifluous.json");
-pub const THEME_MOLOKAI: &str = include_str!("../themes/molokai.json");
-pub const THEME_SOLARIZED: &str = include_str!("../themes/solarized.json");
-pub const THEME_SPACEDUCK: &str = include_str!("../themes/spaceduck.json");
-pub const THEME_TOKYONIGHT: &str = include_str!("../themes/tokyonight.json");
-pub const THEME_TWILIGHT: &str = include_str!("../themes/twilight.json");
+pub const THEME_ADVENTURE: &str = include_str!("data/adventure.json");
+pub const THEME_ALDUIN: &str = include_str!("data/alduin.json");
+pub const THEME_ASCIINEMA: &str = include_str!("data/asciinema.json");
+pub const THEME_AYU: &str = include_str!("data/ayu.json");
+pub const THEME_CATPPUCCIN: &str = include_str!("data/catppuccin.json");
+pub const THEME_EVERFOREST: &str = include_str!("data/everforest.json");
+pub const THEME_FAHRENHEIT: &str = include_str!("data/fahrenheit.json");
+pub const THEME_FLEXOKI: &str = include_str!("data/flexoki.json");
+pub const THEME_GRUVBOX: &str = include_str!("data/gruvbox.json");
+pub const THEME_HARPER: &str = include_str!("data/harper.json");
+pub const THEME_HYBRID: &str = include_str!("data/hybrid.json");
+pub const THEME_JELLYBEANS: &str = include_str!("data/jellybeans.json");
+pub const THEME_KIBBLE: &str = include_str!("data/kibble.json");
+pub const THEME_MACOS_CLASSIC: &str = include_str!("data/macos-classic.json");
+pub const THEME_MATRIX: &str = include_str!("data/matrix.json");
+pub const THEME_MELLIFLUOUS: &str = include_str!("data/mellifluous.json");
+pub const THEME_MOLOKAI: &str = include_str!("data/molokai.json");
+pub const THEME_SOLARIZED: &str = include_str!("data/solarized.json");
+pub const THEME_SPACEDUCK: &str = include_str!("data/spaceduck.json");
+pub const THEME_TOKYONIGHT: &str = include_str!("data/tokyonight.json");
+pub const THEME_TWILIGHT: &str = include_str!("data/twilight.json");
 
 /// `(file_name, json_content)` 列表。init 时按需写到用户 themes 目录。
 pub(super) fn embedded_themes() -> Vec<(&'static str, &'static str)> {
