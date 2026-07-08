@@ -1,9 +1,9 @@
-//! 日志系统 (PR #17, 2026-07-08 重构).
+//! 日志系统 (PR #17, 2026-07-08 重构; 2026-07-08 默认改为 Text).
 //!
 //! # 设计
 //!
-//! - **JSON-on-by-default**: 生产/容器环境用 JSON 输出, 便于聚合栈 (Loki / ELK) parse
-//! - **text mode**: `LOG_FORMAT=text` 环境变量切回可读文本 (开发期常用)
+//! - **text 模式 (默认)**: 人类可读文本 + ANSI 颜色, 开发期常用
+//! - **JSON 模式**: `LOG_FORMAT=json` 环境变量切换, 生产/容器环境用, 便于聚合栈 (Loki / ELK) parse
 //! - **env filter**: `RUST_LOG=info,so_novel_rs=debug` 走 `tracing_subscriber::EnvFilter`
 //! - **init 一次**: `tracing_subscriber::init()` 全局唯一; 二次 init 会 panic,
 //!   caller 需自行保证 (CLI 启动期 + startup::dispatch 模式已分流)
@@ -25,37 +25,39 @@ use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberI
 /// 日志输出格式。
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum LogFormat {
-    /// JSON 行输出 (生产/容器, 聚合栈 parse 友好)。**默认**。
+    /// 人类可读文本 (开发期常用, 带 ANSI 颜色)。**默认**。
     #[default]
-    Json,
-    /// 人类可读文本 (开发期常用, 带 ANSI 颜色)。
     Text,
+    /// JSON 行输出 (生产/容器, 聚合栈 parse 友好)。
+    Json,
 }
 
 impl FromStr for LogFormat {
     type Err = String;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.trim().to_ascii_lowercase().as_str() {
-            "json" | "" => Ok(Self::Json),
-            "text" | "pretty" => Ok(Self::Text),
-            other => Err(format!("未知日志格式: {other:?}; 期望 json|text")),
+            "json" => Ok(Self::Json),
+            "text" | "pretty" | "" => Ok(Self::Text),
+            other => Err(format!("未知日志格式: {other:?}; 期望 text|json")),
         }
     }
 }
 
-/// 初始化全局 tracing subscriber (JSON-by-default).
+/// 初始化全局 tracing subscriber (text-by-default).
 ///
 /// # Examples
 ///
 /// ```
 /// // 启动时调一次; 二次 init 会 panic
 /// so_novel_rs::logger::init();
-/// tracing::info!("hello");  // 输出一行 JSON
+/// tracing::info!("hello");  // 默认输出可读文本
 /// ```
+///
+/// 切到 JSON: `LOG_FORMAT=json so-novel-rs ...`.
 ///
 /// # Errors
 ///
-/// 当 `LOG_FORMAT` 环境变量是无效值时, 启动 panic. 用 `init_from_config`
+/// 当 `LOG_FORMAT` 环境变量是无效值时, 启动 panic. 用 `init_with_format`
 /// 走非 panic 路径。
 pub fn init() {
     let format = std::env::var("LOG_FORMAT")
@@ -71,6 +73,19 @@ pub fn init_with_format(format: LogFormat) -> Result<(), String> {
         .unwrap_or_else(|_| EnvFilter::new("info,so_novel_rs=debug"));
 
     match format {
+        LogFormat::Text => {
+            let layer = fmt::layer()
+                .with_target(true)
+                .with_thread_ids(false)
+                .with_file(false)
+                .with_line_number(false)
+                .with_ansi(true);
+            tracing_subscriber::registry()
+                .with(filter)
+                .with(layer)
+                .try_init()
+                .map_err(|e| format!("tracing subscriber init 失败: {e}"))?;
+        }
         LogFormat::Json => {
             let layer = fmt::layer()
                 .json()
@@ -79,19 +94,6 @@ pub fn init_with_format(format: LogFormat) -> Result<(), String> {
                 .with_target(true)
                 .with_file(false)
                 .with_line_number(false);
-            tracing_subscriber::registry()
-                .with(filter)
-                .with(layer)
-                .try_init()
-                .map_err(|e| format!("tracing subscriber init 失败: {e}"))?;
-        }
-        LogFormat::Text => {
-            let layer = fmt::layer()
-                .with_target(true)
-                .with_thread_ids(false)
-                .with_file(false)
-                .with_line_number(false)
-                .with_ansi(true);
             tracing_subscriber::registry()
                 .with(filter)
                 .with(layer)
@@ -122,16 +124,16 @@ mod tests {
 
     #[test]
     fn log_format_parses_case_insensitive() {
-        assert_eq!("json".parse::<LogFormat>().unwrap(), LogFormat::Json);
-        assert_eq!("JSON".parse::<LogFormat>().unwrap(), LogFormat::Json);
         assert_eq!("text".parse::<LogFormat>().unwrap(), LogFormat::Text);
+        assert_eq!("TEXT".parse::<LogFormat>().unwrap(), LogFormat::Text);
         assert_eq!("pretty".parse::<LogFormat>().unwrap(), LogFormat::Text);
-        assert_eq!("".parse::<LogFormat>().unwrap(), LogFormat::Json);
+        assert_eq!("".parse::<LogFormat>().unwrap(), LogFormat::Text);
+        assert_eq!("json".parse::<LogFormat>().unwrap(), LogFormat::Json);
     }
 
     #[test]
-    fn log_format_default_is_json() {
-        assert_eq!(LogFormat::default(), LogFormat::Json);
+    fn log_format_default_is_text() {
+        assert_eq!(LogFormat::default(), LogFormat::Text);
     }
 
     #[test]
