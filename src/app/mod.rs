@@ -398,7 +398,8 @@ impl AppModel {
                 self.push_success(msg);
                 self.save_sources_config();
             }
-            Err(msg) => {
+            Err(e) => {
+                let msg = e.message();
                 if msg.starts_with("文件内容为空") || msg.starts_with("文件中未找到有效")
                 {
                     self.push_warning(msg);
@@ -422,7 +423,7 @@ impl AppModel {
                 self.push_success(ts_fmt("Toasts.delete_source_ok", &[("url", source_url)]))
             }
             Ok(false) => self.push_warning(ts("Toasts.delete_source_missing")),
-            Err(msg) => self.push_error(msg),
+            Err(e) => self.push_error(e.message()),
         }
     }
 
@@ -450,7 +451,7 @@ impl AppModel {
                 ));
                 self.save_sources_config();
             }
-            Err(msg) => self.push_error(msg),
+            Err(e) => self.push_error(e.message()),
         }
     }
 
@@ -465,7 +466,8 @@ impl AppModel {
     /// cx.spawn(timer 500ms) 合并多次 persist_settings 调用 —— 单次写盘本来就很快
     /// （小 TOML 几 ms），目前不做 debounce。
     pub fn persist_settings(&mut self) {
-        if let Err(msg) = persist_settings(&self.config, &self.paths.config_file) {
+        if let Err(e) = persist_settings(&self.config, &self.paths.config_file) {
+            let msg = e.message();
             tracing::warn!("自动保存 config.toml 失败: {msg}");
             self.push_error(msg);
             return;
@@ -579,7 +581,7 @@ impl AppModel {
         match delete_library_entry(&mut self.library, &self.config.download.download_path, path) {
             Ok(msg) if !msg.is_empty() => self.push_success(msg),
             Ok(_) => {}
-            Err(msg) => self.push_error(msg),
+            Err(e) => self.push_error(e.message()),
         }
     }
 

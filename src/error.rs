@@ -153,6 +153,12 @@ impl AppError {
         Self::Internal(msg.into())
     }
 
+    /// IO 错误加业务前缀。`std::io::Error` 已 `#[from]`, 但业务侧常需要
+    /// "读取文件失败: No such file" 这种带前缀的字符串, 一次性收口。
+    pub fn io_msg(e: std::io::Error, prefix: impl AsRef<str>) -> Self {
+        Self::Internal(format!("{}: {e}", prefix.as_ref()))
+    }
+
     /// 返回错误的消息文本 (不含结构化字段), 便于日志和 HTTP 响应。
     pub fn message(&self) -> String {
         match self {

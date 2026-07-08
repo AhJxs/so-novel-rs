@@ -3,6 +3,8 @@
 use std::path::Path;
 use std::sync::Arc;
 
+use crate::error::AppError;
+use crate::error::AppResult;
 use crate::http::HttpClients;
 use crate::models::Rule;
 use crate::db::SourcesConfig;
@@ -31,33 +33,33 @@ pub fn toggle_source_disabled(
 /// **去重**：文件名相同时 replace（覆盖）。
 /// 返回 `ImportResult { filename }`。
 ///
-/// 失败：返回 `Err(msg)`，msg 走 toast notification。
+/// 失败：返回 `Err(AppError)`，调用方用 `e.message()` 渲染 toast notification。
 pub fn add_sources_from_file(
     rules_dir: &Path,
     sources_config: &mut SourcesConfig,
     rules: &mut Vec<Rule>,
     rule_load_error: &mut Option<String>,
     source_path: &Path,
-) -> Result<ImportResult, String> {
+) -> AppResult<ImportResult> {
     let filename = source_path
         .file_name()
         .and_then(|n| n.to_str())
-        .ok_or_else(|| "无法获取文件名".to_string())?
+        .ok_or_else(|| AppError::invalid("无法获取文件名"))?
         .to_string();
 
     // 验证文件内容是否有效
-    let bytes = std::fs::read(source_path).map_err(|e| format!("读取文件失败: {e}"))?;
+    let bytes = std::fs::read(source_path).map_err(|e| AppError::io_msg(e, "读取文件失败"))?;
     let text = String::from_utf8_lossy(&bytes);
 
     let _: Vec<Rule> = serde_json::from_str::<Vec<Rule>>(&text)
         .or_else(|_| serde_json::from_str::<Rule>(&text).map(|r| vec![r]))
         .or_else(|_| json5::from_str::<Vec<Rule>>(&text))
         .or_else(|_| json5::from_str::<Rule>(&text).map(|r| vec![r]))
-        .map_err(|e| format!("解析失败: {e}"))?;
+        .map_err(|e| AppError::internal(format!("解析失败: {e}")))?;
 
     // 复制文件到 rules 目录（重名则覆盖）
     let dest = rules_dir.join(&filename);
-    std::fs::copy(source_path, &dest).map_err(|e| format!("复制文件失败: {e}"))?;
+    std::fs::copy(source_path, &dest).map_err(|e| AppError::io_msg(e, "复制文件失败"))?;
 
     tracing::info!("已导入书源文件: {}", dest.display());
 
@@ -99,7 +101,7 @@ pub fn delete_source(
     rules: &mut Vec<Rule>,
     sources_state: &mut SourcesState,
     source_url: &str,
-) -> Result<bool, String> {
+) -> AppResult<bool> {
     let url_key = source_url.trim().to_lowercase();
 
     // 在 retain 之前捕获要删除的规则 ID（retain 后就找不到了）
@@ -117,10 +119,10 @@ pub fn delete_source(
         // 从活跃文件中重新保存（原子写入，防止崩溃时损坏文件）
         let file_path = rules_dir.join(&sources_config.active_file);
         if file_path.exists() {
-            let content =
-                serde_json::to_string_pretty(rules).map_err(|e| format!("序列化失败: {e}"))?;
+            let content = serde_json::to_string_pretty(rules)
+                .map_err(|e| AppError::internal(format!("序列化失败: {e}")))?;
             crate::db::write_atomically(&file_path, content.as_bytes())
-                .map_err(|e| format!("写入文件失败: {e}"))?;
+                .map_err(|e| AppError::internal(format!("写入文件失败: {e}")))?;
         }
 
         // 清理健康检查状态
@@ -141,10 +143,10 @@ pub fn switch_active_file(
     rules: &mut Vec<Rule>,
     rule_load_error: &mut Option<String>,
     filename: &str,
-) -> Result<(), String> {
+) -> AppResult<()> {
     let file_path = rules_dir.join(filename);
     if !file_path.exists() {
-        return Err(format!("文件不存在: {filename}"));
+        return Err(AppError::not_found(format!("文件不存在: {filename}")));
     }
 
     sources_config.active_file = filename.to_string();
@@ -157,7 +159,7 @@ pub fn switch_active_file(
         }
         Err(e) => {
             *rule_load_error = Some(format!("{e:#}"));
-            Err(format!("加载规则失败: {e:#}"))
+            Err(AppError::internal(format!("加载规则失败: {e:#}")))
         }
     }
 }

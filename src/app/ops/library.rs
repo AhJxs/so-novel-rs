@@ -49,7 +49,7 @@ pub fn delete_library_entry(
     library: &mut LibraryState,
     _download_path: &str,
     path: &Path,
-) -> Result<String, String> {
+) -> crate::error::AppResult<String> {
     let result = match std::fs::remove_file(path) {
         Ok(_) => {
             let file_name = path
@@ -69,7 +69,7 @@ pub fn delete_library_entry(
                 crate::i18n::ts_fmt("Toasts.library_delete_failed", &[("err", &e.to_string())])
                     .to_string();
             library.last_error = Some(msg.clone());
-            Err(msg)
+            Err(crate::error::AppError::internal(msg))
         }
     };
     library.pending_delete = None;
