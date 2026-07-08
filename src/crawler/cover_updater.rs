@@ -43,6 +43,22 @@ const TIMEOUT_SECS: u64 = 5;
 /// `fallback_cover_url` 是详情页抽出的原始 cover URL（可能 None / 空串）；
 /// 3 站都没拿到有效候选时返回 fallback（fallback 自身为空则用 `DEFAULT_COVER`）。
 /// **永远返回非空 String**，让调用方无脑赋值给 `book.cover_url` 即可。
+///
+/// # Examples
+///
+/// ```ignore
+/// let cover = fetch_cover(&client, &book, book.cover_url.as_deref(), qidian_cookie).await;
+/// book.cover_url = Some(cover);
+/// ```
+#[tracing::instrument(
+    name = "fetch_cover",
+    skip_all,
+    fields(
+        book = %book.book_name,
+        author = %book.author,
+        has_qidian_cookie = !qidian_cookie.trim().is_empty(),
+    )
+)]
 pub async fn fetch_cover(
     client: &Client,
     book: &Book,

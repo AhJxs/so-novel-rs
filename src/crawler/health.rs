@@ -95,6 +95,15 @@ impl SourceHealth {
 /// 并发探测一组规则；每源结果通过 `tx` 实时回推（顺序不保证，UI 用 source_id 关联）。
 ///
 /// 完成后通道关闭（tx drop），UI 端 try_recv 看到 Disconnected 即知道全部跑完。
+///
+/// # Examples
+///
+/// ```ignore
+/// let (tx, rx) = mpsc::unbounded_channel();
+/// check_sources_health(http, rules, tx).await;
+/// while let Ok(h) = rx.try_recv() { /* update UI */ }
+/// ```
+#[tracing::instrument(name = "check_sources_health", skip_all, fields(rules = rules.len()))]
 pub async fn check_sources_health(
     http: Arc<HttpClients>,
     rules: Vec<Rule>,

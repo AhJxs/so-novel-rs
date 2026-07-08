@@ -76,6 +76,18 @@ pub fn trim_completed(tasks: &mut Vec<DownloadTaskRecord>) -> usize {
 /// 保存任务并自动清理超额的已完成任务。
 ///
 /// 在保存前调用 `trim_completed`，确保文件大小有界。
+///
+/// # Examples
+///
+/// ```ignore
+/// let mut tasks = state.tasks.lock().unwrap();
+/// save_with_trim(&PathBuf::from(".tasks.json"), &mut tasks)?;
+/// ```
+///
+/// # Errors
+///
+/// - `std::io::Error` — 序列化或写文件失败
+#[tracing::instrument(name = "db::tasks::save_with_trim", skip_all, fields(path = %path.display(), count = tasks.len()))]
 pub fn save_with_trim(path: &Path, tasks: &mut Vec<DownloadTaskRecord>) -> anyhow::Result<()> {
     let trimmed = trim_completed(tasks);
     if trimmed > 0 {

@@ -50,6 +50,36 @@ pub struct FetchResponse {
 ///
 /// Async：调用方在 `tokio::select!` 里 race 这个 future 和 cancel 信号，
 /// 取消时 in-flight HTTP 立刻被 drop（reqwest 关闭底层连接），无超时等待。
+///
+/// # Examples
+///
+/// ```ignore
+/// let resp = fetch(&client, &FetchRequest {
+///     url: "https://example.com/",
+///     method: HttpMethod::Get,
+///     cookies: None,
+///     timeout_secs: Some(10),
+///     referer: None,
+/// }).await?;
+/// println!("{} bytes, final {}", resp.html.len(), resp.final_url);
+/// ```
+///
+/// # Errors
+///
+/// - `reqwest::Error` — 网络 / 超时 / TLS / 重定向失败
+/// - `decode_response_bytes` 失败 —— 由 `anyhow::Context` 包装
+#[tracing::instrument(
+    name = "http::fetch",
+    skip_all,
+    fields(
+        url = %req.url,
+        method = match req.method {
+            HttpMethod::Get => "GET",
+            HttpMethod::Post(_) => "POST",
+        },
+        timeout_secs = ?req.timeout_secs,
+    )
+)]
 pub async fn fetch(client: &Client, req: &FetchRequest<'_>) -> Result<FetchResponse> {
     let referer = req
         .referer
@@ -148,6 +178,22 @@ mod tests {
 ///
 /// `chapter.rs` / `toc.rs` 各有一份几乎相同的实现；这里统一为
 /// `Result<String, CfFallbackError>`，调用方 `.map_err()` 转为自己的错误类型。
+///
+/// # Examples
+///
+/// ```ignore
+/// let html = fetch_with_cf_fallback(&client, "https://x.com/", Some(10), None).await?;
+/// ```
+///
+/// # Errors
+///
+/// - `CfFallbackError::Http` — 普通请求 / cf-bypass 请求失败
+/// - `CfFallbackError::Cloudflare` — 命中 CF 但未配置 cf-bypass
+#[tracing::instrument(
+    name = "http::fetch_with_cf_fallback",
+    skip_all,
+    fields(url, has_bypass = cf_bypass_base.is_some())
+)]
 pub async fn fetch_with_cf_fallback(
     client: &reqwest::Client,
     url: &str,

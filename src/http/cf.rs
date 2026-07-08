@@ -43,6 +43,28 @@ pub fn has_cloudflare(html: &str) -> bool {
 ///
 /// Java 端用 hutool `HttpUtil.get(...)` 同步请求；这里复用调用方
 /// 已经构造好的 `Client`（保持 cookie / 代理一致）。
+/// 把 `target_url` 转发给外部 CF 旁路服务, 返回解扰后的 HTML。
+///
+/// `cf_bypass_base` 例如 `"http://127.0.0.1:8000"`,
+/// `target_url` 是真正想抓的页面 URL。
+///
+/// Java 端用 hutool `HttpUtil.get(...)` 同步请求; 这里复用调用方
+/// 已经构造好的 `Client` (保持 cookie / 代理一致)。
+///
+/// # Examples
+///
+/// ```ignore
+/// let html = fetch_via_cf_bypass(&client, "http://127.0.0.1:8000", "https://x.com/").await?;
+/// ```
+///
+/// # Errors
+///
+/// - `reqwest::Error` — 旁路服务不可达 / 返回非 2xx / 反序列化失败
+#[tracing::instrument(
+    name = "http::fetch_via_cf_bypass",
+    skip_all,
+    fields(cf_bypass_base, target_url)
+)]
 pub async fn fetch_via_cf_bypass(
     client: &Client,
     cf_bypass_base: &str,

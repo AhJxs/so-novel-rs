@@ -68,6 +68,20 @@ fn sat_u16(v: i64) -> u16 {
 // ---------- load_config ----------
 
 /// 加载配置。文件不存在时返回 `Default::default()`。
+///
+/// # Examples
+///
+/// ```ignore
+/// let cfg = load_config(&PathBuf::from("config.toml"))?;
+/// println!("search_limit: {:?}", cfg.source.search_limit);
+/// ```
+///
+/// # Errors
+///
+/// - `std::io::Error` — 文件存在但读取失败
+/// - `toml_edit` parse 错误 — config.toml 语法错
+/// - 任意字段类型转换失败 — 通过 `Context` 包装
+#[tracing::instrument(name = "config::load", skip_all, fields(path = %path.display()))]
 pub fn load_config(path: &Path) -> Result<AppConfig> {
     if !path.exists() {
         return Ok(AppConfig::default());
@@ -196,6 +210,18 @@ pub fn load_config(path: &Path) -> Result<AppConfig> {
 
 /// 把 AppConfig 写回 TOML。如果原文件存在，就在它上面 in-place 改字段（保留注释）；
 /// 不存在则用统一模板生成。
+///
+/// # Examples
+///
+/// ```ignore
+/// save_config(&PathBuf::from("config.toml"), &cfg)?;
+/// ```
+///
+/// # Errors
+///
+/// - `std::io::Error` — 读取旧文件 / 写新文件失败
+/// - `toml_edit` parse 错误 — 旧 config.toml 损坏, fallback 用模板覆盖
+#[tracing::instrument(name = "config::save", skip_all, fields(path = %path.display()))]
 pub fn save_config(path: &Path, cfg: &AppConfig) -> Result<()> {
     let mut doc: DocumentMut = if path.exists() {
         std::fs::read_to_string(path)
