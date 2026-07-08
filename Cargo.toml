@@ -68,7 +68,8 @@ thiserror = "2"
 tracing = "0.1"
 # `ansi` feature 必须开：`tracing-subscriber` 默认会用 `Style::italic/dimmed`
 # 给字段名（`trace_id=` 等）加颜色码；不开启此 feature 时 `.with_ansi(false)`
-tracing-subscriber = { version = "0.3", features = ["env-filter", "ansi"] }
+# `json` feature: 启用后 `.json()` layer 可用, 容器/聚合栈用; 默认开 (PR #17)
+tracing-subscriber = { version = "0.3", features = ["env-filter", "ansi", "json"] }
 
 # Config / serde
 serde = { version = "1", features = ["derive"] }

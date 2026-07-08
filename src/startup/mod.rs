@@ -140,11 +140,11 @@ pub fn dispatch(mode: LaunchMode) -> Result<()> {
         }
         LaunchMode::Web { host, port } => {
             attach_parent_console();
-            crate::logging::init_tracing();
+            crate::logger::init();
             web::run(host, port)
         }
         LaunchMode::Gui => {
-            crate::logging::init_tracing();
+            crate::logger::init();
             run_gui()
         }
     }

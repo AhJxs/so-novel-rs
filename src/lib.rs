@@ -45,7 +45,7 @@ pub mod gpui_app;
 pub mod http;
 pub mod i18n;
 pub mod js;
-pub mod logging;
+pub mod logger;
 pub mod models;
 pub mod parser;
 pub mod startup;

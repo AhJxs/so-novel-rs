@@ -190,7 +190,7 @@ pub fn run() -> Result<()> {
     // 注：此时还没有 subscriber，要等 --verbose 才 init；这样不开启时
     // tracing::info!/warn! 调用完全不会有任何输出。
     if cli.verbose {
-        crate::logging::init_tracing();
+        crate::logger::init_compat_legacy();
     }
 
     // 与 GUI 启动行为保持一致：首次运行时把默认 config 写出去，
