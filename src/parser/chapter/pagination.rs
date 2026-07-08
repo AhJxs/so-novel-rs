@@ -1,130 +1,31 @@
-//! 单章正文解析。对应 Java `parse.ChapterParser`。
+//! 单章分页正文抓取 (PR #17 拆分, 2026-07-08).
 //!
-//! 阶段 2c 实现：
-//! - 单页：抓一页，按 `chapter.content` 取 HTML 字符串；
-//! - 分页：循环抓 → 拼接，下一页 URL 顺序：
-//!   1. 配了 `nextPageInJs` → 用 `select_and_invoke_js` 从某段 script
-//!      内容里执行 JS 抽取 URL；
-//!   2. 否则按 `chapter.nextPage` 选元素，取 `first.href`；
-//! - 终止条件：
-//!   - `nextChapterLink` 配置且 candidate 命中正则 → 终止（说明已经跳到下一章）；
-//!   - 兜底：URL 不像分页（`!matches(".*[-_]\\d\\.html")`）且下一页元素文本含
-//!     `下一章/没有了/>>/书末页` → 终止；
-//! - CF 命中 → 走 cf-bypass 兜底。
+//! 来自原 `parser/chapter.rs`:
+//! - [`fetch_paginated_content`] 循环抓 + 拼 + 判定终止
+//! - [`NextStep`] 把 Html 析出 await 之外用的辅助 enum
+//! - [`resolve_next_url`] 找下一页 URL (nextPageInJs / nextPage 二选一)
+//! - [`is_last_page`] 终止判定 (nextChapterLink 正则 / 通用文本兜底)
+//! - [`PAGINATION_URL_RE`] / [`NEXT_CHAPTER_TEXT_RE`] LazyLock 静态正则
 //!
-//! **不在本阶段做**：
-//! - 正文清洗（filterTxt 正则替换、filterTag 节点删除、不可见字符清理、HTML 实体清理、
-//!   重复标题去除、HTML 模板渲染）— 全部归阶段 3 `ChapterFilter` + `ChapterFormatter`。
-//! - 重试（配置在 `enable-retry`）— 归阶段 3 调度层。
-//! - 简繁转换 — 归阶段 5。
+//! 入口 [`super::parse::parse_chapter`]。
 
-use anyhow::Result;
 use regex::Regex;
 use reqwest::Client;
 use scraper::Html;
-#[cfg(test)]
-use scraper::Selector;
 use std::sync::LazyLock;
-use thiserror::Error;
 
 use crate::http::abs_url;
-use crate::models::{Chapter, ContentType, Rule, RuleChapter};
-use crate::parser::dom::{SelectError, select_and_invoke_js};
+use crate::models::{ContentType, Rule, RuleChapter};
+use crate::parser::dom::select_and_invoke_js;
 
-#[derive(Debug, Error)]
-pub enum ChapterError {
-    #[error("书源没有 chapter 规则")]
-    ChapterRuleMissing,
-    #[error("HTTP 错误: {0}")]
-    Http(String),
-    #[error(
-        "命中 Cloudflare 验证页，未配置 cf-bypass 旁路或旁路失败（请在 config.toml [global] cf-bypass 填地址）: {0}"
-    )]
-    Cloudflare(String),
-    #[error("正文为空: {0}")]
-    EmptyContent(String),
-    #[error("HTML 解析失败: {0}")]
-    Parse(String),
-    #[error("选择器/JS 执行失败: {0}")]
-    Selector(#[from] SelectError),
-}
+use super::parse::{ChapterError, fetch_with_cf_fallback};
 
-/// 抓取并解析单章正文。
+/// 循环抓分页正文 + 拼接 + 终止判定。
 ///
-/// `chapter` 入参里只有 url/title/order 是有效的；本函数填回 `content`（原始 HTML，
-/// 未做清洗 / 模板渲染 — 那些在阶段 3 的 ChapterFilter/Formatter 里做）。
-///
-/// `cf_bypass_base` 同其它 parser。
-#[tracing::instrument(
-    name = "parse_chapter",
-    skip_all,
-    fields(
-        source_id = rule.id,
-        source = %rule.name,
-        order = chapter.order,
-        title = %chapter.title,
-        url = %chapter.url,
-    )
-)]
-pub async fn parse_chapter(
-    client: &Client,
-    rule: &Rule,
-    chapter: &Chapter,
-    cf_bypass_base: Option<&str>,
-) -> Result<Chapter, ChapterError> {
-    let chapter_rule = rule
-        .chapter
-        .as_ref()
-        .ok_or(ChapterError::ChapterRuleMissing)?;
-    let pagination = !chapter_rule.next_page.is_empty();
-
-    let content = if pagination {
-        fetch_paginated_content(client, rule, &chapter.url, cf_bypass_base).await?
-    } else {
-        fetch_single_page_content(client, rule, &chapter.url, cf_bypass_base).await?
-    };
-
-    Ok(Chapter {
-        url: chapter.url.clone(),
-        title: chapter.title.clone(),
-        order: chapter.order,
-        content,
-    })
-}
-
-/// 仅做"已知 HTML → 正文 HTML 字符串"的纯解析；便于离线测试。
-pub fn parse_chapter_html(html: &str, rule: &Rule) -> Result<String, ChapterError> {
-    let chapter_rule = rule
-        .chapter
-        .as_ref()
-        .ok_or(ChapterError::ChapterRuleMissing)?;
-    let document = Html::parse_document(html);
-    let content = select_and_invoke_js(&document, &chapter_rule.content, ContentType::Html)?;
-    if content.is_empty() {
-        return Err(ChapterError::EmptyContent(format!(
-            "{} returned empty",
-            chapter_rule.content
-        )));
-    }
-    Ok(content)
-}
-
-async fn fetch_single_page_content(
-    client: &Client,
-    rule: &Rule,
-    url: &str,
-    cf_bypass_base: Option<&str>,
-) -> Result<String, ChapterError> {
-    let chapter_rule = rule
-        .chapter
-        .as_ref()
-        .ok_or(ChapterError::ChapterRuleMissing)?;
-
-    let html = fetch_with_cf_fallback(client, url, chapter_rule.timeout, cf_bypass_base).await?;
-    parse_chapter_html(&html, rule)
-}
-
-async fn fetch_paginated_content(
+/// 防御性上限 50 页: 单章超过 50 页基本是反爬死循环。`Html` 不 `Send`，
+/// 所以"解析 + 选 + 拼"全部塞进 sync 子作用域 (`let (content, next_step) = { ... }`),
+/// 子作用域结束时 `Html` drop, 再带 `String` 出 await 边界。
+pub(super) async fn fetch_paginated_content(
     client: &Client,
     rule: &Rule,
     start_url: &str,
@@ -209,7 +110,10 @@ enum NextStep {
 }
 
 /// 在已解析的页面里找下一页 URL。
-fn resolve_next_url(
+///
+/// 优先级: `nextPageInJs` (从某段 script 内部用 JS 抽 URL, 如 96读书) →
+/// `chapter.nextPage` 选元素的 `href`。
+pub(super) fn resolve_next_url(
     document: &Html,
     next_els: &[scraper::ElementRef<'_>],
     chapter_rule: &RuleChapter,
@@ -232,7 +136,10 @@ fn resolve_next_url(
     Ok(abs_url(current_url, href))
 }
 
-fn is_last_page(
+/// 终止判定。两层:
+/// 1. `chapter.next_chapter_link` 正则命中 → 终止 (说明已经跳到下一章);
+/// 2. 兜底: URL 不再像 `*[-_]数字.html`, 且按钮文本含 `下一章/没有了/>>/书末页`。
+pub(super) fn is_last_page(
     candidate: &Option<String>,
     next_els: &[scraper::ElementRef<'_>],
     chapter_rule: &RuleChapter,
@@ -266,27 +173,12 @@ static PAGINATION_URL_RE: LazyLock<Regex> =
 static NEXT_CHAPTER_TEXT_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(下一章|没有了|>>|书末页)").expect("next chapter text re"));
 
-async fn fetch_with_cf_fallback(
-    client: &Client,
-    url: &str,
-    timeout: Option<u32>,
-    cf_bypass_base: Option<&str>,
-) -> Result<String, ChapterError> {
-    crate::http::fetch_with_cf_fallback(client, url, timeout, cf_bypass_base)
-        .await
-        .map_err(|e| match e {
-            crate::http::CfFallbackError::Http(msg) => ChapterError::Http(msg),
-            crate::http::CfFallbackError::Cloudflare(final_url) => {
-                ChapterError::Cloudflare(final_url)
-            }
-        })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::config::LangType;
     use crate::db::apply_default_rule;
+    use scraper::Selector;
 
     fn rule_22biqu_chapter() -> Rule {
         let mut r: Rule = serde_json::from_str(
@@ -307,46 +199,6 @@ mod tests {
         apply_default_rule(&mut r, LangType::ZhCn);
         r
     }
-
-    #[test]
-    fn parses_single_page_chapter_content() {
-        let html = r##"<html><body>
-            <div class="title">第1章 起航</div>
-            <div id="content">
-                <p>第一段</p>
-                <p>第二段</p>
-            </div>
-        </body></html>"##;
-        let rule = rule_22biqu_chapter();
-        let content = parse_chapter_html(html, &rule).unwrap();
-        // content 走 HTML，内含两段 <p>
-        assert!(content.contains("第一段"));
-        assert!(content.contains("第二段"));
-        // 不含 .title 的内容（说明 #content 选对了）
-        assert!(!content.contains("第1章 起航"));
-    }
-
-    #[test]
-    fn empty_content_returns_typed_error() {
-        let html = r##"<html><body>
-            <div class="title">无正文</div>
-        </body></html>"##;
-        let rule = rule_22biqu_chapter();
-        let err = parse_chapter_html(html, &rule).unwrap_err();
-        assert!(matches!(err, ChapterError::EmptyContent(_)));
-    }
-
-    #[test]
-    fn no_chapter_rule_errors() {
-        let rule = Rule {
-            url: "https://x".into(),
-            ..Rule::default()
-        };
-        let err = parse_chapter_html("", &rule).unwrap_err();
-        assert!(matches!(err, ChapterError::ChapterRuleMissing));
-    }
-
-    // ---------- 终止判定 ----------
 
     #[test]
     fn is_last_page_when_no_candidate() {
