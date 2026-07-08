@@ -30,6 +30,3 @@ Thumbs.db
 *.swo
 *~
 .githooks.local
-
-# 优化提示词 (一次性参考文件, 不入版本)
-/适配Claude Code的Rust项目企业级架构&代码质量优化提示词.md

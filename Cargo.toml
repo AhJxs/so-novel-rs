@@ -236,6 +236,21 @@ missing_errors_doc = "allow"
 # `cast_*` 损失精度 — 业务层刻意 (i64→i32 时间戳), 由调用方负责
 cast_possible_truncation = "allow"
 cast_lossless = "allow"
+
+# -------------------------------------------------------------------------------------
+# PR #5a: 安全性 pedantic lint 收紧
+# 目标: 让裸 unwrap/expect/panic 显式可见, 逐步替换为 `?` / `AppError`。
+# 现状: 全仓 372 处非测试 unwrap/expect/panic (db/ 35, export/pdf.rs 34, ...),
+# 一次性清理会撞业务逻辑, 分 3 个子 PR (5a/5b/5c) 渐进收紧。
+# -------------------------------------------------------------------------------------
+# pedantic 子集中, 与"安全/正确性"相关的几条独立提到 deny/warn 级别,
+# 让 `cargo clippy` 在 CI 阶段就拦住新增违规:
+unwrap_used = "warn"          # `.unwrap()` — 业务层禁, 测试 `#[allow]`
+expect_used = "warn"          # `.expect(msg)` — 同上, 但允许在有解释的
+                              # 初始化常量/单例构造场景 (`expect("static")`)
+panic = "warn"                # `panic!(...)` — 显式 panic, 同上
+todo = "warn"                 # `todo!()` — 显式未实现
+unimplemented = "warn"        # `unimplemented!()` — 显式未实现
 cast_sign_loss = "allow"
 # `struct_excessive_bools` — 状态结构体常出现 ≥4 布尔, 不强求拆分
 struct_excessive_bools = "allow"
