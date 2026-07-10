@@ -21,5 +21,6 @@ pub mod download_task;
 pub mod library;
 pub mod search;
 pub mod sources;
+pub mod update;
 
 pub use download_task::DownloadTask;
