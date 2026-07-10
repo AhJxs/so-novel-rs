@@ -2,7 +2,7 @@
 //!
 //! 历史上 `src/cli.rs` 单文件 549 行既含实现又含测试。
 //! 拆分子模块后，测试统一搬到这里。`Cli` / `Cmd` 通过 `super::*` 拿到
-//! 公共 re-export，`effective_cfg` 是内部 helper，按模块路径直接取。
+//! 公共 re-export，`effective_cfg` 已在 Phase 3.3 搬到 `crate::core::bootstrap`。
 
 #![allow(
     clippy::expect_used,
@@ -14,10 +14,9 @@
 use clap::{CommandFactory, Parser};
 
 use crate::config::{AppConfig, DownloadCfg, ExportFormat, Language};
+use crate::core::bootstrap::effective_cfg;
 
-use super::{
-    Cli, Cmd, SourcesAction, build_localized_command, subcommand_name, util::effective_cfg,
-};
+use super::{Cli, Cmd, SourcesAction, build_localized_command, subcommand_name};
 
 #[test]
 fn cli_rejects_version_subcommand() {

@@ -25,36 +25,23 @@ pub(super) fn parse_arg_value_pub(args: &[String], key: &str) -> Option<String> 
 /// 解出并通过 `LaunchMode::Web` 传过来，这里不再做参数解析。
 #[cfg(feature = "web")]
 pub fn run(host: String, port: u16) -> anyhow::Result<()> {
-    use crate::config::{ConfigPaths, load_config};
-    use crate::db::{SourcesConfig, init_rules_dir, load_active_rules};
-    use crate::http::HttpClients;
-    use anyhow::Context;
-
-    let paths = ConfigPaths::discover();
-    let config = load_config(&paths.config_file).unwrap_or_default();
-
-    // 初始化规则目录
-    if let Err(e) = init_rules_dir(&paths.rules_dir) {
-        tracing::warn!("规则目录初始化失败: {e:#}");
-    }
-
-    let sources_config = SourcesConfig::load(&paths.sources_config);
-    let rules = load_active_rules(&paths.rules_dir, &sources_config).unwrap_or_default();
-    let http = HttpClients::new(&config).context("初始化 HTTP 客户端失败")?;
+    // Phase 3.3：启动期公共资源（paths / config / sources_config / rules / http）
+    // 统一收敛到 `core::bootstrap::load_context`，三端共享同一套兜底矩阵。
+    let ctx = crate::core::bootstrap::load_context();
 
     // 加载历史任务 → `Vec<DownloadTask>`。复用 `db::load_tasks_from_file`：
     // 它已经把 `finished.is_none()` 的历史记录标成 `AppRestarted` 并落盘（上次
     // 退出时还在跑的任务），跟 GUI 启动走完全同一条路径。
-    let (tasks, next_task_id) = crate::db::load_tasks_from_file(&paths.tasks_file);
+    let (tasks, next_task_id) = crate::db::load_tasks_from_file(&ctx.paths.tasks_file);
 
     let params = crate::web::WebInitParams {
-        sources_config,
-        sources_config_path: paths.sources_config,
+        sources_config: ctx.sources_config,
+        sources_config_path: ctx.paths.sources_config,
         tasks,
-        tasks_file: paths.tasks_file,
+        tasks_file: ctx.paths.tasks_file,
         next_task_id,
     };
-    crate::web::run(config, http.into(), rules, params, host, port)
+    crate::web::run(ctx.config, ctx.http, ctx.rules, params, host, port)
 }
 
 /// 当前构建不含 Web 功能。用户给了 `--web` / `SO_NOVEL_WEB=1` 但 binary

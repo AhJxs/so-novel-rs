@@ -14,7 +14,9 @@
 //! - `search`  — `run_search` 子命令
 //! - `download` — `run_download` 子命令
 //! - `sources` — `run_sources` 子命令
-//! - `helpers` — 共享工具（`effective_cfg` / `load_active_sources`）
+//!
+//! CLI 启动期工具（`effective_cfg` / `load_active_sources` / `validate_range`）已搬到
+//! `crate::core::bootstrap`，详见 Phase 3.3 计划。
 //!
 //! 本文件作为 **re-export 门面**，对外只暴露 `run()`（`Cli` / `Cmd` 仅供测试用）。
 
@@ -22,15 +24,13 @@ mod args;
 mod download;
 mod search;
 mod sources;
-mod util;
 
 pub use args::{Cli, Cmd, SourcesAction};
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use clap::Parser;
 
-use crate::config::{ConfigPaths, load_config};
-use crate::db::init_rules_dir;
+use crate::core::bootstrap::cli_load_paths_and_config;
 
 use self::args::{PKG_NAME, VERSION_STRING, build_localized_command, subcommand_name};
 
@@ -136,11 +136,9 @@ pub fn run() -> Result<()> {
         return Ok(());
     }
 
-    // 加载 config。文件不存在 → `load_config` 返回 `AppConfig::default()`
-    // （含 `language = SimplifiedChinese`），无 panic / 无错误。malformed TOML
-    // 才报错向上抛。
-    let paths = ConfigPaths::discover();
-    let cfg = load_config(&paths.config_file).context("加载 config.toml 失败")?;
+    // 加载 config + 首次启动写默认 + 初始化规则目录（Phase 3.3 抽到
+    // `core::bootstrap::cli_load_paths_and_config`，统一三端的 startup 兜底矩阵）。
+    let (paths, cfg) = cli_load_paths_and_config()?;
 
     // 切到用户配置的语言。`locale_for` 是项目里 `Language → locale 字符串`
     // 的唯一权威映射（见 `crate::i18n::locale_for` 注释）。先 `invalidate_cache`
@@ -191,21 +189,6 @@ pub fn run() -> Result<()> {
     // tracing::info!/warn! 调用完全不会有任何输出。
     if cli.verbose {
         crate::logger::init_compat_legacy();
-    }
-
-    // 与 GUI 启动行为保持一致：首次运行时把默认 config 写出去，
-    // 用户立刻能在项目根看到 config.toml 可编辑。失败仅警告，不阻塞 CLI。
-    if !paths.config_file.exists() {
-        if let Err(e) = crate::config::save_config(&paths.config_file, &cfg) {
-            tracing::warn!("写入默认 config.toml 失败: {e:#}");
-        } else {
-            tracing::info!("首次运行：已生成 {}", paths.config_file.display());
-        }
-    }
-
-    // 初始化规则目录
-    if let Err(e) = init_rules_dir(&paths.rules_dir) {
-        tracing::warn!("规则目录初始化失败: {e:#}");
     }
 
     match cmd {

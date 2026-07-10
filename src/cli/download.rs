@@ -13,12 +13,11 @@ use std::io::{IsTerminal, stderr};
 use anyhow::{Context, Result};
 
 use crate::config::{AppConfig, ConfigPaths};
+use crate::core::bootstrap::{effective_cfg, load_active_sources, validate_range};
 use crate::core::{search as core_search, sources as core_sources};
 use crate::crawler::{self, CancelToken, CrawlerError, Progress, download_chapters, resolve_book};
 use crate::models::{Chapter, Source};
 use crate::utils::system::open_path;
-
-use super::util::{effective_cfg, load_active_sources, validate_range};
 
 /// 单行进度模板里最多保留多少字符的章节标题（防止刷屏）。
 const TITLE_DISPLAY_MAX: usize = 24;

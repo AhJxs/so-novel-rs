@@ -82,6 +82,24 @@ pub struct HttpClients {
 }
 
 impl HttpClients {
+    /// 兜底空集：`safe` / `unsafe_ssl` 都是 `reqwest::Client::new()`，`gh_proxy` 空字符串 + 同款 client。
+    ///
+    /// Phase 3.3：`core::bootstrap::load_context` 在 proxy strip 后仍失败时最后
+    /// 兜底用 —— 比 panic 友好（前端用户仍能进入 UI，下载页报网络错即可）。
+    /// 日常路径都走 [`Self::new`]。
+    pub fn empty() -> Self {
+        let bare = Arc::new(reqwest::Client::new());
+        Self {
+            clients: RwLock::new((Arc::clone(&bare), Arc::clone(&bare))),
+            gh_proxy: Mutex::new((String::new(), bare)),
+            proxy_signature: Mutex::new(ProxySignature {
+                enabled: false,
+                host: String::new(),
+                port: 0,
+            }),
+        }
+    }
+
     /// 从 `AppConfig` 构造初始 client 集合。
     pub fn new(cfg: &AppConfig) -> Result<Self> {
         let safe = Arc::new(

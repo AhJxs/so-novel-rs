@@ -50,8 +50,9 @@ use std::sync::Arc;
 use anyhow::Result;
 use tokio::runtime::Runtime;
 
-use crate::config::{AppConfig, ConfigPaths, load_config};
+use crate::config::{AppConfig, ConfigPaths};
 use crate::core::DownloadTask;
+use crate::core::bootstrap::load_context;
 use crate::db::{SourcesConfig, load_tasks_from_file};
 use crate::http::HttpClients;
 use crate::models::Rule;
@@ -134,34 +135,24 @@ impl AppModel {
     /// wakeup 通路才生效：后台 producer 写入新数据时 `notify()`，drain_loop
     /// 立刻醒来排空，不必等 100ms 兜底。
     pub fn new_with_wakeup() -> Result<(Self, WakeupReceiver)> {
-        let paths = ConfigPaths::discover();
-
-        let (config, config_load_error) = Self::bootstrap_config(&paths);
-
-        // 初始化规则目录（首次启动时复制默认规则文件）
-        if let Err(e) = crate::db::init_rules_dir(&paths.rules_dir) {
-            tracing::warn!("规则目录初始化失败: {e:#}");
-        }
-
-        let sources_config = Self::bootstrap_sources_config(&paths);
+        // Phase 3.3：启动期公共资源（paths / config / sources_config / rules / http）
+        // 统一收敛到 `core::bootstrap::load_context`，三端共享同一套兜底矩阵。
+        // 加载失败 `load_context` 已 `tracing::warn!` + 兜底默认；desktop 的
+        // `config_load_error` / `rule_load_error` 字段保留为 `None`，因为
+        // load_context 不再向上抛错误（旧版用 Option<String> 是为了在 UI 上
+        // 弹错误条 —— 现在 swallow + log 已经能覆盖同样诊断目的，且不污染
+        // web/cli 简单调用）。
+        let ctx = load_context();
+        let paths = ctx.paths;
+        let config = ctx.config;
+        let sources_config = ctx.sources_config;
+        let rules = ctx.rules;
+        let http = ctx.http;
 
         let runtime = build_shared_runtime()?;
 
-        let (rules, rule_load_error) =
-            match crate::db::load_active_rules(&paths.rules_dir, &sources_config) {
-                Ok(rs) => (rs, None),
-                Err(e) => {
-                    tracing::warn!("rules load failed: {e:#}");
-                    (Vec::new(), Some(format!("{e:#}")))
-                }
-            };
-
         let (tasks, next_task_id) = load_tasks_from_file(&paths.tasks_file);
         tracing::info!("从文件加载 {} 个历史下载任务", tasks.len());
-
-        // 共享 HTTP client 集合。构造失败（proxy URL 非法等）沿 Result 冒到
-        // desktop 入口，由 rfd 弹致命错误对话框 —— 与 runtime 失败同等待遇。
-        let http = Arc::new(HttpClients::new(&config)?);
 
         let (wakeup, rx) = events::new_wakeup();
 
@@ -169,8 +160,8 @@ impl AppModel {
             paths,
             config,
             rules,
-            rule_load_error,
-            config_load_error,
+            rule_load_error: None,
+            config_load_error: None,
             sources_config,
             runtime,
             http,
@@ -185,38 +176,6 @@ impl AppModel {
             wakeup,
         };
         Ok((model, rx))
-    }
-
-    /// 加载 `config.toml`：失败则回落默认值并返回错误串；首次启动（文件不
-    /// 存在）时写出默认配置。
-    fn bootstrap_config(paths: &ConfigPaths) -> (AppConfig, Option<String>) {
-        let (config, err) = match load_config(&paths.config_file) {
-            Ok(c) => (c, None),
-            Err(e) => {
-                tracing::warn!("config load failed: {e:#}");
-                (AppConfig::default(), Some(format!("{e:#}")))
-            }
-        };
-
-        if !paths.config_file.exists() {
-            match crate::config::save_config(&paths.config_file, &config) {
-                Ok(()) => tracing::info!("首次启动：已生成 {}", paths.config_file.display()),
-                Err(e) => tracing::warn!("写入默认 config.toml 失败: {e:#}"),
-            }
-        }
-
-        (config, err)
-    }
-
-    /// 加载书源配置；首次启动（文件不存在）时写出默认。
-    fn bootstrap_sources_config(paths: &ConfigPaths) -> SourcesConfig {
-        let sources_config = SourcesConfig::load(&paths.sources_config);
-        if !paths.sources_config.exists() {
-            if let Err(e) = sources_config.save(&paths.sources_config) {
-                tracing::warn!("写入默认 sources_config.json 失败: {e:#}");
-            }
-        }
-        sources_config
     }
 
     /// 内部：把一条 [`UIEvent`] 推入待处理队列。语义见 [`Self::pending_ui_events`]。

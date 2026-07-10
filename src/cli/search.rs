@@ -9,12 +9,11 @@ use std::io::{IsTerminal, Write, stderr};
 use anyhow::{Context, Result};
 
 use crate::config::{AppConfig, ConfigPaths};
+use crate::core::bootstrap::load_active_sources;
 use crate::core::{config_helpers, search as core_search};
 use crate::crawler;
 use crate::crawler::search::SourceSearchOutcome;
 use crate::models::SearchResult;
-
-use super::util::load_active_sources;
 
 #[allow(clippy::needless_pass_by_value)]
 pub fn run_search(
