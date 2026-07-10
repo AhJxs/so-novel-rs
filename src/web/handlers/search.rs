@@ -9,8 +9,8 @@ use axum::response::Sse;
 use futures::stream::Stream;
 use serde::{Deserialize, Serialize};
 
+use crate::core::{config_helpers, search as core_search};
 use crate::models::SearchResult;
-use crate::models::Source;
 
 use super::super::SharedState;
 use crate::utils::lock::rw_read_or;
@@ -77,27 +77,14 @@ pub async fn search(
         Err((code, msg)) => return lock_failure_stream(code.as_u16(), &msg),
     };
 
-    let sources: Vec<Source> = if let Some(id) = params.source_id {
-        rules
-            .into_iter()
-            .filter(|r| r.id == id)
-            .map(|r| Source::from(r, &config))
-            .collect()
-    } else {
-        rules
-            .into_iter()
-            .filter(crate::models::rule::Rule::is_search_enabled)
-            .map(|r| Source::from(r, &config))
-            .collect()
-    };
+    let sources = core_search::select_sources(&rules, &config, params.source_id);
 
+    // 注意：web 这里只取 query param 的 limit，**不**自动 fallback 到
+    // cfg.source.search_limit —— 这是 web API 的契约（CLI / 桌面会走 fallback，
+    // 见 `core_search::effective_limit`）。保留原行为以免改动前端契约。
     let limit = params.limit.map(|v| v.max(0) as usize).filter(|v| *v > 0);
 
-    let cf_bypass = if config.global.cf_bypass.trim().is_empty() {
-        None
-    } else {
-        Some(config.global.cf_bypass)
-    };
+    let cf_bypass = config_helpers::cf_bypass(&config);
 
     let (tx, rx) =
         tokio::sync::mpsc::unbounded_channel::<crate::crawler::search::SourceSearchOutcome>();

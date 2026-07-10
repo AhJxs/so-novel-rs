@@ -13,8 +13,9 @@ use std::io::{IsTerminal, stderr};
 use anyhow::{Context, Result};
 
 use crate::config::{AppConfig, ConfigPaths};
+use crate::core::search as core_search;
 use crate::crawler::{self, CancelToken, CrawlerError, Progress, download_chapters, resolve_book};
-use crate::models::Chapter;
+use crate::models::{Chapter, Source};
 use crate::utils::system::open_path;
 
 use super::util::{effective_cfg, load_active_sources, validate_range};
@@ -40,31 +41,34 @@ pub fn run_download(
     quiet: bool,
 ) -> Result<()> {
     let cfg = effective_cfg(cfg.clone(), output, format);
-    let sources = load_active_sources(&cfg, paths)?;
-    if sources.is_empty() {
+    let rules = load_active_sources(paths)?;
+    if rules.is_empty() {
         anyhow::bail!("没有可用的书源");
     }
-    let chosen = if let Some(id) = source {
-        sources
+    let chosen: Source = if let Some(id) = source {
+        core_search::select_sources(&rules, &cfg, Some(id))
             .into_iter()
-            .find(|s| s.rule.id == id)
+            .next()
             .with_context(|| format!("找不到 ID={id} 的书源"))?
     } else {
         // 按 URL 自动匹配：找出 URL 所属网站对应的书源
+        // 遍历全量 rules（不限 is_search_enabled —— 下载场景无视 search_disabled），
+        // 用户给定的 URL 命中哪个 origin 就用哪个书源。
         let url_matched = url::Url::parse(&url).ok().and_then(|parsed| {
             let origin = parsed.origin();
-            sources
+            rules
                 .iter()
-                .find(|s| {
-                    url::Url::parse(&s.rule.url)
+                .find(|r| {
+                    url::Url::parse(&r.url)
                         .ok()
                         .is_some_and(|u| u.origin() == origin)
                 })
                 .cloned()
+                .map(|r| Source::from(r, &cfg))
         });
         match url_matched {
             Some(s) => s,
-            None => sources.into_iter().next().context("没有可用的书源")?,
+            None => Source::from(rules.into_iter().next().context("没有可用的书源")?, &cfg),
         }
     };
 

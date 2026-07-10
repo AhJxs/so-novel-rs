@@ -6,8 +6,8 @@ use tokio::sync::mpsc;
 use tracing::Instrument;
 
 use crate::config::AppConfig;
+use crate::core::{config_helpers, search as core_search};
 use crate::http::HttpClients;
-use crate::models::Source;
 use crate::models::{Book, Rule};
 
 use super::super::events::WakeupHandle;
@@ -39,24 +39,7 @@ pub fn spawn_search(
     search.received = 0;
     search.selected = None;
 
-    let target_sources: Vec<Source> = search.source_id.map_or_else(
-        || {
-            rules
-                .iter()
-                .filter(|r| r.is_search_enabled())
-                .cloned()
-                .map(|r| Source::from(r, config))
-                .collect()
-        },
-        |id| {
-            rules
-                .iter()
-                .filter(|r| r.id == id)
-                .cloned()
-                .map(|r| Source::from(r, config))
-                .collect()
-        },
-    );
+    let target_sources = core_search::select_sources(rules, config, search.source_id);
 
     if target_sources.is_empty() {
         search.last_error = Some("没有可用的书源（请在 [书源管理] 检查规则文件）".to_string());
@@ -79,16 +62,8 @@ pub fn spawn_search(
     let (tx, rx) = mpsc::unbounded_channel::<SourceSearchEvent>();
     search.rx = Some(rx);
 
-    let cf_bypass = if config.global.cf_bypass.trim().is_empty() {
-        None
-    } else {
-        Some(config.global.cf_bypass.clone())
-    };
-    let limit = config
-        .source
-        .search_limit
-        .map(|v| v.max(0) as usize)
-        .filter(|v| *v > 0);
+    let cf_bypass = config_helpers::cf_bypass(config);
+    let limit = core_search::effective_limit(None, config);
 
     // 顶层 trace_id：在所有 spawn 之前 mint；通过 `info_span!` 跨 .await 传播。
     // 之后所有 `tracing::info!/warn!`（含 crawler 内部）都会自动带 trace_id 字段。
@@ -228,16 +203,8 @@ pub fn select_search_result(
 
     let url = r.url.clone();
     let source_id = r.source_id;
-    let cf_bypass = if config.global.cf_bypass.trim().is_empty() {
-        None
-    } else {
-        Some(config.global.cf_bypass.clone())
-    };
-    let qidian_cookie = if config.cookie.qidian_cookie.trim().is_empty() {
-        None
-    } else {
-        Some(config.cookie.qidian_cookie.clone())
-    };
+    let cf_bypass = config_helpers::cf_bypass(config);
+    let qidian_cookie = config_helpers::qidian_cookie(config);
 
     // 详情拉取 mint 一个新 trace_id —— 它是一次独立的"动作"（不与搜索本身
     // 共享 trace_id，方便 grep `trace_id=N` 时只看一次详情拉取）。

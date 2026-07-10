@@ -9,9 +9,10 @@ use std::io::{IsTerminal, Write, stderr};
 use anyhow::{Context, Result};
 
 use crate::config::{AppConfig, ConfigPaths};
+use crate::core::{config_helpers, search as core_search};
 use crate::crawler;
 use crate::crawler::search::SourceSearchOutcome;
-use crate::models::{SearchResult, Source};
+use crate::models::SearchResult;
 
 use super::util::load_active_sources;
 
@@ -25,31 +26,16 @@ pub fn run_search(
     json: bool,
     quiet: bool,
 ) -> Result<()> {
-    let sources = load_active_sources(cfg, paths)?;
-    let target_sources: Vec<Source> = if let Some(id) = source {
-        sources.into_iter().filter(|s| s.rule.id == id).collect()
-    } else {
-        sources
-    };
+    let rules = load_active_sources(paths)?;
+    let target_sources = core_search::select_sources(&rules, cfg, source);
     if target_sources.is_empty() {
         anyhow::bail!("没有可用的书源（检查 config.toml / rules 目录）");
     }
     // streaming task 把 target_sources move 走，先把总数存出来用于进度。
     let total_sources = target_sources.len();
 
-    let cf_bypass = if cfg.global.cf_bypass.trim().is_empty() {
-        None
-    } else {
-        Some(cfg.global.cf_bypass.clone())
-    };
-
-    // 与 GUI（app/ops/search.rs:71-74）一致：--limit 优先；否则用 config.search_limit。
-    let limit = limit.or_else(|| {
-        cfg.source
-            .search_limit
-            .map(|v| v.max(0) as usize)
-            .filter(|v| *v > 0)
-    });
+    let cf_bypass = config_helpers::cf_bypass(cfg);
+    let limit = core_search::effective_limit(limit, cfg);
 
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()

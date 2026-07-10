@@ -5,7 +5,7 @@ use anyhow::{Context, Result};
 
 use crate::config::{AppConfig, ConfigPaths, ExportFormat};
 use crate::db::{SourcesConfig, load_active_rules};
-use crate::models::Source;
+use crate::models::Rule;
 
 /// 把 `--output` / `--format` 覆盖合并进 AppConfig（仅 download 用）。
 pub fn effective_cfg(
@@ -22,15 +22,18 @@ pub fn effective_cfg(
     cfg
 }
 
-/// 读 `sources_config.json` + rules dir，返回所有启用的 `Source`。
-pub fn load_active_sources(cfg: &AppConfig, paths: &ConfigPaths) -> Result<Vec<Source>> {
+/// 读 `sources_config.json` + rules dir，返回所有"未被 sources_config 禁用"的 Rule 列表。
+///
+/// **注意**:
+/// - 这是 cli 启动期的快捷入口，已应用 [`SourcesConfig`] 里 `disabled_urls` 的过滤。
+/// - **不**再过滤 rule.disabled / search.disabled —— 这两步由调用方通过
+///   [`crate::core::search::select_sources`] 统一处理（搜索场景用 `is_search_enabled`，
+///   下载场景按需自选），避免 core 模块需要知道"调用方有没有预过滤"的歧义。
+///
+/// Phase 3.3 时本函数会搬到 `crate::core::bootstrap::load_active_sources`。
+pub fn load_active_sources(paths: &ConfigPaths) -> Result<Vec<Rule>> {
     let sources_config = SourcesConfig::load(&paths.sources_config);
-    let rules = load_active_rules(&paths.rules_dir, &sources_config).context("加载规则失败")?;
-    Ok(rules
-        .into_iter()
-        .filter(|r| !r.disabled)
-        .map(|r| Source::from(r, cfg))
-        .collect())
+    load_active_rules(&paths.rules_dir, &sources_config).context("加载规则失败")
 }
 
 /// 校验并规范化 download 的 `--from` / `--to` 范围。
