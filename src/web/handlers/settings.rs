@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 use crate::config::AppConfig;
 use crate::utils::lock::{rw_read_or, rw_write_or};
 use crate::web::SharedState;
+use crate::web::error::read_state_or_json;
 
 /// `GET /api/settings` 返回的脱敏 DTO。
 ///
@@ -106,8 +107,7 @@ pub struct SettingsUpdate {
 pub async fn settings_get(
     State(state): State<SharedState>,
 ) -> Result<Json<PublicSettings>, (StatusCode, String)> {
-    let cfg = rw_read_or("settings_get", &state.config)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let cfg = read_state_or_json("settings_get", || rw_read_or("settings_get", &state.config))?;
     Ok(Json(PublicSettings::from(&*cfg)))
 }
 
@@ -139,8 +139,9 @@ pub async fn settings_put(
         }
     }
 
-    let mut cfg = rw_write_or("settings_put", &state.config)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let mut cfg = read_state_or_json("settings_put", || {
+        rw_write_or("settings_put", &state.config)
+    })?;
 
     if let Some(v) = update.download_path {
         cfg.download.download_path = v.trim().to_string();

@@ -25,9 +25,13 @@
 //! // → 编译期要求 handler 返回 Result<_, WebError>
 //! ```
 
+use std::convert::Infallible;
+
 use axum::Json;
 use axum::http::StatusCode;
+use axum::response::sse::Sse;
 use axum::response::{IntoResponse, Response};
+use futures::stream::Stream;
 use serde::Serialize;
 
 use crate::crawler::CrawlerError;
@@ -326,6 +330,83 @@ impl From<String> for WebError {
 impl From<&str> for WebError {
     fn from(s: &str) -> Self {
         Self::from(s.to_string())
+    }
+}
+
+// ── Phase 3.8: 锁 / 内部错误统一收纳 ──────────────────────────────
+//
+// 背景：handler 入口处常需要拿 1-3 个共享状态锁（config / rules / sources_config）
+// 后才开始"真业务"。旧写法是逐句 `.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?`
+// 重复 ~10 处；遇到 2+ 锁时还套一层 IIFE 把多个锁打包成单个 `Result`。
+//
+// 两个 helper 都是 free function 而非 trait ——
+// - `read_state_or_json`：闭包返回 `Result<T, String>`，失败 → `(StatusCode, String)`
+// - `read_state_or_sse`：同语义，但失败转 `Sse<S>` 流返回（避免 SSE 连接哑断）
+//
+// `label` 走 `tracing::warn!`，与 `rw_read_or` 内部 `tracing::error!` 一一对应
+// （一个锁 helper 一个 label，便于 grep 调用栈）。
+
+/// 非-SSE handler 专用：拿锁 / 读共享状态，失败 → `(INTERNAL_SERVER_ERROR, msg)`。
+///
+/// 调用方典型用法：
+/// ```ignore
+/// let cfg = read_state_or_json("settings_get", || {
+///     Ok(rw_read_or("settings_get", &state.config)?.clone())
+/// })?;
+/// ```
+///
+/// **行为合约**：
+/// - `Ok(v)` → 原样返回
+/// - `Err(msg)` → `tracing::warn!("web handler {label} state read failed: {msg}")`
+///   + 返回 `Err((INTERNAL_SERVER_ERROR, msg))`
+///
+/// `String` error 类型与 `rw_read_or` / `mutex_or` 直接对接；`?` 即可。
+pub fn read_state_or_json<T, F>(label: &str, f: F) -> Result<T, (StatusCode, String)>
+where
+    F: FnOnce() -> Result<T, String>,
+{
+    match f() {
+        Ok(v) => Ok(v),
+        Err(msg) => {
+            tracing::warn!("web handler {label} state read failed: {msg}");
+            Err((StatusCode::INTERNAL_SERVER_ERROR, msg))
+        }
+    }
+}
+
+/// SSE handler 专用：拿锁 / 读共享状态，失败 → 由 `make_stream` 构造错误 SSE 流
+/// 返回（不同 SSE 端点的事件 schema 不一样 —— search / download 各有 `result` / `progress`
+/// 字段 —— 所以 `make_stream` 由调用方传）。
+///
+/// 调用方典型用法：
+/// ```ignore
+/// let cfg = read_state_or_sse(
+///     "search:cfg",
+///     lock_failure_stream,
+///     || Ok(rw_read_or("search:cfg", &state.config)?.clone()),
+/// )?;
+/// ```
+///
+/// `make_stream: FnOnce(u16, &str) -> Sse<S>` —— 第一个参数是 HTTP status code（恒为
+/// 500，因为 `read_state_or_*` 只在锁毒化 / 内部失败时返 `Err`，此时 status 必然 5xx）。
+///
+/// **泛型 `S`**：handler 各自的 Sse 流类型可能不同（`BoxedSearchStream` /
+/// `BoxedSseStream`），helper 不强行统一类型别名，由调用方保留各自的 stream 包装。
+pub fn read_state_or_sse<T, F, S, M>(label: &str, make_stream: M, f: F) -> Result<T, Sse<S>>
+where
+    F: FnOnce() -> Result<T, String>,
+    M: FnOnce(u16, &str) -> Sse<S>,
+    S: Stream<Item = Result<axum::response::sse::Event, Infallible>> + Send + 'static,
+{
+    match f() {
+        Ok(v) => Ok(v),
+        Err(msg) => {
+            tracing::warn!("web SSE handler {label} state read failed: {msg}");
+            Err(make_stream(
+                StatusCode::INTERNAL_SERVER_ERROR.as_u16(),
+                &msg,
+            ))
+        }
     }
 }
 

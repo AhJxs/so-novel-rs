@@ -4,7 +4,6 @@ use std::convert::Infallible;
 use std::sync::Arc;
 
 use axum::extract::{Query, State};
-use axum::http::StatusCode;
 use axum::response::Sse;
 use futures::stream::Stream;
 use serde::{Deserialize, Serialize};
@@ -13,6 +12,7 @@ use crate::core::{config_helpers, search as core_search};
 use crate::models::SearchResult;
 
 use super::super::SharedState;
+use super::super::error::read_state_or_sse;
 use crate::utils::lock::rw_read_or;
 
 type BoxedSearchStream =
@@ -20,6 +20,9 @@ type BoxedSearchStream =
 
 /// 在 SSE search handler 入口拿到 poisoned lock 时，把错误以 `result` event
 /// (error 字段) + `done` 形式给前端，避免连接哑断。
+///
+/// Phase 3.8：本函数仍保留原签名，作为 [`read_state_or_sse`] 的 `make_stream` 回调；
+/// 真正消除的是入口处的 match-IIFE 模板。
 fn lock_failure_stream(status: u16, msg: &str) -> Sse<BoxedSearchStream> {
     let reason = format!("[{status}] {msg}");
     let stream = async_stream::stream! {
@@ -66,16 +69,21 @@ pub async fn search(
     Query(params): Query<SearchParams>,
 ) -> Sse<BoxedSearchStream> {
     let keyword = params.keyword.trim().to_string();
-    let (config, http, rules) = match (|| -> Result<_, (StatusCode, String)> {
-        let cfg = rw_read_or("search:cfg", &state.config)
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
-        let rules = rw_read_or("search:rules", &state.rules)
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
-        Ok((cfg.clone(), Arc::clone(&state.http), rules.clone()))
-    })() {
+    // SSE handler 直接返 `Sse<...>` 而非 `Result<_, _>`, 不能用 `?` 早返;
+    // 这里用 `match ... { Err(sse) => return sse }` 模式 (跟原 match-IIFE 等价).
+    let config = match read_state_or_sse("search:cfg", lock_failure_stream, || {
+        Ok(rw_read_or("search:cfg", &state.config)?.clone())
+    }) {
         Ok(v) => v,
-        Err((code, msg)) => return lock_failure_stream(code.as_u16(), &msg),
+        Err(sse) => return sse,
     };
+    let rules = match read_state_or_sse("search:rules", lock_failure_stream, || {
+        Ok(rw_read_or("search:rules", &state.rules)?.clone())
+    }) {
+        Ok(v) => v,
+        Err(sse) => return sse,
+    };
+    let http = Arc::clone(&state.http);
 
     let sources = core_search::select_sources(&rules, &config, params.source_id);
 

@@ -35,6 +35,7 @@ use crate::utils::time::now_unix_secs;
 use super::super::{TaskStatus, WebState};
 use crate::utils::lock::mutex_or;
 use crate::web::SharedState;
+use crate::web::error::read_state_or_json;
 
 /// `GET /api/tasks` 响应体。
 #[derive(Serialize)]
@@ -125,8 +126,7 @@ fn task_to_info(task: &DownloadTask) -> TaskInfo {
 pub async fn tasks_list(
     State(state): State<SharedState>,
 ) -> Result<Json<Vec<TaskInfo>>, (StatusCode, String)> {
-    let tasks =
-        mutex_or("tasks_list", &state.tasks).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let tasks = read_state_or_json("tasks_list", || mutex_or("tasks_list", &state.tasks))?;
     let mut result: Vec<TaskInfo> = tasks.iter().map(task_to_info).collect();
     drop(tasks);
     // 按 id 降序 (最新任务在前)。
@@ -151,8 +151,8 @@ pub async fn task_cancel(
 ) -> Result<&'static str, (StatusCode, String)> {
     let cancel;
     {
-        let mut tasks = mutex_or("task_cancel", &state.tasks)
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+        let mut tasks =
+            read_state_or_json("task_cancel", || mutex_or("task_cancel", &state.tasks))?;
         let Some(task) = tasks.iter_mut().find(|t| t.id == id) else {
             return Err((StatusCode::NOT_FOUND, "任务未找到".to_string()));
         };
@@ -199,8 +199,7 @@ pub async fn task_delete(
     State(state): State<SharedState>,
     Path(id): Path<u64>,
 ) -> Result<&'static str, (StatusCode, String)> {
-    let mut tasks = mutex_or("task_delete", &state.tasks)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let mut tasks = read_state_or_json("task_delete", || mutex_or("task_delete", &state.tasks))?;
     let initial_len = tasks.len();
     tasks.retain(|t| t.id != id);
     if tasks.len() == initial_len {

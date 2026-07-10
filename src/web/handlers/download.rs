@@ -20,7 +20,6 @@ use std::sync::Arc;
 
 use axum::Json;
 use axum::extract::State;
-use axum::http::StatusCode;
 use axum::response::Sse;
 use futures::stream::Stream;
 use serde::{Deserialize, Serialize};
@@ -33,6 +32,7 @@ use crate::models::{Chapter, SearchResult};
 use crate::utils::time::now_unix_secs;
 
 use super::super::SharedState;
+use super::super::error::read_state_or_sse;
 use super::tasks::spawn_task_drain;
 use crate::utils::lock::{mutex_or, rw_read_or};
 
@@ -42,6 +42,9 @@ pub(super) type BoxedSseStream =
 
 /// 在 SSE handler 入口拿到 poisoned lock 时, 把错误以 SSE `failed` event 形式
 /// 给前端 (稳定字面量 + status code), 避免连接哑断。
+///
+/// Phase 3.8：本函数仍保留原签名，作为 [`read_state_or_sse`] 的 `make_stream` 回调；
+/// 真正消除的是入口处的 match-IIFE 模板。
 fn lock_failure_stream(status: u16, msg: &str) -> Sse<BoxedSseStream> {
     let reason = format!("[{status}] {msg}");
     let stream = async_stream::stream! {
@@ -120,18 +123,22 @@ pub async fn download(
     Json(req): Json<DownloadRequest>,
 ) -> Sse<BoxedSseStream> {
     // Lock 失败也走 SSE 错误事件, 让前端看到稳定原因, 而不是连接哑断。
-    let (config, rule) = match (|| -> Result<_, (StatusCode, String)> {
-        let cfg = rw_read_or("download:cfg", &state.config)
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
-        let rule = rw_read_or("download:rules", &state.rules)
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?
+    // SSE handler 直接返 `Sse<...>` 而非 `Result<_, _>`, 不能用 `?` 早返;
+    // 这里用 `match ... { Err(sse) => return sse }` 模式 (跟原 match-IIFE 等价).
+    let config = match read_state_or_sse("download:cfg", lock_failure_stream, || {
+        Ok(rw_read_or("download:cfg", &state.config)?.clone())
+    }) {
+        Ok(v) => v,
+        Err(sse) => return sse,
+    };
+    let rule = match read_state_or_sse("download:rules", lock_failure_stream, || {
+        Ok(rw_read_or("download:rules", &state.rules)?
             .iter()
             .find(|r| r.id == req.source_id)
-            .cloned();
-        Ok((cfg.clone(), rule))
-    })() {
+            .cloned())
+    }) {
         Ok(v) => v,
-        Err((code, msg)) => return lock_failure_stream(code.as_u16(), &msg),
+        Err(sse) => return sse,
     };
 
     let Some(rule) = rule else {
@@ -149,19 +156,14 @@ pub async fn download(
     };
 
     // 1. mint id —— push 到 state.tasks 之前必须先有 id (其它请求靠它找任务)
-    let task_id = match (|| -> Result<_, (StatusCode, String)> {
-        let current = {
-            let mut id = mutex_or("download:next_task_id", &state.next_task_id)
-                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
-            let current = *id;
-            *id += 1;
-            drop(id);
-            current
-        };
+    let task_id: u64 = match read_state_or_sse("download:next_task_id", lock_failure_stream, || {
+        let mut id = mutex_or("download:next_task_id", &state.next_task_id)?;
+        let current = *id;
+        *id += 1;
         Ok(current)
-    })() {
+    }) {
         Ok(v) => v,
-        Err((code, msg)) => return lock_failure_stream(code.as_u16(), &msg),
+        Err(sse) => return sse,
     };
 
     let mut config = config;
@@ -176,10 +178,11 @@ pub async fn download(
     let (sse_tx, _) = broadcast::channel::<Progress>(256);
 
     // 2. 任务先入 state.tasks —— `tasks_list` 在 SSE 返回前已经能列到这条记录
-    if let Err((code, msg)) = (|| -> Result<(), (StatusCode, String)> {
-        {
-            let mut tasks = mutex_or("download:push_task", &state.tasks)
-                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    if let Err(sse) = read_state_or_sse(
+        "download:push_task",
+        lock_failure_stream,
+        || -> Result<(), String> {
+            let mut tasks = mutex_or("download:push_task", &state.tasks)?;
             tasks.push(DownloadTask {
                 id: task_id,
                 origin: SearchResult {
@@ -207,10 +210,10 @@ pub async fn download(
                 failures: Vec::new(),
                 version: 0,
             });
-        }
-        Ok(())
-    })() {
-        return lock_failure_stream(code.as_u16(), &msg);
+            Ok(())
+        },
+    ) {
+        return sse;
     }
     if let Ok(tasks) = mutex_or("download:save_after_push", &state.tasks) {
         let _ = crate::db::save_with_trim(&state.tasks_file, &tasks);

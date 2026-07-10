@@ -15,6 +15,7 @@ use axum::http::StatusCode;
 use crate::core::sources as core_sources;
 use crate::utils::lock::{rw_read_or, rw_write_or};
 use crate::web::SharedState;
+use crate::web::error::read_state_or_json;
 
 /// `GET /api/sources` / `POST /api/sources/{id}/toggle` 响应体。
 #[derive(serde::Serialize)]
@@ -34,8 +35,8 @@ pub struct SourceInfo {
 pub async fn sources_list(
     State(state): State<SharedState>,
 ) -> Result<Json<Vec<SourceInfo>>, (StatusCode, String)> {
-    let sources: Vec<SourceInfo> = rw_read_or("sources_list", &state.rules)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?
+    let rules = read_state_or_json("sources_list", || rw_read_or("sources_list", &state.rules))?;
+    let sources: Vec<SourceInfo> = rules
         .iter()
         .map(|r| SourceInfo {
             id: r.id,
@@ -44,6 +45,7 @@ pub async fn sources_list(
             enabled: !r.disabled,
         })
         .collect();
+    drop(rules);
     Ok(Json(sources))
 }
 
@@ -60,8 +62,9 @@ pub async fn source_toggle(
 ) -> Result<Json<SourceInfo>, (StatusCode, String)> {
     // 1. 先从 rules 中取到目标书源的 URL（短锁，取完即放）。
     let url = {
-        let rules = rw_read_or("source_toggle:read_url", &state.rules)
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+        let rules = read_state_or_json("source_toggle:read_url", || {
+            rw_read_or("source_toggle:read_url", &state.rules)
+        })?;
         core_sources::find_rule_by_id(&rules, id)
             .map(|r| r.url.clone())
             .ok_or_else(|| (StatusCode::NOT_FOUND, "书源未找到".to_string()))?
@@ -69,8 +72,9 @@ pub async fn source_toggle(
 
     // 2. 切换 SourcesConfig 并持久化到磁盘。
     let (now_disabled, to_save) = {
-        let mut sc = rw_write_or("source_toggle:write_sc", &state.sources_config)
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+        let mut sc = read_state_or_json("source_toggle:write_sc", || {
+            rw_write_or("source_toggle:write_sc", &state.sources_config)
+        })?;
         let d = sc.toggle_disabled(&url);
         (d, sc.clone())
     };
@@ -79,9 +83,8 @@ pub async fn source_toggle(
     }
 
     // 3. 同步更新内存中的 Rule.disabled。
-    {
-        let mut rules = rw_write_or("source_toggle:write_rules", &state.rules)
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    read_state_or_json("source_toggle:write_rules", || {
+        let mut rules = rw_write_or("source_toggle:write_rules", &state.rules)?;
         // 借用 disjoint: find(&) 拿不可变借用只在条件判断作用域内；
         // 立刻 drop，再 iter_mut 拿可变借用更新 disabled。
         if core_sources::find_rule_by_id(&rules, id).is_some() {
@@ -89,11 +92,13 @@ pub async fn source_toggle(
                 r.disabled = now_disabled;
             }
         }
-    }
+        Ok(())
+    })?;
 
     // 4. 返回更新后的信息。
-    let rules = rw_read_or("source_toggle:read_back", &state.rules)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let rules = read_state_or_json("source_toggle:read_back", || {
+        rw_read_or("source_toggle:read_back", &state.rules)
+    })?;
     let r = core_sources::find_rule_by_id(&rules, id)
         .ok_or_else(|| (StatusCode::NOT_FOUND, "书源未找到".to_string()))?;
     let info = SourceInfo {
@@ -129,8 +134,7 @@ pub async fn source_test(
     axum::extract::Path(id): axum::extract::Path<i32>,
 ) -> Result<Json<SourceTestResult>, (StatusCode, String)> {
     let rule = {
-        let rules = rw_read_or("source_test", &state.rules)
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+        let rules = read_state_or_json("source_test", || rw_read_or("source_test", &state.rules))?;
         match core_sources::find_rule_by_id_cloned(&rules, id) {
             Some(r) => r,
             None => {
