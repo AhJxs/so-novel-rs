@@ -18,6 +18,7 @@
 pub mod bootstrap;
 pub mod config_helpers;
 pub mod download_task;
+pub mod library;
 pub mod search;
 pub mod sources;
 

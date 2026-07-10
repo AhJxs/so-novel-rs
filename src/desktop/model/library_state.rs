@@ -50,9 +50,11 @@ pub struct LibraryState {
 /// 扫描下载目录得到 `LibraryEntry` 列表。
 ///
 /// - 仅包含**直接子文件**（不递归子目录）。
-/// - 仅保留 `.epub / .txt / .zip / .html / .pdf` 五种扩展名。
+/// - 仅保留 [`crate::core::library::SUPPORTED_LIBRARY_EXTS`] 白名单内的扩展名。
+///   白名单由 `core::library` 单一维护，桌面和 web 共用同一份（防止 web 加新格式
+///   时漏改桌面）。
 pub fn scan_library_dir(dir: &Path) -> std::io::Result<Vec<LibraryEntry>> {
-    const KEEP_EXT: &[&str] = &["epub", "txt", "zip", "html", "pdf"];
+    use crate::core::library::SUPPORTED_LIBRARY_EXTS;
 
     let mut out = Vec::new();
     for entry in std::fs::read_dir(dir)? {
@@ -65,7 +67,7 @@ pub fn scan_library_dir(dir: &Path) -> std::io::Result<Vec<LibraryEntry>> {
             continue;
         };
         let ext = ext_raw.to_ascii_lowercase();
-        if !KEEP_EXT.contains(&ext.as_str()) {
+        if !SUPPORTED_LIBRARY_EXTS.contains(&ext.as_str()) {
             continue;
         }
         let file_name = path
