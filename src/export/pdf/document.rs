@@ -254,11 +254,11 @@ impl<'b> Paginator<'b> {
     /// 一章: 强制新页 → 标题居中 → 各段落。标题为空时跳过标题行。
     fn render_chapter(&mut self, title: Option<&str>, paras: &[String]) {
         self.page_break();
-        if let Some(t) = title {
-            if !t.is_empty() {
-                self.line_centered(t, TITLE_SIZE, TITLE_LH);
-                self.space(TITLE_SIZE * 0.8);
-            }
+        if let Some(t) = title
+            && !t.is_empty()
+        {
+            self.line_centered(t, TITLE_SIZE, TITLE_LH);
+            self.space(TITLE_SIZE * 0.8);
         }
         for p in paras {
             if !p.is_empty() {

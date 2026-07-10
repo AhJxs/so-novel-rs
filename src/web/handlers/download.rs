@@ -156,12 +156,18 @@ pub async fn download(
     };
 
     // 1. mint id —— push 到 state.tasks 之前必须先有 id (其它请求靠它找任务)
-    let task_id: u64 = match read_state_or_sse("download:next_task_id", lock_failure_stream, || {
-        let mut id = mutex_or("download:next_task_id", &state.next_task_id)?;
-        let current = *id;
-        *id += 1;
-        Ok(current)
-    }) {
+    let task_id: u64 = match read_state_or_sse(
+        "download:next_task_id",
+        lock_failure_stream,
+        || -> Result<u64, String> {
+            let mut id = mutex_or("download:next_task_id", &state.next_task_id)?;
+            let current = *id;
+            *id += 1;
+            // 显式 drop MutexGuard, 让锁尽早释放 (clippy::significant_drop_tightening)
+            drop(id);
+            Ok(current)
+        },
+    ) {
         Ok(v) => v,
         Err(sse) => return sse,
     };
@@ -182,34 +188,38 @@ pub async fn download(
         "download:push_task",
         lock_failure_stream,
         || -> Result<(), String> {
-            let mut tasks = mutex_or("download:push_task", &state.tasks)?;
-            tasks.push(DownloadTask {
-                id: task_id,
-                origin: SearchResult {
-                    source_id: source.rule.id,
-                    source_name: source.rule.name.clone(),
-                    url: req.url.clone(),
-                    // 旧 web 这里写空串 → /tasks 返回 `book_name: null`。
-                    // 改用请求里带的搜索书名 (前端可保证非空; 缺省时回退到空串,
-                    // 后续 BookResolved 会被 drain 写入 book_meta, book_name() 仍可显示)。
-                    book_name: req.book_name.clone().unwrap_or_default(),
-                    ..Default::default()
-                },
-                // web 不在 struct 上挂 rx —— drain task 拥有它, drain 退出时丢。
-                rx: None,
-                cancel: Some(cancel.clone()),
-                cancelling: false,
-                started_at_unix: now_unix_secs(),
-                finished_at_unix: None,
-                book_meta: None,
-                total_chapters: 0,
-                completed: 0,
-                failed: 0,
-                last_chapter_title: String::new(),
-                finished: None,
-                failures: Vec::new(),
-                version: 0,
-            });
+            // 用块作用域把 MutexGuard 提前 drop, 避免 clippy
+            // `significant_drop_tightening` (guard 持有到闭包结尾).
+            {
+                let mut tasks = mutex_or("download:push_task", &state.tasks)?;
+                tasks.push(DownloadTask {
+                    id: task_id,
+                    origin: SearchResult {
+                        source_id: source.rule.id,
+                        source_name: source.rule.name.clone(),
+                        url: req.url.clone(),
+                        // 旧 web 这里写空串 → /tasks 返回 `book_name: null`。
+                        // 改用请求里带的搜索书名 (前端可保证非空; 缺省时回退到空串,
+                        // 后续 BookResolved 会被 drain 写入 book_meta, book_name() 仍可显示)。
+                        book_name: req.book_name.clone().unwrap_or_default(),
+                        ..Default::default()
+                    },
+                    // web 不在 struct 上挂 rx —— drain task 拥有它, drain 退出时丢。
+                    rx: None,
+                    cancel: Some(cancel.clone()),
+                    cancelling: false,
+                    started_at_unix: now_unix_secs(),
+                    finished_at_unix: None,
+                    book_meta: None,
+                    total_chapters: 0,
+                    completed: 0,
+                    failed: 0,
+                    last_chapter_title: String::new(),
+                    finished: None,
+                    failures: Vec::new(),
+                    version: 0,
+                });
+            }
             Ok(())
         },
     ) {

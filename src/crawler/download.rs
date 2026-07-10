@@ -383,13 +383,13 @@ pub async fn download_chapters(
         exporter.merge_with_cover(book, &chapters_dir, out_dir, cover_bytes.as_deref())?;
 
     // 7. 清理章节临时目录
-    if !cfg.download.preserve_chapter_cache {
-        if let Err(e) = std::fs::remove_dir_all(&chapters_dir) {
-            tracing::warn!(
-                "清理章节缓存目录失败（已忽略）: {} — {e}",
-                chapters_dir.display()
-            );
-        }
+    if !cfg.download.preserve_chapter_cache
+        && let Err(e) = std::fs::remove_dir_all(&chapters_dir)
+    {
+        tracing::warn!(
+            "清理章节缓存目录失败（已忽略）: {} — {e}",
+            chapters_dir.display()
+        );
     }
 
     let _ = progress.send(Progress::Finished {

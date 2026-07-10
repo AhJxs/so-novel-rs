@@ -24,7 +24,7 @@ pub enum FinishedReason {
 
 impl FinishedReason {
     /// 给 UI 用的错误消息文案（仅 `Failed` 有内容）。
-    pub fn user_message(&self) -> Option<&str> {
+    pub const fn user_message(&self) -> Option<&str> {
         match self {
             Self::Failed { message } => Some(message.as_str()),
             Self::UserCancelled | Self::AppRestarted => None,

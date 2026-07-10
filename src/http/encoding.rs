@@ -43,13 +43,12 @@ static META_CHARSET_RE: LazyLock<Regex> = LazyLock::new(|| {
 /// `content_type` 是响应头 `Content-Type` 的原始字符串（不要预解析）。
 pub fn decode_response_bytes(bytes: &[u8], content_type: Option<&str>) -> String {
     // 1. Content-Type
-    if let Some(ct) = content_type {
-        if let Some(charset) = parse_charset_from_content_type(ct) {
-            if let Some(enc) = Encoding::for_label(charset.as_bytes()) {
-                let (cow, _, _) = enc.decode(bytes);
-                return cow.into_owned();
-            }
-        }
+    if let Some(ct) = content_type
+        && let Some(charset) = parse_charset_from_content_type(ct)
+        && let Some(enc) = Encoding::for_label(charset.as_bytes())
+    {
+        let (cow, _, _) = enc.decode(bytes);
+        return cow.into_owned();
     }
 
     // 2. <meta>

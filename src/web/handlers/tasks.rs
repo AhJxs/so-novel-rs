@@ -273,10 +273,8 @@ pub(super) fn spawn_task_drain(
                 false
             }
         };
-        if needs_save {
-            if let Ok(tasks) = mutex_or("spawn_task_drain:save", &state.tasks) {
-                let _ = crate::db::save_with_trim(&state.tasks_file, &tasks);
-            }
+        if needs_save && let Ok(tasks) = mutex_or("spawn_task_drain:save", &state.tasks) {
+            let _ = crate::db::save_with_trim(&state.tasks_file, &tasks);
         }
     });
 }

@@ -27,7 +27,7 @@
 //! 同样 `Rule.url` 来自 JSON 解析（无 trim），但内存里查找时都按 `rule.url.trim().to_lowercase()`
 //! 归一后比对 —— 这就是 `rule_key` 与 `find_rule_by_url` 之间的契约。
 //!
-//! ## 关于 parse_rules_bytes
+//! ## 关于 `parse_rules_bytes`
 //!
 //! 桌面端导入书源文件时已经做了"先解析一次确认有效再 copy"的预检（`add_sources_from_file`）。
 //! 解析链是 4 步 fallback：严格 JSON `Vec<Rule>` → 严格 JSON 单 `Rule` → json5 `Vec<Rule>`

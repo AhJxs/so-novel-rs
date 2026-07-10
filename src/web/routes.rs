@@ -36,10 +36,10 @@ fn loopback_origins() -> Vec<HeaderValue> {
     // 总是包含 loopback（覆盖未配环境变量场景）。
     for host in ["localhost", "127.0.0.1"] {
         let url = format!("http://{host}:{port}");
-        if let Ok(hv) = HeaderValue::from_str(&url) {
-            if !origins.contains(&hv) {
-                origins.push(hv);
-            }
+        if let Ok(hv) = HeaderValue::from_str(&url)
+            && !origins.contains(&hv)
+        {
+            origins.push(hv);
         }
     }
     origins

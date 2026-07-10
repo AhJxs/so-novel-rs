@@ -83,12 +83,16 @@ pub async fn source_toggle(
     }
 
     // 3. 同步更新内存中的 Rule.disabled。
-    read_state_or_json("source_toggle:write_rules", || {
-        let mut rules = rw_write_or("source_toggle:write_rules", &state.rules)?;
-        // 借用 disjoint: find(&) 拿不可变借用只在条件判断作用域内；
-        // 立刻 drop，再 iter_mut 拿可变借用更新 disabled。
-        if core_sources::find_rule_by_id(&rules, id).is_some() {
-            if let Some(r) = rules.iter_mut().find(|r| r.id == id) {
+    read_state_or_json("source_toggle:write_rules", || -> Result<(), String> {
+        // 用块作用域把 RwLock write guard 提前 drop, 避免 clippy
+        // `significant_drop_tightening` (guard 持有到闭包结尾).
+        {
+            let mut rules = rw_write_or("source_toggle:write_rules", &state.rules)?;
+            // 借用 disjoint: find(&) 拿不可变借用只在条件判断作用域内；
+            // 立刻 drop，再 iter_mut 拿可变借用更新 disabled。
+            if core_sources::find_rule_by_id(&rules, id).is_some()
+                && let Some(r) = rules.iter_mut().find(|r| r.id == id)
+            {
                 r.disabled = now_disabled;
             }
         }

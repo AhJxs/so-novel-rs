@@ -121,11 +121,11 @@ pub fn write_atomically(path: &Path, data: &[u8]) -> std::io::Result<()> {
     // rename 覆盖目标。如果目标已存在，std::fs::rename 在 Windows 上会
     // 失败（不允许覆盖），所以先 remove 再 rename。两步不是严格原子，
     // 但配合上面的 fsync，断电最坏情况是"老文件还在"（不是半截）。
-    if path.exists() {
-        if let Err(e) = std::fs::remove_file(path) {
-            let _ = std::fs::remove_file(&tmp);
-            return Err(e);
-        }
+    if path.exists()
+        && let Err(e) = std::fs::remove_file(path)
+    {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e);
     }
     if let Err(e) = std::fs::rename(&tmp, path) {
         let _ = std::fs::remove_file(&tmp);

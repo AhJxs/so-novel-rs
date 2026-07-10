@@ -147,12 +147,11 @@ pub(super) fn is_last_page(
         return true;
     };
 
-    if !chapter_rule.next_chapter_link.is_empty() {
-        if let Ok(re) = crate::parser::cache::cached_regex(&chapter_rule.next_chapter_link) {
-            if re.is_match(next_url) {
-                return true;
-            }
-        }
+    if !chapter_rule.next_chapter_link.is_empty()
+        && let Ok(re) = crate::parser::cache::cached_regex(&chapter_rule.next_chapter_link)
+        && re.is_match(next_url)
+    {
+        return true;
     }
 
     // 通用兜底：URL 不再像 *_数字.html 形式，且按钮文本含"下一章"等关键字

@@ -30,10 +30,8 @@ pub fn load_tasks_from_file(path: &Path) -> (Vec<DownloadTask>, u64) {
     }
 
     // 如果有中断的任务，重新保存到文件
-    if need_rewrite {
-        if let Err(e) = crate::db::save_tasks(path, &tasks) {
-            tracing::warn!("rewrite interrupted tasks failed: {e}");
-        }
+    if need_rewrite && let Err(e) = crate::db::save_tasks(path, &tasks) {
+        tracing::warn!("rewrite interrupted tasks failed: {e}");
     }
 
     (tasks, max_id + 1)

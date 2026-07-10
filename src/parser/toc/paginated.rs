@@ -113,10 +113,10 @@ pub(super) fn collect_option_pagination_urls(
     };
     let mut out = Vec::new();
     for e in &elements {
-        if let Some(raw) = e.value().attr(attr_key) {
-            if let Some(abs) = abs_url(&base, raw) {
-                out.push(abs);
-            }
+        if let Some(raw) = e.value().attr(attr_key)
+            && let Some(abs) = abs_url(&base, raw)
+        {
+            out.push(abs);
         }
     }
     Ok(Some(out))

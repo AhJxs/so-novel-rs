@@ -216,11 +216,11 @@ pub fn run_download(
     }
 
     let result = rt.block_on(download_task).context("下载任务 join 失败")?;
-    if let Err(e) = result {
-        if !saw_cancelled {
-            eprintln!("\n❌ 下载失败: {e:#}");
-            std::process::exit(1);
-        }
+    if let Err(e) = result
+        && !saw_cancelled
+    {
+        eprintln!("\n❌ 下载失败: {e:#}");
+        std::process::exit(1);
     }
     drop(rt);
     Ok(())

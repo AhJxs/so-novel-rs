@@ -163,11 +163,11 @@ mod tests {
     #[test]
     fn duration_units() {
         assert_eq!(format_duration(Duration::from_secs(45)), "45 秒");
-        assert_eq!(format_duration(Duration::from_secs(60)), "1 分");
+        assert_eq!(format_duration(Duration::from_mins(1)), "1 分");
         assert_eq!(format_duration(Duration::from_secs(125)), "2 分 5 秒");
-        assert_eq!(format_duration(Duration::from_secs(3600)), "1 时");
-        assert_eq!(format_duration(Duration::from_secs(7320)), "2 时 2 分");
-        assert_eq!(format_duration(Duration::from_secs(86_400)), "1 天");
-        assert_eq!(format_duration(Duration::from_secs(90_000)), "1 天 1 时");
+        assert_eq!(format_duration(Duration::from_hours(1)), "1 时");
+        assert_eq!(format_duration(Duration::from_mins(122)), "2 时 2 分");
+        assert_eq!(format_duration(Duration::from_hours(24)), "1 天");
+        assert_eq!(format_duration(Duration::from_hours(25)), "1 天 1 时");
     }
 }

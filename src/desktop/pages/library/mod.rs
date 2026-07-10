@@ -225,10 +225,10 @@ impl Render for LibraryPage {
                         .entries
                         .iter()
                         .filter(|e| {
-                            if let Some(ext) = &model.library.filter_ext {
-                                if &e.ext != ext {
-                                    return false;
-                                }
+                            if let Some(ext) = &model.library.filter_ext
+                                && &e.ext != ext
+                            {
+                                return false;
                             }
                             let kw = model.library.filter_text.trim();
                             if kw.is_empty() {

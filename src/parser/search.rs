@@ -200,10 +200,10 @@ pub fn parse_search_results(
     let mut out: Vec<SearchResult> = Vec::new();
     for el in matched {
         push_search_result(el, s, base_url, rule.id, &rule.name, &mut out);
-        if let Some(n) = limit {
-            if out.len() >= n {
-                break;
-            }
+        if let Some(n) = limit
+            && out.len() >= n
+        {
+            break;
         }
     }
 

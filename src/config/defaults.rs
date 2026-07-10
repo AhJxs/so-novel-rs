@@ -20,10 +20,10 @@ use toml_edit::DocumentMut;
 /// 字符串能被设置页直接放到 `TextEdit` 里编辑，也能直接序列化进 TOML。
 pub fn default_download_path() -> String {
     use directories::UserDirs;
-    if let Some(user_dirs) = UserDirs::new() {
-        if let Some(docs) = user_dirs.document_dir() {
-            return docs.join("Novel").to_string_lossy().into_owned();
-        }
+    if let Some(user_dirs) = UserDirs::new()
+        && let Some(docs) = user_dirs.document_dir()
+    {
+        return docs.join("Novel").to_string_lossy().into_owned();
     }
     tracing::warn!("无法定位系统 Documents 目录，下载路径回落到 ./downloads");
     "downloads".to_string()

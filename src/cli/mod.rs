@@ -177,18 +177,18 @@ pub fn run() -> Result<()> {
         let mut cmd = build_localized_command(cfg.global.language);
         // `find_subcommand_mut` 返回 `Option<&mut Command>` —— 用 if let 显式
         // 拿出子命令引用，避免 `.unwrap_or(&mut cmd)` 的双 mutable borrow。
-        if let Some(sub) = &cli.command {
-            if let Some(target) = cmd.find_subcommand_mut(subcommand_name(sub)) {
-                if is_short_help {
-                    target.print_help().ok();
-                } else {
-                    target.print_long_help().ok();
-                }
-                println!();
-                return Ok(());
+        if let Some(sub) = &cli.command
+            && let Some(target) = cmd.find_subcommand_mut(subcommand_name(sub))
+        {
+            if is_short_help {
+                target.print_help().ok();
+            } else {
+                target.print_long_help().ok();
             }
-            // 找不到子命令（不该发生 —— derive 和手搓结构应一致），fall through 顶层。
+            println!();
+            return Ok(());
         }
+        // 找不到子命令（不该发生 —— derive 和手搓结构应一致），fall through 顶层。
         if is_short_help {
             cmd.print_help().ok();
         } else {

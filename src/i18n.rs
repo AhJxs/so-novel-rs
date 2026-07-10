@@ -115,12 +115,11 @@ pub fn ts_cached(key: &'static str) -> TStr {
     // 读路径走 Mutex 而非 RwLock：① 全局只一个 key-value 写者（第一次访问），
     // ② SharedString clone 很轻，无锁阻塞竞争更友好。读侧用 `try_lock` 退路：
     // 万一锁被持有（极罕见）退到非缓存路径，绝不阻塞调用方。
-    if let Ok(g) = ts_cache().lock() {
-        if let Some(map) = g.as_ref() {
-            if let Some(cached) = map.get(key) {
-                return cached.clone();
-            }
-        }
+    if let Ok(g) = ts_cache().lock()
+        && let Some(map) = g.as_ref()
+        && let Some(cached) = map.get(key)
+    {
+        return cached.clone();
     }
     // miss：调底层查 + 写回缓存。
     let v = ts(key);

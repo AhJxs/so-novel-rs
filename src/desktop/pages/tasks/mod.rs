@@ -70,11 +70,11 @@ impl TasksPage {
 
     pub(super) fn cancel(&self, task_id: u64, cx: &mut Context<Self>) {
         self.model.update(cx, |m, _cx| {
-            if let Some(t) = m.tasks.iter_mut().find(|t| t.id == task_id) {
-                if let Some(cancel) = t.cancel.take() {
-                    cancel.cancel();
-                    t.cancelling = true;
-                }
+            if let Some(t) = m.tasks.iter_mut().find(|t| t.id == task_id)
+                && let Some(cancel) = t.cancel.take()
+            {
+                cancel.cancel();
+                t.cancelling = true;
             }
         });
         cx.notify();

@@ -232,12 +232,12 @@ impl SearchState {
         if self.received >= self.expected && self.expected > 0 {
             self.running = false;
             self.rx = None;
-            if self.filter_after_done {
-                if let Some(kw) = self.last_keyword.as_deref() {
-                    let new_results = crate::parser::filter_sort(&self.results, kw);
-                    self.selected = None;
-                    self.results = new_results;
-                }
+            if self.filter_after_done
+                && let Some(kw) = self.last_keyword.as_deref()
+            {
+                let new_results = crate::parser::filter_sort(&self.results, kw);
+                self.selected = None;
+                self.results = new_results;
             }
         }
 
@@ -259,16 +259,15 @@ impl SearchState {
         let mut any = false;
         let _ = try_drain_all(&mut self.detail_rx, |ev: DetailEvent| {
             any = true;
-            if let DetailState::Loaded(book) = &ev.state {
-                if let Some(cover_url) = book
+            if let DetailState::Loaded(book) = &ev.state
+                && let Some(cover_url) = book
                     .cover_url
                     .as_deref()
                     .map(str::trim)
                     .filter(|s| !s.is_empty())
-                {
-                    self.pending_cover_prefetch
-                        .push((ev.source_id, cover_url.to_string()));
-                }
+            {
+                self.pending_cover_prefetch
+                    .push((ev.source_id, cover_url.to_string()));
             }
             self.detail_cache.insert((ev.source_id, ev.url), ev.state);
         });
@@ -298,11 +297,11 @@ impl SearchState {
         let _ = try_drain_all(&mut self.toc_rx, |ev: TocEvent| {
             any = true;
             // 首次加载完成时初始化章节范围
-            if let TocState::Loaded(_, chapters) = &ev.state {
-                if self.chapter_range_start == 0 || self.chapter_range_end == 0 {
-                    self.chapter_range_start = 1;
-                    self.chapter_range_end = chapters.len() as u32;
-                }
+            if let TocState::Loaded(_, chapters) = &ev.state
+                && (self.chapter_range_start == 0 || self.chapter_range_end == 0)
+            {
+                self.chapter_range_start = 1;
+                self.chapter_range_end = chapters.len() as u32;
             }
             self.toc_cache.insert((ev.source_id, ev.url), ev.state);
         });

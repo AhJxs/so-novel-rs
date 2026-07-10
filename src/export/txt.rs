@@ -122,10 +122,10 @@ impl Exporter for TxtExporter {
         // 章节合并（每个文件已是 render::render_txt 的输出：标题 + 缩进段落 + \n）
         for path in &files {
             // 跳过 0_ 开头的辅助文件（封面图、目录索引）
-            if let Some(name) = path.file_name().and_then(|s| s.to_str()) {
-                if name.starts_with("0_") || name == "0_目录.txt" {
-                    continue;
-                }
+            if let Some(name) = path.file_name().and_then(|s| s.to_str())
+                && (name.starts_with("0_") || name == "0_目录.txt")
+            {
+                continue;
             }
             let content = std::fs::read_to_string(path)?;
             writer.write_str(&content)?;

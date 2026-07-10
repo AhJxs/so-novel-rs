@@ -121,10 +121,10 @@ pub fn load_config(path: &Path) -> Result<AppConfig> {
     if let Some(v) = t_str(&doc, "global", "theme-dark") {
         cfg.global.theme_pref.dyn_dark = v;
     }
-    if let Some(v) = t_str(&doc, "global", "language") {
-        if let Some(parsed) = Language::parse(&v) {
-            cfg.global.language = parsed;
-        }
+    if let Some(v) = t_str(&doc, "global", "language")
+        && let Some(parsed) = Language::parse(&v)
+    {
+        cfg.global.language = parsed;
     }
     if let Some(v) = t_str(&doc, "global", "gh-proxy") {
         cfg.global.gh_proxy = v;
@@ -199,14 +199,12 @@ pub fn load_config(path: &Path) -> Result<AppConfig> {
     let theme_kind_present = t_table(&doc, "global")
         .and_then(|t| t.get("theme-kind"))
         .is_some();
-    if !theme_kind_present {
-        if let Some(v) = t_str(&doc, "global", "theme") {
-            cfg.global.theme_pref = ThemePref {
-                kind: ThemeKind::Static,
-                static_name: v,
-                ..ThemePref::default()
-            };
-        }
+    if !theme_kind_present && let Some(v) = t_str(&doc, "global", "theme") {
+        cfg.global.theme_pref = ThemePref {
+            kind: ThemeKind::Static,
+            static_name: v,
+            ..ThemePref::default()
+        };
     }
 
     Ok(cfg)

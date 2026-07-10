@@ -35,7 +35,7 @@ pub fn build_async_client(cfg: &AppConfig, opts: &ClientOptions) -> Result<reqwe
     let mut builder = reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(DEFAULT_TIMEOUT_SECS))
         .timeout(Duration::from_secs(DEFAULT_TIMEOUT_SECS))
-        .pool_idle_timeout(Duration::from_secs(60))
+        .pool_idle_timeout(Duration::from_mins(1))
         .redirect(reqwest::redirect::Policy::limited(10))
         .cookie_store(true)
         .default_headers({

@@ -132,7 +132,7 @@ impl AppModel {
     /// 构造 `AppModel` + 配套的 `WakeupReceiver`（主构造函数）。
     ///
     /// 调用方（`desktop::run`）拿到 `WakeupReceiver` 后传给 `drain_loop`，
-    /// wakeup 通路才生效：后台 producer 写入新数据时 `notify()`，drain_loop
+    /// wakeup 通路才生效：后台 producer 写入新数据时 `notify()`，`drain_loop`
     /// 立刻醒来排空，不必等 100ms 兜底。
     pub fn new_with_wakeup() -> Result<(Self, WakeupReceiver)> {
         // Phase 3.3：启动期公共资源（paths / config / sources_config / rules / http）

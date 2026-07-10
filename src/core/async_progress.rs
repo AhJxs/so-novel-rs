@@ -81,9 +81,8 @@ pub fn try_drain_all<T, F>(
 where
     F: FnMut(T),
 {
-    let mut rx = match rx_slot.take() {
-        Some(rx) => rx,
-        None => return DrainOutcome::NoReceiver,
+    let Some(mut rx) = rx_slot.take() else {
+        return DrainOutcome::NoReceiver;
     };
     loop {
         match rx.try_recv() {
