@@ -1,5 +1,6 @@
 //! 一个正在跑的下载任务（由搜索页"下载"按钮触发，下载页/任务页消费）。
 
+use std::sync::Mutex;
 use std::time::Duration;
 use tokio::sync::mpsc;
 
@@ -114,53 +115,33 @@ impl DownloadTask {
 
     /// 排空进度通道；返回是否产生过事件（用于触发 repaint）。
     ///
-    /// 与 `apply_progress` 共享同一套事件→字段映射，但 `drain` 必须直接拿 `rx`
-    /// 的可变借用（不能借 self），所以 match 内联（无法用 `self.apply_progress`）。
+    /// Phase 3.4 重写：用 `mem::take` 把 `Option<UnboundedReceiver>` 从 `self` 移出，
+    /// 循环里只 `&mut self` 写字段，跟 `rx` 所有权 disjoint，借用检查通过；
+    /// 这样可以调 `self.apply_progress(ev)` 而不需要在两处维护同一套 match。
+    ///
+    /// 行为完全等价于旧实现：
+    /// - `rx = None` → 返回 false，不动任何字段
+    /// - `Empty` → 把 `rx` 放回去，下次还能 drain（关键不变量）
+    /// - `Disconnected` → 标 `AppRestarted`（如果 `finished` 还没设）
+    /// - `was_running && finished.is_some() && finished_at_unix.is_none()` → 补填 `finished_at_unix`
+    /// - 任何事件收到 → `version.wrapping_add(1)`，返回 true
     pub fn drain(&mut self) -> bool {
         let mut any = false;
         let was_running = self.is_running();
-        let Some(rx) = self.rx.as_mut() else {
+        let Some(mut rx) = self.rx.take() else {
             return false;
         };
         loop {
             match rx.try_recv() {
                 Ok(ev) => {
                     any = true;
-                    match ev {
-                        Progress::BookResolved {
-                            book,
-                            total_chapters,
-                        } => {
-                            self.book_meta = Some(*book);
-                            self.total_chapters = total_chapters;
-                        }
-                        Progress::ChapterDone { index, title } => {
-                            self.completed += 1;
-                            self.last_chapter_title = title;
-                            let _ = index;
-                        }
-                        Progress::ChapterFailed {
-                            index,
-                            title,
-                            reason,
-                        } => {
-                            self.failed += 1;
-                            self.failures.push((index, title, reason));
-                        }
-                        Progress::Finished { output_path } => {
-                            self.finished = Some(Ok(output_path));
-                        }
-                        Progress::Cancelled => {
-                            self.finished = Some(Err(FinishedReason::UserCancelled));
-                            self.cancelling = false;
-                        }
-                        Progress::Failed { reason } => {
-                            self.finished = Some(Err(FinishedReason::Failed { message: reason }));
-                            self.cancelling = false;
-                        }
-                    }
+                    self.apply_progress(ev);
                 }
-                Err(mpsc::error::TryRecvError::Empty) => break,
+                Err(mpsc::error::TryRecvError::Empty) => {
+                    // 关键：把 rx 放回去 —— 下次 drain 还能读到新事件。
+                    self.rx = Some(rx);
+                    break;
+                }
                 Err(mpsc::error::TryRecvError::Disconnected) => {
                     // 后台 task 异常退出（panic / 进程被 kill 等）—— 标记为 AppRestarted，
                     // 因为用户没主动取消，理论上应该自动恢复重跑。当前简化处理：直接标记结束。
@@ -168,6 +149,7 @@ impl DownloadTask {
                         self.finished = Some(Err(FinishedReason::AppRestarted));
                         self.cancelling = false;
                     }
+                    // Disconnected 路径不放回 rx —— sender 已 drop，留 None 即可。
                     break;
                 }
             }
@@ -223,6 +205,26 @@ impl DownloadTask {
         }
     }
 
+    /// web drain 闭包里"锁 + 按 id 找 + `apply_progress`"的可复用形式。
+    ///
+    /// Phase 3.4：web 的 `spawn_task_drain` 阻塞循环（`while let Some(progress) =
+    /// crawler_rx.recv().await`）**不**重构 —— 它跟桌面 `try_recv` 循环语义不同
+    /// （web 要阻塞到 crawler 退出，桌面 drain 每次调用即返回），所以 `spawn_task_drain`
+    /// 仍是阻塞式。只把"找到 task → `apply_progress`"这段抽出来给 web 复用。
+    ///
+    /// 锁毒化时返回 false（与 [`crate::utils::lock::mutex_or`] 行为一致）——
+    /// 调用方据此判断是否要 abort drain 任务。
+    pub fn apply_to_task(tasks: &Mutex<Vec<Self>>, task_id: u64, ev: Progress) -> bool {
+        use crate::utils::lock::mutex_or;
+        let Ok(mut guard) = mutex_or("apply_to_task", tasks) else {
+            return false;
+        };
+        if let Some(task) = guard.iter_mut().find(|t| t.id == task_id) {
+            task.apply_progress(ev);
+        }
+        true
+    }
+
     /// 转成可持久化的 record（不含 rx/cancel）。
     pub fn to_record(&self) -> DownloadTaskRecord {
         DownloadTaskRecord {
@@ -271,5 +273,209 @@ impl DownloadTask {
                 .collect(),
             version: 0,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
+    use super::*;
+
+    fn task_with_rx() -> (DownloadTask, mpsc::UnboundedSender<Progress>) {
+        let (tx, rx) = mpsc::unbounded_channel::<Progress>();
+        let task = DownloadTask {
+            id: 1,
+            origin: search_result_dummy(),
+            rx: Some(rx),
+            cancel: None,
+            cancelling: false,
+            started_at_unix: 0,
+            finished_at_unix: None,
+            book_meta: None,
+            total_chapters: 0,
+            completed: 0,
+            failed: 0,
+            last_chapter_title: String::new(),
+            finished: None,
+            failures: Vec::new(),
+            version: 0,
+        };
+        (task, tx)
+    }
+
+    fn search_result_dummy() -> crate::models::SearchResult {
+        crate::models::SearchResult::default()
+    }
+
+    // ── drain invariants (Phase 3.4 mem::take rewrite) ─────
+
+    #[test]
+    fn drain_returns_false_and_leaves_state_untouched_when_rx_is_none() {
+        let mut task = DownloadTask {
+            id: 1,
+            origin: search_result_dummy(),
+            rx: None,
+            cancel: None,
+            cancelling: false,
+            started_at_unix: 0,
+            finished_at_unix: None,
+            book_meta: None,
+            total_chapters: 0,
+            completed: 0,
+            failed: 0,
+            last_chapter_title: String::new(),
+            finished: None,
+            failures: Vec::new(),
+            version: 0,
+        };
+        assert!(!task.drain(), "rx=None 应返回 false");
+        assert_eq!(task.version, 0, "rx=None 不应 bump version");
+        assert!(task.finished.is_none(), "rx=None 不应改 finished");
+    }
+
+    #[test]
+    fn drain_empty_branch_puts_rx_back_so_next_drain_works() {
+        // 关键不变量：drain 排空后必须把 rx 放回去，下一次 drain 还能再读。
+        // 这条保证是 mem::take 重写最关键的回归 —— 旧实现 `rx.as_mut()` 路径
+        // 不会丢 rx，但 `mem::take` 后不显式放回会丢。
+        let (mut task, tx) = task_with_rx();
+
+        // 第一次 drain：通道空 → Empty → rx 必须被放回去
+        let any = task.drain();
+        assert!(!any, "空通道应返回 false");
+        assert!(task.rx.is_some(), "Empty 分支必须把 rx 放回去");
+
+        // 现在发一个事件，第二次 drain 必须能读到
+        tx.send(Progress::Cancelled).expect("send");
+        let any = task.drain();
+        assert!(any, "第二次 drain 必须能读到事件");
+        assert!(matches!(
+            task.finished,
+            Some(Err(FinishedReason::UserCancelled))
+        ));
+    }
+
+    #[test]
+    fn drain_disconnected_does_not_put_rx_back() {
+        // sender drop 后通道 Disconnected：放回 rx 没有意义（永远读不出事件），
+        // 所以 drain 后 rx 应为 None。
+        let (mut task, tx) = task_with_rx();
+        drop(tx);
+        let any = task.drain();
+        assert!(!any, "disconnected 应返回 false（没读到事件）");
+        assert!(task.rx.is_none(), "Disconnected 后 rx 应为 None");
+        assert!(matches!(
+            task.finished,
+            Some(Err(FinishedReason::AppRestarted))
+        ));
+    }
+
+    #[test]
+    fn drain_disconnected_does_not_overwrite_existing_finished() {
+        // 守卫：如果 finished 已经设了（用户主动取消 / Finished 已收到），
+        // Disconnected 不应覆盖。
+        let (mut task, tx) = task_with_rx();
+        task.finished = Some(Err(FinishedReason::UserCancelled));
+        drop(tx);
+        task.drain();
+        assert!(
+            matches!(task.finished, Some(Err(FinishedReason::UserCancelled))),
+            "Disconnected 不应覆盖已存在的 finished"
+        );
+    }
+
+    // ── apply_progress 等价性 spot check ──────────────────
+
+    #[test]
+    fn drain_uses_apply_progress_for_chapter_done() {
+        let (mut task, tx) = task_with_rx();
+        tx.send(Progress::ChapterDone {
+            index: 5,
+            title: "第五章".into(),
+        })
+        .expect("send");
+        let any = task.drain();
+        assert!(any);
+        assert_eq!(task.completed, 1, "ChapterDone → completed += 1");
+        assert_eq!(task.last_chapter_title, "第五章");
+        assert_eq!(task.version, 1, "收到事件 → version += 1");
+    }
+
+    #[test]
+    fn drain_records_finished_at_unix_when_finished_via_event() {
+        let (mut task, tx) = task_with_rx();
+        let out = std::path::PathBuf::from("/tmp/out.epub");
+        tx.send(Progress::Finished {
+            output_path: out.clone(),
+        })
+        .expect("send");
+        task.drain();
+        assert!(matches!(task.finished, Some(Ok(ref p)) if p == &out));
+        assert!(
+            task.finished_at_unix.is_some(),
+            "Finished 事件应触发 finished_at_unix 兜底"
+        );
+    }
+
+    // ── apply_to_task ─────────────────────────────────────
+
+    #[test]
+    fn apply_to_task_updates_correct_task_by_id() {
+        use std::sync::Mutex;
+        let mut t1 = DownloadTask {
+            id: 1,
+            origin: search_result_dummy(),
+            rx: None,
+            cancel: None,
+            cancelling: false,
+            started_at_unix: 0,
+            finished_at_unix: None,
+            book_meta: None,
+            total_chapters: 0,
+            completed: 0,
+            failed: 0,
+            last_chapter_title: String::new(),
+            finished: None,
+            failures: Vec::new(),
+            version: 0,
+        };
+        let mut t2 = DownloadTask {
+            id: 2,
+            origin: search_result_dummy(),
+            rx: None,
+            cancel: None,
+            cancelling: false,
+            started_at_unix: 0,
+            finished_at_unix: None,
+            book_meta: None,
+            total_chapters: 0,
+            completed: 0,
+            failed: 0,
+            last_chapter_title: String::new(),
+            finished: None,
+            failures: Vec::new(),
+            version: 0,
+        };
+        t1.last_chapter_title = "preset-1".into();
+        t2.last_chapter_title = "preset-2".into();
+        let tasks = Mutex::new(vec![t1, t2]);
+        let ok = DownloadTask::apply_to_task(
+            &tasks,
+            2,
+            Progress::ChapterDone {
+                index: 1,
+                title: "first".into(),
+            },
+        );
+        assert!(ok);
+        let (t1_title, t2_title) = {
+            let guard = tasks.lock().expect("lock");
+            (
+                guard[0].last_chapter_title.clone(),
+                guard[1].last_chapter_title.clone(),
+            )
+        };
+        assert_eq!(t1_title, "preset-1");
+        assert_eq!(t2_title, "first");
     }
 }
