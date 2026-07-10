@@ -1,7 +1,6 @@
 //! 书籍详情 + 目录（TOC）API。
 
 use axum::extract::{Query, State};
-use axum::http::StatusCode;
 use axum::response::Json;
 use serde::Deserialize;
 
@@ -22,20 +21,26 @@ pub struct BookDetailParams {
 }
 
 /// 从共享状态中提取配置和指定书源。
+///
+/// 返回 [`WebError`]：
+/// - **锁毒化** (`rw_read_or` 失败) → `Internal("internal_error")`，动态消息进日志，
+///   响应 body 不外泄（依赖 [`WebError::From<String>`] blanket impl，Phase 3.0）。
+/// - **书源 id 不存在** → `NotFound("书源未找到")`，4xx 给前端。
+///
+/// **不要**把锁毒化静默转成 `NotFound`（旧实现 `.map_err(|_| NotFound)` 的 bug）：
+/// 锁毒化是 500（服务端状态损坏），不是 404（资源不存在）。
 fn extract_config_and_rule(
     state: &SharedState,
     source_id: i32,
-) -> Result<(AppConfig, Rule), (StatusCode, String)> {
-    let cfg = rw_read_or("book:cfg", &state.config)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+) -> Result<(AppConfig, Rule), WebError> {
+    let cfg = rw_read_or("book:cfg", &state.config)?;
     let rule = {
-        let rules = rw_read_or("book:rules", &state.rules)
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+        let rules = rw_read_or("book:rules", &state.rules)?;
         rules
             .iter()
             .find(|r| r.id == source_id)
             .cloned()
-            .ok_or_else(|| (StatusCode::NOT_FOUND, "书源未找到".to_string()))?
+            .ok_or(WebError::NotFound("书源未找到"))?
     };
     Ok((cfg.clone(), rule))
 }
@@ -44,8 +49,7 @@ pub async fn book_detail(
     State(state): State<SharedState>,
     Query(params): Query<BookDetailParams>,
 ) -> Result<Json<Book>, WebError> {
-    let (config, rule) = extract_config_and_rule(&state, params.source_id)
-        .map_err(|_| WebError::NotFound("书源未找到"))?;
+    let (config, rule) = extract_config_and_rule(&state, params.source_id)?;
 
     let source = Source::from(rule, &config);
     let client = state.http.for_rule(&source.rule);
@@ -64,8 +68,7 @@ pub async fn book_toc(
     State(state): State<SharedState>,
     Query(params): Query<BookDetailParams>,
 ) -> Result<Json<serde_json::Value>, WebError> {
-    let (config, rule) = extract_config_and_rule(&state, params.source_id)
-        .map_err(|_| WebError::NotFound("书源未找到"))?;
+    let (config, rule) = extract_config_and_rule(&state, params.source_id)?;
 
     let source = Source::from(rule, &config);
     let client = state.http.for_rule(&source.rule);

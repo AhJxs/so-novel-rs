@@ -52,7 +52,8 @@ use tokio::runtime::Runtime;
 
 use crate::config::{AppConfig, ConfigPaths, load_config};
 use crate::core::DownloadTask;
-use crate::db::{SourcesConfig, load_tasks_from_file};use crate::http::HttpClients;
+use crate::db::{SourcesConfig, load_tasks_from_file};
+use crate::http::HttpClients;
 use crate::models::Rule;
 use events::{WakeupHandle, WakeupReceiver};
 use ops::OpsCtx;

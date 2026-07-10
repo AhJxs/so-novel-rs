@@ -306,6 +306,29 @@ impl From<std::io::Error> for WebError {
     }
 }
 
+// ── Phase 3.0: 锁 / 通用 String→WebError blanket impl ────────────────────
+//
+// 让 `?` 自动把锁毒化 (`rw_read_or` 返回 `Result<_, String>`) 和其它 String 错误
+// 装箱到 `WebError::Internal`。响应 body 始终返回稳定的 `"internal_error"` 短码，
+// 动态消息只进日志（参见 `Self::Internal(&'static str)` 的契约 —— 内部
+// 文案绝不外泄；这里跟 `From<std::io::Error>` 用同样的 "warn + 静态 label" 模式）。
+//
+// 修复了 `web::handlers::book.rs:48` 旧 bug：之前 `.map_err(|_| NotFound(...))`
+// 把锁毒化静默转成 404，丢诊断信息。
+
+impl From<String> for WebError {
+    fn from(s: String) -> Self {
+        tracing::warn!("web API internal/lock error: {s}");
+        Self::Internal("internal_error")
+    }
+}
+
+impl From<&str> for WebError {
+    fn from(s: &str) -> Self {
+        Self::from(s.to_string())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
@@ -352,5 +375,41 @@ mod tests {
         let err = WebError::NotFound("任务未找到");
         let resp = err.into_response();
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    // ── Phase 3.0: blanket From<String> / From<&str> ─────────────────
+
+    #[test]
+    fn from_string_maps_to_internal_with_stable_label() {
+        // 动态消息 (e.g. 锁毒化) → Internal("internal_error") label 稳定，
+        // 敏感信息只进日志，响应 body 不外泄。
+        let err: WebError = String::from("rwlock 'web:config' poisoned at byte 42").into();
+        assert_eq!(err.classify(), WebErrorKind::Internal);
+        assert!(matches!(err, WebError::Internal("internal_error")));
+        assert_eq!(err.message(), "internal_error");
+    }
+
+    #[test]
+    fn from_str_works_same_as_string() {
+        let err: WebError = "lock poison".into();
+        assert_eq!(err.classify(), WebErrorKind::Internal);
+        assert!(matches!(err, WebError::Internal("internal_error")));
+    }
+
+    #[test]
+    fn from_string_via_question_mark_operator() {
+        // 模拟 `?` 在 Result<T, String> 上的行为 (RwLock/Mutex poison helper 返回的形态)
+        let result: Result<i32, String> = Err("poisoned lock at web:tasks".to_string());
+        let web: Result<i32, WebError> = result.map_err(WebError::from);
+        assert!(web.is_err());
+        let err = web.unwrap_err();
+        assert_eq!(err.classify(), WebErrorKind::Internal);
+    }
+
+    #[test]
+    fn from_string_response_status_is_500() {
+        let err: WebError = String::from("any internal msg").into();
+        let resp = err.into_response();
+        assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
     }
 }

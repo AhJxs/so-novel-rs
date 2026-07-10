@@ -6,20 +6,20 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::Instrument;
 
-use crate::desktop::model::search_state::TocState;
 use crate::config::AppConfig;
 use crate::crawler::{
     CancelToken, CrawlerError, DownloadOptions, Progress, download_book, download_chapters,
     resolve_book,
 };
+use crate::desktop::model::search_state::TocState;
 use crate::http::HttpClients;
 use crate::models::Source;
 use crate::models::{Book, Chapter, Rule, SearchResult};
 
-use crate::core::DownloadTask;
 use super::super::events::WakeupHandle;
 use super::super::search_state::TocEvent;
 use super::super::trace::{TraceId, sub};
+use crate::core::DownloadTask;
 use crate::utils::time::now_unix_secs;
 
 /// spawn 共享上下文：提取 `rules` / `config` / `http` / `runtime` 四个参数，

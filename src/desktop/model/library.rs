@@ -44,7 +44,8 @@ impl AppModel {
             return;
         }
 
-        let (tx, rx) = smol::channel::unbounded::<crate::desktop::model::library_state::LibraryScanEvent>();
+        let (tx, rx) =
+            smol::channel::unbounded::<crate::desktop::model::library_state::LibraryScanEvent>();
         self.library.scan_rx = Some(rx);
         self.library.scan_in_flight = true;
 

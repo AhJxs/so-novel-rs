@@ -21,9 +21,9 @@ use gpui_component::{
     v_flex,
 };
 
-use crate::desktop::model::{AppModel, SourcesFilterStatus};
 use crate::db::list_rule_files;
 use crate::desktop::components::{EmptyState, PageHeader, Pagination, compute_page_window};
+use crate::desktop::model::{AppModel, SourcesFilterStatus};
 use crate::i18n::ts;
 use crate::models::Rule;
 

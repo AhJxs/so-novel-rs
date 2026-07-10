@@ -34,8 +34,8 @@ use gpui_component::{
     v_flex,
 };
 
-use crate::desktop::model::{AppModel, LibraryEntry};
 use crate::desktop::components::{EmptyState, PageHeader, Pagination, compute_page_window};
+use crate::desktop::model::{AppModel, LibraryEntry};
 use crate::i18n::{ts, ts_fmt};
 
 use self::delegate::LibraryDelegate;

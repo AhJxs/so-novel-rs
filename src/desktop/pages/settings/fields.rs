@@ -14,8 +14,8 @@
 use gpui::{App, Entity, SharedString};
 use gpui_component::setting::{NumberFieldOptions, SettingField};
 
-use crate::desktop::model::AppModel;
 use crate::config::ExportFormat;
+use crate::desktop::model::AppModel;
 
 /// String 字段（Input）—— getter 返回 `SharedString`，setter 拿到新 `String`。
 ///

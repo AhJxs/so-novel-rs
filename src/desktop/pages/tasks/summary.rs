@@ -6,8 +6,8 @@
 
 use std::path::PathBuf;
 
-use crate::desktop::model::AppModel;
 use crate::core::DownloadTask;
+use crate::desktop::model::AppModel;
 use crate::models::{Book, FinishedReason, SearchResult};
 
 /// `DownloadTask` 的轻量 Clone 视图 —— 给 List delegate 用。

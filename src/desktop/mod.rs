@@ -45,12 +45,12 @@ impl Eq for ToggleSidebar {}
 pub mod components;
 mod drain_loop;
 mod logo;
+pub mod model;
 mod nav;
 mod notifications;
 mod pages;
 mod root;
 pub mod themes;
-pub mod model;
 pub use nav::{NavPage, register_key_bindings};
 pub use root::RootView;
 

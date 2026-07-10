@@ -12,8 +12,8 @@ use gpui_component::{
     tag::Tag,
 };
 
-use crate::desktop::model::LibraryEntry;
 use crate::desktop::components::truncate;
+use crate::desktop::model::LibraryEntry;
 use crate::i18n::ts_cached;
 use crate::utils::system::{open_path, reveal_in_folder};
 

@@ -22,9 +22,9 @@ use gpui_component::{
 };
 use tracing;
 
-use crate::desktop::model::AppModel;
 use crate::config::ExportFormat;
 use crate::config::{Language, ThemeDynMode, ThemeKind};
+use crate::desktop::model::AppModel;
 use crate::desktop::themes;
 use crate::i18n::ts;
 

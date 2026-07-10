@@ -37,10 +37,10 @@ use gpui_component::{
     v_flex,
 };
 
-use crate::desktop::model::{AppModel, TocState};
 use crate::desktop::components::{
     EmptyState, PageHeader, Pagination, compute_page_window, truncate,
 };
+use crate::desktop::model::{AppModel, TocState};
 use crate::i18n::ts;
 use crate::models::SearchResult;
 

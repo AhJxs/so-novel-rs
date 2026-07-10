@@ -14,8 +14,8 @@ use gpui_component::{
     ActiveTheme as _, Sizable, h_flex, input::NumberInput, spinner::Spinner, v_flex,
 };
 
-use crate::desktop::model::TocState;
 use crate::desktop::components::truncate;
+use crate::desktop::model::TocState;
 use crate::i18n::{ts, ts_fmt};
 use crate::models::Chapter;
 
