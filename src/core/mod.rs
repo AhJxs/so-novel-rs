@@ -15,6 +15,7 @@
 //! 当你发现同一段概念在 cli / web / desktop 三处各写了一份（或者 web / desktop
 //! 都用到而 cli 的实现又值得复用），就抽到这里作为三端共享的契约层。
 
+pub mod async_progress;
 pub mod bootstrap;
 pub mod config_helpers;
 pub mod download_task;
@@ -22,5 +23,7 @@ pub mod library;
 pub mod search;
 pub mod sources;
 pub mod update;
+
+pub use async_progress::{DrainOutcome, try_drain_all};
 
 pub use download_task::DownloadTask;

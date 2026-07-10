@@ -6,6 +6,8 @@
 
 use tokio::sync::mpsc;
 
+use crate::core::{DrainOutcome, try_drain_all};
+
 // 保留旧 re-export 以免 `desktop::model::*` 的外部 user 受影响。
 // 等 Phase 3.x 清理 desktop 时一并删。
 pub use crate::core::update::{
@@ -34,22 +36,19 @@ impl UpdateState {
     /// 排空通道；只在状态刚刚跃迁到终态时返回 [`Some(UpdateOutcome)`]，
     /// 中间状态（无事件 / 通道断开但无 result）返回 `None`。
     pub fn drain(&mut self) -> Option<UpdateOutcome> {
-        let rx = self.rx.as_mut()?;
-        match rx.try_recv() {
-            Ok(result) => {
-                self.checking = false;
-                self.latest_version.clone_from(&result.latest_version);
-                self.error.clone_from(&result.error);
-                self.rx = None;
-                Some(classify(&result))
-            }
-            Err(mpsc::error::TryRecvError::Empty) => None,
-            Err(mpsc::error::TryRecvError::Disconnected) => {
-                self.checking = false;
-                self.rx = None;
-                None
-            }
+        let mut outcome = None;
+        let result = try_drain_all(&mut self.rx, |res: UpdateCheckResult| {
+            self.checking = false;
+            self.latest_version.clone_from(&res.latest_version);
+            self.error.clone_from(&res.error);
+            outcome = Some(classify(&res));
+        });
+        // sender 已 drop（用户中断 / 异常退出）—— 按原版语义收敛 `checking`，
+        // 让 UI spinner 消失；`rx` 已被 `try_drain_all` 留为 None。
+        if matches!(result, DrainOutcome::Disconnected) {
+            self.checking = false;
         }
+        outcome
     }
 
     /// 检查完成后 `latest_version` 与当前版本不同时为 true —— Settings 页据此把

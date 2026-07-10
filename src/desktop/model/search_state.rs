@@ -7,6 +7,7 @@ use tokio::sync::mpsc;
 
 use lru::LruCache;
 
+use crate::core::{DrainOutcome, try_drain_all};
 use crate::models::{Book, Chapter, SearchResult};
 
 use super::cover::{CoverEntry, cover_entry_from_bytes};
@@ -202,43 +203,32 @@ impl SearchState {
     /// 排空通道；返回是否有事件（触发 repaint）。
     pub fn drain(&mut self) -> bool {
         let mut any = false;
-        if let Some(rx) = self.rx.as_mut() {
-            loop {
-                match rx.try_recv() {
-                    Ok(ev) => {
-                        any = true;
-                        self.received += 1;
-                        let status = match ev.result {
-                            Ok(list) => {
-                                let n = list.len();
-                                self.results.extend(list);
-                                SourceStatus::Ok(n)
-                            }
-                            Err(e) => {
-                                let line = e.message();
-                                let truncated: String = line.chars().take(60).collect();
-                                SourceStatus::Err(truncated)
-                            }
-                        };
-                        if let Some(slot) = self
-                            .source_status
-                            .iter_mut()
-                            .find(|(id, _, _)| *id == ev.source_id)
-                        {
-                            slot.2 = status;
-                        } else {
-                            self.source_status
-                                .push((ev.source_id, ev.source_name, status));
-                        }
-                    }
-                    Err(mpsc::error::TryRecvError::Empty) => break,
-                    Err(mpsc::error::TryRecvError::Disconnected) => {
-                        self.rx = None;
-                        break;
-                    }
+        let _ = try_drain_all(&mut self.rx, |ev: SourceSearchEvent| {
+            any = true;
+            self.received += 1;
+            let status = match ev.result {
+                Ok(list) => {
+                    let n = list.len();
+                    self.results.extend(list);
+                    SourceStatus::Ok(n)
                 }
+                Err(e) => {
+                    let line = e.message();
+                    let truncated: String = line.chars().take(60).collect();
+                    SourceStatus::Err(truncated)
+                }
+            };
+            if let Some(slot) = self
+                .source_status
+                .iter_mut()
+                .find(|(id, _, _)| *id == ev.source_id)
+            {
+                slot.2 = status;
+            } else {
+                self.source_status
+                    .push((ev.source_id, ev.source_name, status));
             }
-        }
+        });
         if self.received >= self.expected && self.expected > 0 {
             self.running = false;
             self.rx = None;
@@ -266,88 +256,56 @@ impl SearchState {
 
     /// 排空详情后台通道。
     fn drain_detail(&mut self) -> bool {
-        let Some(rx) = self.detail_rx.as_mut() else {
-            return false;
-        };
         let mut any = false;
-        loop {
-            match rx.try_recv() {
-                Ok(ev) => {
-                    any = true;
-                    if let DetailState::Loaded(book) = &ev.state {
-                        if let Some(cover_url) = book
-                            .cover_url
-                            .as_deref()
-                            .map(str::trim)
-                            .filter(|s| !s.is_empty())
-                        {
-                            self.pending_cover_prefetch
-                                .push((ev.source_id, cover_url.to_string()));
-                        }
-                    }
-                    self.detail_cache.insert((ev.source_id, ev.url), ev.state);
-                }
-                Err(mpsc::error::TryRecvError::Empty) => break,
-                Err(mpsc::error::TryRecvError::Disconnected) => {
-                    self.detail_rx = None;
-                    break;
+        let _ = try_drain_all(&mut self.detail_rx, |ev: DetailEvent| {
+            any = true;
+            if let DetailState::Loaded(book) = &ev.state {
+                if let Some(cover_url) = book
+                    .cover_url
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                {
+                    self.pending_cover_prefetch
+                        .push((ev.source_id, cover_url.to_string()));
                 }
             }
-        }
+            self.detail_cache.insert((ev.source_id, ev.url), ev.state);
+        });
         any
     }
 
     /// 排空封面下载完成事件通道。
     fn drain_cover(&mut self) -> bool {
-        let Some(rx) = self.cover_rx.as_mut() else {
-            return false;
-        };
         let mut any = false;
-        loop {
-            match rx.try_recv() {
-                Ok(ev) => {
-                    any = true;
-                    self.cover_in_flight.remove(&(ev.source_id, ev.url.clone()));
-                    let entry = cover_entry_from_bytes(ev.source_id, &ev.url, ev.bytes);
-                    self.cover_cache.put((ev.source_id, ev.url), entry);
-                }
-                Err(mpsc::error::TryRecvError::Empty) => break,
-                Err(mpsc::error::TryRecvError::Disconnected) => {
-                    self.cover_rx = None;
-                    self.cover_tx = None;
-                    break;
-                }
-            }
+        let outcome = try_drain_all(&mut self.cover_rx, |ev: CoverEvent| {
+            any = true;
+            self.cover_in_flight.remove(&(ev.source_id, ev.url.clone()));
+            let entry = cover_entry_from_bytes(ev.source_id, &ev.url, ev.bytes);
+            self.cover_cache.put((ev.source_id, ev.url), entry);
+        });
+        // sender 已 drop：连同 `cover_tx` 一起清，避免后续 `spawn_cover_download`
+        // 误用旧 tx；`cover_rx` 已被 `try_drain_all` 留为 None。
+        if matches!(outcome, DrainOutcome::Disconnected) {
+            self.cover_tx = None;
         }
         any
     }
 
     /// 排空 TOC 预取后台通道。
     fn drain_toc(&mut self) -> bool {
-        let Some(rx) = self.toc_rx.as_mut() else {
-            return false;
-        };
         let mut any = false;
-        loop {
-            match rx.try_recv() {
-                Ok(ev) => {
-                    any = true;
-                    // 首次加载完成时初始化章节范围
-                    if let TocState::Loaded(_, chapters) = &ev.state {
-                        if self.chapter_range_start == 0 || self.chapter_range_end == 0 {
-                            self.chapter_range_start = 1;
-                            self.chapter_range_end = chapters.len() as u32;
-                        }
-                    }
-                    self.toc_cache.insert((ev.source_id, ev.url), ev.state);
-                }
-                Err(mpsc::error::TryRecvError::Empty) => break,
-                Err(mpsc::error::TryRecvError::Disconnected) => {
-                    self.toc_rx = None;
-                    break;
+        let _ = try_drain_all(&mut self.toc_rx, |ev: TocEvent| {
+            any = true;
+            // 首次加载完成时初始化章节范围
+            if let TocState::Loaded(_, chapters) = &ev.state {
+                if self.chapter_range_start == 0 || self.chapter_range_end == 0 {
+                    self.chapter_range_start = 1;
+                    self.chapter_range_end = chapters.len() as u32;
                 }
             }
-        }
+            self.toc_cache.insert((ev.source_id, ev.url), ev.state);
+        });
         any
     }
 

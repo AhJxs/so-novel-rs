@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use tokio::sync::mpsc;
 
 use crate::core::sources as core_sources;
+use crate::core::{DrainOutcome, try_drain_all};
 use crate::crawler::health::SourceHealth;
 use crate::models::Rule;
 
@@ -48,24 +49,16 @@ impl SourcesState {
 
     /// 排空通道；返回是否产生过事件（触发 repaint）。
     pub fn drain(&mut self) -> bool {
-        let Some(rx) = self.rx.as_mut() else {
-            return false;
-        };
         let mut any = false;
-        loop {
-            match rx.try_recv() {
-                Ok(h) => {
-                    any = true;
-                    self.received += 1;
-                    self.health.insert(h.source_id, h);
-                }
-                Err(mpsc::error::TryRecvError::Empty) => break,
-                Err(mpsc::error::TryRecvError::Disconnected) => {
-                    self.rx = None;
-                    self.running = false;
-                    break;
-                }
-            }
+        let outcome = try_drain_all(&mut self.rx, |h: SourceHealth| {
+            any = true;
+            self.received += 1;
+            self.health.insert(h.source_id, h);
+        });
+        // sender 已 drop（用户中断 / 异常退出）—— 按原版语义收敛 `running`，
+        // `rx` 已被 `try_drain_all` 留为 None。
+        if matches!(outcome, DrainOutcome::Disconnected) {
+            self.running = false;
         }
         if self.expected > 0 && self.received >= self.expected {
             self.running = false;
