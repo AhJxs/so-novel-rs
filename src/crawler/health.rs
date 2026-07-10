@@ -30,7 +30,7 @@ pub struct SourceHealth {
 
 /// 单源健康判定（domain-level，UI 自行映射到主题色 / `StatusKind`）。
 ///
-/// 跟 GUI 层的 `gpui_app::components::StatusKind` 解耦——`crawler` 不应依赖 `gpui_app`。
+/// 跟 GUI 层的 `desktop::components::StatusKind` 解耦——`crawler` 不应依赖 `desktop`。
 /// `sources` page 拿 `HealthStatus` 后再做 1 行 `match` 转成 `StatusKind`。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HealthStatus {

@@ -16,7 +16,7 @@
 //! # 未来可加 (按需, 不抢跑)
 //!
 //! - `http.rs` — UA 池 (目前 `http/ua.rs` 内部, 等 ≥2 处用再抽)
-//! - `theme.rs` — 字号/间距 (目前 `gpui_app/themes.rs` 内部, 同上)
+//! - `theme.rs` — 字号/间距 (目前 `desktop/themes.rs` 内部, 同上)
 //! - `limits.rs` — 限流阈值 (目前散在 `AppConfig::with_defaults`, 是配置非魔法)
 //! - `paths.rs` — 目录名常量 (目前散在 `db/rules.rs` 等, 视 PR #11 db 重构时抽)
 

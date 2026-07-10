@@ -33,15 +33,16 @@ mod rules;
 mod sources_config;
 mod tasks;
 
+mod tasks_init;
 pub use rules::{
     META_AUTHOR, META_BOOK_NAME, META_CATEGORY, META_COVER_URL, META_INTRO, META_LAST_UPDATE_TIME,
     META_LATEST_CHAPTER, META_LATEST_CHAPTER_URL, META_STATUS, RulesError, apply_default_rule,
     init_rules_dir, list_rule_files, load_active_rules, load_rules_from_path,
 };
 pub use sources_config::SourcesConfig;
-pub use tasks::{load as load_tasks, save as save_tasks, save_with_trim};
-
 use std::path::{Path, PathBuf};
+pub use tasks::{load as load_tasks, save as save_tasks, save_with_trim};
+pub use tasks_init::load_tasks_from_file;
 
 /// 顶层 dao 错误
 ///

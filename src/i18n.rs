@@ -26,9 +26,9 @@
 //!
 //! ## 模块位置历史
 //!
-//! 早期在 `gpui_app::i18n`（UI 子模块下），但 `crate::app` 的业务层（`events::drain` /
+//! 早期在 `desktop::i18n`（UI 子模块下），但 `crate::desktop::model` 的业务层（`events::drain` /
 //! `ops::library`）也要调用 `ts()` 翻译错误信息，跨层依赖很别扭。挪到 crate root
-//! 后 `crate::i18n::ts()` 是中性 API，`app/` 和 `gpui_app/` 都可以自然使用。
+//! 后 `crate::i18n::ts()` 是中性 API，`app/` 和 `desktop/` 都可以自然使用。
 
 use std::sync::OnceLock;
 
@@ -46,10 +46,10 @@ use crate::config::Language;
 /// - `TraditionalChinese` → `"zh-HK"`（**不是** `Language::as_str()` 返回的 `"zh-TW"`）
 /// - `English` → `"en"`
 ///
-/// **位置历史**：原本在 `gpui_app::mod::locale_for`（仅 gui feature 编译）。
-/// CLI 路径（web-only / 未来 cli-only 构建）不依赖 `gpui_app`，但 CLI 也要按
+/// **位置历史**：原本在 `desktop::mod::locale_for`（仅 gui feature 编译）。
+/// CLI 路径（web-only / 未来 cli-only 构建）不依赖 `desktop`，但 CLI 也要按
 /// `config.toml` 的 language 切帮助语言 —— 必须从 cfg gate 模块搬到中性 crate
-/// root 模块 `crate::i18n`。`gpui_app` 那边改成 `use crate::i18n::locale_for`。
+/// root 模块 `crate::i18n`。`desktop` 那边改成 `use crate::i18n::locale_for`。
 pub const fn locale_for(lang: Language) -> &'static str {
     match lang {
         Language::SimplifiedChinese => "zh-CN",

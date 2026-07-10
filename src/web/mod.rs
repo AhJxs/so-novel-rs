@@ -17,8 +17,8 @@ use anyhow::{Context, Result};
 use axum_session::{SessionConfig, SessionNullPool, SessionStore};
 use serde::Serialize;
 
-use crate::app::DownloadTask;
 use crate::config::AppConfig;
+use crate::core::DownloadTask;
 use crate::db::SourcesConfig;
 use crate::http::HttpClients;
 use crate::models::Rule;
@@ -89,14 +89,14 @@ pub struct WebInitParams {
 ///   `crate::web::handlers::download::spawn_task_drain`），同时负责
 ///   "drain 到的事件 → SSE `broadcast_tx"，把"状态更新"和"事件转发"合并到一处`。
 ///
-/// `tasks_file` 只是磁盘路径，`save_tasks_to_file` 用它做原子写入。
+/// `tasks_file` 只是磁盘路径，由调用方 inline 走 `crate::db::save_with_trim` 写盘。
 pub struct WebState {
     pub config: RwLock<AppConfig>,
     pub http: Arc<HttpClients>,
     pub rules: RwLock<Vec<Rule>>,
     pub download_path: PathBuf,
     /// **单源真相**：每个任务（活跃 + 已结束）的所有状态都在这里。
-    /// 跟 `crate::app::AppModel::tasks` 同型 —— web 和 GUI 用的是同一个类型。
+    /// 跟 `crate::desktop::model::AppModel::tasks` 同型 —— web 和 GUI 用的是同一个类型。
     pub tasks: Mutex<Vec<DownloadTask>>,
     pub next_task_id: Mutex<u64>,
     /// 访问码（仅存内存，启动时为空，用户通过 Web UI 设置）。
@@ -143,36 +143,6 @@ impl WebState {
             sources_config: RwLock::new(params.sources_config),
             sources_config_path: params.sources_config_path,
             tasks_file: params.tasks_file,
-        }
-    }
-
-    /// 把当前 `tasks` vec 序列化为 `DownloadTaskRecord` vec，写到磁盘。
-    ///
-    /// 触发时机：每次某任务终结（drain 线程从 rx Disconnected 或 crawler 写 finished）。
-    /// 失败仅 warn —— tasks.json 偶尔丢一次不致命（best-effort 持久化，跟 GPUI 同语义）。
-    ///
-    /// **不**在内存 `tasks` 上反映 trim —— `save_with_trim` 只在 records vec 上做
-    /// 修剪，in-memory `DownloadTask` 维持原样（next drain 才会再次被列出）。
-    /// GPUI 走的也是这个语义（见 `AppModel::save_tasks_to_file` 的注释）。
-    pub fn save_tasks_to_file(&self) {
-        // Poisoned lock = 之前持锁的线程 panic 了：磁盘保存是 best-effort，
-        // 这里吃掉 poison 错误 + log，不要再炸一次。
-        let mut records: Vec<crate::models::DownloadTaskRecord> = match self.tasks.lock() {
-            Ok(tasks) => {
-                let r = tasks
-                    .iter()
-                    .map(super::app::download_task::DownloadTask::to_record)
-                    .collect();
-                drop(tasks);
-                r
-            }
-            Err(e) => {
-                tracing::error!("save_tasks_to_file: tasks Mutex poisoned: {e}");
-                return;
-            }
-        };
-        if let Err(e) = crate::db::save_with_trim(&self.tasks_file, &mut records) {
-            tracing::warn!("保存 tasks.json 失败: {e}");
         }
     }
 }

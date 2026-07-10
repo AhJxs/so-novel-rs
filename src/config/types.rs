@@ -187,7 +187,7 @@ impl ThemeDynMode {
 /// - [`ThemeKind::Dynamic`] → `dyn_light` / `dyn_dark` 各指定一个主题名（空串 = 用
 ///   registry 默认浅/深主题），`dyn_mode` 决定按系统 / 强制浅 / 强制深切换。
 ///
-/// 主题名来自 `src/gpui_app/themes/*.json`（每个文件含 light + dark 变体，变体名如
+/// 主题名来自 `src/desktop/themes/*.json`（每个文件含 light + dark 变体，变体名如
 /// `"Catppuccin Latte"` / `"Catppuccin Mocha"`）。设置页选浅/深主题时会按变体的
 /// `mode` 过滤，避免把深色主题选进浅色槽。
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -375,7 +375,7 @@ impl AppConfig {
     /// 校验配置合法性。启动时调一次, 失败让用户改 config.toml 重启。
     ///
     /// 当前校验:
-    /// - `font_size` ∈ [12.0, 24.0] (与 `gpui_app::themes::FONT_SIZE_MIN/MAX` 一致)
+    /// - `font_size` ∈ [12.0, 24.0] (与 `desktop::themes::FONT_SIZE_MIN/MAX` 一致)
     /// - `min_interval <= max_interval` (爬虫间隔合法性)
     /// - `retry_min_interval <= retry_max_interval` (重试间隔合法性)
     /// - `proxy_port != 0` (启用代理时端口必须非零; 实际上 u16 不会为 0 但显式校验可读)

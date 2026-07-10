@@ -5,6 +5,7 @@
 use std::path::Path;
 
 use super::write_atomically;
+use crate::core::DownloadTask;
 use crate::models::DownloadTaskRecord;
 
 /// 已完成任务的最大保留数量。
@@ -30,8 +31,20 @@ pub fn load(path: &Path) -> Vec<DownloadTaskRecord> {
 }
 
 /// 保存所有任务到 JSON 文件（原子写入）。
-pub fn save(path: &Path, tasks: &[DownloadTaskRecord]) -> anyhow::Result<()> {
-    let content = serde_json::to_string_pretty(tasks)?;
+///
+/// 接收运行期 [`DownloadTask`] 切片 → 内部转 [`DownloadTaskRecord`] → 写盘。
+/// 三端共用入口：cli / web / desktop 全部把内存里的 `Vec<DownloadTask>` 直
+/// 接传进来；record 转换是写盘前的最后一步, 不再由调用方手动 `.map(to_record)`。
+pub fn save(path: &Path, tasks: &[DownloadTask]) -> anyhow::Result<()> {
+    let records: Vec<DownloadTaskRecord> = tasks.iter().map(DownloadTask::to_record).collect();
+    save_records(path, &records)
+}
+
+/// 私有 helper: 已构造好的 [`DownloadTaskRecord`] 切片 → 文件。
+///
+/// [`save`] 和 [`save_with_trim`] 都走它; 序列化 + 原子写集中在一处。
+fn save_records(path: &Path, records: &[DownloadTaskRecord]) -> anyhow::Result<()> {
+    let content = serde_json::to_string_pretty(records)?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).ok();
     }
@@ -80,20 +93,21 @@ pub fn trim_completed(tasks: &mut Vec<DownloadTaskRecord>) -> usize {
 /// # Examples
 ///
 /// ```ignore
-/// let mut tasks = state.tasks.lock().unwrap();
-/// save_with_trim(&PathBuf::from(".tasks.json"), &mut tasks)?;
+/// let tasks = state.tasks.lock().unwrap();
+/// save_with_trim(&PathBuf::from(".tasks.json"), &tasks)?;
 /// ```
 ///
 /// # Errors
 ///
 /// - `std::io::Error` — 序列化或写文件失败
 #[tracing::instrument(name = "db::tasks::save_with_trim", skip_all, fields(path = %path.display(), count = tasks.len()))]
-pub fn save_with_trim(path: &Path, tasks: &mut Vec<DownloadTaskRecord>) -> anyhow::Result<()> {
-    let trimmed = trim_completed(tasks);
+pub fn save_with_trim(path: &Path, tasks: &[DownloadTask]) -> anyhow::Result<()> {
+    let mut records: Vec<DownloadTaskRecord> = tasks.iter().map(DownloadTask::to_record).collect();
+    let trimmed = trim_completed(&mut records);
     if trimmed > 0 {
         tracing::info!("自动清理了 {trimmed} 条旧的已完成任务");
     }
-    save(path, tasks)
+    save_records(path, &records)
 }
 
 #[cfg(test)]
@@ -175,10 +189,13 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("tasks.json");
 
-        let tasks = vec![
+        let tasks: Vec<DownloadTask> = vec![
             sample_rec(1, Some(Ok(std::path::PathBuf::from("/tmp/a.epub")))),
             sample_rec(2, None),
-        ];
+        ]
+        .into_iter()
+        .map(DownloadTask::from_record)
+        .collect();
         save(&path, &tasks).unwrap();
 
         let loaded = load(&path);
@@ -257,13 +274,52 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("tasks.json");
 
-        let mut tasks = vec![
+        let tasks: Vec<DownloadTask> = vec![
             sample_rec(1, Some(Ok(std::path::PathBuf::from("/tmp/a.epub")))),
             sample_rec(2, None),
-        ];
-        save_with_trim(&path, &mut tasks).unwrap();
+        ]
+        .into_iter()
+        .map(DownloadTask::from_record)
+        .collect();
+        save_with_trim(&path, &tasks).unwrap();
 
         let loaded = load(&path);
         assert_eq!(loaded.len(), 2);
+    }
+
+    /// 验证 [`save_with_trim`] 的统一入口（`&[DownloadTask]` → record → 文件 →
+    /// record → 还原）在混合状态（running + finished）下无损。既有 roundtrip
+    /// 测试只校验 `id` / `len`，这里补 finished payload + completed 字段的
+    /// 端到端检查 —— 这是 Phase 0.3 把 record 转换下沉到 `db::` 后的核心契约。
+    #[test]
+    fn save_with_trim_roundtrips_running_and_finished() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("tasks.json");
+
+        let running = sample_rec(1, None);
+        let finished = sample_rec(2, Some(Ok(std::path::PathBuf::from("/tmp/done.epub"))));
+        let tasks: Vec<DownloadTask> = [running, finished]
+            .into_iter()
+            .map(DownloadTask::from_record)
+            .collect();
+
+        save_with_trim(&path, &tasks).unwrap();
+
+        let loaded = load(&path);
+        assert_eq!(loaded.len(), 2);
+        // save 不重排 —— id 顺序与输入一致
+        assert_eq!(loaded[0].id, 1);
+        assert!(
+            loaded[0].finished.is_none(),
+            "running task should stay running after roundtrip"
+        );
+        assert_eq!(loaded[0].completed, 0);
+
+        assert_eq!(loaded[1].id, 2);
+        match &loaded[1].finished {
+            Some(Ok(p)) => assert_eq!(p, &std::path::PathBuf::from("/tmp/done.epub")),
+            other => panic!("finished task payload lost, got: {other:?}"),
+        }
+        assert_eq!(loaded[1].completed, 100);
     }
 }

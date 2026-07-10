@@ -42,10 +42,10 @@ pub fn run(host: String, port: u16) -> anyhow::Result<()> {
     let rules = load_active_rules(&paths.rules_dir, &sources_config).unwrap_or_default();
     let http = HttpClients::new(&config).context("初始化 HTTP 客户端失败")?;
 
-    // 加载历史任务 → `Vec<DownloadTask>`。复用 `app::load_tasks_from_file`：
+    // 加载历史任务 → `Vec<DownloadTask>`。复用 `db::load_tasks_from_file`：
     // 它已经把 `finished.is_none()` 的历史记录标成 `AppRestarted` 并落盘（上次
     // 退出时还在跑的任务），跟 GUI 启动走完全同一条路径。
-    let (tasks, next_task_id) = crate::app::load_tasks_from_file(&paths.tasks_file);
+    let (tasks, next_task_id) = crate::db::load_tasks_from_file(&paths.tasks_file);
 
     let params = crate::web::WebInitParams {
         sources_config,

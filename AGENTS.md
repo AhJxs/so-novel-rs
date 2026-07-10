@@ -50,3 +50,17 @@
 - **简洁优先**：每次变更尽量简单，只影响最小代码。
 - **绝不偷懒**：找到根因，不用临时修复，坚持资深开发者标准。
 - **最小影响**：只修改必要部分，避免引入新 bug。
+
+## Agent skills
+
+### Issue tracker
+
+Issues live on GitHub. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Five canonical roles match their label names exactly. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context — one `CONTEXT.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.

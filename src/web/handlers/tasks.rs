@@ -27,7 +27,7 @@ use axum::http::StatusCode;
 use serde::Serialize;
 use tokio::sync::{broadcast, mpsc};
 
-use crate::app::DownloadTask;
+use crate::core::DownloadTask;
 use crate::crawler::Progress;
 use crate::models::FinishedReason;
 use crate::utils::time::now_unix_secs;
@@ -207,7 +207,9 @@ pub async fn task_delete(
         return Err((StatusCode::NOT_FOUND, "任务未找到".to_string()));
     }
     drop(tasks);
-    state.save_tasks_to_file();
+    if let Ok(tasks) = mutex_or("task_delete:save", &state.tasks) {
+        let _ = crate::db::save_with_trim(&state.tasks_file, &tasks);
+    }
     Ok("已删除任务")
 }
 
@@ -220,7 +222,7 @@ pub async fn task_delete(
 ///
 /// 退出条件: `crawler_rx.recv()` 返回 `None` (crawler 退出发送端被 drop)。
 /// 退出前若 `finished.is_none()` 标 `AppRestarted` (对齐 GPUI `DownloadTask::drain`
-/// 的 `TryRecvError::Disconnected` 分支), 并触发一次 `save_tasks_to_file` 兜底
+/// 的 `TryRecvError::Disconnected` 分支), 并触发一次 `db::save_with_trim` 兜底
 /// 落盘 —— 不依赖中心 tick, drain 退出后所有变更都已经被保存。
 pub(super) fn spawn_task_drain(
     state: Arc<WebState>,
@@ -273,7 +275,9 @@ pub(super) fn spawn_task_drain(
             }
         };
         if needs_save {
-            state.save_tasks_to_file();
+            if let Ok(tasks) = mutex_or("spawn_task_drain:save", &state.tasks) {
+                let _ = crate::db::save_with_trim(&state.tasks_file, &tasks);
+            }
         }
     });
 }

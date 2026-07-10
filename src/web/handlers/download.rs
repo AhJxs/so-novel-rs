@@ -26,7 +26,7 @@ use futures::stream::Stream;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{broadcast, mpsc};
 
-use crate::app::DownloadTask;
+use crate::core::DownloadTask;
 use crate::crawler::{self, CancelToken, DownloadOptions, Progress};
 use crate::models::Source;
 use crate::models::{Chapter, SearchResult};
@@ -212,7 +212,9 @@ pub async fn download(
     })() {
         return lock_failure_stream(code.as_u16(), &msg);
     }
-    state.save_tasks_to_file();
+    if let Ok(tasks) = mutex_or("download:save_after_push", &state.tasks) {
+        let _ = crate::db::save_with_trim(&state.tasks_file, &tasks);
+    }
 
     // 3. spawn per-task drain
     spawn_task_drain(Arc::clone(&state), task_id, crawler_rx, sse_tx.clone());
@@ -244,7 +246,9 @@ pub async fn download(
                 let _ = sse_tx_for_crawler.send(Progress::Failed {
                     reason: format!("{e:#}"),
                 });
-                state_for_crawler.save_tasks_to_file();
+                if let Ok(tasks) = state_for_crawler.tasks.lock() {
+                    let _ = crate::db::save_with_trim(&state_for_crawler.tasks_file, &tasks);
+                }
                 return;
             }
         };
@@ -276,7 +280,9 @@ pub async fn download(
         // return (如 resolve 失败) drain 看不到任何终结事件, drain 还是会标
         // AppRestarted + save, 但显式 save 不亏。
         let _ = result;
-        state_for_crawler.save_tasks_to_file();
+        if let Ok(tasks) = state_for_crawler.tasks.lock() {
+            let _ = crate::db::save_with_trim(&state_for_crawler.tasks_file, &tasks);
+        }
     });
 
     // 5. SSE 流 —— subscribe broadcast

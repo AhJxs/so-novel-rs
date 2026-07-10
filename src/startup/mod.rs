@@ -1,12 +1,12 @@
 //! 进程启动层：从 argv + `SO_NOVEL_WEB` env 判定走 GUI / Web / CLI 模式，
-//! 各自转交给 `gpui_app::run` / `web::run` / `cli::run`。
+//! 各自转交给 `desktop::run` / `web::run` / `cli::run`。
 //!
 //! 主要拆 main.rs 的几个责任点：
 //! - `LaunchMode` + `detect` —— 把原 `main.rs` 里 `is_web` / `is_cli` 两个
 //!   boolean + 非显式 precedence 浓缩成一个 enum + 一个 pure-ish 函数。
 //! - `attach_parent_console` —— Windows-only，把 GUI subsystem exe 的
 //!   stdio 挂到父进程控制台（cmd / PowerShell），失败回退 `AllocConsole`。
-//! - `run_gui` —— cfg gate 内联在 `gpui_app::run` 调用点；缺 feature
+//! - `run_gui` —— cfg gate 内联在 `desktop::run` 调用点；缺 feature
 //!   时返回与原 main.rs 等价的 bail 信息。
 //! - `dispatch` —— 唯一调度入口：CLI 路径**先 `attach_console`** 再 `cli::run()`
 //!   （release GUI subsystem exe 默认 stdio 关到 NUL，不 attach 用户看不到任何
@@ -95,11 +95,11 @@ pub fn attach_parent_console() {
 #[cfg(not(target_os = "windows"))]
 pub fn attach_parent_console() {}
 
-/// GUI 模式入口。`feature = "gui"` 启用时转交给 `gpui_app::run`；
+/// GUI 模式入口。`feature = "gui"` 启用时转交给 `desktop::run`；
 /// 否则返回与原 main.rs 等价的 bail 信息。
 #[cfg(feature = "gui")]
 pub fn run_gui() -> Result<()> {
-    crate::gpui_app::run()
+    crate::desktop::run()
 }
 
 /// 当前构建不含 GUI 功能（用户没加 `--features gui`），无法启动桌面客户端。

@@ -45,7 +45,7 @@ pub fn default_template_doc() -> DocumentMut {
 #   theme-kind = "dynamic"（默认）或 "static"
 #     - dynamic：theme-light / theme-dark 各选一个主题，按 theme-dyn-mode（system/light/dark）切换
 #     - static  ：固定用 theme-name 这一个主题，不随明暗变化
-#   主题名与 `src/gpui_app/themes/*.json` 里变体的 name 一致（如 "Catppuccin Latte"），
+#   主题名与 `src/desktop/themes/*.json` 里变体的 name 一致（如 "Catppuccin Latte"），
 #   留空 = 用 gpui-component 内置默认主题。
 theme-kind = "dynamic"
 theme-name = ""

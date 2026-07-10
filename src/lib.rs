@@ -1,9 +1,11 @@
 //! so-novel-rs — Rust 桌面客户端（GPUI + gpui-component，egui 已完全移除）。
 //!
 //! 模块划分：
-//! - `gpui_app` — 新 GPUI GUI 入口（Stage 1+）。
-//! - `app` / `db` / `crawler` / `config` / `models` / `parser` / `export` /
-//!   `http` / `js` / `utils` / `cli` — 业务 + 数据层（GUI 解耦）。
+//! - `desktop` — 新 GPUI GUI 入口（Stage 1+）,内含 `desktop::model`（业务层，
+//!   原 `app/` 模块，2026-07-10 Phase 2 重构折叠到此） + GPUI 渲染 +
+//!   主题/导航/快捷键/通知/drain loop。
+//! - `db` / `crawler` / `config` / `models` / `parser` / `export` /
+//!   `http` / `js` / `utils` / `cli` / `core` — 业务 + 数据层（GUI 解耦）。
 //!
 //! ## 工程规约
 //!
@@ -55,16 +57,16 @@
 // 实例各管各的 key 表，但**全局 locale 共享**（同一 `CURRENT_LOCALE`）。
 rust_i18n::i18n!("locales");
 
-pub mod app;
 pub mod cli;
 pub mod config;
 pub mod constant;
+pub mod core;
 pub mod crawler;
 pub mod db;
+#[cfg(feature = "gui")]
+pub mod desktop;
 pub mod error;
 pub mod export;
-#[cfg(feature = "gui")]
-pub mod gpui_app;
 pub mod http;
 pub mod i18n;
 pub mod js;
