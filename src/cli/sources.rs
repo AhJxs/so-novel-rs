@@ -6,14 +6,15 @@
 use anyhow::{Context, Result};
 
 use crate::config::ConfigPaths;
-use crate::db::{SourcesConfig, load_active_rules};
+use crate::core::sources as core_sources;
+use crate::db::SourcesConfig;
 use crate::models::Rule;
 
 /// 列出当前激活书源（人类可读 / JSON 两种格式）。
 pub fn run_list(paths: &ConfigPaths, json: bool) -> Result<()> {
     let sources_config = SourcesConfig::load(&paths.sources_config);
     let rules: Vec<Rule> =
-        load_active_rules(&paths.rules_dir, &sources_config).context("加载规则失败")?;
+        core_sources::load_active(&paths.rules_dir, &sources_config).context("加载规则失败")?;
 
     if json {
         // 机器可读：Rule 已 derive(Serialize)。
@@ -59,17 +60,16 @@ pub fn run_list(paths: &ConfigPaths, json: bool) -> Result<()> {
 pub fn run_set_disabled(paths: &ConfigPaths, id: i32, disable: bool) -> Result<()> {
     let mut sources_config = SourcesConfig::load(&paths.sources_config);
     let rules: Vec<Rule> =
-        load_active_rules(&paths.rules_dir, &sources_config).context("加载规则失败")?;
+        core_sources::load_active(&paths.rules_dir, &sources_config).context("加载规则失败")?;
 
     // 用 ID 找 URL（ID 是 sources_config.active_file 文件内的局部编号，不跨文件）。
-    let rule = rules
-        .iter()
-        .find(|r| r.id == id)
+    let rule = core_sources::find_rule_by_id(&rules, id)
         .with_context(|| format!("找不到 ID={id} 的书源"))?;
     let url = rule.url.clone();
     let name = &rule.name;
 
-    let key = url.trim().to_lowercase();
+    // URL 键归一走 core::sources::disabled_url_key —— 与 SourcesConfig::toggle_disabled 同源
+    let key = core_sources::disabled_url_key(&url);
     let already = sources_config.disabled_urls.contains(&key);
     let state = if disable { "已禁用" } else { "已启用" };
 
@@ -132,7 +132,7 @@ mod tests {
 
     fn rule_count(paths: &ConfigPaths, disabled: bool) -> usize {
         let sources_config = SourcesConfig::load(&paths.sources_config);
-        let rules = load_active_rules(&paths.rules_dir, &sources_config).unwrap();
+        let rules = core_sources::load_active(&paths.rules_dir, &sources_config).unwrap();
         rules.iter().filter(|r| r.disabled == disabled).count()
     }
 

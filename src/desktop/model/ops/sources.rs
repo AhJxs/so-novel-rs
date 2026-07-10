@@ -3,6 +3,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
+use crate::core::sources as core_sources;
 use crate::db::SourcesConfig;
 use crate::error::AppError;
 use crate::error::AppResult;
@@ -18,11 +19,10 @@ pub fn toggle_source_disabled(
     source_url: &str,
 ) {
     let now_disabled = sources_config.toggle_disabled(source_url);
-    // 更新内存中的规则状态
-    let url_key = source_url.trim().to_lowercase();
+    // 更新内存中的规则状态（URL 键规范化集中到 core::sources）
     if let Some(r) = rules
         .iter_mut()
-        .find(|r| r.url.trim().to_lowercase() == url_key)
+        .find(|r| core_sources::rule_key(r) == core_sources::disabled_url_key(source_url))
     {
         r.disabled = now_disabled;
     }
@@ -47,15 +47,10 @@ pub fn add_sources_from_file(
         .ok_or_else(|| AppError::invalid("无法获取文件名"))?
         .to_string();
 
-    // 验证文件内容是否有效
+    // 验证文件内容是否有效（解析链统一在 core::sources::parse_rules_bytes）
     let bytes = std::fs::read(source_path).map_err(|e| AppError::io_msg(&e, "读取文件失败"))?;
-    let text = String::from_utf8_lossy(&bytes);
-
-    let _: Vec<Rule> = serde_json::from_str::<Vec<Rule>>(&text)
-        .or_else(|_| serde_json::from_str::<Rule>(&text).map(|r| vec![r]))
-        .or_else(|_| json5::from_str::<Vec<Rule>>(&text))
-        .or_else(|_| json5::from_str::<Rule>(&text).map(|r| vec![r]))
-        .map_err(|e| AppError::internal(format!("解析失败: {e}")))?;
+    let _: Vec<Rule> = core_sources::parse_rules_bytes(&bytes, source_path)
+        .map_err(|e| AppError::internal(format!("{e:#}")))?;
 
     // 复制文件到 rules 目录（重名则覆盖）
     let dest = rules_dir.join(&filename);
@@ -66,7 +61,7 @@ pub fn add_sources_from_file(
     // 如果导入的是当前活跃文件，重新加载规则
     let mut reloaded_active = false;
     if filename == sources_config.active_file {
-        match crate::db::load_active_rules(rules_dir, sources_config) {
+        match core_sources::load_active(rules_dir, sources_config) {
             Ok(rs) => {
                 *rules = rs;
                 *rule_load_error = None;
@@ -102,17 +97,18 @@ pub fn delete_source(
     sources_state: &mut SourcesState,
     source_url: &str,
 ) -> AppResult<bool> {
-    let url_key = source_url.trim().to_lowercase();
+    // URL 键规范化集中到 core::sources
+    let url_key = core_sources::disabled_url_key(source_url);
 
     // 在 retain 之前捕获要删除的规则 ID（retain 后就找不到了）
     let doomed_id = rules
         .iter()
-        .find(|r| r.url.trim().to_lowercase() == url_key)
+        .find(|r| core_sources::rule_key(r) == url_key)
         .map(|r| r.id);
 
     // 从内存中移除
     let before = rules.len();
-    rules.retain(|r| r.url.trim().to_lowercase() != url_key);
+    rules.retain(|r| core_sources::rule_key(r) != url_key);
     let deleted = rules.len() < before;
 
     if deleted {
@@ -151,7 +147,7 @@ pub fn switch_active_file(
 
     sources_config.active_file = filename.to_string();
 
-    match crate::db::load_active_rules(rules_dir, sources_config) {
+    match core_sources::load_active(rules_dir, sources_config) {
         Ok(rs) => {
             *rules = rs;
             *rule_load_error = None;

@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 use tokio::sync::mpsc;
 
+use crate::core::sources as core_sources;
 use crate::crawler::health::SourceHealth;
 use crate::models::Rule;
 
@@ -92,7 +93,7 @@ impl SourcesState {
                 if kw.is_empty() {
                     return true;
                 }
-                r.name.to_lowercase().contains(&kw) || r.url.to_lowercase().contains(&kw)
+                r.name.to_lowercase().contains(&kw) || core_sources::rule_key(r).contains(&kw)
             })
             .cloned()
             .collect();

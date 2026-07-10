@@ -10,6 +10,7 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
+use crate::core::sources as core_sources;
 use crate::models::Rule;
 use crate::utils::lang::detect_system_lang;
 
@@ -171,8 +172,8 @@ fn parse_one_file(path: &Path) -> Result<Vec<Rule>, RulesError> {
 /// `load_rules_from_path` 已经做过了。
 fn apply_disabled_urls(rules: &mut [Rule], disabled_urls: &HashSet<String>) {
     for rule in rules.iter_mut() {
-        let url_key = rule.url.trim().to_lowercase();
-        if disabled_urls.contains(&url_key) {
+        // 键归一走 core::sources::rule_key —— 与 SourcesConfig::toggle_disabled 同源
+        if disabled_urls.contains(&core_sources::rule_key(rule)) {
             rule.disabled = true;
         }
     }

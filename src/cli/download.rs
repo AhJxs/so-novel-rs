@@ -13,7 +13,7 @@ use std::io::{IsTerminal, stderr};
 use anyhow::{Context, Result};
 
 use crate::config::{AppConfig, ConfigPaths};
-use crate::core::search as core_search;
+use crate::core::{search as core_search, sources as core_sources};
 use crate::crawler::{self, CancelToken, CrawlerError, Progress, download_chapters, resolve_book};
 use crate::models::{Chapter, Source};
 use crate::utils::system::open_path;
@@ -51,23 +51,18 @@ pub fn run_download(
             .next()
             .with_context(|| format!("找不到 ID={id} 的书源"))?
     } else {
-        // 按 URL 自动匹配：找出 URL 所属网站对应的书源
-        // 遍历全量 rules（不限 is_search_enabled —— 下载场景无视 search_disabled），
-        // 用户给定的 URL 命中哪个 origin 就用哪个书源。
-        let url_matched = url::Url::parse(&url).ok().and_then(|parsed| {
-            let origin = parsed.origin();
-            rules
-                .iter()
-                .find(|r| {
-                    url::Url::parse(&r.url)
-                        .ok()
-                        .is_some_and(|u| u.origin() == origin)
-                })
-                .cloned()
-                .map(|r| Source::from(r, &cfg))
-        });
-        match url_matched {
-            Some(s) => s,
+        // 按 URL origin 自动匹配：核心 URL→Source 匹配逻辑收敛到
+        // core::sources::match_source_by_url（与 web/桌面未来复用同款）。
+        // 这里临时构造 `Vec<Source>`（N 个 Rule 的 clone + EffectiveCrawl derive）——
+        // CLI 启动一次，N 通常 ≤ 20，开销可忽略；好处是消除了 inline origin
+        // 解析 + 健壮性逻辑（畸形 rule URL 静默跳过）。
+        let sources: Vec<Source> = rules
+            .iter()
+            .cloned()
+            .map(|r| Source::from(r, &cfg))
+            .collect();
+        match core_sources::match_source_by_url(&sources, &url) {
+            Some(s) => s.clone(),
             None => Source::from(rules.into_iter().next().context("没有可用的书源")?, &cfg),
         }
     };

@@ -18,5 +18,6 @@
 pub mod config_helpers;
 pub mod download_task;
 pub mod search;
+pub mod sources;
 
 pub use download_task::DownloadTask;

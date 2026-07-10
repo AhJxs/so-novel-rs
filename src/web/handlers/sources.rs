@@ -12,6 +12,7 @@ use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
 
+use crate::core::sources as core_sources;
 use crate::utils::lock::{rw_read_or, rw_write_or};
 use crate::web::SharedState;
 
@@ -61,9 +62,7 @@ pub async fn source_toggle(
     let url = {
         let rules = rw_read_or("source_toggle:read_url", &state.rules)
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
-        rules
-            .iter()
-            .find(|r| r.id == id)
+        core_sources::find_rule_by_id(&rules, id)
             .map(|r| r.url.clone())
             .ok_or_else(|| (StatusCode::NOT_FOUND, "书源未找到".to_string()))?
     };
@@ -83,17 +82,19 @@ pub async fn source_toggle(
     {
         let mut rules = rw_write_or("source_toggle:write_rules", &state.rules)
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
-        if let Some(r) = rules.iter_mut().find(|r| r.id == id) {
-            r.disabled = now_disabled;
+        // 借用 disjoint: find(&) 拿不可变借用只在条件判断作用域内；
+        // 立刻 drop，再 iter_mut 拿可变借用更新 disabled。
+        if core_sources::find_rule_by_id(&rules, id).is_some() {
+            if let Some(r) = rules.iter_mut().find(|r| r.id == id) {
+                r.disabled = now_disabled;
+            }
         }
     }
 
     // 4. 返回更新后的信息。
     let rules = rw_read_or("source_toggle:read_back", &state.rules)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
-    let r = rules
-        .iter()
-        .find(|r| r.id == id)
+    let r = core_sources::find_rule_by_id(&rules, id)
         .ok_or_else(|| (StatusCode::NOT_FOUND, "书源未找到".to_string()))?;
     let info = SourceInfo {
         id: r.id,
@@ -130,7 +131,7 @@ pub async fn source_test(
     let rule = {
         let rules = rw_read_or("source_test", &state.rules)
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
-        match rules.iter().find(|r| r.id == id).cloned() {
+        match core_sources::find_rule_by_id_cloned(&rules, id) {
             Some(r) => r,
             None => {
                 return Ok(Json(SourceTestResult {

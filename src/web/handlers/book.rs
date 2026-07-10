@@ -5,6 +5,7 @@ use axum::response::Json;
 use serde::Deserialize;
 
 use crate::config::AppConfig;
+use crate::core::sources as core_sources;
 use crate::crawler::{self, CancelToken};
 use crate::models::Source;
 use crate::models::{Book, Rule};
@@ -36,10 +37,7 @@ fn extract_config_and_rule(
     let cfg = rw_read_or("book:cfg", &state.config)?;
     let rule = {
         let rules = rw_read_or("book:rules", &state.rules)?;
-        rules
-            .iter()
-            .find(|r| r.id == source_id)
-            .cloned()
+        core_sources::find_rule_by_id_cloned(&rules, source_id)
             .ok_or(WebError::NotFound("书源未找到"))?
     };
     Ok((cfg.clone(), rule))
