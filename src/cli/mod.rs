@@ -27,10 +27,33 @@ mod sources;
 
 pub use args::{Cli, Cmd, SourcesAction};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::Parser;
 
 use crate::core::bootstrap::cli_load_paths_and_config;
+
+/// CLI 共享 tokio runtime 构造器 —— search / download 子命令都用同一份配置
+/// (`new_multi_thread` + `enable_all` + 线程名 `so-novel-cli`)。
+///
+/// Phase 3.9 从 `cli::search::run_search` / `cli::download::run_download` 各自
+/// 字面量提取。`?` 走 `anyhow::Context` 跟原行为完全一致。
+pub(super) fn build_cli_runtime() -> Result<tokio::runtime::Runtime> {
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .thread_name("so-novel-cli")
+        .build()
+        .context("build tokio runtime")
+}
+
+/// CLI 单行原地进度模板 —— search / download 各自的 `print_in_place` 都只做
+/// (truncate → 拼 `《X》` 后缀 → 调底层 `print_in_place_line`) 三步, 差异只在
+/// label 文案 + 输入文本 + 截断长度。
+///
+/// Phase 3.9 把这三步合并到这里; 调用方只剩一行:
+/// `print_progress_line("🔍 搜索中…", done, total, &truncated_keyword)`。
+pub(super) fn print_progress_line(label: &str, done: u32, total: usize, suffix: &str) {
+    crate::utils::tty::print_in_place_line(label, u64::from(done), total, suffix);
+}
 
 use self::args::{PKG_NAME, VERSION_STRING, build_localized_command, subcommand_name};
 

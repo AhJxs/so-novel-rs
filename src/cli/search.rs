@@ -15,6 +15,9 @@ use crate::crawler;
 use crate::crawler::search::SourceSearchOutcome;
 use crate::models::SearchResult;
 
+use super::build_cli_runtime;
+use super::print_progress_line;
+
 #[allow(clippy::needless_pass_by_value)]
 pub fn run_search(
     cfg: &AppConfig,
@@ -36,11 +39,7 @@ pub fn run_search(
     let cf_bypass = config_helpers::cf_bypass(cfg);
     let limit = core_search::effective_limit(limit, cfg);
 
-    let rt = tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .thread_name("so-novel-cli")
-        .build()
-        .context("build tokio runtime")?;
+    let rt = build_cli_runtime()?;
 
     // CLI 临时构造共享 HTTP client 集合 —— 与 GUI AppModel::new 一致路径：
     // 工厂函数被 HttpClients 取代后，CLI 不能再直接调 build_async_client。
@@ -174,9 +173,9 @@ fn print_failed_sources(failed: &[(i32, String, String)], quiet: bool) {
 /// TTY 模式下原地单行搜索进度。
 fn print_in_place(done: usize, total: usize, keyword: &str) {
     let kw_short = crate::utils::formatting::truncate(keyword, 16 + 1);
-    crate::utils::tty::print_in_place_line(
+    print_progress_line(
         "🔍 搜索中…",
-        done as u64,
+        done as u32,
         total,
         &format!("关键词:《{kw_short}》"),
     );

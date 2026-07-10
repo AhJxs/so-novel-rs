@@ -19,6 +19,9 @@ use crate::crawler::{self, CancelToken, CrawlerError, Progress, download_chapter
 use crate::models::{Chapter, Source};
 use crate::utils::system::open_path;
 
+use super::build_cli_runtime;
+use super::print_progress_line;
+
 /// 单行进度模板里最多保留多少字符的章节标题（防止刷屏）。
 const TITLE_DISPLAY_MAX: usize = 24;
 
@@ -84,11 +87,7 @@ pub fn run_download(
     let cfg_for_task = cfg;
     let url_for_task = url;
     let source_for_task = chosen;
-    let rt = tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .thread_name("so-novel-cli")
-        .build()
-        .context("build tokio runtime")?;
+    let rt = build_cli_runtime()?;
 
     // CLI 临时构造共享 HTTP client 集合（与 search 子命令同款），由
     // download_book 内部按 source.rule.ignore_ssl 选 safe/unsafe_ssl 通道。
@@ -288,10 +287,5 @@ async fn run_range_download(
 /// TTY 模式下的原地单行下载进度。
 fn print_in_place(done: u32, total: usize, latest_title: &str) {
     let title_short = crate::utils::formatting::truncate(latest_title, TITLE_DISPLAY_MAX + 1);
-    crate::utils::tty::print_in_place_line(
-        "⏳ 已完成",
-        done as u64,
-        total,
-        &format!("最新:《{title_short}》"),
-    );
+    print_progress_line("⏳ 已完成", done, total, &format!("最新:《{title_short}》"));
 }
