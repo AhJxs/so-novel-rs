@@ -72,7 +72,8 @@
       "epub": "EPUB",
       "txt": "TXT",
       "pdf": "PDF",
-      "html": "HTML"
+      "html": "HTML",
+      "md": "MD"
     },
     "download": "下载",
     "delete": "删除",

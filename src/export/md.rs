@@ -264,4 +264,49 @@ mod tests {
             "expected EmptyChaptersDir, got {err:?}"
         );
     }
+
+    #[test]
+    fn skips_zero_prefixed_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let chapters = dir.path().join("chapters");
+        let out = dir.path().join("out");
+        std::fs::create_dir_all(&chapters).unwrap();
+        std::fs::create_dir_all(&out).unwrap();
+        write_chapter_files(&chapters, &sample_chapters(), ExportFormat::Markdown).unwrap();
+        // 加一个伪封面 / 索引
+        std::fs::write(chapters.join("0_目录.md"), "应该被忽略").unwrap();
+
+        let p = MdExporter.merge(&sample_book(), &chapters, &out).unwrap();
+        let s = std::fs::read_to_string(&p).unwrap();
+        assert!(!s.contains("应该被忽略"));
+        assert!(s.contains("正文一"));
+    }
+
+    #[test]
+    fn merge_dedup_output_filename_on_collision() {
+        // 同一本书二次导出到同 out_dir：第一次得到 `<book>(<author>).md`，
+        // 第二次因 `unique_path` 加 ` (1)` 后缀，不应覆盖前一次。
+        let dir = tempfile::tempdir().unwrap();
+        let chapters = dir.path().join("chapters");
+        let out = dir.path().join("out");
+        std::fs::create_dir_all(&chapters).unwrap();
+        std::fs::create_dir_all(&out).unwrap();
+        write_chapter_files(&chapters, &sample_chapters(), ExportFormat::Markdown).unwrap();
+
+        let book = sample_book();
+        let p1 = MdExporter.merge(&book, &chapters, &out).unwrap();
+        let p2 = MdExporter.merge(&book, &chapters, &out).unwrap();
+
+        assert!(p1.exists());
+        assert!(p2.exists());
+        assert_ne!(p1, p2, "second merge should pick a different filename");
+        assert!(p1.file_name().unwrap().to_str().unwrap().ends_with(").md"));
+        assert!(
+            p2.file_name()
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .contains(" (1).md")
+        );
+    }
 }
