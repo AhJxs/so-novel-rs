@@ -7,6 +7,7 @@
 pub mod epub;
 pub mod exporter;
 pub mod html;
+pub mod md;
 pub mod pdf;
 pub mod render;
 pub mod txt;

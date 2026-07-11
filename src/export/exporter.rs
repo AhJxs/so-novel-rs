@@ -79,8 +79,7 @@ pub fn exporter_for(format: ExportFormat, txt_encoding: &str) -> Box<dyn Exporte
         ExportFormat::Html => Box::new(super::html::HtmlExporter),
         ExportFormat::Epub => Box::new(super::epub::EpubExporter),
         ExportFormat::Pdf => Box::new(super::pdf::PdfExporter),
-        // TODO(Task 4): 替换为 `super::md::MdExporter`。
-        ExportFormat::Markdown => Box::new(super::html::HtmlExporter),
+        ExportFormat::Markdown => Box::new(super::md::MdExporter),
     }
 }
 
