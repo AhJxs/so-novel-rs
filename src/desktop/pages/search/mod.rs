@@ -28,9 +28,11 @@ use gpui::{
     SharedString, Styled, Window, div, prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
-    ActiveTheme as _, IconName, WindowExt,
+    ActiveTheme as _, IconName, Sizable, WindowExt,
+    button::{Button, ButtonVariants as _},
     dialog::{Dialog, DialogButtonProps},
-    input::{InputEvent, InputState, NumberInputEvent, StepAction},
+    h_flex,
+    input::{Input, InputEvent, InputState, NumberInputEvent, StepAction},
     list::{List, ListState},
     notification::{Notification, NotificationType},
     select::{SearchableVec, SelectDelegate, SelectEvent, SelectState},
@@ -41,8 +43,9 @@ use crate::desktop::components::{
     EmptyState, PageHeader, Pagination, compute_page_window, truncate,
 };
 use crate::desktop::model::{AppModel, TocState};
-use crate::i18n::ts;
+use crate::i18n::{ts, ts_fmt};
 use crate::models::SearchResult;
+use crate::models::Source;
 
 use self::delegate::SearchDelegate;
 use range_dialog::clamp_range_value;
@@ -102,6 +105,11 @@ pub struct SearchPage {
     /// 是否已为当前 target `初始化过输入框（set_value` 1 / N）。
     /// 防 TOC 每帧重渲时反复 `set_value` 覆盖用户输入。
     range_initialized: bool,
+
+    /// URL 输入 Dialog 的输入框 —— PageHeader「下载链接」按钮弹 Dialog 时承载 URL 输入。
+    /// 同 `keyword` / range_start_input 同款 owner 持有（Entity 在 owner 里缓存，
+    /// render 闭包只复用），避免 InputState 失活。placeholder 在 `new()` 一次性设好。
+    url_input: Entity<InputState>,
 }
 
 impl SearchPage {
@@ -159,6 +167,13 @@ impl SearchPage {
             cx.new(|cx| InputState::new(window, cx).placeholder("1".to_string()));
         let range_end_input = cx.new(|cx| InputState::new(window, cx).placeholder("1".to_string()));
 
+        // URL 输入 Dialog 的 InputState —— PageHeader「下载链接」按钮唤起。
+        // placeholder 设好后不变（locale 切换走重启进程路径）。
+        let url_input = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder(ts("Search.url_download.placeholder").to_string())
+        });
+
         // Change 订阅：只在值不同时 set_value —— 无条件写回触发 Change→set_value→
         // Change 死循环，几轮把 Windows 句柄配额耗尽崩溃（0x80070718）。set_value 写回
         // 的值已是规整值，二次 Change want==cur 直接跳过，循环终止。
@@ -209,7 +224,7 @@ impl SearchPage {
 
         // Step 订阅（+/-）。
         cx.subscribe_in(
-            &range_end_input,
+            &range_start_input,
             window,
             |this, _state, ev: &NumberInputEvent, window, cx| {
                 let NumberInputEvent::Step(action) = ev;
@@ -261,6 +276,7 @@ impl SearchPage {
             range_end_input,
             range_target: None,
             range_initialized: false,
+            url_input,
         }
     }
 
@@ -358,6 +374,141 @@ impl SearchPage {
         self.source_state.update(cx, |s, cx| {
             s.set_items(items_sv, window, cx);
             s.set_selected_index(sel, window, cx);
+        });
+    }
+
+    /// PageHeader「下载链接」按钮回调：弹 URL 输入 Dialog（自动粘贴剪贴板）→
+    /// 匹配书源 → 复用 `open_range_dialog` 走选章下载流程。
+    ///
+    /// 与 `open_range_dialog` 的关系：URL 输入 + 匹配后，构造一个最小 `SearchResult`
+    /// （book_name 空 / 元信息全 None —— range_dialog 不依赖这些，TOC 解析时会从
+    /// 详情页拿完整数据）→ 走 `open_range_dialog` 同样的 `spawn_resolve_toc` +
+    /// `range_dialog::content` 反应式渲染路径。零结构改动。
+    fn open_url_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // 自动粘贴：Dialog 打开时把剪贴板里的 URL 填进去（http(s) 才填）。
+        // `read_from_clipboard` 返回 `Option<ClipboardItem>`（gpui 0.2.2），
+        // `.text()` 把所有 String entry 拼起来返回 Option<String>。
+        if let Some(s) = cx.read_from_clipboard().and_then(|item| item.text()) {
+            let trimmed = s.trim();
+            if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+                self.url_input.update(cx, |state, cx| {
+                    state.set_value(trimmed.to_string(), window, cx);
+                });
+            }
+        }
+
+        let page = cx.entity();
+        window.open_dialog(cx, move |dialog: Dialog, _window, cx| {
+            // builder 是 Fn（每帧重调）→ 每帧 clone page 进当帧闭包。
+            let page = page.clone();
+            // 渲染 body：TextInput + 「粘贴」兜底按钮 + 自动粘贴提示行。
+            let url_input = page.read(cx).url_input.clone();
+            let body = v_flex()
+                .gap_2()
+                .child(Input::new(&url_input).cleanable(true))
+                .child(
+                    h_flex()
+                        .gap_2()
+                        .items_center()
+                        .child(
+                            Button::new("url-paste")
+                                .small()
+                                .ghost()
+                                .label(ts("Search.url_download.paste_button"))
+                                .on_click(move |_, window, cx| {
+                                    // 兜底：Dialog 打开后剪贴板被新内容覆盖时，重新读一次。
+                                    if let Some(s) =
+                                        cx.read_from_clipboard().and_then(|item| item.text())
+                                    {
+                                        let trimmed = s.trim();
+                                        if trimmed.starts_with("http://")
+                                            || trimmed.starts_with("https://")
+                                        {
+                                            url_input.update(cx, |state, cx| {
+                                                state.set_value(trimmed.to_string(), window, cx);
+                                            });
+                                        }
+                                    }
+                                }),
+                        )
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(cx.theme().muted_foreground)
+                                .child(ts("Search.url_download.auto_pasted")),
+                        ),
+                );
+            dialog
+                .title(ts("Search.url_download.dialog_title"))
+                .w(px(520.))
+                .child(body)
+                .button_props(
+                    DialogButtonProps::default()
+                        .ok_text(ts("Search.url_download.confirm"))
+                        .cancel_text(ts("Search.url_download.cancel")),
+                )
+                .confirm()
+                .on_ok(move |_ev, _window, cx| {
+                    // OK 后：读 URL → 匹配书源 → 成功则构造 SearchResult 调
+                    // open_range_dialog 接管；失败则 push_warning 并关 URL Dialog。
+                    let url = page.read(cx).url_input.read(cx).value().to_string();
+                    let url = url.trim().to_string();
+                    if url.is_empty() {
+                        page.update(cx, |p, cx| {
+                            p.model.update(cx, |m, _cx| {
+                                m.push_warning(ts("Search.url_download.no_match"));
+                            });
+                            cx.notify();
+                        });
+                        return true;
+                    }
+                    // 一次性借用 model：rules + config 都拿到 owned 副本，避免在
+                    // find_map 闭包里反复 `page.read(cx).model.read(cx)` 触发
+                    // borrow-checker 冲突。
+                    let (rules, config) = {
+                        let m = page.read(cx).model.read(cx);
+                        (m.rules.clone(), m.config.clone())
+                    };
+                    let source = rules.iter().find_map(|r| {
+                        let sources = [Source::from(r.clone(), &config)];
+                        crate::core::sources::match_source_by_url(&sources, &url)
+                            .map(|s| s.rule.clone())
+                    });
+                    let Some(source) = source else {
+                        page.update(cx, |p, cx| {
+                            p.model.update(cx, |m, _cx| {
+                                m.push_warning(ts("Search.url_download.no_match"));
+                            });
+                            cx.notify();
+                        });
+                        return true;
+                    };
+                    // 匹配成功：构造最小 SearchResult + 复用现有 open_range_dialog。
+                    let target = SearchResult {
+                        source_id: source.id,
+                        source_name: source.name.clone(),
+                        url: url.clone(),
+                        book_name: String::new(),
+                        author: None,
+                        intro: None,
+                        category: None,
+                        latest_chapter: None,
+                        last_update_time: None,
+                        status: None,
+                        word_count: None,
+                    };
+                    page.update(cx, |p, cx| {
+                        p.model.update(cx, |m, _cx| {
+                            m.push_success(ts_fmt(
+                                "Search.url_download.matched_source",
+                                &[("name", &source.name)],
+                            ));
+                        });
+                        p.open_range_dialog(target, _window, cx);
+                        cx.notify();
+                    });
+                    true // 关 URL Dialog，range Dialog 接管
+                })
         });
     }
 
