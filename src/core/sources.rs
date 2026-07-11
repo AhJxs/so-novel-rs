@@ -442,6 +442,56 @@ mod tests {
         assert_eq!(s.rule.id, 1);
     }
 
+    #[test]
+    fn match_source_by_url_ignores_query_and_hash() {
+        // origin 比对不含 query / fragment —— `ignores_path` 已覆盖 path，
+        // 这里补全 query (`?`) 和 hash (`#`) 边界。浏览器粘贴的 URL 几乎都带 `?utm_source=...`
+        // 或 `#chapter-N`，必须不影响匹配。
+        let cfg = crate::config::AppConfig::default();
+        let sources = vec![Source::from(rule(1, "https://a.com", false), &cfg)];
+        assert_eq!(
+            match_source_by_url(&sources, "https://a.com/p?q=1")
+                .unwrap()
+                .rule
+                .id,
+            1
+        );
+        assert_eq!(
+            match_source_by_url(&sources, "https://a.com/p#fragment")
+                .unwrap()
+                .rule
+                .id,
+            1
+        );
+        assert_eq!(
+            match_source_by_url(&sources, "https://a.com/p?q=1#fragment&x=y")
+                .unwrap()
+                .rule
+                .id,
+            1
+        );
+    }
+
+    #[test]
+    fn match_source_by_url_handles_port_difference() {
+        // origin 含 port —— rule `https://a.com:8080` 不会被 `https://a.com` 命中，
+        // 反之亦然（防用户粘贴端口错配的 URL 误命中）。
+        let cfg = crate::config::AppConfig::default();
+        let sources = vec![Source::from(rule(1, "https://a.com:8080", false), &cfg)];
+        assert!(
+            match_source_by_url(&sources, "https://a.com/foo").is_none(),
+            "rule 带 :8080，URL 不带端口 → 不应命中"
+        );
+        assert!(
+            match_source_by_url(&sources, "https://a.com:8080/foo").is_some(),
+            "URL 带 :8080 → 应命中"
+        );
+        assert!(
+            match_source_by_url(&sources, "https://a.com:9090/foo").is_none(),
+            "URL 带不同端口 :9090 → 不应命中"
+        );
+    }
+
     // ── sanity: helper 不会因为空 input 炸 ───────────────────
 
     #[test]
