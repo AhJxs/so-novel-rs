@@ -26,6 +26,8 @@ pub enum RenderTarget {
     Epub,
     /// 章节文件沿用 Html 模板写到 `chapters_dir`，由 `PdfExporter` 读取并合成 PDF。
     Pdf,
+    /// Markdown 单文件输出（章节文件 = 标题 `##` + 段落 + `chapter-N` 锚点）。
+    Markdown,
 }
 
 impl From<ExportFormat> for RenderTarget {
@@ -35,9 +37,7 @@ impl From<ExportFormat> for RenderTarget {
             ExportFormat::Html => Self::Html,
             ExportFormat::Epub => Self::Epub,
             ExportFormat::Pdf => Self::Pdf,
-            // TODO(Task 2): RenderTarget::Markdown + render_md()。
-            // 阶段 1 占位：渲染为 HTML（与 PDF 阶段 1 占位语义一致）。
-            ExportFormat::Markdown => Self::Html,
+            ExportFormat::Markdown => Self::Markdown,
         }
     }
 }
@@ -74,6 +74,7 @@ pub fn render_chapter(
             &formatted_html,
             include_str!("../../assets/chapter_epub.tmpl"),
         ),
+        RenderTarget::Markdown => render_md(&filtered.title, &formatted_html),
     };
 
     maybe_convert_chinese(filtered.title, body, target, source_lang_raw, target_lang)
@@ -99,6 +100,7 @@ fn maybe_convert_chinese(
     let new_title = convert_text(&title, &target_lang);
     let new_body = match target {
         RenderTarget::Txt => convert_text(&body, &target_lang),
+        RenderTarget::Markdown => convert_text(&body, &target_lang),
         RenderTarget::Html | RenderTarget::Epub | RenderTarget::Pdf => {
             convert_html_body(&body, &target_lang)
         }
@@ -150,6 +152,68 @@ fn render_txt(title: &str, p_html: &str) -> String {
             sb.push('\n');
         }
     }
+    sb
+}
+
+/// Markdown：从 `<p>...</p>` 中抽段落文字，标题前缀 `##`，段落间双换行。
+///
+/// 输出形态：
+/// ```text
+/// ## {title}
+///
+/// 段一
+///
+/// 段二
+///
+/// ```
+/// 末尾保留一个 `\n`，便于与 TOC / 下一章拼接。
+fn render_md(title: &str, p_html: &str) -> String {
+    use regex::Regex;
+    use std::sync::LazyLock;
+
+    /// 编译期确定的正则：用 match 走 panic 路径以避免 `clippy::expect_used`。
+    /// panic IS the design：源码字面量写错就是程序员错误。
+    #[allow(
+        clippy::panic,
+        reason = "static regex literal must compile; failure = programmer error"
+    )]
+    fn compile_static_re(pattern: &'static str) -> Regex {
+        match Regex::new(pattern) {
+            Ok(re) => re,
+            Err(e) => panic!("static regex `{pattern}` should compile: {e}"),
+        }
+    }
+
+    static P_RE: LazyLock<Regex> = LazyLock::new(|| compile_static_re(r"(?s)<p>(.*?)</p>"));
+
+    let mut sb = String::with_capacity(p_html.len());
+    // H2 标题（front matter 之外的"书标题"由 merge 阶段单独生成 H1）。
+    sb.push_str("## ");
+    sb.push_str(title);
+    sb.push_str("\n\n");
+
+    let mut matched = false;
+    for cap in P_RE.captures_iter(p_html) {
+        matched = true;
+        let inner = cap.get(1).map_or("", |m| m.as_str());
+        let trimmed = inner.trim();
+        if trimmed.is_empty() {
+            // 空段跳过：避免连续空行影响下游 merge 的 `\n\n` 计数
+            continue;
+        }
+        sb.push_str(trimmed);
+        sb.push_str("\n\n");
+    }
+    if !matched {
+        // 无 <p> 时直接把整段当一段（极端兜底）
+        let s = p_html.trim();
+        if !s.is_empty() {
+            sb.push_str(s);
+            sb.push_str("\n\n");
+        }
+    }
+    // 末尾保留一个尾随 \n（与 render_txt 一致）
+    sb.push('\n');
     sb
 }
 
@@ -439,5 +503,97 @@ mod tests {
         );
         assert_eq!(title, "头发");
         assert!(body.contains("头发"), "should be unchanged: {body}");
+    }
+
+    // ---------- Markdown ----------
+
+    /// 闭合 `<p>` 抽段 → 输出 `## 标题` + 段落 + `## 标题` 行单独。
+    #[test]
+    fn render_md_extracts_paragraphs_with_h2_heading() {
+        let raw = Chapter {
+            url: "https://x/c.html".into(),
+            title: "第1章 起航".into(),
+            content: "<p>段一</p><p>段二</p>".into(),
+            order: 1,
+        };
+        let (title, body) = render(&raw, &rule_closed_with_ad(), RenderTarget::Markdown);
+        assert_eq!(title, "第1章 起航");
+        // 首行是 H2 标题
+        assert!(
+            body.starts_with("## 第1章 起航\n\n"),
+            "body should start with H2 title, got: {body}"
+        );
+        // 段一、段二 各占段，段之间 `\n\n`
+        assert!(body.contains("段一"));
+        assert!(body.contains("段二"));
+    }
+
+    /// 空 `<p>` 跳过（与 TXT 行为一致：matched=true 但 inner 为空时不 push）。
+    #[test]
+    fn render_md_skips_empty_paragraphs() {
+        let raw = Chapter {
+            url: "https://x/".into(),
+            title: "第1章".into(),
+            content: "<p>a</p><p>   </p><p>b</p>".into(),
+            order: 1,
+        };
+        let (_t, body) = render(&raw, &rule_closed_with_ad(), RenderTarget::Markdown);
+        assert!(body.contains("a"));
+        assert!(body.contains("b"));
+        // 空白段不应作为独立段落出现（H2 标题之外不应有连续空行）
+        assert!(
+            !body.contains("a\n\n\nb"),
+            "空 <p> 被错留了一段空白: {body}"
+        );
+    }
+
+    /// 无 `<p>` 兜底：把整段 HTML trim 当一段。
+    #[test]
+    fn render_md_falls_back_to_whole_html_when_no_p_tags() {
+        let raw = Chapter {
+            url: "https://x/".into(),
+            title: "第1章".into(),
+            content: "<div>裸 HTML 兜底</div>".into(),
+            order: 1,
+        };
+        let (_t, body) = render(&raw, &rule_closed_with_ad(), RenderTarget::Markdown);
+        assert!(body.starts_with("## 第1章\n\n"));
+        assert!(
+            body.contains("裸 HTML 兜底"),
+            "expected fallback paragraph, got: {body}"
+        );
+    }
+
+    /// 末尾保留一个 `\n`（与 `render_txt` 风格一致，便于拼接 TOC / 下一章）。
+    #[test]
+    fn render_md_trailing_newline() {
+        let raw = Chapter {
+            url: "https://x/".into(),
+            title: "末章".into(),
+            content: "<p>完</p>".into(),
+            order: 1,
+        };
+        let (_t, body) = render(&raw, &rule_closed_with_ad(), RenderTarget::Markdown);
+        assert!(body.ends_with('\n'), "expected trailing \\n, got: {body:?}");
+    }
+
+    /// Markdown 走 `convert_text` 路径（与 TXT 同），不走 `convert_html_body`。
+    #[test]
+    fn render_md_converts_simplified_to_traditional_tw() {
+        let raw = Chapter {
+            url: "https://x/".into(),
+            title: "头发".into(),
+            content: "<p>头发的颜色</p>".into(),
+            order: 1,
+        };
+        let (_t, body) = render_chapter(
+            &raw,
+            &RuleChapter::default(),
+            RenderTarget::Markdown,
+            "zh_CN",
+            LangType::ZhTw,
+        );
+        assert!(body.contains("頭髮"), "got: {body}");
+        assert!(body.contains("顏色"), "got: {body}");
     }
 }
