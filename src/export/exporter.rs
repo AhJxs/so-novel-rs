@@ -70,9 +70,8 @@ pub trait Exporter {
 /// 按 `ExportFormat` 选择导出器。Pdf 用 `pdf_oxide` 真生成 PDF（章节文件由
 /// `render_chapter(target=Pdf)` 写出成 Html，`PdfExporter` 内部再合并成 PDF）。
 ///
-/// `ExportFormat::Markdown` 的真正 exporter 在 Task 4 (`src/export/md.rs`) 落地。
-/// 当前先用 HtmlExporter 作 placeholder —— Task 1 阶段枚举先就位，UI 暂未暴露
-/// Markdown，故运行时不会走到这里。
+/// Markdown 导出由 `MdExporter`（`src/export/md.rs`）负责 —— 输出单个 `.md`
+/// 文件，包含 YAML front matter、`## 目录` TOC 与 `<a id="chapter-N">` 锚点。
 pub fn exporter_for(format: ExportFormat, txt_encoding: &str) -> Box<dyn Exporter + Send + Sync> {
     match format {
         ExportFormat::Txt => Box::new(super::txt::TxtExporter::new(txt_encoding)),

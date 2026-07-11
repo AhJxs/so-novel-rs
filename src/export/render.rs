@@ -99,8 +99,7 @@ fn maybe_convert_chinese(
     }
     let new_title = convert_text(&title, &target_lang);
     let new_body = match target {
-        RenderTarget::Txt => convert_text(&body, &target_lang),
-        RenderTarget::Markdown => convert_text(&body, &target_lang),
+        RenderTarget::Txt | RenderTarget::Markdown => convert_text(&body, &target_lang),
         RenderTarget::Html | RenderTarget::Epub | RenderTarget::Pdf => {
             convert_html_body(&body, &target_lang)
         }
@@ -538,8 +537,8 @@ mod tests {
             order: 1,
         };
         let (_t, body) = render(&raw, &rule_closed_with_ad(), RenderTarget::Markdown);
-        assert!(body.contains("a"));
-        assert!(body.contains("b"));
+        assert!(body.contains('a'));
+        assert!(body.contains('b'));
         // 空白段不应作为独立段落出现（H2 标题之外不应有连续空行）
         assert!(
             !body.contains("a\n\n\nb"),

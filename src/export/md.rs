@@ -109,11 +109,7 @@ impl Exporter for MdExporter {
 pub(crate) fn chapter_title_from_path(path: &Path) -> String {
     path.file_stem()
         .and_then(|s| s.to_str())
-        .map(|s| {
-            s.split_once('_')
-                .map(|(_, t)| t.to_string())
-                .unwrap_or_else(|| s.to_string())
-        })
+        .map(|s| s.split_once('_').map_or(s, |(_, t)| t).to_string())
         .unwrap_or_default()
 }
 
