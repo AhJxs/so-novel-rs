@@ -38,6 +38,7 @@ use gpui_component::{
 
 use crate::desktop::components::{EmptyState, PageHeader, Pagination, compute_page_window};
 use crate::desktop::model::AppModel;
+use crate::desktop::model::tasks::DeleteTaskResult;
 use crate::i18n::{ts, ts_fmt};
 
 use self::delegate::TasksDelegate;
@@ -134,8 +135,18 @@ impl TasksPage {
                 )
                 .confirm()
                 .on_ok(move |_ev: &ClickEvent, _window, cx| {
-                    model_for_ok.update(cx, |m, _cx| {
-                        m.delete_task(task_id);
+                    model_for_ok.update(cx, |m, _cx| match m.delete_task(task_id) {
+                        DeleteTaskResult::Deleted => m.push_success(ts_fmt(
+                            "Toasts.delete_task_ok",
+                            &[("book_name", &name_for_ok)],
+                        )),
+                        DeleteTaskResult::StillRunning => m.push_warning(ts_fmt(
+                            "Toasts.delete_task_still_running",
+                            &[("book_name", &name_for_ok)],
+                        )),
+                        DeleteTaskResult::Missing => {
+                            m.push_warning(ts("Toasts.delete_task_missing"))
+                        }
                     });
                     cx.notify(model_id_for_ok);
                     true // 关闭 dialog
