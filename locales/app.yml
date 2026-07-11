@@ -1056,6 +1056,53 @@ Search:
       en: "(no title)"
       zh-CN: "(无标题)"
       zh-TW: "(無標題)"
+  # URL 下载入口（PageHeader「下载链接」按钮 → 输入 Dialog → 复用 range_dialog）
+  url_download:
+    # PageHeader 按钮 label
+    button:
+      en: "Download by URL"
+      zh-CN: 下载链接
+      zh-TW: 下載連結
+    # URL 输入 Dialog 标题
+    dialog_title:
+      en: "Download from URL"
+      zh-CN: 从链接下载
+      zh-TW: 從連結下載
+    # URL 输入框 placeholder
+    placeholder:
+      en: "Paste novel detail page URL (http/https)..."
+      zh-CN: 请粘贴小说详情页链接（http/https）...
+      zh-TW: 請粘貼小說詳情頁連結（http/https）...
+    # 剪贴板已自动粘贴时的提示行
+    auto_pasted:
+      en: "✓ Auto-pasted from clipboard"
+      zh-CN: "✓ 已自动粘贴剪贴板"
+      zh-TW: "✓ 已自動粘貼剪貼板"
+    # Dialog 内的兜底「粘贴」按钮
+    paste_button:
+      en: Paste
+      zh-CN: 粘贴
+      zh-TW: 粘貼
+    # Dialog OK 按钮（=开始解析 URL）
+    confirm:
+      en: Resolve
+      zh-CN: 解析
+      zh-TW: 解析
+    # Dialog Cancel 按钮
+    cancel:
+      en: Cancel
+      zh-CN: 取消
+      zh-TW: 取消
+    # 未匹配到任何书源的 warning toast
+    no_match:
+      en: "No book source matches this URL. Check the link or enable a source on the Sources page."
+      zh-CN: "未匹配到任何书源，请检查链接是否正确或在「书源」页启用对应源"
+      zh-TW: "未匹配到任何書源，請檢查連結是否正確或在「書源」頁啟用對應源"
+    # 匹配成功的 success toast（{name} = 书源名）
+    matched_source:
+      en: "✓ Matched: {name}"
+      zh-CN: "✓ 已匹配：{name}"
+      zh-TW: "✓ 已匹配：{name}"
   empty:
     title:
       en: "Enter a keyword to start searching"

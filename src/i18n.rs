@@ -422,4 +422,32 @@ mod tests {
             assert_ne!(zh_cn, zh_tw, "{key}: zh-CN == zh-TW");
         }
     }
+
+    // ── Search.url_download.* 完整性（spec 2026-07-11-tasks-url-download）──
+    //
+    // Search.* 段没有像 WebErrors 那样的全局注册表，但 url_download 是新增的
+    // 一整组 key（按钮 / Dialog / 提示 / toast），漏译一个就会在桌面端某 locale
+    // 下显示原始 key 字面量。这里跟 WEB_ERROR_KEYS 同模式做一次兜底校验。
+    const URL_DOWNLOAD_KEYS: &[&str] = &[
+        "Search.url_download.button",
+        "Search.url_download.dialog_title",
+        "Search.url_download.placeholder",
+        "Search.url_download.auto_pasted",
+        "Search.url_download.paste_button",
+        "Search.url_download.confirm",
+        "Search.url_download.cancel",
+        "Search.url_download.no_match",
+        "Search.url_download.matched_source",
+    ];
+
+    #[test]
+    fn url_download_translated_in_all_three_locales() {
+        for &key in URL_DOWNLOAD_KEYS {
+            for locale in ["en", "zh-CN", "zh-TW"] {
+                let v = ts_for_locale(locale, key);
+                assert!(!v.is_empty(), "{key} 在 locale={locale} 翻译为空字符串");
+                assert_ne!(v, key, "{key} 在 locale={locale} 缺失（返回 key 本身）");
+            }
+        }
+    }
 }
