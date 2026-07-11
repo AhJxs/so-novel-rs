@@ -68,12 +68,13 @@ pub(super) fn build(ctx: &PageCtx<'_>, cx: &App) -> SettingPage {
         ),
     ];
 
-    // 4 种输出格式 → (value_str, label)
+    // 5 种输出格式 → (value_str, label)
     let ext_options: Vec<(SharedString, SharedString)> = vec![
         (ext_value(ExportFormat::Epub).into(), "epub".into()),
         (ext_value(ExportFormat::Txt).into(), "txt".into()),
         (ext_value(ExportFormat::Html).into(), "html".into()),
         (ext_value(ExportFormat::Pdf).into(), "pdf".into()),
+        (ext_value(ExportFormat::Markdown).into(), "md".into()),
     ];
 
     // 7 种常见 TXT 编码 → (value_str, label)
