@@ -744,40 +744,44 @@ impl Exporter for MdExporter {
 
         // BufWriter 流式写入：避免一次性把整本书拼成大 String 占用堆。
         // Markdown 是纯 UTF-8，无编码转换需求。
+        // 注：用 `write_all(format!(...).as_bytes())?` 而非 `writeln!(w, ...)`，因为
+        // `writeln!` 返回 `fmt::Result` 而函数签名要 `Result<_, ExportError>`，而
+        // `ExportError` 只 derive 了 `From<std::io::Error>`，没 `From<fmt::Error>`。
+        // `write_all` 返回 `io::Result`，`?` 自动走 `ExportError::Io(#[from])`。
         let file = std::fs::File::create(&out_path)?;
         let mut w = BufWriter::new(file);
 
         // 1) YAML front matter（Hugo/Jekyll 风格）
-        writeln!(w, "---")?;
-        writeln!(w, "title: {}", book.book_name)?;
-        writeln!(w, "author: {}", book.author)?;
+        w.write_all(b"---\n")?;
+        w.write_all(format!("title: {}\n", book.book_name).as_bytes())?;
+        w.write_all(format!("author: {}\n", book.author).as_bytes())?;
         if let Some(intro) = book.intro.as_deref() {
             let cleaned = strip_html_tags(intro);
             if !cleaned.is_empty() {
-                writeln!(w, "description: |")?;
+                w.write_all(b"description: |\n")?;
                 for line in cleaned.lines() {
-                    writeln!(w, "  {line}")?;
+                    w.write_all(format!("  {line}\n").as_bytes())?;
                 }
             }
         }
-        writeln!(w, "---\n")?;
+        w.write_all(b"---\n\n")?;
 
         // 2) 顶部 H1（书标题，与 front matter title 一致）
-        writeln!(w, "# {}\n", book.book_name)?;
+        w.write_all(format!("# {}\n\n", book.book_name).as_bytes())?;
 
         // 3) 章节锚点 TOC
-        writeln!(w, "## 目录\n")?;
+        w.write_all(b"## 目录\n\n")?;
         for (idx, (title, _)) in chapters.iter().enumerate() {
-            writeln!(w, "- [{title}](#chapter-{})", idx + 1)?;
+            w.write_all(format!("- [{title}](#chapter-{})\n", idx + 1).as_bytes())?;
         }
-        writeln!(w)?;
+        w.write_all(b"\n")?;
 
         // 4) 每章正文（前置一个 HTML 锚点以兼容 GFM / Obsidian / Hugo）
         for (idx, (_title, body)) in chapters.iter().enumerate() {
             // 章节渲染时已自带 `## 标题` 行；锚点用内联 HTML，GFM/CM 均识别。
-            writeln!(w, "<a id=\"chapter-{}\"></a>\n", idx + 1)?;
+            w.write_all(format!("<a id=\"chapter-{}\"></a>\n\n", idx + 1).as_bytes())?;
             w.write_all(body.trim_end().as_bytes())?;
-            writeln!(w, "\n")?;
+            w.write_all(b"\n\n")?;
         }
 
         w.flush()?;
