@@ -1337,9 +1337,9 @@ Cli:
     zh-CN: "覆盖 config.toml 的下载目录"
     zh-TW: "覆蓋 config.toml 的下載目錄"
   download_format_help:
-    en: "Override config.toml output format (epub / txt / html)"
-    zh-CN: "覆盖 config.toml 的输出格式（epub / txt / html）"
-    zh-TW: "覆蓋 config.toml 的輸出格式（epub / txt / html）"
+    en: "Override config.toml output format (epub / txt / html / pdf / markdown)"
+    zh-CN: "覆盖 config.toml 的输出格式（epub / txt / html / pdf / markdown）"
+    zh-TW: "覆蓋 config.toml 的輸出格式（epub / txt / html / pdf / markdown）"
   download_from_help:
     en: "Start chapter (1-based; default: 1)"
     zh-CN: "起始章节（1-based；省略 → 1）"

@@ -123,8 +123,8 @@ pub enum Cmd {
         /// 覆盖 config.toml 的下载目录
         #[arg(long, value_name = "DIR")]
         output: Option<String>,
-        /// 覆盖 config.toml 的输出格式（epub / txt / html）
-        #[arg(long, value_name = "epub|txt|html")]
+        /// 覆盖 config.toml 的输出格式（epub / txt / html / pdf / markdown）
+        #[arg(long, value_name = "epub|txt|html|pdf|markdown")]
         format: Option<String>,
         /// 起始章节（1-based；省略 → 1）
         #[arg(long, value_name = "N")]
@@ -305,7 +305,7 @@ pub fn build_localized_command(lang: Language) -> Command {
                 .arg(
                     Arg::new("format")
                         .long("format")
-                        .value_name("epub|txt|html")
+                        .value_name("epub|txt|html|pdf|markdown")
                         .help(ts("Cli.download_format_help")),
                 )
                 .arg(
