@@ -13,8 +13,10 @@ use toml_edit::DocumentMut;
 /// - macOS：`~/Documents/Novel`
 /// - Linux：XDG `XDG_DOCUMENTS_DIR`，未设置时一般是 `~/Documents`
 ///
-/// 取不到（极端环境无 home）时回落到相对路径 `downloads`，与历史行为保持一致 —
-/// 至少程序还能跑，写到 cwd 下的 `downloads/`。
+/// 取不到（极端环境无 home，例如 Docker 容器里没有 `HOME`/`USERPROFILE`）时回
+/// 落到 cwd 相对路径 `./downloads`。带 `./` 前缀是为了在网页设置页 / 日志
+/// warning / 实际存储值三处展示一致 —— 用户能一眼看出是「相对路径」而不是
+/// 「绝对的 `downloads` 目录」。
 ///
 /// 返回字符串而非 `PathBuf`：`AppConfig.download_path` 字段就是 String，
 /// 字符串能被设置页直接放到 `TextEdit` 里编辑，也能直接序列化进 TOML。
@@ -26,7 +28,7 @@ pub fn default_download_path() -> String {
         return docs.join("Novel").to_string_lossy().into_owned();
     }
     tracing::warn!("无法定位系统 Documents 目录，下载路径回落到 ./downloads");
-    "downloads".to_string()
+    "./downloads".to_string()
 }
 
 /// 第一次启动 / 模板 / 文件被破坏时使用的默认 TOML 文档。
