@@ -425,4 +425,24 @@ mod tests {
         // stem=README, ext=None → fallback "html" used
         assert_eq!(p, dir.path().join("README (1).html"));
     }
+
+    #[test]
+    fn write_chapter_files_creates_titled_filenames_for_md() {
+        let dir = tempfile::tempdir().unwrap();
+        let rendered = vec![RenderedChapter {
+            order: 5,
+            title: "起航".into(),
+            body: "## 起航\n\n正文\n\n".into(),
+        }];
+        write_chapter_files(dir.path(), &rendered, ExportFormat::Markdown).unwrap();
+        assert!(dir.path().join("005_起航.md").exists());
+    }
+
+    #[test]
+    fn write_single_chapter_uses_md_extension() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_single_chapter(dir.path(), 3, "楔子", "body", ExportFormat::Markdown, 10)
+            .unwrap();
+        assert_eq!(path, dir.path().join("003_楔子.md"));
+    }
 }
