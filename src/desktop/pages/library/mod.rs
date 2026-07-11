@@ -7,9 +7,9 @@
 //!   格式 / 大小 / 修改时间 / 3 动作）。
 //! - 分页页脚自写（gpui-component 0.5.1 没 Pagination 组件），≤1 页时整段隐藏。
 //! - **没有文件 watcher** —— 列表只在「首次进入 / 下载目录变化」时自动扫一次，
-//!   其余情况靠 PageHeader 右上角「刷新」按钮手动触发。
+//!   其余情况靠 `PageHeader` 右上角「刷新」按钮手动触发。
 //! - 删除走 `WindowExt::open_dialog` 二次确认 → `model.delete_library_entry` → `entries_version`
-//!   bump 让 ListCache 立即失效，UI 实时反映删除结果。
+//!   bump 让 `ListCache` 立即失效，UI 实时反映删除结果。
 
 mod delegate;
 mod row;
@@ -109,7 +109,7 @@ impl LibraryPage {
         }
     }
 
-    /// PageHeader 「刷新」按钮 —— 重扫下载目录。`scan_in_flight` 期间点多次会被
+    /// `PageHeader` 「刷新」按钮 —— 重扫下载目录。`scan_in_flight` 期间点多次会被
     /// `refresh_library_async` 内部的 flag 拦截，重复触发零成本。
     fn manual_refresh(&mut self, cx: &mut Context<Self>) {
         self.model.update(cx, |m, _cx| m.refresh_library_async());

@@ -462,7 +462,7 @@ fn subcommand_name_maps_variants() {
 
 /// `locale_for` 是项目里 `Language → locale 字符串` 的唯一权威映射（针对本项目
 /// 自己的 `app.yml` + 前端 JSON 文件名）。测试三种 enum 的输出 + 关键差异：
-/// TraditionalChinese 返回 `zh-TW` —— 跟 `Language::as_str()` 的 `"zh-TW"` 巧合一致。
+/// `TraditionalChinese` 返回 `zh-TW` —— 跟 `Language::as_str()` 的 `"zh-TW"` 巧合一致。
 ///
 /// 注意：`gpui_component::set_locale(...)` 不接受 `zh-TW`（gpui-component 0.5.1
 /// 只有 en / zh-CN / zh-HK / it），桌面路径走 [`crate::i18n::locale_for_gpui`]

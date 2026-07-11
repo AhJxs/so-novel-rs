@@ -145,7 +145,7 @@ impl TasksPage {
                             &[("book_name", &name_for_ok)],
                         )),
                         DeleteTaskResult::Missing => {
-                            m.push_warning(ts("Toasts.delete_task_missing"))
+                            m.push_warning(ts("Toasts.delete_task_missing"));
                         }
                     });
                     cx.notify(model_id_for_ok);

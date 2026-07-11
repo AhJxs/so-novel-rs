@@ -107,14 +107,14 @@ pub struct SearchPage {
     range_initialized: bool,
 
     /// URL 输入 Dialog 的输入框 —— PageHeader「下载链接」按钮弹 Dialog 时承载 URL 输入。
-    /// 同 `keyword` / range_start_input 同款 owner 持有（Entity 在 owner 里缓存，
-    /// render 闭包只复用），避免 InputState 失活。placeholder 在 `new()` 一次性设好。
+    /// 同 `keyword` / `range_start_input` 同款 owner 持有（Entity 在 owner 里缓存，
+    /// render 闭包只复用），避免 `InputState` 失活。placeholder 在 `new()` 一次性设好。
     url_input: Entity<InputState>,
-    /// URL Dialog 点「解析」成功后，由 `open_url_dialog` 的 on_ok 写入。
-    /// **不在 on_ok 里直接调 `open_range_dialog`**，因为 `on_ok` 返回 true
+    /// URL Dialog 点「解析」成功后，由 `open_url_dialog` 的 `on_ok` 写入。
+    /// **不在 `on_ok` 里直接调 `open_range_dialog`**，因为 `on_ok` 返回 true
     /// 后 gpui-component 的 button click handler 会调 `window.close_dialog`，
     /// `close_dialog` 是 `active_dialogs.pop()` —— 此刻新 push 的 range Dialog
-    /// 反而被 pop 掉。改为 set flag + `cx.notify()`，render() 在下一帧
+    /// 反而被 pop 掉。改为 set flag + `cx.notify()`，`render()` 在下一帧
     /// 检测到 flag 后再调 `open_range_dialog`，这时 URL Dialog 已经被
     /// 关闭 / 栈空，push 的 range Dialog 不会被 pop。
     pending_range_dialog: Option<SearchResult>,
@@ -390,10 +390,10 @@ impl SearchPage {
     /// 匹配书源 → 复用 `open_range_dialog` 走选章下载流程。
     ///
     /// 与 `open_range_dialog` 的关系：URL 输入 + 匹配后，构造一个最小 `SearchResult`
-    /// （book_name 空 / 元信息全 None —— range_dialog 不依赖这些，TOC 解析时会从
+    /// （`book_name` 空 / 元信息全 None —— `range_dialog` 不依赖这些，TOC 解析时会从
     /// 详情页拿完整数据）→ 走 `open_range_dialog` 同样的 `spawn_resolve_toc` +
     /// `range_dialog::content` 反应式渲染路径。零结构改动。
-    fn open_url_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    fn open_url_dialog(&self, window: &mut Window, cx: &mut Context<Self>) {
         // 自动粘贴：Dialog 打开时把剪贴板里的 URL 填进去（http(s) 才填）。
         // `read_from_clipboard` 返回 `Option<ClipboardItem>`（gpui 0.2.2），
         // `.text()` 把所有 String entry 拼起来返回 Option<String>。
@@ -496,7 +496,7 @@ impl SearchPage {
                     let target = SearchResult {
                         source_id: source.id,
                         source_name: source.name.clone(),
-                        url: url.clone(),
+                        url,
                         book_name: String::new(),
                         author: None,
                         intro: None,

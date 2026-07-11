@@ -284,9 +284,9 @@ mod tests {
     #[test]
     fn ts_for_locale_does_not_mutate_global() {
         rust_i18n::set_locale("en");
-        let before: String = (&*rust_i18n::locale()).to_string();
+        let before: String = (*rust_i18n::locale()).to_string();
         let _ = ts_for_locale("zh-CN", "Nav.tasks");
-        let after: String = (&*rust_i18n::locale()).to_string();
+        let after: String = (*rust_i18n::locale()).to_string();
         assert_eq!(before, after, "ts_for_locale 不应改全局 locale");
         rust_i18n::set_locale("en");
     }
@@ -333,7 +333,7 @@ mod tests {
     // 翻译（fallback 到 key 本身也算 miss，但必须非空以保证 frontend 至少能看到
     // 一个稳定的字符串 id）。失败的 key 一定是手抄漏译。
 
-    /// 47 个 WebErrors key：38 原 ErrorCode + 3 新 3xxx (3004/3005/3006) + 6 内联。
+    /// 47 个 `WebErrors` key：38 原 `ErrorCode` + 3 新 3xxx (3004/3005/3006) + 6 内联。
     /// 与 `src/web/error_code.rs::ErrorCode` 1:1 + handler 散落字符串。
     const WEB_ERROR_KEYS: &[&str] = &[
         // 1xxx 业务规则
