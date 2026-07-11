@@ -90,6 +90,23 @@ Toasts:
     zh-CN: "删除失败: {err}"
     zh-TW: "刪除失敗: {err}"
 
+  # 任务删除反馈（TasksPage::prompt_delete 的 on_ok → AppModel::delete_task）
+  # {book_name} 与 Tasks.delete_dialog.message 同源 —— 调用方已做空名兜底。
+  delete_task_ok:
+    en: 'Deleted: "{book_name}"'
+    zh-CN: '已删除: "{book_name}"'
+    zh-TW: '已刪除: "{book_name}"'
+  # false 原因 1：仍然在运行。
+  delete_task_still_running:
+    en: 'Cannot delete: "{book_name}" is still running'
+    zh-CN: '无法删除: "{book_name}" 仍在运行'
+    zh-TW: '無法刪除: "{book_name}" 仍在執行'
+  # false 原因 2：任务已被并发清掉 / 不存在。
+  delete_task_missing:
+    en: 'Task no longer exists'
+    zh-CN: '任务已不存在'
+    zh-TW: '任務已不存在'
+
 App:
   title:
     en: So Novel
