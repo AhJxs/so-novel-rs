@@ -23,7 +23,7 @@ mod search_state;
 mod sources;
 mod sources_state;
 pub use sources_state::SourcesFilterStatus;
-mod tasks;
+pub(crate) mod tasks;
 pub(crate) mod trace;
 mod ui_event;
 mod update;
