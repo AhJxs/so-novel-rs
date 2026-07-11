@@ -28,7 +28,7 @@ use gpui::{
     SharedString, Styled, Window, div, prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
-    ActiveTheme as _, IconName, Sizable, WindowExt,
+    ActiveTheme as _, Icon, IconName, Sizable, WindowExt,
     button::{Button, ButtonVariants as _},
     dialog::{Dialog, DialogButtonProps},
     h_flex,
@@ -718,7 +718,20 @@ impl Render for SearchPage {
             .size_full()
             .p_6()
             .gap_4()
-            .child(PageHeader::new(ts("Search.page_title")).subtitle(ts("Search.page_subtitle")))
+            .child(
+                PageHeader::new(ts("Search.page_title"))
+                    .subtitle(ts("Search.page_subtitle"))
+                    .action(
+                        Button::new("search-url-download")
+                            .small()
+                            .outline()
+                            .icon(Icon::new(IconName::ExternalLink))
+                            .label(ts("Search.url_download.button"))
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.open_url_dialog(window, cx);
+                            })),
+                    ),
+            )
             .child(toolbar::toolbar_row(
                 &self.keyword,
                 &self.source_state,
