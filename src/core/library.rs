@@ -4,7 +4,7 @@
 //!
 //! Web `handlers/library.rs` 和桌面 `model/library_state.rs::scan_library_dir` 都
 //! 要做"扫下载目录 / 列条目 / 算 ext"。两边都维护一份 `["epub", "txt", "html", "zip",
-//! "pdf"]` 白名单字面量，新增格式时容易漏改一边 —— 抽到 `core::library` 用同一份常量。
+//! "pdf", "md"]` 白名单字面量，新增格式时容易漏改一边 —— 抽到 `core::library` 用同一份常量。
 //!
 //! `open_download_file` 是 web `file_download` 的核心：`sanitize_filename` + path check +
 //! 读字节 + 解析 content-type。放在 `core`（而不是 web）是因为它**不**依赖 HTTP
@@ -27,7 +27,7 @@ use crate::utils::fs::sanitize_filename;
 ///
 /// **单一事实来源** —— web `library_list` 和桌面 `scan_library_dir` 都引用这里，
 /// 新增 / 删除扩展名只需改这一处。
-pub const SUPPORTED_LIBRARY_EXTS: &[&str] = &["epub", "txt", "html", "zip", "pdf"];
+pub const SUPPORTED_LIBRARY_EXTS: &[&str] = &["epub", "txt", "html", "zip", "pdf", "md"];
 
 /// 扩展名 → MIME type。Web 用作 `Content-Type`；CLI / GUI 忽略。
 ///
@@ -39,6 +39,7 @@ pub fn extension_to_content_type(ext: &str) -> Option<&'static str> {
         "txt" => Some("text/plain; charset=utf-8"),
         "html" | "zip" => Some("application/zip"),
         "pdf" => Some("application/pdf"),
+        "md" => Some("text/markdown; charset=utf-8"),
         _ => None,
     }
 }
@@ -182,7 +183,7 @@ mod tests {
 
     #[test]
     fn supported_exts_contains_expected() {
-        for ext in ["epub", "txt", "html", "zip", "pdf"] {
+        for ext in ["epub", "txt", "html", "zip", "pdf", "md"] {
             assert!(
                 SUPPORTED_LIBRARY_EXTS.contains(&ext),
                 "{ext} should be in SUPPORTED_LIBRARY_EXTS"
@@ -191,9 +192,9 @@ mod tests {
     }
 
     #[test]
-    fn supported_exts_length_is_five() {
+    fn supported_exts_length_is_six() {
         // 锁死长度 —— 防新加 / 删除扩展名时漏改 web-ui Badge count 或 i18n key。
-        assert_eq!(SUPPORTED_LIBRARY_EXTS.len(), 5);
+        assert_eq!(SUPPORTED_LIBRARY_EXTS.len(), 6);
     }
 
     // ---- extension_to_content_type ----
@@ -211,6 +212,10 @@ mod tests {
         assert_eq!(extension_to_content_type("html"), Some("application/zip"));
         assert_eq!(extension_to_content_type("zip"), Some("application/zip"));
         assert_eq!(extension_to_content_type("pdf"), Some("application/pdf"));
+        assert_eq!(
+            extension_to_content_type("md"),
+            Some("text/markdown; charset=utf-8")
+        );
     }
 
     #[test]

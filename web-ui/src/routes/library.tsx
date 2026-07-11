@@ -18,10 +18,12 @@ const EXT_COLOR: Record<string, string> = {
   pdf: "bg-red-500",
   txt: "bg-blue-500",
   html: "bg-orange-500",
+  md: "bg-purple-500",
 };
 
-// tab Badge 颜色：epub/pdf/txt/html 映射 HeroUI 语义色（success / danger /
-// accent / warning），跟卡片左侧 EXT_COLOR 颜色块视觉对齐；all 用中性 default。
+// tab Badge 颜色：epub/pdf/txt/html/md 映射 HeroUI 语义色（success / danger /
+// accent / warning / default），跟卡片左侧 EXT_COLOR 颜色块视觉对齐；all 用中性 default。
+// md 没有专属语义色，沿用 default（neutral）—— 5 种格式已占满 success/danger/accent/warning。
 // HeroUI v3 Badge 单独使用时是 inline 元素（不像 v2 那样 absolute 角标），
 // 因此可以直接挂在 tab label 后面作为内联数字徽章。
 const TAB_BADGE_COLOR: Record<string, "default" | "success" | "danger" | "accent" | "warning"> = {
@@ -30,6 +32,7 @@ const TAB_BADGE_COLOR: Record<string, "default" | "success" | "danger" | "accent
   pdf: "danger",
   txt: "accent",
   html: "warning",
+  md: "default",
 };
 
 const PAGE_SIZE = 12;
@@ -48,9 +51,9 @@ export default function LibraryPage() {
   const paged = files.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   // 每种 ext 的文件数（含 0）—— 用在 Tabs.Tab 的 Badge 上。
-  // 一次 reduce 算 4 个数（O(n)）而不是每次 tab 渲染时 filter（O(n) × 4）。
+  // 一次 reduce 算 6 个数（O(n)）而不是每次 tab 渲染时 filter（O(n) × 6）。
   const extCounts = useMemo(() => {
-    const counts: Record<string, number> = { all: allFiles.length, epub: 0, txt: 0, pdf: 0, html: 0 }
+    const counts: Record<string, number> = { all: allFiles.length, epub: 0, txt: 0, pdf: 0, html: 0, md: 0 }
     for (const f of allFiles) {
       if (f.ext in counts) counts[f.ext]++
     }
@@ -97,7 +100,7 @@ export default function LibraryPage() {
       >
         <Tabs.ListContainer>
           <Tabs.List aria-label="library-filter">
-            {["all", "epub", "txt", "pdf", "html"].map((tab) => (
+            {["all", "epub", "txt", "pdf", "html", "md"].map((tab) => (
               <Tabs.Tab key={tab} id={tab}>
                 {t(`library.filter.${tab}`).toUpperCase()}
                 <Badge size="sm" color={TAB_BADGE_COLOR[tab]}>

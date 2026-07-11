@@ -132,7 +132,7 @@ export default function BookDetailPage() {
           <div className="flex flex-wrap items-center gap-3">
             <span className="text-sm font-medium">{t('book.format')}</span>
             <ButtonGroup>
-              {(['epub','txt','html','pdf'] as ExportFormat[]).map(f => (
+              {(['epub','txt','html','pdf','markdown'] as ExportFormat[]).map(f => (
                 <Button
                   key={f}
                   size="sm"
