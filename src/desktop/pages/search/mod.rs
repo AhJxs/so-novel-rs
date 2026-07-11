@@ -110,6 +110,14 @@ pub struct SearchPage {
     /// 同 `keyword` / range_start_input 同款 owner 持有（Entity 在 owner 里缓存，
     /// render 闭包只复用），避免 InputState 失活。placeholder 在 `new()` 一次性设好。
     url_input: Entity<InputState>,
+    /// URL Dialog 点「解析」成功后，由 `open_url_dialog` 的 on_ok 写入。
+    /// **不在 on_ok 里直接调 `open_range_dialog`**，因为 `on_ok` 返回 true
+    /// 后 gpui-component 的 button click handler 会调 `window.close_dialog`，
+    /// `close_dialog` 是 `active_dialogs.pop()` —— 此刻新 push 的 range Dialog
+    /// 反而被 pop 掉。改为 set flag + `cx.notify()`，render() 在下一帧
+    /// 检测到 flag 后再调 `open_range_dialog`，这时 URL Dialog 已经被
+    /// 关闭 / 栈空，push 的 range Dialog 不会被 pop。
+    pending_range_dialog: Option<SearchResult>,
 }
 
 impl SearchPage {
@@ -277,6 +285,7 @@ impl SearchPage {
             range_target: None,
             range_initialized: false,
             url_input,
+            pending_range_dialog: None,
         }
     }
 
@@ -504,10 +513,14 @@ impl SearchPage {
                                 &[("name", &source.name)],
                             ));
                         });
-                        p.open_range_dialog(target, _window, cx);
+                        // 不在此处直接调 `open_range_dialog`：on_ok 返回 true 后
+                        // gpui-component 会调 `window.close_dialog` (pop 栈顶)，
+                        // 此刻栈顶是我们刚 push 的 range Dialog，反而被 pop 掉。
+                        // 改为 set flag → `cx.notify()` → render() 下一帧 drain。
+                        p.pending_range_dialog = Some(target);
                         cx.notify();
                     });
-                    true // 关 URL Dialog，range Dialog 接管
+                    true // 关 URL Dialog，range Dialog 在下一帧 render() 里接管
                 })
         });
     }
@@ -662,6 +675,13 @@ enum RangeOutcome {
 
 impl Render for SearchPage {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // 排空「URL Dialog 解析成功 → 弹 range Dialog」的挂起请求。
+        // 必须在最前面：URL Dialog 的 on_ok 返回 true 后 close_dialog 已经把
+        // URL Dialog pop 掉，栈空，此时 push range Dialog 不会被覆盖。
+        if let Some(target) = self.pending_range_dialog.take() {
+            self.open_range_dialog(target, window, cx);
+        }
+
         // 差量同步书源下拉：先于其他读 model 的代码，因为这里要 &mut Window。
         self.sync_source_items(window, cx);
 
@@ -723,8 +743,6 @@ impl Render for SearchPage {
                     .subtitle(ts("Search.page_subtitle"))
                     .action(
                         Button::new("search-url-download")
-                            .small()
-                            .outline()
                             .icon(Icon::new(IconName::ExternalLink))
                             .label(ts("Search.url_download.button"))
                             .on_click(cx.listener(|this, _, window, cx| {
