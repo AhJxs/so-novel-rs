@@ -112,7 +112,7 @@ export interface Settings {
 }
 
 /** 导出文件格式。对应后端 `config::ExportFormat`（serde 序列化为小写变体名）。 */
-export type ExportFormat = 'epub' | 'txt' | 'html' | 'pdf'
+export type ExportFormat = 'epub' | 'txt' | 'html' | 'pdf' | 'markdown'
 
 /** startDownload 返回的任务标识。 */
 export interface StartDownloadResult {

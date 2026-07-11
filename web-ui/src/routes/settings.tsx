@@ -30,7 +30,7 @@ interface EditableSettings {
   language?: BackendLanguage
 }
 
-const FORMAT_OPTIONS: ExportFormat[] = ['epub', 'txt', 'html', 'pdf']
+const FORMAT_OPTIONS: ExportFormat[] = ['epub', 'txt', 'html', 'pdf', 'markdown']
 const LOCALES: Locale[] = ['zh-CN', 'zh-TW', 'en']
 // 与后端 fields.rs::TXT_ENCODINGS 对齐。
 const TXT_ENCODINGS = ['UTF-8', 'GBK', 'GB18030', 'Big5', 'BIG5HKSCS', 'UTF-16LE', 'UTF-16BE']
