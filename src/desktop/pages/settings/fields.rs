@@ -213,12 +213,14 @@ where
 /// `ExportFormat` ↔ `&'static str` 转换 —— 用于 `ext_name` dropdown。
 ///
 /// 4 个值用 match 而不是 `as_ref()`，避免依赖 `Display` 顺序。
+/// Markdown 仅在 enum 串行化层就位；Task 2 才把 Markdown 加入 desktop dropdown。
 pub(super) const fn ext_value(e: ExportFormat) -> &'static str {
     match e {
         ExportFormat::Epub => "epub",
         ExportFormat::Txt => "txt",
         ExportFormat::Html => "html",
         ExportFormat::Pdf => "pdf",
+        ExportFormat::Markdown => "markdown",
     }
 }
 
@@ -228,6 +230,7 @@ pub(super) fn ext_from_str(s: &str) -> Option<ExportFormat> {
         "txt" => Some(ExportFormat::Txt),
         "html" => Some(ExportFormat::Html),
         "pdf" => Some(ExportFormat::Pdf),
+        "markdown" => Some(ExportFormat::Markdown),
         _ => None,
     }
 }

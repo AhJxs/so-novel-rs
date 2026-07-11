@@ -244,3 +244,21 @@ fn save_config_writes_to_new_path() {
     let cfg = load_config(&path).unwrap();
     assert!((cfg.global.font_size - AppConfig::default().global.font_size).abs() < f32::EPSILON);
 }
+
+#[test]
+fn export_format_parse_accepts_markdown_lowercase() {
+    assert_eq!(ExportFormat::parse("markdown"), ExportFormat::Markdown);
+}
+
+#[test]
+fn export_format_parse_is_case_insensitive_for_markdown() {
+    assert_eq!(ExportFormat::parse("MARKDOWN"), ExportFormat::Markdown);
+    assert_eq!(ExportFormat::parse("  Markdown  "), ExportFormat::Markdown);
+}
+
+#[test]
+fn export_format_parse_falls_back_to_epub_for_unknown() {
+    // 既有行为不变：未知值回落 Epub（默认）
+    assert_eq!(ExportFormat::parse("not-a-format"), ExportFormat::Epub);
+    assert_eq!(ExportFormat::parse(""), ExportFormat::Epub);
+}

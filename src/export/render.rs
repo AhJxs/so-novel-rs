@@ -35,6 +35,9 @@ impl From<ExportFormat> for RenderTarget {
             ExportFormat::Html => Self::Html,
             ExportFormat::Epub => Self::Epub,
             ExportFormat::Pdf => Self::Pdf,
+            // TODO(Task 2): RenderTarget::Markdown + render_md()。
+            // 阶段 1 占位：渲染为 HTML（与 PDF 阶段 1 占位语义一致）。
+            ExportFormat::Markdown => Self::Html,
         }
     }
 }

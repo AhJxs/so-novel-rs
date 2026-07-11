@@ -5,7 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 
-/// 导出文件格式。EPUB / TXT / HTML / PDF。
+/// 导出文件格式。EPUB / TXT / HTML / PDF / Markdown。
 #[derive(Debug, Copy, Clone, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub enum ExportFormat {
     #[default]
@@ -15,6 +15,8 @@ pub enum ExportFormat {
     /// 阶段一不实现 PDF 导出，仅保留枚举以便兼容旧配置，
     /// UI 选择 PDF 时会显示提示并降级。详见 audit §6.4。
     Pdf,
+    /// Markdown 单文件输出（`.md`），UTF-8 only。详见 docs/superpowers/specs/2026-07-11-markdown-export-design.md。
+    Markdown,
 }
 
 impl ExportFormat {
@@ -24,6 +26,7 @@ impl ExportFormat {
             Self::Txt => "txt",
             Self::Html => "html",
             Self::Pdf => "pdf",
+            Self::Markdown => "markdown",
         }
     }
 
@@ -32,6 +35,7 @@ impl ExportFormat {
             "txt" => Self::Txt,
             "html" => Self::Html,
             "pdf" => Self::Pdf,
+            "markdown" => Self::Markdown,
             _ => Self::Epub,
         }
     }

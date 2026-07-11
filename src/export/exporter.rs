@@ -69,12 +69,18 @@ pub trait Exporter {
 
 /// 按 `ExportFormat` 选择导出器。Pdf 用 `pdf_oxide` 真生成 PDF（章节文件由
 /// `render_chapter(target=Pdf)` 写出成 Html，`PdfExporter` 内部再合并成 PDF）。
+///
+/// `ExportFormat::Markdown` 的真正 exporter 在 Task 4 (`src/export/md.rs`) 落地。
+/// 当前先用 HtmlExporter 作 placeholder —— Task 1 阶段枚举先就位，UI 暂未暴露
+/// Markdown，故运行时不会走到这里。
 pub fn exporter_for(format: ExportFormat, txt_encoding: &str) -> Box<dyn Exporter + Send + Sync> {
     match format {
         ExportFormat::Txt => Box::new(super::txt::TxtExporter::new(txt_encoding)),
         ExportFormat::Html => Box::new(super::html::HtmlExporter),
         ExportFormat::Epub => Box::new(super::epub::EpubExporter),
         ExportFormat::Pdf => Box::new(super::pdf::PdfExporter),
+        // TODO(Task 4): 替换为 `super::md::MdExporter`。
+        ExportFormat::Markdown => Box::new(super::html::HtmlExporter),
     }
 }
 
@@ -105,6 +111,8 @@ pub fn write_chapter_files(
             ExportFormat::Html | ExportFormat::Pdf => format!("{order}_.html"),
             ExportFormat::Txt => format!("{order}_{safe_title}.txt"),
             ExportFormat::Epub => format!("{order}_{safe_title}.html"),
+            // Task 1 阶段先就位文件名后缀；Task 4 才会有真正写 Markdown 内容。
+            ExportFormat::Markdown => format!("{order}_{safe_title}.md"),
         };
         let path = unique_path(chapters_dir, &filename);
         std::fs::write(&path, &ch.body)
@@ -130,6 +138,8 @@ pub fn write_single_chapter(
         ExportFormat::Html | ExportFormat::Pdf => format!("{order_str}_.html"),
         ExportFormat::Txt => format!("{order_str}_{safe_title}.txt"),
         ExportFormat::Epub => format!("{order_str}_{safe_title}.html"),
+        // Task 1 阶段先就位文件名后缀；Task 4 才会有真正写 Markdown 内容。
+        ExportFormat::Markdown => format!("{order_str}_{safe_title}.md"),
     };
     let path = dir.join(&filename);
     std::fs::write(&path, body)?;
