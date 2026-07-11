@@ -26,7 +26,8 @@ pub struct BookDetailParams {
 /// 返回 [`WebError`]：
 /// - **锁毒化** (`rw_read_or` 失败) → `Internal("internal_error")`，动态消息进日志，
 ///   响应 body 不外泄（依赖 [`WebError::From<String>`] blanket impl，Phase 3.0）。
-/// - **书源 id 不存在** → `NotFound("书源未找到")`，4xx 给前端。
+/// - **书源 id 不存在** → `NotFound("")`，4xx 给前端。内部字符串**忽略**，统一翻译成
+///   `WebErrors.not_found` —— 避免泄漏内部 id / 路径（Phase 4.x i18n 改造）。
 ///
 /// **不要**把锁毒化静默转成 `NotFound`（旧实现 `.map_err(|_| NotFound)` 的 bug）：
 /// 锁毒化是 500（服务端状态损坏），不是 404（资源不存在）。
@@ -37,8 +38,7 @@ fn extract_config_and_rule(
     let cfg = rw_read_or("book:cfg", &state.config)?;
     let rule = {
         let rules = rw_read_or("book:rules", &state.rules)?;
-        core_sources::find_rule_by_id_cloned(&rules, source_id)
-            .ok_or(WebError::NotFound("书源未找到"))?
+        core_sources::find_rule_by_id_cloned(&rules, source_id).ok_or(WebError::NotFound(""))?
     };
     Ok((cfg.clone(), rule))
 }

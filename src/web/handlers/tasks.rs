@@ -23,19 +23,20 @@ use std::sync::Arc;
 
 use axum::Json;
 use axum::extract::{Path, State};
-use axum::http::StatusCode;
 use serde::Serialize;
 use tokio::sync::{broadcast, mpsc};
 
 use crate::core::DownloadTask;
 use crate::crawler::Progress;
+use crate::i18n::ts_for_locale;
 use crate::models::FinishedReason;
 use crate::utils::time::now_unix_secs;
 
 use super::super::{TaskStatus, WebState};
 use crate::utils::lock::mutex_or;
 use crate::web::SharedState;
-use crate::web::error::read_state_or_json;
+use crate::web::error::{WebError, read_state_or_json};
+use crate::web::locale::Locale;
 
 /// `GET /api/tasks` 响应体。
 #[derive(Serialize)]
@@ -121,11 +122,9 @@ fn task_to_info(task: &DownloadTask) -> TaskInfo {
 ///
 /// # Errors
 ///
-/// - `(INTERNAL_SERVER_ERROR, ...)` — `state.tasks` 锁被毒化
+/// - `WebError::Internal("internal_error")` (500) — `state.tasks` 锁被毒化
 #[tracing::instrument(name = "web::tasks_list", skip_all)]
-pub async fn tasks_list(
-    State(state): State<SharedState>,
-) -> Result<Json<Vec<TaskInfo>>, (StatusCode, String)> {
+pub async fn tasks_list(State(state): State<SharedState>) -> Result<Json<Vec<TaskInfo>>, WebError> {
     let tasks = read_state_or_json("tasks_list", || mutex_or("tasks_list", &state.tasks))?;
     let mut result: Vec<TaskInfo> = tasks.iter().map(task_to_info).collect();
     drop(tasks);
@@ -137,32 +136,34 @@ pub async fn tasks_list(
 /// `POST /api/tasks/{id}/cancel` — 翻 `cancelling` 标记 + 触发 `CancelToken`。
 ///
 /// 任务已结束 (任何 `finished.is_some()`) → 409 提示前端"无法取消已结束任务",
-/// 避免 cancel 按钮无响应却显示 ok。
+/// 避免 cancel 按钮无响应却显示 ok。错误文案走 [`crate::i18n::ts_for_locale`] 按
+/// 请求 locale 翻译（`WebError` 的 `IntoResponse` 路径）。
 ///
 /// # Errors
 ///
-/// - `(NOT_FOUND, ...)` — 任务 id 不存在或 `task.cancel` 不存在
-/// - `(CONFLICT, "任务已结束,无法取消")` — 任务已终结
-/// - `(INTERNAL_SERVER_ERROR, ...)` — 锁被毒化
+/// - `WebError::NotFound` (404) — 任务 id 不存在或 `task.cancel` 不存在
+/// - `WebError::TaskAlreadyFinished` (409) — 任务已终结（`code: 3006`）
+/// - `WebError::Internal` (500) — 锁被毒化
 #[tracing::instrument(name = "web::task_cancel", skip_all, fields(task_id = id))]
 pub async fn task_cancel(
+    Locale(locale): Locale,
     State(state): State<SharedState>,
     Path(id): Path<u64>,
-) -> Result<&'static str, (StatusCode, String)> {
+) -> Result<String, WebError> {
     let cancel;
     {
         let mut tasks =
             read_state_or_json("task_cancel", || mutex_or("task_cancel", &state.tasks))?;
         let Some(task) = tasks.iter_mut().find(|t| t.id == id) else {
-            return Err((StatusCode::NOT_FOUND, "任务未找到".to_string()));
+            return Err(WebError::NotFound(""));
         };
         // 任务已结束: cancel 不会触发任何 crawler 状态变化 (crawler 已退出)。
         // 返回 409 提示前端"无法取消已结束任务", 避免前端 cancel 按钮无响应却显示 ok。
         if task.finished.is_some() {
-            return Err((StatusCode::CONFLICT, "任务已结束,无法取消".to_string()));
+            return Err(WebError::TaskAlreadyFinished);
         }
         let Some(c) = task.cancel.as_ref() else {
-            return Err((StatusCode::NOT_FOUND, "任务未找到".to_string()));
+            return Err(WebError::NotFound(""));
         };
         // 立即翻 cancelling 标记 (前端可显示"正在取消..."), cancel.cancel() 同步触发
         // crawler 内部的 CancelToken; crawler 下一次 progress tick 看到 cancel 时会发
@@ -172,7 +173,9 @@ pub async fn task_cancel(
         drop(tasks);
     }
     cancel.cancel();
-    Ok("已取消")
+    // Success body 是 plain text —— 前端 `apiFetch<void>` 不读 body, 但保留 localed
+    // 文案便于调试 (`curl -X POST` 直接看到中文/英文反馈)。
+    Ok(ts_for_locale(locale, "WebErrors.task_cancelled"))
 }
 
 /// `DELETE /api/tasks/{id}` — 从 `state.tasks` 移除一条任务记录, **不动磁盘**。
@@ -192,24 +195,25 @@ pub async fn task_cancel(
 ///
 /// # Errors
 ///
-/// - `(NOT_FOUND, ...)` — 任务 id 不存在
-/// - `(INTERNAL_SERVER_ERROR, ...)` — 锁被毒化
+/// - `WebError::NotFound` (404) — 任务 id 不存在
+/// - `WebError::Internal` (500) — 锁被毒化
 #[tracing::instrument(name = "web::task_delete", skip_all, fields(task_id = id))]
 pub async fn task_delete(
+    Locale(locale): Locale,
     State(state): State<SharedState>,
     Path(id): Path<u64>,
-) -> Result<&'static str, (StatusCode, String)> {
+) -> Result<String, WebError> {
     let mut tasks = read_state_or_json("task_delete", || mutex_or("task_delete", &state.tasks))?;
     let initial_len = tasks.len();
     tasks.retain(|t| t.id != id);
     if tasks.len() == initial_len {
-        return Err((StatusCode::NOT_FOUND, "任务未找到".to_string()));
+        return Err(WebError::NotFound(""));
     }
     drop(tasks);
     if let Ok(tasks) = mutex_or("task_delete:save", &state.tasks) {
         let _ = crate::db::save_with_trim(&state.tasks_file, &tasks);
     }
-    Ok("已删除任务")
+    Ok(ts_for_locale(locale, "WebErrors.task_deleted"))
 }
 
 /// 单个下载任务的 per-task drain。

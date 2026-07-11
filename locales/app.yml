@@ -10,7 +10,7 @@
 # - 顶层 key 大写（Nav / App / Settings / …）
 # - 每 key 下面是 locale → text 映射
 #
-# 3 种语言：zh-CN / zh-HK / en
+# 3 种语言：zh-CN / zh-TW / en
 
 _version: 2
 
@@ -18,23 +18,23 @@ Nav:
   search:
     en: Search
     zh-CN: 搜索下载
-    zh-HK: 搜尋下載
+    zh-TW: 搜尋下載
   tasks:
     en: Tasks
     zh-CN: 下载任务
-    zh-HK: 下載任務
+    zh-TW: 下載任務
   library:
     en: Library
     zh-CN: 本地书库
-    zh-HK: 本地書庫
+    zh-TW: 本地書庫
   sources:
     en: Sources
     zh-CN: 书源管理
-    zh-HK: 書源管理
+    zh-TW: 書源管理
   settings:
     en: Settings
     zh-CN: 设置
-    zh-HK: 設定
+    zh-TW: 設定
 
 # 跨页面 / 跨模块的通用 toast 文案（不归属某个页面）。
 Toasts:
@@ -42,426 +42,426 @@ Toasts:
   delete_source_ok:
     en: "Source #{id} deleted"
     zh-CN: "已删除书源 #{id}"
-    zh-HK: "已刪除書源 #{id}"
+    zh-TW: "已刪除書源 #{id}"
   delete_source_missing:
     en: "Source no longer exists"
     zh-CN: 书源已不存在
-    zh-HK: 書源已不存在
+    zh-TW: 書源已不存在
   switch_source_file_ok:
     en: "Switched to rule file: {filename}"
     zh-CN: "已切换到书源文件: {filename}"
-    zh-HK: "已切換到書源檔案: {filename}"
+    zh-TW: "已切換到書源檔案: {filename}"
   no_sources_detected:
     en: "No sources detected"
     zh-CN: 没有可检测的书源
-    zh-HK: 沒有可檢測的書源
+    zh-TW: 沒有可檢測的書源
   clear_tasks_ok:
     en: "Cleared {n} record(s)"
     zh-CN: "已清除 {n} 条记录"
-    zh-HK: "已清除 {n} 條記錄"
+    zh-TW: "已清除 {n} 條記錄"
   # 更新检查（AppModel::update_state → events::drain 翻译）
   update_up_to_date:
     en: "Already up to date"
     zh-CN: 已是最新版本
-    zh-HK: 已是最新版本
+    zh-TW: 已是最新版本
   update_new_version:
     en: "New version {ver} available"
     zh-CN: "新版本 {ver} 可用"
-    zh-HK: "新版本 {ver} 可用"
+    zh-TW: "新版本 {ver} 可用"
   update_failed:
     en: "Update check failed: {err}"
     zh-CN: "检查更新失败: {err}"
-    zh-HK: "檢查更新失敗: {err}"
+    zh-TW: "檢查更新失敗: {err}"
   # 本地书库扫描 / 删除错误文案（AppModel::library.last_error 值）
   library_scan_failed:
     en: "Failed to scan download directory: {err}"
     zh-CN: "扫描下载目录失败: {err}"
-    zh-HK: "掃描下載目錄失敗: {err}"
+    zh-TW: "掃描下載目錄失敗: {err}"
   library_delete_ok:
     en: "Deleted: {file}"
     zh-CN: "已删除: {file}"
-    zh-HK: "已刪除: {file}"
+    zh-TW: "已刪除: {file}"
   library_delete_unknown:
     en: "(unknown)"
     zh-CN: "(未知)"
-    zh-HK: "(未知)"
+    zh-TW: "(未知)"
   library_delete_failed:
     en: "Delete failed: {err}"
     zh-CN: "删除失败: {err}"
-    zh-HK: "刪除失敗: {err}"
+    zh-TW: "刪除失敗: {err}"
 
 App:
   title:
     en: So Novel
     zh-CN: So Novel
-    zh-HK: So Novel
+    zh-TW: So Novel
 
 Settings:
   page:
     general:
       en: General
       zh-CN: 常规
-      zh-HK: 常規
+      zh-TW: 常規
     crawl:
       en: Crawl
       zh-CN: 抓取
-      zh-HK: 擷取
+      zh-TW: 擷取
     proxy:
       en: Proxy
       zh-CN: 代理
-      zh-HK: 代理
+      zh-TW: 代理
     about:
       en: About
       zh-CN: 关于
-      zh-HK: 關於
+      zh-TW: 關於
   group:
     appearance:
       en: Appearance
       zh-CN: 外观
-      zh-HK: 外觀
+      zh-TW: 外觀
     network:
       en: Network
       zh-CN: 网络
-      zh-HK: 網路
+      zh-TW: 網路
     download:
       en: Download
       zh-CN: 下载
-      zh-HK: 下載
+      zh-TW: 下載
     source:
       en: Sources
       zh-CN: 书源
-      zh-HK: 書源
+      zh-TW: 書源
     concurrency:
       en: "Concurrency & interval"
       zh-CN: 并发与间隔
-      zh-HK: 並發與間隔
+      zh-TW: 並發與間隔
     retry:
       en: Retry
       zh-CN: 重试
-      zh-HK: 重試
+      zh-TW: 重試
     http_proxy:
       en: "HTTP proxy"
       zh-CN: "HTTP 代理"
-      zh-HK: "HTTP 代理"
+      zh-TW: "HTTP 代理"
     cookie:
       en: Cookie
       zh-CN: Cookie
-      zh-HK: Cookie
+      zh-TW: Cookie
     info:
       en: Info
       zh-CN: 信息
-      zh-HK: 資訊
+      zh-TW: 資訊
   item:
     theme_kind:
       en: "Theme mode"
       zh-CN: 主题模式
-      zh-HK: 主題模式
+      zh-TW: 主題模式
     theme_static:
       en: Theme
       zh-CN: 主题
-      zh-HK: 主題
+      zh-TW: 主題
     theme_dyn_mode:
       en: "Light / dark"
       zh-CN: 浅色/深色
-      zh-HK: 淺色/深色
+      zh-TW: 淺色/深色
     theme_light:
       en: "Light theme"
       zh-CN: 浅色主题
-      zh-HK: 淺色主題
+      zh-TW: 淺色主題
     theme_dark:
       en: "Dark theme"
       zh-CN: 深色主题
-      zh-HK: 深色主題
+      zh-TW: 深色主題
     language:
       en: "Interface language"
       zh-CN: 界面语言
-      zh-HK: 界面語言
+      zh-TW: 界面語言
     font_size:
       en: "Font size"
       zh-CN: 字号
-      zh-HK: 字號
+      zh-TW: 字號
     gh_proxy:
       en: "GitHub proxy"
       zh-CN: "GitHub 代理"
-      zh-HK: "GitHub 代理"
+      zh-TW: "GitHub 代理"
     cf_bypass:
       en: "Cloudflare bypass URL"
       zh-CN: "Cloudflare bypass URL"
-      zh-HK: "Cloudflare bypass URL"
+      zh-TW: "Cloudflare bypass URL"
     download_path:
       en: "Download directory"
       zh-CN: 下载目录
-      zh-HK: 下載目錄
+      zh-TW: 下載目錄
     default_format:
       en: "Default format"
       zh-CN: 默认格式
-      zh-HK: 預設格式
+      zh-TW: 預設格式
     txt_encoding:
       en: "TXT encoding"
       zh-CN: "TXT 编码"
-      zh-HK: "TXT 編碼"
+      zh-TW: "TXT 編碼"
     preserve_chapter_cache:
       en: "Preserve chapter cache"
       zh-CN: 保留章节缓存目录
-      zh-HK: 保留章節快取目錄
+      zh-TW: 保留章節快取目錄
     search_limit:
       en: "Search result limit"
       zh-CN: 搜索条数上限
-      zh-HK: 搜尋條數上限
+      zh-TW: 搜尋條數上限
     search_filter:
       en: "Filter & sort by similarity"
       zh-CN: 过滤低相似度并排序搜索结果
-      zh-HK: 過濾低相似度並排序搜尋結果
+      zh-TW: 過濾低相似度並排序搜尋結果
     concurrency:
       en: "Concurrency limit"
       zh-CN: 并发上限
-      zh-HK: 並發上限
+      zh-TW: 並發上限
     min_interval:
       en: "Request interval min (ms)"
       zh-CN: 请求间隔最小 (ms)
-      zh-HK: 請求間隔最小 (ms)
+      zh-TW: 請求間隔最小 (ms)
     max_interval:
       en: "Request interval max (ms)"
       zh-CN: 请求间隔最大 (ms)
-      zh-HK: 請求間隔最大 (ms)
+      zh-TW: 請求間隔最大 (ms)
     enable_retry:
       en: "Enable retry on failure"
       zh-CN: 启用失败重试
-      zh-HK: 啟用失敗重試
+      zh-TW: 啟用失敗重試
     max_retries:
       en: "Max retry count"
       zh-CN: 最大重试次数
-      zh-HK: 最大重試次數
+      zh-TW: 最大重試次數
     retry_min_interval:
       en: "Retry interval min (ms)"
       zh-CN: 重试间隔最小 (ms)
-      zh-HK: 重試間隔最小 (ms)
+      zh-TW: 重試間隔最小 (ms)
     retry_max_interval:
       en: "Retry interval max (ms)"
       zh-CN: 重试间隔最大 (ms)
-      zh-HK: 重試間隔最大 (ms)
+      zh-TW: 重試間隔最大 (ms)
     proxy_enabled:
       en: "Enable HTTP proxy"
       zh-CN: 启用 HTTP 代理
-      zh-HK: 啟用 HTTP 代理
+      zh-TW: 啟用 HTTP 代理
     proxy_host:
       en: "Proxy host"
       zh-CN: 代理 Host
-      zh-HK: 代理 Host
+      zh-TW: 代理 Host
     proxy_port:
       en: "Proxy port"
       zh-CN: 代理 Port
-      zh-HK: 代理 Port
+      zh-TW: 代理 Port
     qidian_cookie:
       en: "Qidian cookie"
       zh-CN: 起点 Cookie
-      zh-HK: 起點 Cookie
+      zh-TW: 起點 Cookie
     version:
       en: Version
       zh-CN: 版本
-      zh-HK: 版本
+      zh-TW: 版本
     check_update:
       en: "Check for updates"
       zh-CN: 检查更新
-      zh-HK: 檢查更新
+      zh-TW: 檢查更新
     open_github:
       en: "Project homepage"
       zh-CN: 项目主页
-      zh-HK: 項目主頁
+      zh-TW: 項目主頁
   desc:
     theme_kind:
       en: "Dynamic: pick light & dark themes, switch by system/appearance. Static: fix one theme, ignore light/dark."
       zh-CN: 动态：分别选浅色/深色主题，按系统或强制明暗切换；静态：固定一个主题，不随明暗变化。改动即时生效。
-      zh-HK: 動態：分別選淺色/深色主題，按系統或強制明暗切換；靜態：固定一個主題，不隨明暗變化。改動即時生效。
+      zh-TW: 動態：分別選淺色/深色主題，按系統或強制明暗切換；靜態：固定一個主題，不隨明暗變化。改動即時生效。
     theme_static:
       en: "The fixed theme used in static mode."
       zh-CN: 静态模式下使用的固定主题。
-      zh-HK: 靜態模式下使用的固定主題。
+      zh-TW: 靜態模式下使用的固定主題。
     theme_dyn_mode:
       en: "When to switch between the light and dark theme (dynamic mode only)."
       zh-CN: 动态模式下浅色/深色主题的切换方式。
-      zh-HK: 動態模式下淺色/深色主題的切換方式。
+      zh-TW: 動態模式下淺色/深色主題的切換方式。
     theme_light:
       en: "Light theme used in dynamic mode."
       zh-CN: 动态模式下的浅色主题。
-      zh-HK: 動態模式下的淺色主題。
+      zh-TW: 動態模式下的淺色主題。
     theme_dark:
       en: "Dark theme used in dynamic mode."
       zh-CN: 动态模式下的深色主题。
-      zh-HK: 動態模式下的深色主題。
+      zh-TW: 動態模式下的深色主題。
     language:
       en: "App UI and downloaded chapter text language. Takes effect after restart."
       zh-CN: 应用 UI 与下载章节正文的语言。重启后生效。
-      zh-HK: 應用 UI 與下載章節正文的語言。重啟後生效。
+      zh-TW: 應用 UI 與下載章節正文的語言。重啟後生效。
     font_size:
       en: "UI font size (12–24px); the whole app scales proportionally. Changes take effect immediately."
       zh-CN: 界面字号（12–24px），整个应用等比缩放。改动即时生效。
-      zh-HK: 界面字號（12–24px），整個應用等比縮放。改動即時生效。
+      zh-TW: 界面字號（12–24px），整個應用等比縮放。改動即時生效。
     gh_proxy:
       en: "Used to speed up release / raw asset downloads; leave empty to use default."
       zh-CN: 用于加速 release / raw 资源下载；留空走默认。
-      zh-HK: 用於加速 release / raw 資源下載；留空走預設。
+      zh-TW: 用於加速 release / raw 資源下載；留空走預設。
     cf_bypass:
       en: "Base URL of a local or remote sarperavci/CloudflareBypass service."
       zh-CN: 本地或远端 sarperavci/CloudflareBypass 服务的 base URL。
-      zh-HK: 本地或遠端 sarperavci/CloudflareBypass 服務的 base URL。
+      zh-TW: 本地或遠端 sarperavci/CloudflareBypass 服務的 base URL。
     download_path:
       en: "Directory to save downloaded book files (absolute path)."
       zh-CN: 书籍文件保存目录（绝对路径）。
-      zh-HK: 書籍檔案儲存目錄（絕對路徑）。
+      zh-TW: 書籍檔案儲存目錄（絕對路徑）。
     default_format:
       en: "Output format for downloaded files."
       zh-CN: 下载完成的文件输出格式。
-      zh-HK: 下載完成的檔案輸出格式。
+      zh-TW: 下載完成的檔案輸出格式。
     txt_encoding:
       en: "Character encoding for TXT export; pick GBK for older devices."
       zh-CN: TXT 导出的字符编码；如需兼容旧设备选 GBK。
-      zh-HK: TXT 匯出的字元編碼；如需相容舊裝置選 GBK。
+      zh-TW: TXT 匯出的字元編碼；如需相容舊裝置選 GBK。
     preserve_chapter_cache:
       en: "When disabled, re-downloading will fetch all chapters from scratch."
       zh-CN: 关闭后下次重新下载会全章节再爬。
-      zh-HK: 關閉後下次重新下載會全章節再爬。
+      zh-TW: 關閉後下次重新下載會全章節再爬。
     search_limit:
       en: "Max results per source; -1 means unlimited."
       zh-CN: 每源最多返回条数；-1 表示不限。
-      zh-HK: 每源最多返回條數；-1 表示不限。
+      zh-TW: 每源最多返回條數；-1 表示不限。
     search_filter:
       en: "Filter out low-similarity results and sort by title/author similarity."
       zh-CN: 根据标题/作者相似度过滤无效结果并按相似度排序。
-      zh-HK: 根據標題/作者相似度過濾無效結果並按相似度排序。
+      zh-TW: 根據標題/作者相似度過濾無效結果並按相似度排序。
     concurrency:
       en: "-1 = auto: min(50, chapter count)."
       zh-CN: "-1 = 自动：min(50, 章节数)。"
-      zh-HK: "-1 = 自動：min(50, 章節數)。"
+      zh-TW: "-1 = 自動：min(50, 章節數)。"
     min_interval:
       en: "min ≤ max; wait a random ms in [min..max] before each chapter fetch."
       zh-CN: min ≤ max；抓每章前等 [min..max] 内的随机 ms。
-      zh-HK: min ≤ max；擷取每章前等 [min..max] 內的隨機 ms。
+      zh-TW: min ≤ max；擷取每章前等 [min..max] 內的隨機 ms。
     max_interval:
       en: "See the previous item."
       zh-CN: 见上一项。
-      zh-HK: 見上一項。
+      zh-TW: 見上一項。
     enable_retry:
       en: "On chapter fetch failure, retry with the intervals below; give up after max retries."
       zh-CN: 章节下载失败时按下方间隔重试，达到上限后视为放弃。
-      zh-HK: 章節下載失敗時按下方間隔重試，達到上限後視為放棄。
+      zh-TW: 章節下載失敗時按下方間隔重試，達到上限後視為放棄。
     max_retries:
       en: "0 = no retry."
       zh-CN: "0 = 不重试。"
-      zh-HK: "0 = 不重試。"
+      zh-TW: "0 = 不重試。"
     retry_min_interval:
       en: "min ≤ max; wait a random ms in [min..max] between retries."
       zh-CN: min ≤ max；两次重试之间等 [min..max] 内的随机 ms。
-      zh-HK: min ≤ max；兩次重試之間等 [min..max] 內的隨機 ms。
+      zh-TW: min ≤ max；兩次重試之間等 [min..max] 內的隨機 ms。
     retry_max_interval:
       en: "See the previous item."
       zh-CN: 见上一项。
-      zh-HK: 見上一項。
+      zh-TW: 見上一項。
     proxy_enabled:
       en: "Route all outbound requests through this proxy (source fetch + health check)."
       zh-CN: 所有出站请求都走此代理（书源 fetch + 测速）。
-      zh-HK: 所有出站請求都走此代理（書源 fetch + 測速）。
+      zh-TW: 所有出站請求都走此代理（書源 fetch + 測速）。
     proxy_host:
       en: "Proxy server address (IP or domain)."
       zh-CN: 代理服务器地址（IP 或域名）。
-      zh-HK: 代理伺服器地址（IP 或域名）。
+      zh-TW: 代理伺服器地址（IP 或域名）。
     proxy_port:
       en: "Proxy server port (1-65535)."
       zh-CN: 代理服务器端口（1-65535）。
-      zh-HK: 代理伺服器埠（1-65535）。
+      zh-TW: 代理伺服器埠（1-65535）。
     qidian_cookie:
       en: "Required for qidian.com / qidian overseas sites; can be ignored for other sources."
       zh-CN: 起点中文网 / 起点海外站点需要；其它书源可忽略。
-      zh-HK: 起點中文網 / 起點海外站點需要；其它書源可忽略。
+      zh-TW: 起點中文網 / 起點海外站點需要；其它書源可忽略。
     version:
       en: "So Novel — Rust + GPUI desktop client."
       zh-CN: "So Novel — Rust + GPUI 桌面客户端。"
-      zh-HK: "So Novel — Rust + GPUI 桌面用戶端。"
+      zh-TW: "So Novel — Rust + GPUI 桌面用戶端。"
     check_update:
       en: "Query GitHub releases for a newer version."
       zh-CN: 查询 GitHub releases 是否有新版本。
-      zh-HK: 查詢 GitHub releases 是否有新版本。
+      zh-TW: 查詢 GitHub releases 是否有新版本。
     open_github:
       en: "Source code / issue tracker / latest release are all on GitHub."
       zh-CN: 项目源码 / 问题反馈 / 最新版本都在 GitHub。
-      zh-HK: 項目源碼 / 問題回饋 / 最新版本都在 GitHub。
+      zh-TW: 項目源碼 / 問題回饋 / 最新版本都在 GitHub。
   placeholder:
     qidian_cookie:
       en: "w_tsfp=..."
       zh-CN: "w_tsfp=..."
-      zh-HK: "w_tsfp=..."
+      zh-TW: "w_tsfp=..."
   # 按钮 label（SettingsField::render 渲染的 button 上的 label）
   check_update_button:
     en: "Check GitHub for updates"
     zh-CN: 检查 GitHub 最新版本
-    zh-HK: 檢查 GitHub 最新版本
+    zh-TW: 檢查 GitHub 最新版本
   download_new_version_button:
     en: "Download v{ver}"
     zh-CN: 下载新版 v{ver}
-    zh-HK: 下載新版 v{ver}
+    zh-TW: 下載新版 v{ver}
   open_github_button:
     en: "Open GitHub"
     zh-CN: 访问 GitHub
-    zh-HK: 訪問 GitHub
+    zh-TW: 訪問 GitHub
   # 「下载目录」右侧「浏览」按钮弹出的原生文件夹选择器标题。
   choose_download_dir_dialog_title:
     en: "Select download directory"
     zh-CN: 选择下载目录
-    zh-HK: 選擇下載目錄
+    zh-TW: 選擇下載目錄
   # dropdown option 标签（Language 应用语言）
   option:
     language:
       zh_cn:
         en: "简体中文"
         zh-CN: 简体中文
-        zh-HK: 简体中文
+        zh-TW: 简体中文
       zh_tw:
         en: "繁體中文"
         zh-CN: 繁體中文
-        zh-HK: 繁體中文
+        zh-TW: 繁體中文
       en:
         en: English
         zh-CN: English
-        zh-HK: English
+        zh-TW: English
     theme_kind:
       dynamic:
         en: "Dynamic (light & dark)"
         zh-CN: "动态（浅色/深色）"
-        zh-HK: "動態（淺色/深色）"
+        zh-TW: "動態（淺色/深色）"
       static:
         en: Static
         zh-CN: 静态
-        zh-HK: 靜態
+        zh-TW: 靜態
     theme_dyn_mode:
       system:
         en: "Follow system"
         zh-CN: 跟随系统
-        zh-HK: 跟隨系統
+        zh-TW: 跟隨系統
       light:
         en: Light
         zh-CN: 浅色
-        zh-HK: 淺色
+        zh-TW: 淺色
       dark:
         en: Dark
         zh-CN: 深色
-        zh-HK: 深色
+        zh-TW: 深色
   language_restart_dialog:
     title:
       en: "Restart to apply"
       zh-CN: 重启以应用语言
-      zh-HK: 重啟以套用語言
+      zh-TW: 重啟以套用語言
     message:
       en: "Language change takes effect after restart. Restart now?"
       zh-CN: 语言切换需重启后生效，是否立即重启？
-      zh-HK: 語言切換需重啟後生效，是否立即重啟？
+      zh-TW: 語言切換需重啟後生效，是否立即重啟？
     restart_button:
       en: "Restart now"
       zh-CN: 立即重启
-      zh-HK: 立即重啟
+      zh-TW: 立即重啟
     later_button:
       en: Later
       zh-CN: 稍后
-      zh-HK: 稍後
+      zh-TW: 稍後
 
 # 本地书库页面（`src/gpui_app/pages/library.rs`）所有面向用户的字符串。
 # 设计要点：
@@ -473,217 +473,217 @@ Tasks:
   page_title:
     en: Downloads
     zh-CN: 下载任务
-    zh-HK: 下載任務
+    zh-TW: 下載任務
   # Header subtitle —— 不再堆统计数字，给一句功能描述
   subtitle:
     en: "Track download progress; manage completed / failed / cancelled tasks"
     zh-CN: "查看下载进度，管理已完成 / 失败 / 已取消的任务"
-    zh-HK: "查看下載進度，管理已完成 / 失敗 / 已取消的任務"
+    zh-TW: "查看下載進度，管理已完成 / 失敗 / 已取消的任務"
   # 按状态分组的过滤按钮 label —— 后缀由 Rust 端拼上数量（如 "已完成 10"）。
   # 「全部」是第一个按钮，不限状态。
   tab:
     all:
       en: All
       zh-CN: 全部
-      zh-HK: 全部
+      zh-TW: 全部
     running:
       en: Running
       zh-CN: 运行中
-      zh-HK: 運行中
+      zh-TW: 運行中
     completed:
       en: Completed
       zh-CN: 已完成
-      zh-HK: 已完成
+      zh-TW: 已完成
     failed:
       en: Failed
       zh-CN: 失败
-      zh-HK: 失敗
+      zh-TW: 失敗
     cancelled:
       en: Cancelled
       zh-CN: 已取消
-      zh-HK: 已取消
+      zh-TW: 已取消
   # 删除单条任务的二次确认 Dialog
   delete_dialog:
     title:
       en: "Confirm delete"
       zh-CN: 确认删除
-      zh-HK: 確認刪除
+      zh-TW: 確認刪除
     # {book_name} 占位符
     message:
       en: 'Delete the download record for "{book_name}"? This action cannot be undone.'
       zh-CN: "确定要删除《{book_name}》的下载记录吗？此操作无法撤销。"
-      zh-HK: "確定要刪除《{book_name}》的下載記錄嗎？此操作無法撤銷。"
+      zh-TW: "確定要刪除《{book_name}》的下載記錄嗎？此操作無法撤銷。"
     confirm_button:
       en: Delete
       zh-CN: 删除
-      zh-HK: 刪除
+      zh-TW: 刪除
     cancel_button:
       en: Cancel
       zh-CN: 取消
-      zh-HK: 取消
+      zh-TW: 取消
   # 下载完成 toast（事件桥接在 events::drain 检测 was_running → finished 转换时推）。
   # {book_name} 占位符。
   download_finished:
     completed:
       en: 'Download completed: "{book_name}"'
       zh-CN: "下载完成：《{book_name}》"
-      zh-HK: "下載完成：《{book_name}》"
+      zh-TW: "下載完成：《{book_name}》"
     failed:
       en: 'Download failed: "{book_name}"'
       zh-CN: "下载失败：《{book_name}》"
-      zh-HK: "下載失敗：《{book_name}》"
+      zh-TW: "下載失敗：《{book_name}》"
     cancelled:
       en: 'Download cancelled: "{book_name}"'
       zh-CN: "下载已取消：《{book_name}》"
-      zh-HK: "下載已取消：《{book_name}》"
+      zh-TW: "下載已取消：《{book_name}》"
   # 空态：每个过滤各自的空态文案
   empty:
     all:
       title:
         en: "No downloads yet"
         zh-CN: 暂无下载任务
-        zh-HK: 暫無下載任務
+        zh-TW: 暫無下載任務
       subtitle:
         en: "Downloads from the Search page will appear here."
         zh-CN: 从「搜索下载」页面下载一本书后，任务会出现在这里。
-        zh-HK: 從「搜尋下載」頁面下載一本書後，任務會出現在這裡。
+        zh-TW: 從「搜尋下載」頁面下載一本書後，任務會出現在這裡。
     running:
       title:
         en: "No active downloads"
         zh-CN: 没有正在下载的任务
-        zh-HK: 沒有正在下載的任務
+        zh-TW: 沒有正在下載的任務
       subtitle:
         en: "New downloads will show up here."
         zh-CN: 从「搜索下载」页面下载一本书后，运行中的任务会出现在这里。
-        zh-HK: 從「搜尋下載」頁面下載一本書後，運行中的任務會出現在這裡。
+        zh-TW: 從「搜尋下載」頁面下載一本書後，運行中的任務會出現在這裡。
     completed:
       title:
         en: "No completed downloads"
         zh-CN: 没有已完成的任务
-        zh-HK: 沒有已完成的任務
+        zh-TW: 沒有已完成的任務
       subtitle:
         en: "Finished downloads will be listed here."
         zh-CN: 下载完成的任务会出现在这里。
-        zh-HK: 下載完成的任務會出現在這裡。
+        zh-TW: 下載完成的任務會出現在這裡。
     failed:
       title:
         en: "No failed downloads"
         zh-CN: 没有失败的任务
-        zh-HK: 沒有失敗的任務
+        zh-TW: 沒有失敗的任務
       subtitle:
         en: "Failed downloads will be listed here for retry."
         zh-CN: 下载失败的任务会出现在这里，可重试。
-        zh-HK: 下載失敗的任務會出現在這裡，可重試。
+        zh-TW: 下載失敗的任務會出現在這裡，可重試。
     cancelled:
       title:
         en: "No cancelled downloads"
         zh-CN: 没有已取消的任务
-        zh-HK: 沒有已取消的任務
+        zh-TW: 沒有已取消的任務
       subtitle:
         en: "Cancelled downloads will be listed here."
         zh-CN: 已取消的任务会出现在这里。
-        zh-HK: 已取消的任務會出現在這裡。
+        zh-TW: 已取消的任務會出現在這裡。
   # 任务卡片内的状态标签 / 按钮文案（原硬编码）
   card:
     status:
       running:
         en: Running
         zh-CN: 运行中
-        zh-HK: 運行中
+        zh-TW: 運行中
       completed:
         en: Completed
         zh-CN: 已完成
-        zh-HK: 已完成
+        zh-TW: 已完成
       failed:
         en: Failed
         zh-CN: 失败
-        zh-HK: 失敗
+        zh-TW: 失敗
       cancelled:
         en: Cancelled
         zh-CN: 已取消
-        zh-HK: 已取消
+        zh-TW: 已取消
       unknown:
         en: Unknown
         zh-CN: 未知
-        zh-HK: 未知
+        zh-TW: 未知
     # "源 #{id} · {completed}/{total} 章 · 失败 {failed}" 拼接用的片段
     meta:
       chapters:
         en: "{completed}/{total} chapters"
         zh-CN: "{completed}/{total} 章"
-        zh-HK: "{completed}/{total} 章"
+        zh-TW: "{completed}/{total} 章"
       failed:
         en: "Failed {n}"
         zh-CN: "失败 {n}"
-        zh-HK: "失敗 {n}"
+        zh-TW: "失敗 {n}"
       # 下载开始时间 label（"开始: YYYY-MM-DD HH:MM"）
       started:
         en: "Started"
         zh-CN: 开始
-        zh-HK: 開始
+        zh-TW: 開始
       # 时间格式化失败 / 0 时的 fallback
       time_unknown:
         en: "(unknown time)"
         zh-CN: "(未知时间)"
-        zh-HK: "(未知時間)"
+        zh-TW: "(未知時間)"
     # "第 {idx} 章 — {title}" / "原因: {reason}" —— 失败明细 Dialog 里复用
     failure_chapter:
       en: "Chapter {idx} — {title}"
       zh-CN: "第 {idx} 章 — {title}"
-      zh-HK: "第 {idx} 章 — {title}"
+      zh-TW: "第 {idx} 章 — {title}"
     failure_reason:
       en: "Reason: {reason}"
       zh-CN: "原因: {reason}"
-      zh-HK: "原因: {reason}"
+      zh-TW: "原因: {reason}"
     # 动作按钮
     action:
       cancel:
         en: Cancel
         zh-CN: 取消
-        zh-HK: 取消
+        zh-TW: 取消
       cancelling:
         en: "Cancelling..."
         zh-CN: "正在取消..."
-        zh-HK: "正在取消..."
+        zh-TW: "正在取消..."
       retry:
         en: Retry
         zh-CN: 重试
-        zh-HK: 重試
+        zh-TW: 重試
       open:
         en: Open
         zh-CN: 打开
-        zh-HK: 打開
+        zh-TW: 打開
       reveal:
         en: Location
         zh-CN: 位置
-        zh-HK: 位置
+        zh-TW: 位置
       delete:
         en: Delete
         zh-CN: 删除
-        zh-HK: 刪除
+        zh-TW: 刪除
       # 失败明细按钮（{n} = 失败章节数）—— 点击弹 Dialog 列出失败章节 + 原因。
       # 不再用行内 Accordion（List 等高 + overflow_hidden 撑不开）。
       failures:
         en: "Failed ({n})"
         zh-CN: "失败明细 ({n})"
-        zh-HK: "失敗明細 ({n})"
+        zh-TW: "失敗明細 ({n})"
   # 失败明细 Dialog（只读列表，跟书籍详情 Dialog 同款：右上角 X 关闭 + Esc + overlay 点击）
   failures_dialog:
     # {book_name} 占位符
     title:
       en: 'Failed chapters — "{book_name}"'
       zh-CN: "失败章节明细——《{book_name}》"
-      zh-HK: "失敗章節明細——《{book_name}》"
+      zh-TW: "失敗章節明細——《{book_name}》"
   # 无书名时的 fallback
   fallback_unknown_book:
     en: "(unknown book)"
     zh-CN: "(未知书名)"
-    zh-HK: "(未知書名)"
+    zh-TW: "(未知書名)"
   # 无作者时的 fallback（书名行里显示）
   fallback_unknown_author:
     en: "(unknown author)"
     zh-CN: "(未知作者)"
-    zh-HK: "(未知作者)"
+    zh-TW: "(未知作者)"
 
 # - 文件扩展名（epub/txt/zip/html/pdf）是技术名词，**不翻译**——用户看的就是扩展名，
 #   翻译成"电子出版物"反而看不懂。
@@ -691,80 +691,80 @@ Library:
   page_title:
     en: Library
     zh-CN: 本地书库
-    zh-HK: 本地書庫
+    zh-TW: 本地書庫
   # PageHeader 副标题前缀，最终拼接为 "下载目录: <path>"。
   download_path_label:
     en: "Download directory"
     zh-CN: 下载目录
-    zh-HK: 下載目錄
+    zh-TW: 下載目錄
   filter_placeholder:
     en: "Filter by file name…"
     zh-CN: 按文件名过滤…
-    zh-HK: 按檔案名稱過濾…
+    zh-TW: 按檔案名稱過濾…
   filter_option_all:
     en: All
     zh-CN: 全部
-    zh-HK: 全部
+    zh-TW: 全部
   action_open:
     en: Open
     zh-CN: 打开
-    zh-HK: 打開
+    zh-TW: 打開
   action_reveal:
     en: Reveal
     zh-CN: 位置
-    zh-HK: 位置
+    zh-TW: 位置
   action_delete:
     en: Delete
     zh-CN: 删除
-    zh-HK: 刪除
+    zh-TW: 刪除
   empty_title:
     en: "Library is empty"
     zh-CN: 本地书库为空
-    zh-HK: 本地書庫為空
+    zh-TW: 本地書庫為空
   empty_subtitle:
     en: "Download a book and it will appear here automatically."
     zh-CN: 下载一本书后，它会自动出现在这里。
-    zh-HK: 下載一本書後，它會自動出現在這裡。
+    zh-TW: 下載一本書後，它會自動出現在這裡。
   scan_failed:
     en: "Scan failed"
     zh-CN: "扫描失败"
-    zh-HK: "掃描失敗"
+    zh-TW: "掃描失敗"
   delete_dialog:
     title:
       en: "Confirm delete"
       zh-CN: 确认删除
-      zh-HK: 確認刪除
+      zh-TW: 確認刪除
     # {file_name} 占位符 —— 调用 `ts_fmt("Library.delete_dialog.message", &[(... )])` 替换。
     message:
       en: 'Are you sure you want to delete "{file_name}"? This action cannot be undone.'
       zh-CN: '确定要删除 "{file_name}" 吗？此操作无法撤销。'
-      zh-HK: '確定要刪除 "{file_name}" 嗎？此操作無法撤銷。'
+      zh-TW: '確定要刪除 "{file_name}" 嗎？此操作無法撤銷。'
     confirm_button:
       en: Delete
       zh-CN: 删除
-      zh-HK: 刪除
+      zh-TW: 刪除
     cancel_button:
       en: Cancel
       zh-CN: 取消
-      zh-HK: 取消
+      zh-TW: 取消
   fallback_unknown_filename:
     en: "(unknown file name)"
     zh-CN: "(未知文件名)"
-    zh-HK: "(未知檔案名稱)"
+    zh-TW: "(未知檔案名稱)"
   # 修改时间列的 fallback（format_unix_secs 的三个错误分支）。
   time:
     unknown:
       en: "(unknown)"
       zh-CN: "(未知)"
-      zh-HK: "(未知)"
+      zh-TW: "(未知)"
     invalid:
       en: "(invalid time)"
       zh-CN: "(无效时间)"
-      zh-HK: "(無效時間)"
+      zh-TW: "(無效時間)"
     format_failed:
       en: "(format failed)"
       zh-CN: "(格式化失败)"
-      zh-HK: "(格式化失敗)"
+      zh-TW: "(格式化失敗)"
 
 # 书源管理页面（`src/gpui_app/pages/sources.rs`）所有面向用户的字符串。
 # 设计要点：
@@ -777,154 +777,154 @@ Sources:
   page_title:
     en: "Source management"
     zh-CN: 书源管理
-    zh-HK: 書源管理
+    zh-TW: 書源管理
   page_subtitle:
     en: "Enable / disable, connectivity check, JSON import"
     zh-CN: 启用/禁用、连通性检测、JSON 导入
-    zh-HK: 啟用/停用、連通性偵測、JSON 匯入
+    zh-TW: 啟用/停用、連通性偵測、JSON 匯入
   active_file:
     label:
       en: "Rule file"
       zh-CN: "书源文件"
-      zh-HK: "書源檔案"
+      zh-TW: "書源檔案"
   filter:
     placeholder:
       en: "Filter by name or URL…"
       zh-CN: 按名称或 URL 过滤…
-      zh-HK: 按名稱或 URL 過濾…
+      zh-TW: 按名稱或 URL 過濾…
   status:
     all:
       en: All
       zh-CN: 全部
-      zh-HK: 全部
+      zh-TW: 全部
     enabled:
       en: Enabled
       zh-CN: 启用
-      zh-HK: 啟用
+      zh-TW: 啟用
     disabled:
       en: Disabled
       zh-CN: 禁用
-      zh-HK: 停用
+      zh-TW: 停用
   stat:
     total:
       en: Total
       zh-CN: 总数
-      zh-HK: 總數
+      zh-TW: 總數
     enabled:
       en: Enabled
       zh-CN: 启用
-      zh-HK: 啟用
+      zh-TW: 啟用
     disabled:
       en: Disabled
       zh-CN: 禁用
-      zh-HK: 停用
+      zh-TW: 停用
     available:
       en: Available
       zh-CN: 可用
-      zh-HK: 可用
+      zh-TW: 可用
   health:
     progress:
       en: "checked"
       zh-CN: 已检测
-      zh-HK: 已偵測
+      zh-TW: 已偵測
     # StatusBadge 显示在书源行右侧的 4 种标签（对应 `health_status_label`）。
     not_tested:
       en: "Not tested"
       zh-CN: 未测
-      zh-HK: 未測
+      zh-TW: 未測
     error:
       en: Error
       zh-CN: 错误
-      zh-HK: 錯誤
+      zh-TW: 錯誤
     # 2xx 健康 —— 测速核心信号，只显示延迟（毫秒）。
     latency:
       en: "{ms}ms"
       zh-CN: "{ms} ms"
-      zh-HK: "{ms} ms"
+      zh-TW: "{ms} ms"
     # 3xx/4xx/5xx —— 状态码 + 延迟并存，方便区分「慢但通」和「不通」。
     http_status:
       en: "HTTP {status} · {ms}ms"
       zh-CN: "HTTP {status} · {ms} ms"
-      zh-HK: "HTTP {status} · {ms} ms"
+      zh-TW: "HTTP {status} · {ms} ms"
     # `format!("{:?}", err)` 退化分支：源错误但没 HTTP 响应（如 DNS 失败 / 超时）。
     # 调试输出太长不适合塞进 StatusBadge，用一句简短"网络错误"代替。
     network_error:
       en: "Network error"
       zh-CN: 网络错误
-      zh-HK: 網路錯誤
+      zh-TW: 網路錯誤
   error:
     load_failed:
       en: "Rule load failed"
       zh-CN: 规则加载失败
-      zh-HK: 規則載入失敗
+      zh-TW: 規則載入失敗
   empty:
     title:
       en: "No sources imported"
       zh-CN: 暂未导入任何书源
-      zh-HK: 暫未匯入任何書源
+      zh-TW: 暫未匯入任何書源
     subtitle:
       en: "Click the Add button on the top right to select a JSON file."
       zh-CN: 点击右上角「添加」选择 JSON 文件。
-      zh-HK: 點擊右上角「添加」選擇 JSON 檔案。
+      zh-TW: 點擊右上角「添加」選擇 JSON 檔案。
   action:
     add:
       en: Add
       zh-CN: 添加
-      zh-HK: 添加
+      zh-TW: 添加
     health_check:
       en: "Health check"
       zh-CN: 测速
-      zh-HK: 測速
+      zh-TW: 測速
     delete:
       en: Delete
       zh-CN: 删除
-      zh-HK: 刪除
+      zh-TW: 刪除
   # 书源行内小 tag 的标签（language 已经是 rule.language 不需要翻译；
   # need_proxy 这个 tag 是 UI 提示文案要翻译）。
   tag:
     proxy:
       en: Proxy
       zh-CN: 代理
-      zh-HK: 代理
+      zh-TW: 代理
   delete_dialog:
     title:
       en: "Confirm delete"
       zh-CN: 确认删除书源
-      zh-HK: 確認刪除書源
+      zh-TW: 確認刪除書源
     # {source_url} —— 书源的 URL（唯一标识）。
     message:
       en: "Are you sure you want to delete this source? This action cannot be undone."
       zh-CN: "确定要删除此书源吗？此操作无法撤销。"
-      zh-HK: "確定要刪除此書源嗎？此操作無法撤銷。"
+      zh-TW: "確定要刪除此書源嗎？此操作無法撤銷。"
     confirm:
       en: Delete
       zh-CN: 删除
-      zh-HK: 刪除
+      zh-TW: 刪除
     cancel:
       en: Cancel
       zh-CN: 取消
-      zh-HK: 取消
+      zh-TW: 取消
   # 导入 JSON 后的反馈 toast。
   # {filename} 导入的文件名。
   import:
     result:
       en: "Imported source file: {filename}"
       zh-CN: "已导入书源文件: {filename}"
-      zh-HK: "已匯入書源檔案: {filename}"
+      zh-TW: "已匯入書源檔案: {filename}"
   # 「添加」按钮弹出的 rfd 文件选择器文案。
   add_source:
     dialog_title:
       en: "Select source JSON file"
       zh-CN: 选择书源 JSON 文件
-      zh-HK: 選擇書源 JSON 檔案
+      zh-TW: 選擇書源 JSON 檔案
     filter_json:
       en: "JSON rule files"
       zh-CN: JSON 规则文件
-      zh-HK: JSON 規則檔案
+      zh-TW: JSON 規則檔案
     filter_all:
       en: "All files"
       zh-CN: 所有文件
-      zh-HK: 所有檔案
+      zh-TW: 所有檔案
 
 # 搜索下载页面（`src/gpui_app/pages/search.rs`）所有面向用户的字符串。
 # 设计要点：
@@ -939,49 +939,49 @@ Search:
   page_title:
     en: "Search & Download"
     zh-CN: 搜索下载
-    zh-HK: 搜尋下載
+    zh-TW: 搜尋下載
   page_subtitle:
     en: "Search by book name or author; aggregate or single-source"
     zh-CN: "按书名 / 作者搜索；支持单源或全源聚合搜索"
-    zh-HK: "按書名 / 作者搜尋；支援單源或全源聚合搜尋"
+    zh-TW: "按書名 / 作者搜尋；支援單源或全源聚合搜尋"
   filter:
     placeholder:
       en: "Book name / author"
       zh-CN: 书名 / 作者
-      zh-HK: 書名 / 作者
+      zh-TW: 書名 / 作者
   source:
     # 工具栏 "书源" label —— 在 Select 前的静态文字
     label:
       en: Source
       zh-CN: 书源
-      zh-HK: 書源
+      zh-TW: 書源
     # Select 第一项 "聚合搜索"（value="all" = 跨书源搜索 = None）。
     # 切语言后下次展开下拉自动更新。
     aggregate:
       en: "All sources"
       zh-CN: "聚合搜索"
-      zh-HK: "聚合搜尋"
+      zh-TW: "聚合搜尋"
   action:
     # 工具栏右侧搜索按钮
     search:
       en: Search
       zh-CN: 搜索
-      zh-HK: 搜尋
+      zh-TW: 搜尋
     # 行内选章按钮 label + 不可用提示 toast 消息
     select_chapters:
       en: "Select Chapters"
       zh-CN: 选章
-      zh-HK: 選章
+      zh-TW: 選章
     # 行内全本按钮 label
     download_whole:
       en: "Whole Book"
       zh-CN: 全本
-      zh-HK: 全本
+      zh-TW: 全本
     # 全本下载成功后的 success toast 标题
     download_started:
       en: "Download queued"
       zh-CN: "已派下载任务"
-      zh-HK: "已派下載任務"
+      zh-TW: "已派下載任務"
   # 选章下载 Dialog：行内"选章"按钮 → 拉 TOC → confirm Dialog 输入起止章节 → 按范围下载。
   # 用 gpui-component Dialog .confirm()（OK=下载 / Cancel=取消），反应式读 toc_cache。
   range:
@@ -989,97 +989,97 @@ Search:
     title:
       en: "Select Chapters to Download"
       zh-CN: "选择下载章节"
-      zh-HK: "選擇下載章節"
+      zh-TW: "選擇下載章節"
     # 起止章节输入 label
     start:
       en: Start
       zh-CN: 起始
-      zh-HK: 起始
+      zh-TW: 起始
     end:
       en: End
       zh-CN: 结束
-      zh-HK: 結束
+      zh-TW: 結束
     # "共 N 章" 的 N 占位符文案
     total:
       en: "{n} chapters in total"
       zh-CN: "共 {n} 章"
-      zh-HK: "共 {n} 章"
+      zh-TW: "共 {n} 章"
     # 选中范围预览行 label
     preview:
       en: Selected
       zh-CN: 选中
-      zh-HK: 選中
+      zh-TW: 選中
     # TOC 还在拉的占位
     loading:
       en: "Loading chapter list…"
       zh-CN: "正在获取章节列表…"
-      zh-HK: "正在取得章節列表…"
+      zh-TW: "正在取得章節列表…"
     # TOC 拉取失败
     failed:
       en: "Failed to load chapter list"
       zh-CN: "章节列表获取失败"
-      zh-HK: "章節列表取得失敗"
+      zh-TW: "章節列表取得失敗"
     # 范围无效（非数字 / start>end / 超界）toast
     invalid:
       en: "Please enter a valid chapter range"
       zh-CN: "请输入有效的章节范围"
-      zh-HK: "請輸入有效的章節範圍"
+      zh-TW: "請輸入有效的章節範圍"
     # confirm Dialog 的 OK 按钮（=开始下载）
     confirm:
       en: Download
       zh-CN: 下载
-      zh-HK: 下載
+      zh-TW: 下載
     # confirm Dialog 的 Cancel 按钮
     cancel:
       en: Cancel
       zh-CN: 取消
-      zh-HK: 取消
+      zh-TW: 取消
     # 章节名为空时的 fallback（显示在预览里）
     no_title:
       en: "(no title)"
       zh-CN: "(无标题)"
-      zh-HK: "(無標題)"
+      zh-TW: "(無標題)"
   empty:
     title:
       en: "Enter a keyword to start searching"
       zh-CN: "输入关键词开始搜索"
-      zh-HK: "輸入關鍵詞開始搜尋"
+      zh-TW: "輸入關鍵詞開始搜尋"
     subtitle:
       en: "Search by book name or author; single-source reduces network requests."
       zh-CN: "按书名或作者搜索；选单源可减少网络请求。"
-      zh-HK: "按書名或作者搜尋；選單源可減少網絡請求。"
+      zh-TW: "按書名或作者搜尋；選單源可減少網絡請求。"
   source_status:
     # 每个源 status badge 上的"等待"标签（其他状态走原 SourceStatus::Ok/Err 文案）
     pending:
       en: Pending
       zh-CN: 等待
-      zh-HK: 等待
+      zh-TW: 等待
     # "N 条" 的"条"字（Ok(n) 时拼成 "5 条"）
     format:
       en: results
       zh-CN: 条
-      zh-HK: 條
+      zh-TW: 條
   result:
     # r.author 为 None 时的 fallback
     unknown_author:
       en: "(Unknown)"
       zh-CN: "(未知作者)"
-      zh-HK: "(未知作者)"
+      zh-TW: "(未知作者)"
     # r.latest_chapter 为 None 时的 fallback
     no_latest:
       en: "(No latest chapter)"
       zh-CN: "(无最新章节)"
-      zh-HK: "(無最新章節)"
+      zh-TW: "(無最新章節)"
     # 源 id badge: "源 #{id}" —— {id} 占位符由 ts_fmt 替换
     source:
       en: "Source #{id}"
       zh-CN: "源 #{id}"
-      zh-HK: "源 #{id}"
+      zh-TW: "源 #{id}"
     # r.source_name 为空时的 fallback（行内书源名称列）
     unknown_source:
       en: "(Unknown source)"
       zh-CN: "(未知书源)"
-      zh-HK: "(未知書源)"
+      zh-TW: "(未知書源)"
   # 详情 Dialog：行内"详情"按钮 → 弹 Dialog 展示 SearchResult 全字段。
   # 用纯 Dialog（.title + .child），无 footer 按钮 —— 默认 close_button / overlay_closable /
   # keyboard(Esc) 全开，只读信息用 X / 点遮罩 / Esc 关闭即可，比塞个 OK 按钮更干净。
@@ -1088,72 +1088,72 @@ Search:
     action:
       en: Details
       zh-CN: 详情
-      zh-HK: 詳情
+      zh-TW: 詳情
     # Dialog 标题
     title:
       en: Book Details
       zh-CN: 书籍详情
-      zh-HK: 書籍詳情
+      zh-TW: 書籍詳情
     # 字段为 None / 空时的 fallback
     unknown:
       en: "(unknown)"
       zh-CN: "(未知)"
-      zh-HK: "(未知)"
+      zh-TW: "(未知)"
     # 封面占位文案（封面需异步拉详情拿 cover_url 再下载，期间 / 失败 / 无封面时显示）
     cover:
       # 正在加载（detail 或封面字节还在后台跑）
       loading:
         en: "Loading cover…"
         zh-CN: "封面加载中…"
-        zh-HK: "封面載入中…"
+        zh-TW: "封面載入中…"
       # 下载 / 解码失败
       failed:
         en: "Cover unavailable"
         zh-CN: "封面获取失败"
-        zh-HK: "封面取得失敗"
+        zh-TW: "封面取得失敗"
       # 书源详情里没有 cover_url
       none:
         en: "No cover"
         zh-CN: "无封面"
-        zh-HK: "無封面"
+        zh-TW: "無封面"
     # 字段 label（左侧固定宽度列）
     field:
       book_name:
         en: Title
         zh-CN: 书名
-        zh-HK: 書名
+        zh-TW: 書名
       author:
         en: Author
         zh-CN: 作者
-        zh-HK: 作者
+        zh-TW: 作者
       source:
         en: Source
         zh-CN: 书源
-        zh-HK: 書源
+        zh-TW: 書源
       category:
         en: Category
         zh-CN: 分类
-        zh-HK: 分類
+        zh-TW: 分類
       status:
         en: Status
         zh-CN: 状态
-        zh-HK: 狀態
+        zh-TW: 狀態
       latest_chapter:
         en: Latest
         zh-CN: 最新章节
-        zh-HK: 最新章節
+        zh-TW: 最新章節
       last_update:
         en: Updated
         zh-CN: 最近更新
-        zh-HK: 最近更新
+        zh-TW: 最近更新
       intro:
         en: Intro
         zh-CN: 简介
-        zh-HK: 簡介
+        zh-TW: 簡介
       url:
         en: URL
         zh-CN: 链接
-        zh-HK: 連結
+        zh-TW: 連結
 
 # CLI 帮助文案（clap `--help` / `-h` / 无子命令时显示）。
 # 数据源：`src/cli/args.rs::build_localized_command`。
@@ -1164,7 +1164,7 @@ Cli:
   about_short:
     en: "So Novel — batch novel downloader (CLI / GUI / WEB)"
     zh-CN: "So Novel — 简繁小说批量下载（CLI / GUI / WEB 三模）"
-    zh-HK: "So Novel — 簡繁小說批量下載（CLI / GUI / WEB 三模）"
+    zh-TW: "So Novel — 簡繁小說批量下載（CLI / GUI / WEB 三模）"
   about_long:
     en: |
       So Novel — batch novel downloader (CLI / GUI / WEB).
@@ -1185,7 +1185,7 @@ Cli:
       全局 flag（-v / -q）对所有子命令生效：
         -v, --verbose  打开内部 tracing 日志（默认静默）
         -q, --quiet    抑制逐章进度与失败源 dump，脚本管道友好
-    zh-HK: |
+    zh-TW: |
       So Novel — 簡繁小說批量下載（CLI / GUI / WEB 三模）
 
       不傳任何子命令 → 啟動 GPUI 桌面用戶端；
@@ -1216,7 +1216,7 @@ Cli:
         列出书源:                                            so-novel-rs sources list
         禁用书源:                                            so-novel-rs sources disable 5
         启用书源:                                            so-novel-rs sources enable 5
-    zh-HK: |
+    zh-TW: |
       Examples:
         啟動 GUI（無子命令）:                                so-novel-rs
         搜尋書源（聚合）:                                    so-novel-rs search 凡人修仙傳
@@ -1231,25 +1231,25 @@ Cli:
   verbose_help:
     en: "Enable internal tracing logs (silent by default, keeps --json clean)"
     zh-CN: "打开内部 tracing 日志（默认静默，避免污染 --json 等机器可读输出）"
-    zh-HK: "打開內部 tracing 日誌（預設靜默，避免污染 --json 等機器可讀輸出）"
+    zh-TW: "打開內部 tracing 日誌（預設靜默，避免污染 --json 等機器可讀輸出）"
   quiet_help:
     en: "Suppress per-chapter progress / failure dumps (script-friendly)"
     zh-CN: "抑制逐章进度 / 失败源 dump（脚本友好；纯 stdout 输出）"
-    zh-HK: "抑制逐章進度 / 失敗源 dump（腳本友善；純 stdout 輸出）"
+    zh-TW: "抑制逐章進度 / 失敗源 dump（腳本友善；純 stdout 輸出）"
   help_help:
     en: "Print help information"
     zh-CN: "打印帮助信息"
-    zh-HK: "打印說明資訊"
+    zh-TW: "打印說明資訊"
   version_help:
     en: "Print version"
     zh-CN: "打印版本号"
-    zh-HK: "打印版本"
+    zh-TW: "打印版本"
 
   # search 子命令
   search_about:
     en: "Search book sources (all enabled by default; --source for a single one)"
     zh-CN: "搜索书源。默认聚合搜索；--source 指定单源。"
-    zh-HK: "搜尋書源。預設聚合搜尋；--source 指定單源。"
+    zh-TW: "搜尋書源。預設聚合搜尋；--source 指定單源。"
   search_after_help:
     en: |
       Examples:
@@ -1261,7 +1261,7 @@ Cli:
         聚合搜索（默认走所有启用书源）:                       so-novel-rs search 凡人修仙传
         单源搜索（只走 #5 书源）:                             so-novel-rs search 凡人修仙传 --source 5
         限制每源条数 + JSON 输出:                             so-novel-rs search 凡人修仙传 --limit 20 --json
-    zh-HK: |
+    zh-TW: |
       Examples:
         聚合搜尋（預設走所有啟用書源）:                       so-novel-rs search 凡人修仙傳
         單源搜尋（只走 #5 書源）:                             so-novel-rs search 凡人修仙傳 --source 5
@@ -1269,25 +1269,25 @@ Cli:
   search_keyword_help:
     en: "Keyword (book title / author)"
     zh-CN: "关键词（书名 / 作者）"
-    zh-HK: "關鍵詞（書名 / 作者）"
+    zh-TW: "關鍵詞（書名 / 作者）"
   search_source_help:
     en: "Book source ID; default: aggregate all enabled sources"
     zh-CN: "指定书源 ID；省略则聚合所有启用书源"
-    zh-HK: "指定書源 ID；省略則聚合所有啟用書源"
+    zh-TW: "指定書源 ID；省略則聚合所有啟用書源"
   search_limit_help:
     en: "Max results per source (overrides config.toml search-limit)"
     zh-CN: "每源最多返回条数（覆盖 config.toml 的 search-limit）"
-    zh-HK: "每源最多返回條數（覆蓋 config.toml 的 search-limit）"
+    zh-TW: "每源最多返回條數（覆蓋 config.toml 的 search-limit）"
   search_json_help:
     en: "Output JSON to stdout (machine-readable; suppresses human-readable format)"
     zh-CN: "输出 JSON 到 stdout（机器可读，禁用人类可读格式）"
-    zh-HK: "輸出 JSON 到 stdout（機器可讀，停用人類可讀格式）"
+    zh-TW: "輸出 JSON 到 stdout（機器可讀，停用人類可讀格式）"
 
   # download 子命令
   download_about:
     en: "Download a whole book via its detail page URL (default full book; --from / --to for a chapter range)"
     zh-CN: "通过详情页 URL 下载整本书（默认全本；可用 --from / --to 指定章节范围）"
-    zh-HK: "透過詳情頁 URL 下載整本書（預設全本；可用 --from / --to 指定章節範圍）"
+    zh-TW: "透過詳情頁 URL 下載整本書（預設全本；可用 --from / --to 指定章節範圍）"
   download_after_help:
     en: |
       Examples:
@@ -1301,7 +1301,7 @@ Cli:
         指定书源 + 自定义输出目录:                           so-novel-rs download https://example.com/book/123.html --source 5 --output D:\novels
         下载章节 100-200（1-based）:                         so-novel-rs download https://example.com/book/123.html --from 100 --to 200
         抑制逐章进度，脚本模式:                              so-novel-rs download https://example.com/book/123.html --quiet
-    zh-HK: |
+    zh-TW: |
       Examples:
         全本下載:                                            so-novel-rs download https://example.com/book/123.html
         指定書源 + 自訂輸出目錄:                           so-novel-rs download https://example.com/book/123.html --source 5 --output D:\novels
@@ -1310,33 +1310,33 @@ Cli:
   download_url_help:
     en: "Detail page URL"
     zh-CN: "详情页 URL"
-    zh-HK: "詳情頁 URL"
+    zh-TW: "詳情頁 URL"
   download_source_help:
     en: "Book source ID (auto-matched from URL by default; falls back to the first enabled source)"
     zh-CN: "书源 ID（默认按 URL 自动匹配；未匹配则取第一个启用的源）"
-    zh-HK: "書源 ID（預設按 URL 自動匹配；未匹配則取第一個啟用的源）"
+    zh-TW: "書源 ID（預設按 URL 自動匹配；未匹配則取第一個啟用的源）"
   download_output_help:
     en: "Override config.toml download-path"
     zh-CN: "覆盖 config.toml 的下载目录"
-    zh-HK: "覆蓋 config.toml 的下載目錄"
+    zh-TW: "覆蓋 config.toml 的下載目錄"
   download_format_help:
     en: "Override config.toml output format (epub / txt / html)"
     zh-CN: "覆盖 config.toml 的输出格式（epub / txt / html）"
-    zh-HK: "覆蓋 config.toml 的輸出格式（epub / txt / html）"
+    zh-TW: "覆蓋 config.toml 的輸出格式（epub / txt / html）"
   download_from_help:
     en: "Start chapter (1-based; default: 1)"
     zh-CN: "起始章节（1-based；省略 → 1）"
-    zh-HK: "起始章節（1-based；省略 → 1）"
+    zh-TW: "起始章節（1-based；省略 → 1）"
   download_to_help:
     en: "End chapter (1-based; default: last; auto-truncated if out of range)"
     zh-CN: "结束章节（1-based；省略 → 最后一章；超出实际章数自动截断）"
-    zh-HK: "結束章節（1-based；省略 → 最後一章；超出實際章數自動截斷）"
+    zh-TW: "結束章節（1-based；省略 → 最後一章；超出實際章數自動截斷）"
 
   # sources 子命令
   sources_about:
     en: "Manage book sources: list / enable / disable"
     zh-CN: "书源管理：list / enable / disable"
-    zh-HK: "書源管理：list / enable / disable"
+    zh-TW: "書源管理：list / enable / disable"
   sources_after_help:
     en: |
       Examples:
@@ -1350,7 +1350,7 @@ Cli:
         列出所有书源（JSON）:                               so-novel-rs sources list --json
         禁用 #5 书源:                                       so-novel-rs sources disable 5
         启用 #5 书源:                                       so-novel-rs sources enable 5
-    zh-HK: |
+    zh-TW: |
       Examples:
         列出所有書源（人類可讀）:                           so-novel-rs sources list
         列出所有書源（JSON）:                               so-novel-rs sources list --json
@@ -1359,34 +1359,244 @@ Cli:
   sources_json_help:
     en: "Output JSON to stdout (list only; equivalent to `sources list --json`; legacy compat)"
     zh-CN: "输出 JSON 到 stdout（仅 list 有效；与 `sources list --json` 等价；旧版兼容）"
-    zh-HK: "輸出 JSON 到 stdout（僅 list 有效；與 `sources list --json` 等價；舊版相容）"
+    zh-TW: "輸出 JSON 到 stdout（僅 list 有效；與 `sources list --json` 等價；舊版相容）"
 
   # sources list
   sources_list_about:
     en: "List current sources"
     zh-CN: "列出当前书源"
-    zh-HK: "列出當前書源"
+    zh-TW: "列出當前書源"
   sources_list_json_help:
     en: "Output JSON to stdout (machine-readable; suppresses human-readable format)"
     zh-CN: "输出 JSON 到 stdout（机器可读，禁用人类可读格式）"
-    zh-HK: "輸出 JSON 到 stdout（機器可讀，停用人類可讀格式）"
+    zh-TW: "輸出 JSON 到 stdout（機器可讀，停用人類可讀格式）"
 
   # sources enable
   sources_enable_about:
     en: "Enable the source with the given ID (writes back sources_config.json)"
     zh-CN: "启用指定 ID 的书源（写回 sources_config.json）"
-    zh-HK: "啟用指定 ID 的書源（寫回 sources_config.json）"
+    zh-TW: "啟用指定 ID 的書源（寫回 sources_config.json）"
   sources_enable_id_help:
     en: "Book source ID"
     zh-CN: "书源 ID"
-    zh-HK: "書源 ID"
+    zh-TW: "書源 ID"
 
   # sources disable
   sources_disable_about:
     en: "Disable the source with the given ID (writes back sources_config.json)"
     zh-CN: "禁用指定 ID 的书源（写回 sources_config.json）"
-    zh-HK: "禁用指定 ID 的書源（寫回 sources_config.json）"
+    zh-TW: "禁用指定 ID 的書源（寫回 sources_config.json）"
   sources_disable_id_help:
     en: "Book source ID"
     zh-CN: "书源 ID"
-    zh-HK: "書源 ID"
+    zh-TW: "書源 ID"
+
+# Web API 错误消息（per-request locale）。
+#
+# 与 `src/web/error_code.rs::ErrorCode` 1:1 对应（38 原有 + 3 新增 3004/3005/3006）
+# + handler 中散落的内联字符串（6 个 success body / 资源标识 / HTTP status）。
+# 长度 ≤ 30 字（避免泄漏内部细节），由 `WebError::IntoResponse` 序列化进
+# `{ error: { code, message } }` body。3 种 locale 同步维护。
+WebErrors:
+  # ─────────── 1xxx 业务规则 ───────────
+  book_rule_missing:
+    en: "Book source is missing 'book' rule"
+    zh-CN: "书源没有 book 规则"
+    zh-TW: "書源沒有 book 規則"
+  missing_title_or_author:
+    en: "Book title or author is empty"
+    zh-CN: "详情页书名或作者为空"
+    zh-TW: "詳情頁書名或作者為空"
+  toc_rule_missing:
+    en: "Book source is missing 'toc' rule"
+    zh-CN: "书源没有 toc 规则"
+    zh-TW: "書源沒有 toc 規則"
+  chapter_rule_missing:
+    en: "Book source is missing 'chapter' rule"
+    zh-CN: "书源没有 chapter 规则"
+    zh-TW: "書源沒有 chapter 規則"
+  empty_content:
+    en: "Chapter content is empty"
+    zh-CN: "章节正文为空"
+    zh-TW: "章節正文為空"
+  search_disabled:
+    en: "Book source has search disabled"
+    zh-CN: "书源未启用搜索"
+    zh-TW: "書源未啟用搜尋"
+  source_disabled:
+    en: "Book source has been disabled"
+    zh-CN: "书源已被禁用"
+    zh-TW: "書源已被禁用"
+  empty_toc:
+    en: "Table of contents returned 0 chapters"
+    zh-CN: "目录返回 0 章"
+    zh-TW: "目錄返回 0 章"
+  invalid_range:
+    en: "Chapter range is invalid"
+    zh-CN: "章节范围非法"
+    zh-TW: "章節範圍非法"
+  cancelled:
+    en: "Task was cancelled"
+    zh-CN: "任务已取消"
+    zh-TW: "任務已取消"
+
+  # ─────────── 2xxx 解析/网络 ───────────
+  book_http:
+    en: "Book detail HTTP request failed"
+    zh-CN: "书源 HTTP 请求失败"
+    zh-TW: "書源 HTTP 請求失敗"
+  book_cloudflare:
+    en: "Book detail hit Cloudflare challenge"
+    zh-CN: "书源命中 Cloudflare 验证"
+    zh-TW: "書源命中 Cloudflare 驗證"
+  book_parse:
+    en: "Book detail HTML parse failed"
+    zh-CN: "详情页 HTML 解析失败"
+    zh-TW: "詳情頁 HTML 解析失敗"
+  toc_http:
+    en: "TOC HTTP request failed"
+    zh-CN: "目录 HTTP 请求失败"
+    zh-TW: "目錄 HTTP 請求失敗"
+  toc_cloudflare:
+    en: "TOC hit Cloudflare challenge"
+    zh-CN: "目录页命中 Cloudflare 验证"
+    zh-TW: "目錄頁命中 Cloudflare 驗證"
+  toc_parse:
+    en: "TOC HTML parse failed"
+    zh-CN: "目录页 HTML 解析失败"
+    zh-TW: "目錄頁 HTML 解析失敗"
+  chapter_http:
+    en: "Chapter HTTP request failed"
+    zh-CN: "章节 HTTP 请求失败"
+    zh-TW: "章節 HTTP 請求失敗"
+  chapter_cloudflare:
+    en: "Chapter hit Cloudflare challenge"
+    zh-CN: "章节页命中 Cloudflare 验证"
+    zh-TW: "章節頁命中 Cloudflare 驗證"
+  chapter_parse:
+    en: "Chapter HTML parse failed"
+    zh-CN: "章节 HTML 解析失败"
+    zh-TW: "章節 HTML 解析失敗"
+  search_http:
+    en: "Search HTTP request failed"
+    zh-CN: "搜索 HTTP 请求失败"
+    zh-TW: "搜尋 HTTP 請求失敗"
+  search_cloudflare:
+    en: "Search hit Cloudflare challenge"
+    zh-CN: "搜索页命中 Cloudflare 验证"
+    zh-TW: "搜尋頁命中 Cloudflare 驗證"
+  search_parse:
+    en: "Search result HTML parse failed"
+    zh-CN: "搜索结果 HTML 解析失败"
+    zh-TW: "搜尋結果 HTML 解析失敗"
+  crawler_client:
+    en: "HTTP client construction failed"
+    zh-CN: "HTTP 客户端构造失败"
+    zh-TW: "HTTP 客戶端構造失敗"
+  crawler_io:
+    en: "Task file IO failed"
+    zh-CN: "任务文件 IO 失败"
+    zh-TW: "任務檔案 IO 失敗"
+  crawler_export:
+    en: "Export failed"
+    zh-CN: "导出失败"
+    zh-TW: "匯出失敗"
+  crawler_book_aggregate:
+    en: "Book source parse failed"
+    zh-CN: "书源解析失败"
+    zh-TW: "書源解析失敗"
+  crawler_toc_aggregate:
+    en: "TOC parse failed"
+    zh-CN: "目录解析失败"
+    zh-TW: "目錄解析失敗"
+
+  # ─────────── 3xxx 资源 ───────────
+  not_found:
+    en: "Resource not found"
+    zh-CN: "资源未找到"
+    zh-TW: "資源未找到"
+  conflict:
+    en: "Resource state conflict"
+    zh-CN: "资源状态冲突"
+    zh-TW: "資源狀態衝突"
+  bad_request:
+    en: "Request parameter error"
+    zh-CN: "请求参数错误"
+    zh-TW: "請求參數錯誤"
+  # 3xxx 段新增的 3 个具体业务错误 (3004/3005/3006)
+  download_path_empty:
+    en: "Download path cannot be empty"
+    zh-CN: "下载路径不能为空"
+    zh-TW: "下載路徑不能為空"
+  download_path_not_dir:
+    en: "Download path is not an existing directory"
+    zh-CN: "下载路径不是已存在目录"
+    zh-TW: "下載路徑不是已存在目錄"
+  task_already_finished:
+    en: "Task has already finished; cannot cancel"
+    zh-CN: "任务已结束,无法取消"
+    zh-TW: "任務已結束,無法取消"
+
+  # ─────────── 4xxx 内部 ───────────
+  internal:
+    en: "Internal server error"
+    zh-CN: "内部错误"
+    zh-TW: "內部錯誤"
+  io_error:
+    en: "IO error"
+    zh-CN: "IO 错误"
+    zh-TW: "IO 錯誤"
+
+  # ─────────── 5xxx 导出 ───────────
+  export_empty_chapters_dir:
+    en: "Chapter cache directory is empty"
+    zh-CN: "章节缓存目录为空"
+    zh-TW: "章節快取目錄為空"
+  export_io:
+    en: "Export file IO failed"
+    zh-CN: "导出文件 IO 失败"
+    zh-TW: "匯出檔案 IO 失敗"
+  export_epub:
+    en: "EPUB generation failed"
+    zh-CN: "EPUB 生成失败"
+    zh-TW: "EPUB 生成失敗"
+  export_zip:
+    en: "ZIP packaging failed"
+    zh-CN: "ZIP 打包失败"
+    zh-TW: "ZIP 打包失敗"
+  export_encoding:
+    en: "Encoding conversion failed"
+    zh-CN: "编码转换失败"
+    zh-TW: "編碼轉換失敗"
+  export_pdf:
+    en: "PDF generation failed"
+    zh-CN: "PDF 生成失败"
+    zh-TW: "PDF 生成失敗"
+
+  # ─────────── 内联字符串 (handler 散落, 不是 ErrorCode) ───────────
+  # 这些 key 不在 ErrorCode 表里, 是 handler 各自 return 的 success body 或
+  # SourceTestResult.error 这类纯字符串字段。frontend 直接展示。
+  source_not_found:
+    en: "Book source not found"
+    zh-CN: "书源未找到"
+    zh-TW: "書源未找到"
+  task_not_found:
+    en: "Task not found"
+    zh-CN: "任务未找到"
+    zh-TW: "任務未找到"
+  task_cancelled:
+    en: "Cancelled"
+    zh-CN: "已取消"
+    zh-TW: "已取消"
+  task_deleted:
+    en: "Task deleted"
+    zh-CN: "已删除任务"
+    zh-TW: "已刪除任務"
+  library_deleted:
+    en: "Deleted"
+    zh-CN: "已删除"
+    zh-TW: "已刪除"
+  source_test_http_status:
+    en: "HTTP {status}"
+    zh-CN: "HTTP {status}"
+    zh-TW: "HTTP {status}"

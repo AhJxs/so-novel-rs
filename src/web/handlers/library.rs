@@ -2,18 +2,24 @@
 //!
 //! Phase 3.5：白名单 / `LibraryEntry` / `list_library_entries` / `open_download_file`
 //! 全部搬到 [`crate::core::library`]；这里只做 HTTP 层的取参 + 状态码映射。
+//!
+//! Phase 4.x：handler 错误统一走 [`crate::web::error::WebError`]，响应 body
+//! 经 [`crate::i18n::ts_for_locale`] 按请求 locale 翻译。成功 body（删除确认）
+//! 同样是按 locale 翻译的 localized 字符串。
 
 use axum::extract::{Path, Query, State};
-use axum::http::{StatusCode, header};
+use axum::http::header;
 use axum::response::{IntoResponse, Json, Response};
 use serde::Deserialize;
 
 use crate::core::library::{
     LibraryEntry, OpenFileError, list_library_entries, open_download_file, safe_file_path,
 };
+use crate::i18n::ts_for_locale;
 use crate::utils::fs::sanitize_filename;
-
-use super::super::SharedState;
+use crate::web::SharedState;
+use crate::web::error::WebError;
+use crate::web::locale::Locale;
 
 #[derive(Deserialize)]
 pub struct LibraryQuery {
@@ -31,22 +37,27 @@ pub async fn library_list(
     Json(entries)
 }
 
+/// `DELETE /api/library/:filename` — 删除本地下载文件。
+///
+/// 成功响应：localized "Deleted" / "已删除" / "已刪除" 字符串（plain text body）。
 pub async fn library_delete(
+    Locale(locale): Locale,
     State(state): State<SharedState>,
     Path(filename): Path<String>,
-) -> Result<&'static str, (StatusCode, String)> {
-    let path = safe_file_path(&state.download_path, &filename).map_err(map_open_err)?;
-    std::fs::remove_file(&path).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e}")))?;
-    Ok("已删除")
+) -> Result<String, WebError> {
+    let path = safe_file_path(&state.download_path, &filename)?;
+    std::fs::remove_file(&path)?;
+    Ok(ts_for_locale(locale, "WebErrors.library_deleted"))
 }
 
+/// `GET /api/files/:filename` — 下载书库文件（binary body）。
+///
+/// 错误经 `WebError` 渲染（status 400/404/500 + JSON envelope）。
 pub async fn file_download(
     State(state): State<SharedState>,
     Path(filename): Path<String>,
-) -> Result<Response, (StatusCode, String)> {
-    let (bytes, content_type) = open_download_file(&state.download_path, &filename)
-        .await
-        .map_err(map_open_err)?;
+) -> Result<Response, WebError> {
+    let (bytes, content_type) = open_download_file(&state.download_path, &filename).await?;
     // `Content-Disposition` 用 sanitize 后的文件名 —— 避免原始输入里的 `"` / `;` / `\r\n`
     // 破坏 header 格式（HTTP header injection）。
     let safe = sanitize_filename(&filename);
@@ -63,14 +74,15 @@ pub async fn file_download(
         .into_response())
 }
 
-/// `OpenFileError` → `(StatusCode, String)` 映射。`NotFound` → 404，其它 → 500。
-///
-/// Phase 3.8 web 内部清理阶段会进一步抽到 `web/error.rs` 的统一 mapping 里（届时
-/// `delete` / `download` / `tasks::cancel` 等 handler 共用），这里先局部抽出来避免
-/// `library_delete` + `file_download` 两处重复 match。
-fn map_open_err(e: OpenFileError) -> (StatusCode, String) {
-    match e {
-        OpenFileError::NotFound => (StatusCode::NOT_FOUND, e.to_string()),
-        OpenFileError::Io(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg),
+// ── WebError 自动装箱 ──────────────────────────────────────────
+//
+// `OpenFileError` → `WebError`：NotFound → 404 + WebErrors.not_found 翻译；
+// Io → 500 + WebErrors.internal 翻译（避免泄漏内部路径）。
+impl From<OpenFileError> for WebError {
+    fn from(e: OpenFileError) -> Self {
+        match e {
+            OpenFileError::NotFound => Self::NotFound(""),
+            OpenFileError::Io(_) => Self::Internal("io_error"),
+        }
     }
 }

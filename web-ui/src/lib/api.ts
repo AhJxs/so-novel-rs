@@ -24,8 +24,80 @@ import { consumeSse, type SseEvent } from './sse'
 const API_BASE = '/api'
 
 /**
+ * 后端错误响应（见 `src/web/error.rs::ErrorEnvelope`）。
+ * 形态: `{ "error": { "code": "bad_request", "code_id": "3004", "message": "..." } }`
+ * - `code`：`WebErrorKind` snake_case（错误大类）
+ * - `code_id`：稳定数字码（前端 dispatch 用，e.g. `3005` → download_path_not_dir）
+ * - `message`：按 Accept-Locale 翻译的本地化文案，直接展示给用户
+ */
+interface BackendErrorBody {
+  error: {
+    code: string
+    code_id: string
+    message: string
+  }
+}
+
+/**
+ * API 错误。扩展 `Error` 加 `code` / `codeId` —— 前端 dispatch 按这两个稳定字段，
+ * 不要按 `message` 字符串匹配（i18n 后 message 是 localized，无法 substring 匹配）。
+ *
+ * - `code`：`WebErrorKind` snake_case 短码（`bad_request` 等大类），供日志聚合
+ * - `codeId`：稳定数字码字符串（`"3005"` 等），供前端按业务类型 dispatch
+ * - `message`：localized user-facing 文案
+ */
+export class ApiError extends Error {
+  /** HTTP 状态码（4xx / 5xx），便于 UI 区分客户端错误 / 服务端错误 */
+  public readonly status: number
+  /** WebErrorKind snake_case 短码（错误大类） */
+  public readonly code: string
+  /** 业务层稳定数字码（前端 dispatch 用） */
+  public readonly codeId: string
+
+  constructor(message: string, opts: { status: number; code: string; codeId: string }) {
+    super(message)
+    this.name = 'ApiError'
+    this.status = opts.status
+    this.code = opts.code
+    this.codeId = opts.codeId
+  }
+}
+
+/**
+ * 从非-OK Response 抽出 ApiError。优先按后端 JSON envelope 解析；解析失败
+ * （非 JSON body / 旧后端 / 反代截断）降级成 `HTTP {status}` + 空 code/codeId。
+ */
+async function toApiError(res: Response): Promise<ApiError> {
+  const text = await res.text().catch(() => res.statusText)
+  // 尝试解析后端 envelope —— 任何一步失败都降级
+  let parsed: BackendErrorBody | null = null
+  try {
+    if (text) parsed = JSON.parse(text) as BackendErrorBody
+  } catch {
+    parsed = null
+  }
+  if (parsed?.error?.message) {
+    return new ApiError(parsed.error.message, {
+      status: res.status,
+      code: parsed.error.code ?? '',
+      codeId: parsed.error.code_id ?? '',
+    })
+  }
+  // 降级：非 JSON / envelope 缺字段 —— 用 HTTP status + 原始文本
+  return new ApiError(text || `HTTP ${res.status}`, {
+    status: res.status,
+    code: '',
+    codeId: '',
+  })
+}
+
+/**
  * JSON fetch 封装。统一拼 /api 前缀，处理错误与 JSON 反序列化。
  * 对返回 void 的接口，泛型传 void，函数返回 Promise<void>（仍会消费响应体）。
+ *
+ * 非-OK 响应抛 `ApiError`（带 code / codeId / localized message）—— 调用方可以
+ * `if (err.codeId === '3005')` 安全 dispatch，**不要** substring 匹配 message
+ * （i18n 后 message 是 localized 文本，会因 locale 变化）。
  */
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
@@ -33,8 +105,7 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
     ...init,
   })
   if (!res.ok) {
-    const text = await res.text().catch(() => res.statusText)
-    throw new Error(text || `HTTP ${res.status}`)
+    throw await toApiError(res)
   }
   if (init?.method === 'DELETE' || res.status === 204) {
     // 无响应体的接口：直接返回 undefined，避免 res.json() 报错。
@@ -312,8 +383,9 @@ async function consumeSseStream(
     throw err
   }
   if (!res.ok) {
-    const text = await res.text().catch(() => res.statusText)
-    const err = new Error(text || `HTTP ${res.status}`)
+    // SSE 入口的 HTTP 错误（一般是 4xx 早返）也走 envelope 解析 —— 后端把
+    // 锁毒化 / 业务校验失败的错误以 JSON envelope 返（不走 SSE 流）。
+    const err = await toApiError(res)
     onError?.(err)
     throw err
   }

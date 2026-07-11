@@ -4,7 +4,9 @@
 //! 与 CLI 模式同构，直接调用底层 crawler / parser / export 函数。
 
 mod error;
+mod error_code;
 mod handlers;
+pub mod locale;
 mod routes;
 
 #[cfg(test)]

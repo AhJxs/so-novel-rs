@@ -7,15 +7,22 @@
 //!
 //! 注: 本模块定义的 `SourceInfo` 是 web 层 DTO（仅 4 字段: id/name/url/enabled）,
 //! 与 `models::SourceInfo`（10 字段, 含 health / `delay_ms` / `http_status）不同`。
+//!
+//! ## i18n
+//!
+//! 错误走 [`WebError`]（按请求 locale 翻译 `message`，`code` 稳定不变）。
+//! `source_test` 端点始终返 200 + `SourceTestResult.error: Option<String>`，
+//! 该 string 自身是 localized text（书源未找到 / "HTTP {status}" 模板）。
 
 use axum::Json;
 use axum::extract::State;
-use axum::http::StatusCode;
 
 use crate::core::sources as core_sources;
+use crate::i18n::ts_for_locale;
 use crate::utils::lock::{rw_read_or, rw_write_or};
 use crate::web::SharedState;
-use crate::web::error::read_state_or_json;
+use crate::web::error::{WebError, read_state_or_json};
+use crate::web::locale::Locale;
 
 /// `GET /api/sources` / `POST /api/sources/{id}/toggle` 响应体。
 #[derive(serde::Serialize)]
@@ -30,11 +37,11 @@ pub struct SourceInfo {
 ///
 /// # Errors
 ///
-/// - `(INTERNAL_SERVER_ERROR, ...)` — `state.rules` 锁被毒化
+/// - `WebError::Internal` (500) — `state.rules` 锁被毒化
 #[tracing::instrument(name = "web::sources_list", skip_all)]
 pub async fn sources_list(
     State(state): State<SharedState>,
-) -> Result<Json<Vec<SourceInfo>>, (StatusCode, String)> {
+) -> Result<Json<Vec<SourceInfo>>, WebError> {
     let rules = read_state_or_json("sources_list", || rw_read_or("sources_list", &state.rules))?;
     let sources: Vec<SourceInfo> = rules
         .iter()
@@ -53,24 +60,22 @@ pub async fn sources_list(
 ///
 /// # Errors
 ///
-/// - `(NOT_FOUND, ...)` — 书源 id 不存在
-/// - `(INTERNAL_SERVER_ERROR, ...)` — 锁被毒化
+/// - `WebError::NotFound` (404) — 书源 id 不存在
+/// - `WebError::Internal` (500) — 锁被毒化
 #[tracing::instrument(name = "web::source_toggle", skip_all, fields(source_id = id))]
 pub async fn source_toggle(
     State(state): State<SharedState>,
     axum::extract::Path(id): axum::extract::Path<i32>,
-) -> Result<Json<SourceInfo>, (StatusCode, String)> {
-    // 1. 先从 rules 中取到目标书源的 URL（短锁，取完即放）。
+) -> Result<Json<SourceInfo>, WebError> {
     let url = {
         let rules = read_state_or_json("source_toggle:read_url", || {
             rw_read_or("source_toggle:read_url", &state.rules)
         })?;
         core_sources::find_rule_by_id(&rules, id)
             .map(|r| r.url.clone())
-            .ok_or_else(|| (StatusCode::NOT_FOUND, "书源未找到".to_string()))?
+            .ok_or(WebError::NotFound(""))?
     };
 
-    // 2. 切换 SourcesConfig 并持久化到磁盘。
     let (now_disabled, to_save) = {
         let mut sc = read_state_or_json("source_toggle:write_sc", || {
             rw_write_or("source_toggle:write_sc", &state.sources_config)
@@ -82,29 +87,22 @@ pub async fn source_toggle(
         tracing::warn!("保存 sources_config.json 失败: {e}");
     }
 
-    // 3. 同步更新内存中的 Rule.disabled。
     read_state_or_json("source_toggle:write_rules", || -> Result<(), String> {
-        // 用块作用域把 RwLock write guard 提前 drop, 避免 clippy
-        // `significant_drop_tightening` (guard 持有到闭包结尾).
+        let mut rules = rw_write_or("source_toggle:write_rules", &state.rules)?;
+        if core_sources::find_rule_by_id(&rules, id).is_some()
+            && let Some(r) = rules.iter_mut().find(|r| r.id == id)
         {
-            let mut rules = rw_write_or("source_toggle:write_rules", &state.rules)?;
-            // 借用 disjoint: find(&) 拿不可变借用只在条件判断作用域内；
-            // 立刻 drop，再 iter_mut 拿可变借用更新 disabled。
-            if core_sources::find_rule_by_id(&rules, id).is_some()
-                && let Some(r) = rules.iter_mut().find(|r| r.id == id)
-            {
-                r.disabled = now_disabled;
-            }
+            r.disabled = now_disabled;
         }
+        // 显式 drop, 让锁尽早释放 (clippy::significant_drop_tightening)
+        drop(rules);
         Ok(())
     })?;
 
-    // 4. 返回更新后的信息。
     let rules = read_state_or_json("source_toggle:read_back", || {
         rw_read_or("source_toggle:read_back", &state.rules)
     })?;
-    let r = core_sources::find_rule_by_id(&rules, id)
-        .ok_or_else(|| (StatusCode::NOT_FOUND, "书源未找到".to_string()))?;
+    let r = core_sources::find_rule_by_id(&rules, id).ok_or(WebError::NotFound(""))?;
     let info = SourceInfo {
         id: r.id,
         name: r.name.clone(),
@@ -127,16 +125,21 @@ pub struct SourceTestResult {
 
 /// `POST /api/sources/{id}/test` — 用 GET 探活, 10s 超时。
 ///
-/// 书源未找到 → 返回 `ok: false` 而非 404, 让前端统一按 JSON 渲染。
+/// 端点**始终**返 200 + JSON body —— 即使书源未找到，也用 `SourceTestResult.error`
+/// 字段报错（前端统一按 JSON 渲染，不必为这个 case 单独处理 404）。
+///
+/// `error` 字段是按 locale 翻译的文案（书源未找到 / "HTTP {status}" 模板 /
+/// reqwest 错误原文本）。
 ///
 /// # Errors
 ///
-/// - `(INTERNAL_SERVER_ERROR, ...)` — `state.rules` 锁被毒化
+/// - `WebError::Internal` (500) — `state.rules` 锁被毒化
 #[tracing::instrument(name = "web::source_test", skip_all, fields(source_id = id))]
 pub async fn source_test(
+    Locale(locale): Locale,
     State(state): State<SharedState>,
     axum::extract::Path(id): axum::extract::Path<i32>,
-) -> Result<Json<SourceTestResult>, (StatusCode, String)> {
+) -> Result<Json<SourceTestResult>, WebError> {
     let rule = {
         let rules = read_state_or_json("source_test", || rw_read_or("source_test", &state.rules))?;
         match core_sources::find_rule_by_id_cloned(&rules, id) {
@@ -145,7 +148,7 @@ pub async fn source_test(
                 return Ok(Json(SourceTestResult {
                     ok: false,
                     latency_ms: 0,
-                    error: Some("书源未找到".into()),
+                    error: Some(ts_for_locale(locale, "WebErrors.source_not_found")),
                 }));
             }
         }
@@ -171,7 +174,9 @@ pub async fn source_test(
                 error: if ok {
                     None
                 } else {
-                    Some(format!("HTTP {}", resp.status()))
+                    // `WebErrors.source_test_http_status` 在 3 locale 都是字面量
+                    // `"HTTP {status}"` —— 不是自然语言，所以 3 locale 输出相同。
+                    Some(ts_for_locale(locale, "WebErrors.source_test_http_status"))
                 },
             }
         }

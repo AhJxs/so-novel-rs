@@ -34,16 +34,19 @@ use std::sync::OnceLock;
 
 use crate::config::Language;
 
-/// 把 `Language` 映射到 `rust_i18n` 用的 locale 标签。
+/// 把 `Language` 映射到 `rust_i18n` 用的 locale 标签（**本项目自己**的 `app.yml`）。
 ///
-/// **这是项目里 `Language → locale 字符串` 的唯一权威映射**。
-/// `Language::as_str()` 返回的是 `toml_io` 持久化用的 `"zh-TW"` —— 跟 `app.yml`
-/// 实际的 locale 标签（`"zh-HK"`）不一致，所以 `load_config` 之后、任何
-/// `ts("Cli.xxx")` / `gpui_component::set_locale` 之前都要走这里。
+/// **这是项目里 `Language → locale 字符串` 的唯一权威映射**，给 `app.yml` 用的 key
+/// —— 也是 web 前端 `web-ui/src/i18n/locales/{en,zh-CN,zh-TW}.json` 文件名的
+/// 来源（前后端 locale tag 统一为 `en` / `zh-CN` / `zh-TW`）。
+///
+/// `Language::as_str()` 返回的是 `toml_io` 持久化用的 `"zh-TW"`，跟 `app.yml`
+/// 现在的 locale 标签（`"zh-TW"`）已经一致；但**跟 `gpui_component::set_locale`
+/// 接受的标签（`"zh-HK"`）不一致** —— 那个走 [`locale_for_gpui`]。
 ///
 /// 三种映射：
 /// - `SimplifiedChinese` → `"zh-CN"`
-/// - `TraditionalChinese` → `"zh-HK"`（**不是** `Language::as_str()` 返回的 `"zh-TW"`）
+/// - `TraditionalChinese` → `"zh-TW"`（**不是** gpui-component 用的 `"zh-HK"`）
 /// - `English` → `"en"`
 ///
 /// **位置历史**：原本在 `desktop::mod::locale_for`（仅 gui feature 编译）。
@@ -53,7 +56,28 @@ use crate::config::Language;
 pub const fn locale_for(lang: Language) -> &'static str {
     match lang {
         Language::SimplifiedChinese => "zh-CN",
-        Language::TraditionalChinese => "zh-HK",
+        Language::TraditionalChinese => "zh-TW",
+        Language::English => "en",
+    }
+}
+
+/// 把 `Language` 映射到 **gpui-component 接受**的 locale 标签。
+///
+/// gpui-component 0.5.1 用 `rust_i18n` + 自家 `locales/ui.yml`，**只支持 4 个 locale**：
+/// `en` / `zh-CN` / `zh-HK` / `it` —— **没有 `zh-TW`**。本项目的 `app.yml` 用 `zh-TW`，
+/// 但调用 `gpui_component::set_locale(...)` 时必须传 `zh-HK`，否则 gpui-component
+/// 会 fallback 到 `en`（传统中文用户看到英文 UI）。
+///
+/// 三种映射：
+/// - `SimplifiedChinese` → `"zh-CN"`（同 [`locale_for`]）
+/// - `TraditionalChinese` → `"zh-TW"`（同 [`locale_for`]）
+/// - `English` → `"en"`（同 [`locale_for`]）
+///
+/// 调用点只有 `src/desktop/mod.rs::run` 启动时一行 —— CLI / web 路径不碰 gpui-component。
+pub const fn locale_for_gpui(lang: Language) -> &'static str {
+    match lang {
+        Language::SimplifiedChinese => "zh-CN",
+        Language::TraditionalChinese => "zh-TW",
         Language::English => "en",
     }
 }
@@ -129,6 +153,23 @@ pub fn ts_cached(key: &'static str) -> TStr {
         map.insert(key, v.clone());
     }
     v
+}
+
+/// 翻译查找的 per-request 变体 —— 显式传 locale 字符串，**不**读 / **不**写
+/// `rust_i18n::locale()`（全局 `AtomicStr`，并发请求之间会互相踩）。
+///
+/// Web handler 入口拿到 `Locale` extractor 后，闭包里所有翻译都走这里 —— 保证
+/// A 请求 `Accept-Language: zh-CN` 和 B 请求 `Accept-Language: en` 各自走自己的
+/// locale，互不干扰。
+///
+/// 找不到 key 走与 `ts` 相同的 fallback —— 返回 key 字符串本身（开发期可见漏翻译）。
+///
+/// 性能特征：等价于 `ts`，但**每次调用都做 yaml hashmap lookup**（不进 `TS_CACHE`，
+/// 因为缓存按全局 locale 组织，per-request 缓存命中率低且易出错）。热路径（每请求
+/// 1-2 次翻译调用）完全可接受。
+pub fn ts_for_locale(locale: &str, key: &'static str) -> String {
+    crate::_rust_i18n_try_translate(locale, key)
+        .map_or_else(|| key.to_string(), std::borrow::Cow::into_owned)
 }
 
 /// 翻译查找 + 简单变量替换 —— `ts()` 的扩展，handle `{var}` 占位符。
@@ -222,8 +263,8 @@ mod tests {
         assert_eq!(ts("Nav.tasks"), "下载任务");
         assert_eq!(ts_fmt("Search.result.source", &[("id", "3")]), "源 #3");
 
-        // ---- zh-HK ----
-        rust_i18n::set_locale("zh-HK");
+        // ---- zh-TW：传统中文（本项目 app.yml 现在用 zh-TW，跟前端 JSON 文件名一致）----
+        rust_i18n::set_locale("zh-TW");
         assert_eq!(ts("Nav.tasks"), "下載任務");
         assert_eq!(ts_fmt("Search.result.source", &[("id", "3")]), "源 #3");
 
@@ -233,5 +274,152 @@ mod tests {
 
         // 恢复 en，避免污染其他测试。
         rust_i18n::set_locale("en");
+    }
+
+    // ── ts_for_locale：per-request 翻译查找 ─────────────────────────
+    //
+    // 与 `ts` 的关键区别：**不读 / 不写 `rust_i18n::locale()` 全局 atomic**，
+    // 避免并发请求之间 locale 互相踩。Web handler 热路径专用。
+
+    #[test]
+    fn ts_for_locale_does_not_mutate_global() {
+        rust_i18n::set_locale("en");
+        let before: String = (&*rust_i18n::locale()).to_string();
+        let _ = ts_for_locale("zh-CN", "Nav.tasks");
+        let after: String = (&*rust_i18n::locale()).to_string();
+        assert_eq!(before, after, "ts_for_locale 不应改全局 locale");
+        rust_i18n::set_locale("en");
+    }
+
+    #[test]
+    fn ts_for_locale_returns_correct_translation_per_locale() {
+        assert_eq!(ts_for_locale("en", "Nav.tasks"), "Tasks");
+        assert_eq!(ts_for_locale("zh-CN", "Nav.tasks"), "下载任务");
+        assert_eq!(ts_for_locale("zh-TW", "Nav.tasks"), "下載任務");
+    }
+
+    #[test]
+    fn ts_for_locale_falls_back_to_key_on_missing() {
+        assert_eq!(
+            ts_for_locale("en", "definitely.not.a.real.key"),
+            "definitely.not.a.real.key"
+        );
+    }
+
+    #[test]
+    fn ts_for_locale_independent_of_global_locale() {
+        // 全局是 en, 但传 zh-CN 应该返回中文 —— 证明不走全局
+        rust_i18n::set_locale("en");
+        assert_eq!(ts_for_locale("zh-CN", "Nav.tasks"), "下载任务");
+        rust_i18n::set_locale("en");
+    }
+
+    // ── locale_for vs locale_for_gpui：拆分映射 ───────────────────────
+    //
+    // `locale_for` 跟 web 前端 + app.yml 统一（zh-TW）；
+    // `locale_for_gpui` 跟 gpui-component 0.5.1 接受列表对齐（zh-HK）。
+    // 两个分开是为了不互相踩：web 路径走 locale_for，桌面路径走 locale_for_gpui。
+
+    #[test]
+    fn locale_for_matches_app_yml_locale_tags() {
+        assert_eq!(locale_for(Language::SimplifiedChinese), "zh-CN");
+        assert_eq!(locale_for(Language::TraditionalChinese), "zh-TW");
+        assert_eq!(locale_for(Language::English), "en");
+    }
+
+    // ── WebErrors 翻译表完整性 ─────────────────────────────────────
+    //
+    // 验证 app.yml 里 `WebErrors` 段的所有 47 个 key 在三 locale 下都能拿到非空
+    // 翻译（fallback 到 key 本身也算 miss，但必须非空以保证 frontend 至少能看到
+    // 一个稳定的字符串 id）。失败的 key 一定是手抄漏译。
+
+    /// 47 个 WebErrors key：38 原 ErrorCode + 3 新 3xxx (3004/3005/3006) + 6 内联。
+    /// 与 `src/web/error_code.rs::ErrorCode` 1:1 + handler 散落字符串。
+    const WEB_ERROR_KEYS: &[&str] = &[
+        // 1xxx 业务规则
+        "WebErrors.book_rule_missing",
+        "WebErrors.missing_title_or_author",
+        "WebErrors.toc_rule_missing",
+        "WebErrors.chapter_rule_missing",
+        "WebErrors.empty_content",
+        "WebErrors.search_disabled",
+        "WebErrors.source_disabled",
+        "WebErrors.empty_toc",
+        "WebErrors.invalid_range",
+        "WebErrors.cancelled",
+        // 2xxx 解析/网络
+        "WebErrors.book_http",
+        "WebErrors.book_cloudflare",
+        "WebErrors.book_parse",
+        "WebErrors.toc_http",
+        "WebErrors.toc_cloudflare",
+        "WebErrors.toc_parse",
+        "WebErrors.chapter_http",
+        "WebErrors.chapter_cloudflare",
+        "WebErrors.chapter_parse",
+        "WebErrors.search_http",
+        "WebErrors.search_cloudflare",
+        "WebErrors.search_parse",
+        "WebErrors.crawler_client",
+        "WebErrors.crawler_io",
+        "WebErrors.crawler_export",
+        "WebErrors.crawler_book_aggregate",
+        "WebErrors.crawler_toc_aggregate",
+        // 3xxx 资源
+        "WebErrors.not_found",
+        "WebErrors.conflict",
+        "WebErrors.bad_request",
+        "WebErrors.download_path_empty",
+        "WebErrors.download_path_not_dir",
+        "WebErrors.task_already_finished",
+        // 4xxx 内部
+        "WebErrors.internal",
+        "WebErrors.io_error",
+        // 5xxx 导出
+        "WebErrors.export_empty_chapters_dir",
+        "WebErrors.export_io",
+        "WebErrors.export_epub",
+        "WebErrors.export_zip",
+        "WebErrors.export_encoding",
+        "WebErrors.export_pdf",
+        // 内联字符串
+        "WebErrors.source_not_found",
+        "WebErrors.task_not_found",
+        "WebErrors.task_cancelled",
+        "WebErrors.task_deleted",
+        "WebErrors.library_deleted",
+        "WebErrors.source_test_http_status",
+    ];
+
+    #[test]
+    fn web_errors_translated_in_all_three_locales() {
+        // 47 个 key × 3 locale 必须都有非空翻译
+        for &key in WEB_ERROR_KEYS {
+            for locale in ["en", "zh-CN", "zh-TW"] {
+                let v = ts_for_locale(locale, key);
+                assert!(!v.is_empty(), "{key} 在 locale={locale} 翻译为空字符串");
+                assert_ne!(v, key, "{key} 在 locale={locale} 缺失（返回 key 本身）");
+            }
+        }
+    }
+
+    #[test]
+    fn web_errors_en_zh_cn_zh_tw_differ() {
+        // 抽查代表性 key：en / zh-CN / zh-TW 互不相同（防止 fallback 串味）。
+        // 注意 `source_test_http_status` 是 literal token "HTTP {status}"，三 locale
+        // 形式相同 —— 技术字符串，不参与本地化，所以跳过。
+        for key in [
+            "WebErrors.book_rule_missing",
+            "WebErrors.source_not_found",
+            "WebErrors.download_path_not_dir",
+            "WebErrors.task_already_finished",
+        ] {
+            let en = ts_for_locale("en", key);
+            let zh_cn = ts_for_locale("zh-CN", key);
+            let zh_tw = ts_for_locale("zh-TW", key);
+            assert_ne!(en, zh_cn, "{key}: en == zh-CN");
+            assert_ne!(en, zh_tw, "{key}: en == zh-TW");
+            assert_ne!(zh_cn, zh_tw, "{key}: zh-CN == zh-TW");
+        }
     }
 }

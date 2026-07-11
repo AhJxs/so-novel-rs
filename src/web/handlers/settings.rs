@@ -9,13 +9,12 @@
 
 use axum::Json;
 use axum::extract::State;
-use axum::http::StatusCode;
 use serde::{Deserialize, Serialize};
 
 use crate::config::AppConfig;
 use crate::utils::lock::{rw_read_or, rw_write_or};
 use crate::web::SharedState;
-use crate::web::error::read_state_or_json;
+use crate::web::error::{WebError, read_state_or_json};
 
 /// `GET /api/settings` 返回的脱敏 DTO。
 ///
@@ -102,11 +101,11 @@ pub struct SettingsUpdate {
 ///
 /// # Errors
 ///
-/// - `(INTERNAL_SERVER_ERROR, ...)` — `state.config` 锁被毒化
+/// - `WebError::Internal` (500) — `state.config` 锁被毒化
 #[tracing::instrument(name = "web::settings_get", skip_all)]
 pub async fn settings_get(
     State(state): State<SharedState>,
-) -> Result<Json<PublicSettings>, (StatusCode, String)> {
+) -> Result<Json<PublicSettings>, WebError> {
     let cfg = read_state_or_json("settings_get", || rw_read_or("settings_get", &state.config))?;
     Ok(Json(PublicSettings::from(&*cfg)))
 }
@@ -114,28 +113,30 @@ pub async fn settings_get(
 /// `PUT /api/settings` — 部分字段写入 + 落盘 `config.toml` + 重建 HTTP proxy client。
 ///
 /// `download_path` 若被修改: 必须非空且为已存在的目录 (自动保存前端会先做非空校验,
-/// 目录存在性只能后端判断)。校验失败返回 400, 前端据此在字段下显示错误。
+/// 目录存在性只能后端判断)。校验失败返回 400, 前端据此在字段下显示错误 —— 通过
+/// 错误 `code` 字段（`3004` / `3005`）区分两种 empty / `not_dir` 情况，比原来
+/// `msg.includes('download_path_empty')` 字符串匹配更稳。
 ///
 /// 改 `proxy_*` 字段会触发 `state.http.rebuild_proxy(&cfg)` —— reqwest client 构造后
 /// 不能 in-place 改 proxy, `整体重建。gh_proxy` 客户端不受影响。
 ///
 /// # Errors
 ///
-/// - `(BAD_REQUEST, "download_path_empty")` — `download_path` 是空串
-/// - `(BAD_REQUEST, "download_path_not_dir")` — `download_path` 不是已存在目录
-/// - `(INTERNAL_SERVER_ERROR, ...)` — `state.config` 锁被毒化
+/// - `WebError::DownloadPathEmpty` (400, code 3004) — `download_path` 是空串
+/// - `WebError::DownloadPathNotDir` (400, code 3005) — `download_path` 不是已存在目录
+/// - `WebError::Internal` (500) — `state.config` 锁被毒化
 #[tracing::instrument(name = "web::settings_put", skip_all)]
 pub async fn settings_put(
     State(state): State<SharedState>,
     Json(update): Json<SettingsUpdate>,
-) -> Result<Json<AppConfig>, (StatusCode, String)> {
+) -> Result<Json<AppConfig>, WebError> {
     if let Some(v) = &update.download_path {
         let trimmed = v.trim();
         if trimmed.is_empty() {
-            return Err((StatusCode::BAD_REQUEST, "download_path_empty".into()));
+            return Err(WebError::DownloadPathEmpty);
         }
         if !std::path::Path::new(trimmed).is_dir() {
-            return Err((StatusCode::BAD_REQUEST, "download_path_not_dir".into()));
+            return Err(WebError::DownloadPathNotDir);
         }
     }
 

@@ -62,39 +62,31 @@
 
 ## 📂 项目结构
 
-模块列表:
-
 ```
 so-novel-rs/
 ├── assets/                # logo
-├── bundle/
-│   ├── rules/             # 默认书源 JSON (首次启动复制到 ~/.sonovel/rules/)
-│   └── web/               # Web 前端静态资源
-├── locales/app.yml        # i18n 翻译 (zh-CN / zh-HK / en)
+├── bundle/rules/          # 默认书源 JSON + 模板（首次启动复制到 ~/.sonovel/rules/）
+├── bundle/web/            # Web 前端 build 产物
+├── docs/                  # CLI / 书源 / 部署等长文档
+├── locales/app.yml        # i18n 翻译（zh-CN / zh-TW / en）
+├── web-ui/                # React + Vite SPA（前端独立 package）
 └── src/
-    ├── main.rs            # 进程入口
-    ├── startup/           # 启动层: mode 判定 / console attach / dispatch
-    ├── cli/               # CLI 子命令 (args / search / download / sources / util / tests)
-    ├── app/               # 业务层 (与 GUI 解耦) — mod.rs + ops/ (download / search / sources / library / persistence / tasks / update / health)
-    ├── db/                # 持久化 (tasks.json / sources_config.json / rules/) — rules/ 子模块
-    ├── config/            # config.toml 读写 (6 sub-struct)
-    ├── models/            # Rule / Book / Chapter / SearchResult / TaskRecord / ContentType
-    ├── crawler/           # 搜索 / 下载 / 重试 / 健康检测 / CoverUpdater — 拆 7 文件
-    ├── parser/            # HTML 解析 — dom/ toc/ book/ chapter/ 子模块
-    ├── http/              # HTTP 客户端 / 代理 / CF 旁路
-    ├── export/            # EPUB / TXT / HTML / PDF — pdf/ 子模块
-    ├── js/                # boa_engine (@js: 后处理)
-    ├── logger.rs          # tracing 初始化 (text 默认 + JSON 可选)
-    ├── utils/             # 工具函数 (lock / time / fs / zhconv / lang / tty)
-    ├── gpui_app/          # GPUI 桌面 GUI — root / logo / nav / notifications / themes/ (embedded / user_dir / apply / init + data/)
-    └── web/               # Web 服务 (axum + SSE) — handlers/ (download / tasks / health / sources / settings / book / library / search)
+    ├── main.rs / lib.rs   # 入口 + crate 根
+    ├── startup/           # 启动层（mode 判定 / console attach）
+    ├── cli/               # CLI 子命令（search / download / sources / ...）
+    ├── core/              # 业务层（桌面 / Web / CLI 三端共享）
+    ├── desktop/           # GPUI 桌面 GUI（components / model / pages / themes/）
+    ├── web/               # Web 服务（axum + SSE）
+    ├── parser/            # HTML 解析（book / chapter / toc / dom 子模块）
+    ├── crawler/           # 搜索 / 下载 / 重试 / 健康检测
+    ├── export/            # EPUB / TXT / HTML / PDF（含 pdf/ 子模块）
+    ├── http/ js/ db/      # HTTP 客户端 / boa_engine / 持久化
+    ├── config/ models/    # config.toml 读写 / 数据模型
+    ├── i18n.rs error.rs   # 翻译入口 + 顶层错误
+    ├── logger.rs utils/   # tracing 初始化 + 工具函数
 ```
 
-**拆分原则**:
-- 每个文件 100-500 LOC,单一职责
-- 子模块用 `mod.rs` re-export 保持公共 API 不变
-- 私有 helper 用 `pub(super)` / `pub(crate)` 限制可见性
-- 模块文档 `//!` 在 `mod.rs` 顶部,函数文档 `///` 在重要公共 fn 上
+**分层**: `core/` 提供与 GUI / Web 解耦的业务逻辑,`desktop/` 是 GPUI 渲染层,`web/` 是 axum + SSE API 层,三端共享同一份核心代码。Web handler 通过 `Locale` extractor + `WebError::into_response_for_locale` 按 per-request locale 翻译错误,无全局 mutation。
 
 ## 🚀 快速开始
 
@@ -105,7 +97,7 @@ cd so-novel-rs
 cargo run
 ```
 
-> **前置依赖**：Rust 1.85+，Windows / macOS / Linux 均可。Windows 下首次 GPUI 构建需设 `GPUI_FXC_PATH`（详见 [build.rs](./build.rs)）。
+> **前置依赖**：Rust 1.95+，Windows / macOS / Linux 均可。Windows 下首次 GPUI 构建需设 `GPUI_FXC_PATH`（详见 [build.rs](./build.rs)）。
 
 应用数据存放在 `~/.sonovel/`，首次启动自动创建：
 
@@ -135,7 +127,7 @@ so-novel-rs sources --json
 ```
 
 `--help` / `-h` / 子命令 help 跟随 `~/.sonovel/config.toml [global].language`
-显示对应语言（zh-CN / zh-TW → zh-HK / en），与 GUI 同步。
+显示对应语言（zh-CN / zh-TW / en），与 GUI 同步。
 
 📖 完整 CLI 用法、子命令参数、注意事项、故障排查见 [docs/CLI.md](./docs/CLI.md)。
 

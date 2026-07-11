@@ -179,7 +179,7 @@ pub enum SourcesAction {
 /// clap 4 顶层 `about` / `long_about` / `after_help` 是构造期 builder 设置的
 /// `String`，**没有 public setter** —— derive 之后只能 mutate `Arg` / 子命令
 /// 字段，顶层 help 文案改不动。我们的 help 是 `config.toml [global].language`
-/// 决定的（zh-CN / zh-HK / en），必须在运行时切换 —— 只能整棵 `Command` 手搓。
+/// 决定的（zh-CN / zh-TW / en），必须在运行时切换 —— 只能整棵 `Command` 手搓。
 ///
 /// ## 结构与 derive 一一对应
 ///

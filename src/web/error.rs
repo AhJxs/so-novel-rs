@@ -9,13 +9,26 @@
 //!
 //! 新协议（response body 形态）：
 //! ```json
-//! { "error": { "code": "<stable_id>", "message": "<short human CN/EN>" } }
+//! { "error": { "code": "<stable_id>", "message": "<localized per Accept-Language>" } }
 //! ```
 //!
-//! 短码见 [`WebErrorKind::code`]，稳定不变（前端可以 switch 分支），message 是 i18n key
-//! 或短中文，前端可选用 `t()` 翻译或直接展示。
+//! 短码见 [`WebErrorKind::code`]，稳定不变（前端可以 switch 分支）；
+//! `message` 走 [`super::error_code::ErrorCode::message_for`] 按请求 locale 翻译。
 //!
-//! 用法（迁移现有 handler）：
+//! 用法：
+//! ```ignore
+//! // 标准用法（handler 拿 Locale extractor）
+//! async fn handler(Locale(locale): Locale, ...) -> Result<...> {
+//!     // ...
+//!     Err(WebError::NotFound(""))?;
+//!     // 或：
+//!     Err(WebError::from(...))?;
+//! }
+//! // into_response 自动用全局 locale；per-request locale 调用下面：
+//! err.into_response_for_locale(locale)
+//! ```
+//!
+//! 迁移现有 handler：
 //! ```ignore
 //! // 旧
 //! .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:#}")))?;
@@ -61,7 +74,7 @@ pub enum WebErrorKind {
 ///
 /// 设计：
 /// - 业务错误（BookError / `TocError` / 等）→ 对应分类
-/// - `std::io::Error` → Internal + 简短 "`io_error`" message
+/// - `std::io::Error` → Internal + 简短 `"io_error"` message
 /// - 锁 poison / SSE 内部 stream 错误**不**走这里（lock.rs 维持 `(StatusCode, String)`,
 ///   那是不同语义:网络层 vs 业务层）
 #[allow(dead_code)] // Conflict / BadRequest 留作未来 task_cancel / settings_put 业务流用
@@ -79,14 +92,22 @@ pub enum WebError {
     Crawler(CrawlerError),
     /// 导出失败
     Export(ExportError),
-    /// 显式 not found（书源/任务/文件）
+    /// 显式 not found（书源/任务/文件）。内部字符串**忽略**，统一翻译成
+    /// `WebErrors.not_found` —— 避免泄漏内部 id / 路径。
     NotFound(&'static str),
-    /// 显式 conflict
+    /// 显式 conflict。内部字符串**忽略**，统一翻译成 `WebErrors.conflict`。
     Conflict(&'static str),
-    /// 显式 bad request
+    /// 显式 bad request。内部字符串**忽略**，统一翻译成 `WebErrors.bad_request`。
     BadRequest(&'static str),
-    /// 显式内部错误（catch-all，message 不含内部 cause）
+    /// 显式内部错误（catch-all，message 不含内部 cause）。内部字符串**忽略**，
+    /// 统一翻译成 `WebErrors.internal` / `WebErrors.io_error`。
     Internal(&'static str),
+    /// settings PUT: `download_path` 是空串 → 400，翻译成 `WebErrors.download_path_empty`。
+    DownloadPathEmpty,
+    /// settings PUT: `download_path` 不是已存在目录 → 400，翻译成 `WebErrors.download_path_not_dir`。
+    DownloadPathNotDir,
+    /// `task_cancel`: 任务已结束，无法取消 → 409，翻译成 `WebErrors.task_already_finished`。
+    TaskAlreadyFinished,
 }
 
 impl WebErrorKind {
@@ -116,10 +137,10 @@ impl WebErrorKind {
 }
 
 impl WebError {
-    /// 错误码 (数字, e.g. `1001`)。走 [`crate::constant::error_code::ErrorCode`]
-    /// 单点维护, 不在此处硬编码。
-    pub const fn code(&self) -> crate::constant::error_code::ErrorCode {
-        use crate::constant::error_code::ErrorCode;
+    /// 错误码 (数字, e.g. `1001`)。走 [`super::error_code::ErrorCode`]
+    /// 单点维护，不在此处硬编码。
+    pub const fn code(&self) -> super::error_code::ErrorCode {
+        use super::error_code::ErrorCode;
         match self {
             // BookError
             Self::Book(BookError::BookRuleMissing) => ErrorCode::BookRuleMissing,
@@ -170,27 +191,28 @@ impl WebError {
             Self::Export(ExportError::Encoding(_)) => ErrorCode::ExportEncoding,
             Self::Export(ExportError::Pdf(_)) => ErrorCode::ExportPdf,
 
-            // 显式 (WebError 自带的 4 类)
+            // 显式 (WebError 自带的 4 类 + 3 新增具体子类型)
             Self::NotFound(_) => ErrorCode::NotFound,
             Self::Conflict(_) => ErrorCode::Conflict,
             Self::BadRequest(_) => ErrorCode::BadRequest,
             Self::Internal(_) => ErrorCode::Internal,
+            Self::DownloadPathEmpty => ErrorCode::DownloadPathEmpty,
+            Self::DownloadPathNotDir => ErrorCode::DownloadPathNotDir,
+            Self::TaskAlreadyFinished => ErrorCode::TaskAlreadyFinished,
         }
     }
 
     /// 暴露的 message（**不含**内部 cause / 库错误细节）。
-    /// 文案走 [`crate::constant::error_code::ErrorCode::message`] 单点维护。
+    ///
+    /// 文案走 [`super::error_code::ErrorCode::message_for`] 单点维护 + per-locale 翻译。
+    /// 全局 locale fallback（仅 `IntoResponse` / 测试场景用），web handler
+    /// **必须**走 [`Self::into_response_for_locale`] 拿正确翻译。
     ///
     /// 例外: `NotFound/Conflict/BadRequest/Internal` 4 个显式变体接受调用方传
-    /// 入的动态消息 (e.g. `"task_id=42 not found"`), 不进 `ErrorCode` 表。
-    pub const fn message(&self) -> &'static str {
-        match self {
-            Self::NotFound(msg)
-            | Self::Conflict(msg)
-            | Self::BadRequest(msg)
-            | Self::Internal(msg) => msg,
-            _ => self.code().message(),
-        }
+    /// 入的动态消息（已被忽略），统一翻译成对应的 `WebErrors.*` key。
+    #[allow(dead_code)] // public API + `IntoResponse` 间接使用，clippy 检测不到
+    pub fn message(&self) -> String {
+        self.code().message()
     }
 
     /// 内部 `tracing::warn!` 用的详细 cause（**不**进 response body）。
@@ -202,9 +224,13 @@ impl WebError {
             Self::Search(e) => format!("{e:#}"),
             Self::Crawler(e) => format!("{e:#}"),
             Self::Export(e) => format!("{e:#}"),
-            Self::NotFound(_) | Self::Conflict(_) | Self::BadRequest(_) | Self::Internal(_) => {
-                String::new()
-            }
+            Self::NotFound(_)
+            | Self::Conflict(_)
+            | Self::BadRequest(_)
+            | Self::Internal(_)
+            | Self::DownloadPathEmpty
+            | Self::DownloadPathNotDir
+            | Self::TaskAlreadyFinished => String::new(),
         }
     }
 }
@@ -218,7 +244,9 @@ impl WebError {
             | Self::Chapter(ChapterError::ChapterRuleMissing | ChapterError::EmptyContent(_))
             | Self::Search(SearchError::SearchDisabled)
             | Self::Crawler(CrawlerError::InvalidRange(_))
-            | Self::BadRequest(_) => WebErrorKind::BadRequest,
+            | Self::BadRequest(_)
+            | Self::DownloadPathEmpty
+            | Self::DownloadPathNotDir => WebErrorKind::BadRequest,
             Self::Book(BookError::Http(_))
             | Self::Toc(TocError::Http(_))
             | Self::Chapter(ChapterError::Http(_))
@@ -228,31 +256,48 @@ impl WebError {
             | Self::Chapter(ChapterError::Cloudflare(_))
             | Self::Search(SearchError::Cloudflare(_)) => WebErrorKind::Cloudflare,
             Self::NotFound(_) => WebErrorKind::NotFound,
-            Self::Conflict(_) => WebErrorKind::Conflict,
+            Self::Conflict(_) | Self::TaskAlreadyFinished => WebErrorKind::Conflict,
             _ => WebErrorKind::Internal,
         }
     }
 }
 
 #[derive(Serialize)]
-struct ErrorBody<'a> {
-    code: &'a str,
-    message: &'a str,
+struct ErrorBody {
+    /// `WebErrorKind` `snake_case` 短码 (`bad_request` / `not_found` / ...)。
+    /// 日志检索 + 跨语言错误大类标识用。前端 dispatch **不要**用这个
+    /// （多个 variant 共用同一 kind，无法细分）—— 用 `code_id` 数字码。
+    code: &'static str,
+    /// 业务层稳定数字码 (`3004` / `3005` / `3006` / ...)。前端按这个 dispatch。
+    /// 稳定不变，加新 variant 必须同步前端。
+    code_id: &'static str,
+    message: String,
 }
 
 #[derive(Serialize)]
-struct ErrorEnvelope<'a> {
-    error: ErrorBody<'a>,
+struct ErrorEnvelope {
+    error: ErrorBody,
 }
 
-impl IntoResponse for WebError {
-    fn into_response(self) -> Response {
+impl WebError {
+    /// 把 `WebError` 渲染成 axum `Response`，**使用指定 locale** 翻译 `message`。
+    ///
+    /// 这是 web handler 的**规范路径** —— 从 `Locale` extractor 拿 locale 字符串
+    /// 传入，避免并发请求之间全局 locale 互相踩。
+    ///
+    /// `IntoResponse` impl 转调这个方法，传全局 locale（向后兼容旧测试 /
+    /// 不带 Locale 的场景）。
+    pub fn into_response_for_locale(self, locale: &str) -> Response {
         let kind = self.classify();
         let status = kind.status();
         let code = kind.code();
-        let message = self.message();
+        let message = self.code().message_for(locale);
         let body = ErrorEnvelope {
-            error: ErrorBody { code, message },
+            error: ErrorBody {
+                code,
+                code_id: self.code().code_str(),
+                message,
+            },
         };
 
         // 业务层错误（Book/Toc/...）走 warn 级（用户操作触发，但 5xx 时运维要看到）；
@@ -264,9 +309,22 @@ impl IntoResponse for WebError {
                 "web API server error"
             );
         } else {
-            tracing::info!(code = code, message = message, "web API client error");
+            tracing::info!(
+                code = code,
+                message = body.error.message.as_str(),
+                "web API client error"
+            );
         }
         (status, Json(body)).into_response()
+    }
+}
+
+impl IntoResponse for WebError {
+    fn into_response(self) -> Response {
+        // 全局 locale —— 不带 Locale extractor 的 handler / 测试场景用。
+        // 生产 web handler 走 `into_response_for_locale(locale)` 拿 per-request 翻译。
+        let locale = (*rust_i18n::locale()).to_string();
+        self.into_response_for_locale(&locale)
     }
 }
 
@@ -340,13 +398,13 @@ impl From<&str> for WebError {
 // 重复 ~10 处；遇到 2+ 锁时还套一层 IIFE 把多个锁打包成单个 `Result`。
 //
 // 两个 helper 都是 free function 而非 trait ——
-// - `read_state_or_json`：闭包返回 `Result<T, String>`，失败 → `(StatusCode, String)`
+// - `read_state_or_json`：闭包返回 `Result<T, String>`，失败 → `WebError`
 // - `read_state_or_sse`：同语义，但失败转 `Sse<S>` 流返回（避免 SSE 连接哑断）
 //
 // `label` 走 `tracing::warn!`，与 `rw_read_or` 内部 `tracing::error!` 一一对应
 // （一个锁 helper 一个 label，便于 grep 调用栈）。
 
-/// 非-SSE handler 专用：拿锁 / 读共享状态，失败 → `(INTERNAL_SERVER_ERROR, msg)`。
+/// 非-SSE handler 专用：拿锁 / 读共享状态，失败 → `WebError::Internal("internal_error")`。
 ///
 /// 调用方典型用法：
 /// ```ignore
@@ -358,10 +416,12 @@ impl From<&str> for WebError {
 /// **行为合约**：
 /// - `Ok(v)` → 原样返回
 /// - `Err(msg)` → `tracing::warn!("web handler {label} state read failed: {msg}")`
-///   + 返回 `Err((INTERNAL_SERVER_ERROR, msg))`
+///   + 返回 `Err(WebError::Internal("internal_error"))`（500 + 稳定 JSON envelope）
 ///
-/// `String` error 类型与 `rw_read_or` / `mutex_or` 直接对接；`?` 即可。
-pub fn read_state_or_json<T, F>(label: &str, f: F) -> Result<T, (StatusCode, String)>
+/// `String` error 类型与 `rw_read_or` / `mutex_or` 直接对接；`?` 即可。统一到 `WebError`
+/// 后 handler 返回 `Result<Json<T>, WebError>` 走 axum `IntoResponse for Result` 的
+/// 全局 locale 路径 —— per-request locale 改造是下一阶段（独立 PR）。
+pub fn read_state_or_json<T, F>(label: &str, f: F) -> Result<T, WebError>
 where
     F: FnOnce() -> Result<T, String>,
 {
@@ -369,7 +429,7 @@ where
         Ok(v) => Ok(v),
         Err(msg) => {
             tracing::warn!("web handler {label} state read failed: {msg}");
-            Err((StatusCode::INTERNAL_SERVER_ERROR, msg))
+            Err(WebError::from(msg))
         }
     }
 }
@@ -382,20 +442,28 @@ where
 /// ```ignore
 /// let cfg = read_state_or_sse(
 ///     "search:cfg",
+///     locale,            // per-request locale (从 Locale extractor 拿)
 ///     lock_failure_stream,
 ///     || Ok(rw_read_or("search:cfg", &state.config)?.clone()),
 /// )?;
 /// ```
 ///
-/// `make_stream: FnOnce(u16, &str) -> Sse<S>` —— 第一个参数是 HTTP status code（恒为
-/// 500，因为 `read_state_or_*` 只在锁毒化 / 内部失败时返 `Err`，此时 status 必然 5xx）。
+/// `make_stream: FnOnce(u16, &str, &str) -> Sse<S>` —— 第一个参数是 HTTP status code
+/// （恒为 500，因为 `read_state_or_*` 只在锁毒化 / 内部失败时返 `Err`，此时 status 必然 5xx）；
+/// 第二个参数是 cause 字符串（仅 `tracing::warn!` 用，**不**进 SSE event body）；
+/// 第三个参数是请求 locale（用于翻译 SSE error event 的 reason 字段）。
 ///
 /// **泛型 `S`**：handler 各自的 Sse 流类型可能不同（`BoxedSearchStream` /
 /// `BoxedSseStream`），helper 不强行统一类型别名，由调用方保留各自的 stream 包装。
-pub fn read_state_or_sse<T, F, S, M>(label: &str, make_stream: M, f: F) -> Result<T, Sse<S>>
+pub fn read_state_or_sse<T, F, S, M>(
+    label: &str,
+    locale: &str,
+    make_stream: M,
+    f: F,
+) -> Result<T, Sse<S>>
 where
     F: FnOnce() -> Result<T, String>,
-    M: FnOnce(u16, &str) -> Sse<S>,
+    M: FnOnce(u16, &str, &str) -> Sse<S>,
     S: Stream<Item = Result<axum::response::sse::Event, Infallible>> + Send + 'static,
 {
     match f() {
@@ -405,6 +473,7 @@ where
             Err(make_stream(
                 StatusCode::INTERNAL_SERVER_ERROR.as_u16(),
                 &msg,
+                locale,
             ))
         }
     }
@@ -440,6 +509,25 @@ mod tests {
     }
 
     #[test]
+    fn classify_maps_task_already_finished_to_409() {
+        // 任务已结束想取消 → Conflict (409)
+        let err = WebError::TaskAlreadyFinished;
+        assert_eq!(err.classify(), WebErrorKind::Conflict);
+    }
+
+    #[test]
+    fn classify_maps_download_path_empty_to_400() {
+        let err = WebError::DownloadPathEmpty;
+        assert_eq!(err.classify(), WebErrorKind::BadRequest);
+    }
+
+    #[test]
+    fn classify_maps_download_path_not_dir_to_400() {
+        let err = WebError::DownloadPathNotDir;
+        assert_eq!(err.classify(), WebErrorKind::BadRequest);
+    }
+
+    #[test]
     fn message_does_not_leak_internal_cause() {
         // 构造一个含敏感路径的 cause，验证 message 不含它
         let err = WebError::Book(BookError::Parse(
@@ -448,7 +536,19 @@ mod tests {
         let msg = err.message();
         assert!(!msg.contains("admin"), "message leaked path: {msg}");
         assert!(!msg.contains("C:\\"), "message leaked path: {msg}");
-        assert_eq!(msg, "详情页 HTML 解析失败");
+        // 全局 locale 默认 en → 英文翻译
+        assert_eq!(msg, "Book detail HTML parse failed");
+    }
+
+    #[test]
+    fn message_ignores_internal_string_of_explicit_variants() {
+        // NotFound/Conflict/BadRequest/Internal 接受内部字符串但翻译时忽略
+        let err = WebError::NotFound("任务 id=42 私有路径 C:\\foo");
+        // 显式传 locale —— 不依赖全局 atomic
+        let msg = err.code().message_for("zh-CN");
+        assert!(!msg.contains("C:\\"), "message leaked path: {msg}");
+        assert!(!msg.contains("42"), "message leaked id: {msg}");
+        assert_eq!(msg, "资源未找到");
     }
 
     #[test]
@@ -456,6 +556,17 @@ mod tests {
         let err = WebError::NotFound("任务未找到");
         let resp = err.into_response();
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[test]
+    fn into_response_for_locale_uses_given_locale() {
+        // 关键不变量：per-locale 翻译不走全局 locale
+        rust_i18n::set_locale("en"); // 全局是 en
+        let err = WebError::Book(BookError::BookRuleMissing);
+        let resp = err.into_response_for_locale("zh-CN");
+        // 状态码跟 message 是 locale 无关的稳定字段，仅断言 status
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        rust_i18n::set_locale("en");
     }
 
     // ── Phase 3.0: blanket From<String> / From<&str> ─────────────────
@@ -467,7 +578,8 @@ mod tests {
         let err: WebError = String::from("rwlock 'web:config' poisoned at byte 42").into();
         assert_eq!(err.classify(), WebErrorKind::Internal);
         assert!(matches!(err, WebError::Internal("internal_error")));
-        assert_eq!(err.message(), "internal_error");
+        // 全局 locale 默认 en → 英文翻译
+        assert_eq!(err.message(), "Internal server error");
     }
 
     #[test]
@@ -492,5 +604,69 @@ mod tests {
         let err: WebError = String::from("any internal msg").into();
         let resp = err.into_response();
         assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    // ── i18n: per-locale 翻译契约 ────────────────────────────────
+
+    #[test]
+    fn into_response_for_locale_translates_per_request() {
+        // 全局切到 en，per-locale 调用翻译成 zh-CN —— 证明不走全局
+        rust_i18n::set_locale("en");
+        let err = WebError::NotFound("ignored internal string");
+
+        // 抓 response body 的 JSON 字符串
+        let resp_zh = err.into_response_for_locale("zh-CN");
+        let body_zh = response_body_string(resp_zh);
+        assert!(
+            body_zh.contains("资源未找到"),
+            "zh-CN body should contain 资源未找到: {body_zh}"
+        );
+
+        let resp_en = WebError::NotFound("ignored").into_response_for_locale("en");
+        let body_en = response_body_string(resp_en);
+        assert!(
+            body_en.contains("Resource not found"),
+            "en body should contain Resource not found: {body_en}"
+        );
+
+        let resp_tw = WebError::NotFound("ignored").into_response_for_locale("zh-TW");
+        let body_tw = response_body_string(resp_tw);
+        assert!(
+            body_tw.contains("資源未找到"),
+            "zh-TW body should contain 資源未找到: {body_tw}"
+        );
+
+        rust_i18n::set_locale("en");
+    }
+
+    #[test]
+    fn new_variants_translate_correctly() {
+        // 显式传 locale —— 不依赖全局 atomic（其它测试可能并行改全局 locale）
+        let empty = WebError::DownloadPathEmpty;
+        assert_eq!(
+            empty.code().message_for("en"),
+            "Download path cannot be empty"
+        );
+        let not_dir = WebError::DownloadPathNotDir;
+        assert_eq!(
+            not_dir.code().message_for("en"),
+            "Download path is not an existing directory"
+        );
+        let finished = WebError::TaskAlreadyFinished;
+        assert_eq!(
+            finished.code().message_for("en"),
+            "Task has already finished; cannot cancel"
+        );
+    }
+
+    /// 抽 response body 成 String 用于断言 JSON 内容。
+    fn response_body_string(resp: Response) -> String {
+        use axum::body::to_bytes;
+        let body = resp.into_body();
+        let rt = tokio::runtime::Runtime::new().expect("rt");
+        rt.block_on(async {
+            let bytes = to_bytes(body, 4096).await.expect("body bytes");
+            String::from_utf8(bytes.to_vec()).expect("utf8")
+        })
     }
 }

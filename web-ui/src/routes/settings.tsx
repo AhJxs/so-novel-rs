@@ -9,6 +9,7 @@ import { Card, Spinner } from '@heroui/react'
 import { useTranslation } from 'react-i18next'
 import { useSettings, useSaveSettings } from '@/hooks/use-settings'
 import { languageToLocale, localeToLanguage, type Locale, type BackendLanguage } from '@/lib/language'
+import { ApiError } from '@/lib/api'
 import AppSelect from '@/components/app-select'
 import AppSwitch from '@/components/app-switch'
 import NumberInput from '@/components/number-input'
@@ -232,12 +233,15 @@ export default function SettingsPage() {
           savedTimer.current = setTimeout(() => setSaveState('idle'), 2000)
         },
         onError: (err) => {
-          // 后端目录校验失败：download_path_empty / download_path_not_dir。
-          const msg = err.message
-          if (msg.includes('download_path_not_dir')) {
+          // 后端目录校验失败：按 `codeId`（稳定数字码）dispatch —— 不要按
+          // `err.message` substring 匹配（message 是 i18n 翻译后的 localized
+          // 文本，会因 locale 变化导致匹配失败）。
+          //   3004 = download_path_empty
+          //   3005 = download_path_not_dir
+          if (err instanceof ApiError && err.codeId === '3005') {
             setErrors((e) => ({ ...e, download_path: t('settings.errors.pathNotDir') }))
             setSaveState('idle')
-          } else if (msg.includes('download_path_empty')) {
+          } else if (err instanceof ApiError && err.codeId === '3004') {
             setErrors((e) => ({ ...e, download_path: t('settings.errors.pathEmpty') }))
             setSaveState('idle')
           } else {

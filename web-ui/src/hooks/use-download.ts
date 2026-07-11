@@ -8,6 +8,7 @@
 
 import { useCallback, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
+import { useTranslation } from 'react-i18next'
 import { startDownload } from '@/lib/api'
 import type { DownloadOptions } from '@/lib/api'
 import type { DownloadProgressEvent } from '@/lib/types'
@@ -55,6 +56,7 @@ export interface UseDownloadReturn {
  */
 export function useDownload(): UseDownloadReturn {
   const qc = useQueryClient()
+  const { t } = useTranslation()
   const [state, setState] = useState<DownloadState>(initialState)
   const abortRef = useRef<AbortController | null>(null)
 
@@ -115,7 +117,10 @@ export function useDownload(): UseDownloadReturn {
                   return {
                     ...prev,
                     finished: true,
-                    error: ev.reason ?? '下载失败',
+                    // 后端 `Progress::Failed.reason` 当前由 crawler 内部 Display
+                    // 拼出（i18n 化的 follow-up PR 再拆 `code` 字段）—— 缺省
+                    // 回落 i18n 文案而不是硬编码中文。
+                    error: ev.reason ?? t('common.error'),
                     taskId: ev.task_id ?? prev.taskId,
                   }
                 default:
@@ -150,7 +155,7 @@ export function useDownload(): UseDownloadReturn {
       // 返回 started，让调用方控制跳转时机
       return handle.started
     },
-    [qc],
+    [qc, t],
   )
 
   const cancel = useCallback(() => {

@@ -78,9 +78,10 @@ pub use root::RootView;
 /// 注意：**只**对应"应用 UI 语言"（`Language`），跟"书源语言"（`LangType`）无关。
 /// `LangType` 是书源筛选用的 locale hint，不影响 gpui-component 内部 i18n。
 ///
-/// `locale_for` 已搬到 `crate::i18n::locale_for`（中性模块，无 cfg gate，
-/// CLI 路径也能用）。这里 `use` 进来保持调用点不变。
-use crate::i18n::locale_for;
+/// **跟 `crate::i18n::locale_for` 的区别**：`locale_for` 返回 `zh-TW`（跟本项目
+/// `app.yml` + 前端 JSON 文件名统一），但 gpui-component 不认 `zh-TW`，所以这里
+/// 用专门的 `locale_for_gpui` 返回 `zh-HK`。CLI / web 路径走 `locale_for` 即可。
+use crate::i18n::locale_for_gpui;
 
 /// 启动 GPUI 应用。`main.rs` 在无参数分支调用。
 ///
@@ -160,7 +161,7 @@ pub fn run() -> Result<()> {
         //    Sidebar 搜索 placeholder / Select placeholder / Dialog OK|Cancel 等所有
         //    `t!()` 调用的文案。必须在开任何带 Sidebar / Select / Dialog 的窗口前调用，
         //    否则首次 render 就会用错误的 fallback locale。
-        gpui_component::set_locale(locale_for(model.read(cx).config.global.language));
+        gpui_component::set_locale(locale_for_gpui(model.read(cx).config.global.language));
 
         // 6. 居中开窗 + 最小尺寸 + 自定义 TitleBar 配置。
         let window_size = size(px(1200.0), px(800.0));

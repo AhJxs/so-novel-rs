@@ -26,15 +26,18 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::{broadcast, mpsc};
 
 use crate::core::DownloadTask;
-use crate::crawler::{self, CancelToken, DownloadOptions, Progress};
+use crate::crawler::{self, CancelToken, CrawlerError, DownloadOptions, Progress};
+use crate::i18n::ts_for_locale;
 use crate::models::Source;
 use crate::models::{Chapter, SearchResult};
 use crate::utils::time::now_unix_secs;
+use crate::web::error_code::ErrorCode;
 
 use super::super::SharedState;
 use super::super::error::read_state_or_sse;
 use super::tasks::spawn_task_drain;
 use crate::utils::lock::{mutex_or, rw_read_or};
+use crate::web::locale::Locale;
 
 /// SSE 流的内部类型别名, 集中在这里以便一处修改。
 pub(super) type BoxedSseStream =
@@ -43,10 +46,11 @@ pub(super) type BoxedSseStream =
 /// 在 SSE handler 入口拿到 poisoned lock 时, 把错误以 SSE `failed` event 形式
 /// 给前端 (稳定字面量 + status code), 避免连接哑断。
 ///
-/// Phase 3.8：本函数仍保留原签名，作为 [`read_state_or_sse`] 的 `make_stream` 回调；
-/// 真正消除的是入口处的 match-IIFE 模板。
-fn lock_failure_stream(status: u16, msg: &str) -> Sse<BoxedSseStream> {
-    let reason = format!("[{status}] {msg}");
+/// `reason` 字段是按请求 locale 翻译的 [`ErrorCode::Internal`] 文案
+/// (`WebErrors.internal`)。原始 cause 字符串仅进 `tracing::warn!`，不外泄。
+fn lock_failure_stream(status: u16, msg: &str, locale: &str) -> Sse<BoxedSseStream> {
+    let reason = ts_for_locale(locale, ErrorCode::Internal.key());
+    tracing::warn!(status, cause = msg, "download SSE state read failed");
     let stream = async_stream::stream! {
         let ev = ProgressEvent {
             kind: "failed",
@@ -58,6 +62,24 @@ fn lock_failure_stream(status: u16, msg: &str) -> Sse<BoxedSseStream> {
             .data(serde_json::to_string(&ev).unwrap_or_default()));
     };
     Sse::new(Box::pin(stream))
+}
+
+/// 把 [`CrawlerError`] 映射到稳定的 [`ErrorCode`] —— 与
+/// [`crate::web::error::WebError::code`] 的 `Self::Crawler(_)` 分支同语义。
+/// SSE 路径直接拿 key 翻译，避免构造 `WebError` 走错误 envelope 渲染。
+const fn crawler_err_code(e: &CrawlerError) -> ErrorCode {
+    use CrawlerError as CE;
+    use ErrorCode as C;
+    match e {
+        CE::EmptyToc => C::EmptyToc,
+        CE::Client(_) => C::CrawlerClient,
+        CE::Io(_) => C::CrawlerIo,
+        CE::Export(_) => C::CrawlerExport,
+        CE::Cancelled => C::Cancelled,
+        CE::InvalidRange(_) => C::InvalidRange,
+        CE::Book(_) => C::CrawlerBookAggregate,
+        CE::Toc(_) => C::CrawlerTocAggregate,
+    }
 }
 
 /// `POST /api/download` 请求体。
@@ -119,19 +141,20 @@ pub(super) struct ProgressEvent {
     )
 )]
 pub async fn download(
+    Locale(locale): Locale,
     State(state): State<SharedState>,
     Json(req): Json<DownloadRequest>,
 ) -> Sse<BoxedSseStream> {
     // Lock 失败也走 SSE 错误事件, 让前端看到稳定原因, 而不是连接哑断。
     // SSE handler 直接返 `Sse<...>` 而非 `Result<_, _>`, 不能用 `?` 早返;
     // 这里用 `match ... { Err(sse) => return sse }` 模式 (跟原 match-IIFE 等价).
-    let config = match read_state_or_sse("download:cfg", lock_failure_stream, || {
+    let config = match read_state_or_sse("download:cfg", locale, lock_failure_stream, || {
         Ok(rw_read_or("download:cfg", &state.config)?.clone())
     }) {
         Ok(v) => v,
         Err(sse) => return sse,
     };
-    let rule = match read_state_or_sse("download:rules", lock_failure_stream, || {
+    let rule = match read_state_or_sse("download:rules", locale, lock_failure_stream, || {
         Ok(rw_read_or("download:rules", &state.rules)?
             .iter()
             .find(|r| r.id == req.source_id)
@@ -142,10 +165,12 @@ pub async fn download(
     };
 
     let Some(rule) = rule else {
+        // 源未找到：原 inline `"书源未找到"` 硬编码中文。改成 ErrorCode → 按 locale 翻译。
+        let reason = ts_for_locale(locale, "WebErrors.source_not_found");
         let stream = async_stream::stream! {
             let ev = ProgressEvent {
                 kind: "failed",
-                reason: Some("书源未找到".into()),
+                reason: Some(reason),
                 ..Default::default()
             };
             yield Ok(axum::response::sse::Event::default()
@@ -158,6 +183,7 @@ pub async fn download(
     // 1. mint id —— push 到 state.tasks 之前必须先有 id (其它请求靠它找任务)
     let task_id: u64 = match read_state_or_sse(
         "download:next_task_id",
+        locale,
         lock_failure_stream,
         || -> Result<u64, String> {
             let mut id = mutex_or("download:next_task_id", &state.next_task_id)?;
@@ -186,6 +212,7 @@ pub async fn download(
     // 2. 任务先入 state.tasks —— `tasks_list` 在 SSE 返回前已经能列到这条记录
     if let Err(sse) = read_state_or_sse(
         "download:push_task",
+        locale,
         lock_failure_stream,
         || -> Result<(), String> {
             // 用块作用域把 MutexGuard 提前 drop, 避免 clippy
@@ -253,12 +280,17 @@ pub async fn download(
         let (book, chapters) = match resolve_result {
             Ok((book, chapters)) => (book, chapters),
             Err(e) => {
-                // resolve 失败也走 broadcast → SSE; 同时 drain 拿不到事件, drain
-                // 会在 mpsc 断开时补 AppRestarted —— 这里显式发 Failed 优先
-                // 让前端看到具体错误。
-                let _ = sse_tx_for_crawler.send(Progress::Failed {
-                    reason: format!("{e:#}"),
-                });
+                // resolve 失败：原 `format!("{e:#}")` 泄漏内部 cause 给前端
+                // （"HTTP error: ..." / IO 错误链）。改成 ErrorCode → 按 locale 翻译。
+                let code = crawler_err_code(&e);
+                tracing::warn!(
+                    task_id,
+                    cause = %format!("{e:#}"),
+                    key = code.key(),
+                    "download resolve_book failed"
+                );
+                let reason = ts_for_locale(locale, code.key());
+                let _ = sse_tx_for_crawler.send(Progress::Failed { reason });
                 if let Ok(tasks) = state_for_crawler.tasks.lock() {
                     let _ = crate::db::save_with_trim(&state_for_crawler.tasks_file, &tasks);
                 }
