@@ -64,7 +64,7 @@ pub fn delete_task(&mut self, id: u64) -> bool { ... }
 ```rust
 /// `AppModel::delete_task` 的返回值。区分三种互斥结果，供 UI 决定哪条 toast 文案。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum DeleteTaskResult {
+pub enum DeleteTaskResult {
     Deleted,
     StillRunning,
     Missing,
@@ -91,7 +91,7 @@ pub fn delete_task(&mut self, id: u64) -> DeleteTaskResult {
 
 `clear_finished_tasks`（邻居方法）不变；它已经是 `push_success` 内嵌，不影响本设计。
 
-> **可见性**：`DeleteTaskResult` 是 `pub(crate)` —— `mod tasks;` 在 `src/desktop/model/mod.rs:26` 是私有声明，对 `pages/tasks/mod.rs` 跨模块可见需要 `pub(crate)`。`DeleteTaskResult` 不暴露到 crate 外。
+> **可见性**：`DeleteTaskResult` 是 `pub`，但 `mod tasks;` 在 `src/desktop/model/mod.rs:26` 已提升为 `pub(crate) mod tasks;` —— 模块路径对 crate 外不可达，因此外部 crate 即便看得到 `pub` 标记也无法命名这个类型、无法构造或 match。Rust 不允许 `pub fn ... -> pub(crate) Type`（返回类型必须 ≥ 函数可见性），所以 `pub` 是唯一合法选择；crate-外隐私靠模块路径而非 enum 自身达成。
 
 #### 3. `src/desktop/pages/tasks/mod.rs:136-142` —— `on_ok` 闭包里 push 三种通知
 
