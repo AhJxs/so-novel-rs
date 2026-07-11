@@ -111,7 +111,7 @@ pub fn write_chapter_files(
             ExportFormat::Html | ExportFormat::Pdf => format!("{order}_.html"),
             ExportFormat::Txt => format!("{order}_{safe_title}.txt"),
             ExportFormat::Epub => format!("{order}_{safe_title}.html"),
-            // Task 1 阶段先就位文件名后缀；Task 4 才会有真正写 Markdown 内容。
+            // Filename layout is final (Task 3); chapter body content lands in Task 4 (MdExporter).
             ExportFormat::Markdown => format!("{order}_{safe_title}.md"),
         };
         let path = unique_path(chapters_dir, &filename);
@@ -138,7 +138,7 @@ pub fn write_single_chapter(
         ExportFormat::Html | ExportFormat::Pdf => format!("{order_str}_.html"),
         ExportFormat::Txt => format!("{order_str}_{safe_title}.txt"),
         ExportFormat::Epub => format!("{order_str}_{safe_title}.html"),
-        // Task 1 阶段先就位文件名后缀；Task 4 才会有真正写 Markdown 内容。
+        // Filename layout is final (Task 3); chapter body content lands in Task 4 (MdExporter).
         ExportFormat::Markdown => format!("{order_str}_{safe_title}.md"),
     };
     let path = dir.join(&filename);
