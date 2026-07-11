@@ -6,15 +6,14 @@
 //! - 列表：gpui-component `List`（虚拟滚动）+ `LibraryDelegate`，每页 30 条（5 列：文件名 /
 //!   格式 / 大小 / 修改时间 / 3 动作）。
 //! - 分页页脚自写（gpui-component 0.5.1 没 Pagination 组件），≤1 页时整段隐藏。
-//! - 文件系统 watcher：long-lived `cx.spawn` 任务持有 `notify::RecommendedWatcher`，监听
-//!   `config.download.download_path` 非递归增量，300 ms debounce 后触发 refresh。
-//!   `SetPath` 命令让任务内部 drop 旧 watcher 并 arm 到新路径上（详见 `watcher`）。
-//! - 删除走 `WindowExt::open_dialog` 二次确认 → `model.delete_library_entry` → 再 refresh。
+//! - **没有文件 watcher** —— 列表只在「首次进入 / 下载目录变化」时自动扫一次，
+//!   其余情况靠 PageHeader 右上角「刷新」按钮手动触发。
+//! - 删除走 `WindowExt::open_dialog` 二次确认 → `model.delete_library_entry` → `entries_version`
+//!   bump 让 ListCache 立即失效，UI 实时反映删除结果。
 
 mod delegate;
 mod row;
 mod toolbar;
-mod watcher;
 
 use std::path::PathBuf;
 
@@ -24,8 +23,8 @@ use gpui::{
     Window, div, px,
 };
 use gpui_component::{
-    ActiveTheme as _, IconName, WindowExt,
-    button::ButtonVariant,
+    ActiveTheme as _, Disableable as _, Icon, IconName, WindowExt,
+    button::{Button, ButtonVariant},
     dialog::Dialog,
     dialog::DialogButtonProps,
     input::{InputEvent, InputState},
@@ -36,10 +35,9 @@ use gpui_component::{
 
 use crate::desktop::components::{EmptyState, PageHeader, Pagination, compute_page_window};
 use crate::desktop::model::{AppModel, LibraryEntry};
-use crate::i18n::{ts, ts_fmt};
+use crate::i18n::{ts, ts_cached, ts_fmt};
 
 use self::delegate::LibraryDelegate;
-use self::watcher::{WatcherCmd, WatcherCmdTx};
 
 /// Library 页面 entity。
 pub struct LibraryPage {
@@ -51,13 +49,6 @@ pub struct LibraryPage {
 
     /// UI-only，每次路径或过滤变化时重置为 0。
     current_page: usize,
-
-    /// `LibraryPage` 析构 → sender drop → 任务 `try_recv()` 收 `Err(Closed)` → 退出。
-    ///
-    /// 用 `smol::channel` 而非 `tokio::sync::mpsc` —— `cx.spawn` 跑在 smol executor 上，
-    /// 那边没有 tokio reactor。smol 的 `Sender`/`Receiver` 基于 `async-channel`，接口
-    /// 像 `tokio::sync::mpsc`，但底层调度走 smol。
-    watcher_cmd_tx: WatcherCmdTx,
 }
 
 impl LibraryPage {
@@ -87,31 +78,11 @@ impl LibraryPage {
         let delegate = LibraryDelegate::new(page_handle);
         let list_state = cx.new(|cx| ListState::new(delegate, window, cx));
 
-        // Watcher 主循环见 `watcher::run`（debounce + SetPath 重 arm 详情在 watcher.rs 顶部）。
-        let (watcher_cmd_tx, watcher_cmd_rx) = smol::channel::bounded::<WatcherCmd>(8);
-        let initial_path =
-            std::path::PathBuf::from(model.read(cx).config.download.download_path.clone());
-        let page_weak = cx.entity().downgrade();
-        let model_for_watcher = model.clone();
-
-        cx.spawn(async move |_entity, async_cx| {
-            watcher::run(
-                initial_path,
-                page_weak,
-                model_for_watcher,
-                watcher_cmd_rx,
-                async_cx,
-            )
-            .await;
-        })
-        .detach();
-
         Self {
             model,
             filter_input,
             list_state,
             current_page: 0,
-            watcher_cmd_tx,
         }
     }
 
@@ -125,7 +96,7 @@ impl LibraryPage {
         cx.notify();
     }
 
-    /// 首次进入 / 下载目录变化时自动扫一次 + 通知 watcher 切目标。
+    /// 首次进入 / 下载目录变化时自动扫一次。
     /// `过滤变化（filter_text` / `filter_ext）不走这里` —— 不改变路径。
     fn maybe_auto_scan(&mut self, cx: &mut Context<Self>) {
         let download_path =
@@ -134,13 +105,16 @@ impl LibraryPage {
         let need_scan = already_scanned.as_ref().is_none_or(|p| p != &download_path);
         if need_scan {
             self.model.update(cx, |m, _cx| m.refresh_library_async());
-            // 让 watcher 重建监听目标。`try_send` 不阻塞，cap=8 不会满；
-            // 失败（任务已退出）忽略。
-            let _ = self
-                .watcher_cmd_tx
-                .try_send(WatcherCmd::SetPath(download_path));
             self.current_page = 0;
         }
+    }
+
+    /// PageHeader 「刷新」按钮 —— 重扫下载目录。`scan_in_flight` 期间点多次会被
+    /// `refresh_library_async` 内部的 flag 拦截，重复触发零成本。
+    fn manual_refresh(&mut self, cx: &mut Context<Self>) {
+        self.model.update(cx, |m, _cx| m.refresh_library_async());
+        self.current_page = 0;
+        cx.notify();
     }
 
     /// 点"删除"按钮 → 弹 Dialog 二次确认。
@@ -199,8 +173,8 @@ impl Render for LibraryPage {
         //    变借用，而 `model.read(cx)` 只能拿 `&AppModel`。闭包内：(a) 算
         //    filter signature；(b) 查 list_cache 命中则 clone Arc、未命中则
         //    走 filtered_entries 后写回；(c) 取出展示数据。闭包返回
-        //    `(Arc<Vec<LibraryEntry>>, usize, Option<String>, String, Option<String>)`。
-        let (entries_arc, total, scan_err, download_path, current_ext) =
+        //    `(Arc<Vec<LibraryEntry>>, usize, Option<String>, String, Option<String>, bool)`。
+        let (entries_arc, total, scan_err, download_path, current_ext, scan_in_flight) =
             self.model.update(cx, |model, _cx| {
                 // 命中 cache = Arc::clone（只增引用计数，零 alloc）；未命中 = 走
                 // 完整 filter+sort 然后写回。cache key 包含 (entries_version,
@@ -246,7 +220,18 @@ impl Render for LibraryPage {
                 let scan_err = model.library.last_error.clone();
                 let download_path = model.config.download.download_path.clone();
                 let current_ext = model.library.filter_ext.clone();
-                (entries_arc, total, scan_err, download_path, current_ext)
+                // 读 scan_in_flight —— 刷新按钮的 loading 状态用。
+                // drain_loop 100ms tick 内排空 scan channel 时会清零 + notify AppModel，
+                // LibraryPage 是观察者会自动 re-render，loading 状态随之收敛。
+                let scan_in_flight = model.library.scan_in_flight;
+                (
+                    entries_arc,
+                    total,
+                    scan_err,
+                    download_path,
+                    current_ext,
+                    scan_in_flight,
+                )
             });
 
         let w = compute_page_window(total, &mut self.current_page);
@@ -270,11 +255,28 @@ impl Render for LibraryPage {
             .size_full()
             .p_6()
             .gap_3()
-            .child(PageHeader::new(ts("Library.page_title")).subtitle(format!(
-                "{}: {}",
-                ts("Library.download_path_label"),
-                std::path::Path::new(&download_path).display()
-            )))
+            .child(
+                PageHeader::new(ts("Library.page_title"))
+                    .subtitle(format!(
+                        "{}: {}",
+                        ts("Library.download_path_label"),
+                        std::path::Path::new(&download_path).display()
+                    ))
+                    .action(
+                        Button::new("library-refresh")
+                            .icon(Icon::new(IconName::Redo))
+                            .label(ts_cached("Library.action_refresh"))
+                            // scan_in_flight=true 时：禁用 + 显示 spinner，
+                            // 视觉上告诉用户"正在扫，不要再点"。
+                            // manual_refresh 内部也会被 scan_in_flight 拦截，
+                            // 禁用只是双保险（鼠标 / 键盘都可触发 button click）。
+                            .loading(scan_in_flight)
+                            .disabled(scan_in_flight)
+                            .on_click(cx.listener(|this, _, _window, cx| {
+                                this.manual_refresh(cx);
+                            })),
+                    ),
+            )
             .child(toolbar::render(
                 &self.filter_input,
                 current_ext.as_deref(),

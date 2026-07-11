@@ -734,6 +734,12 @@ Library:
     en: Delete
     zh-CN: 删除
     zh-TW: 刪除
+  # PageHeader 右上角的刷新按钮 —— 触发 `refresh_library_async` 重扫下载目录。
+  # 原 watcher 已删除，列表只在进入页面 / 切下载目录时自动扫一次，其余情况靠手动刷新。
+  action_refresh:
+    en: Refresh
+    zh-CN: 刷新
+    zh-TW: 重新整理
   empty_title:
     en: "Library is empty"
     zh-CN: 本地书库为空

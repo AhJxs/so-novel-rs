@@ -76,12 +76,8 @@ pub fn delete_library_entry(
     // 外科式移除：路径完全相等才删，避开 path 末尾不同但 basename 相同的边界情况。
     // 即便文件已经成功删除（result=Ok），entry 仍在内存里 → 显式过滤。
     library.entries.retain(|e| e.path != path);
-    // 抑制 watcher 在接下来 1 秒内因 fs 事件触发的 rescan —— 删除瞬间文件系统
-    // 一定会发 Modify/Remove 事件，watcher 300ms debounce 后会调 refresh_library_async
-    // 把 entries.clear() 再 fill，制造"empty → 重新加载"闪一下。1s 覆盖 rescan 全程。
-    let now_ms = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| d.as_millis() as u64);
-    library.watcher_skip_until_unix_ms = Some(now_ms + 1000);
+    // bump entries_version 让渲染端的 ListCache 失效 —— 不 bump 的话 cache key
+    // 不变，下次 render 命中旧 Arc，里面仍然含被删的 entry，UI 不刷新。
+    library.entries_version = library.entries_version.wrapping_add(1);
     result
 }
