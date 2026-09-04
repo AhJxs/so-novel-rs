@@ -1,10 +1,10 @@
 //! 通用页面顶栏：左侧 title + subtitle，右侧 actions slot。
 
+use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::{
     App, Div, IntoElement, ParentElement, RenderOnce, SharedString, Styled, Window, div,
     prelude::FluentBuilder as _,
 };
-use gpui_kit::component::ActiveTheme as _;
 
 /// 页面顶栏。最常见的 `<h1> + 副标题 + 右侧按钮组` 模式。
 #[derive(IntoElement)]

@@ -6,7 +6,6 @@
 //! `page: Entity<SearchPage>` 转发用：全本 / 详情 / 选章 按钮 `on_click` 调
 //! `page.update` 拿 `&mut AppModel`。
 
-use gpui_kit::{App, Entity, IntoElement, ParentElement, Styled, div, px};
 use gpui_kit::component::{
     ActiveTheme as _, Icon, IconName, Sizable, WindowExt,
     button::Button,
@@ -15,6 +14,7 @@ use gpui_kit::component::{
     notification::{Notification, NotificationType},
     v_flex,
 };
+use gpui_kit::{App, Entity, IntoElement, ParentElement, Styled, div, px};
 
 use crate::desktop::components::truncate;
 use crate::i18n::ts_cached;

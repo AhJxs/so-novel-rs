@@ -2,11 +2,11 @@
 //!
 //! 跟 `library.rs::render_row` 同模式：固定宽 + `flex_1` 撑满剩余的列布局。
 
-use gpui_kit::prelude::FluentBuilder as _;
-use gpui_kit::{App, Entity, IntoElement, ParentElement, SharedString, Styled, div, px};
 use gpui_kit::component::{
     ActiveTheme as _, Sizable, StyledExt, h_flex, link::Link, switch::Switch, tag::Tag,
 };
+use gpui_kit::prelude::FluentBuilder as _;
+use gpui_kit::{App, Entity, IntoElement, ParentElement, SharedString, Styled, div, px};
 
 use crate::crawler::health::{HealthStatus, SourceHealth};
 use crate::desktop::components::{StatusBadge, StatusKind, truncate};

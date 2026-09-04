@@ -3,12 +3,12 @@
 //! 跟 sources.rs 状态过滤同款：`.small().ghost().selected(bool)`，label 拼 "i18n + 数量"。
 //! label 在 render 里现取 `ts(...)` + 当前 counts，切语言自动同步。
 
-use gpui_kit::{Context, IntoElement, ParentElement, Styled};
 use gpui_kit::component::{
     Selectable, Sizable,
     button::{Button, ButtonVariants as _},
     h_flex,
 };
+use gpui_kit::{Context, IntoElement, ParentElement, Styled};
 
 use crate::i18n::ts;
 
