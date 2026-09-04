@@ -6,8 +6,7 @@
 //! `page: Entity<SearchPage>` 转发用：全本 / 详情 / 选章 按钮 `on_click` 调
 //! `page.update` 拿 `&mut AppModel`。
 
-use gpui::{App, Entity, IntoElement, ParentElement, Styled, div, px};
-use gpui_component::{
+use gpui_kit::component::{
     ActiveTheme as _, Icon, IconName, Sizable, WindowExt,
     button::Button,
     dialog::Dialog,
@@ -15,6 +14,7 @@ use gpui_component::{
     notification::{Notification, NotificationType},
     v_flex,
 };
+use gpui_kit::{App, Entity, IntoElement, ParentElement, Styled, div, px};
 
 use crate::desktop::components::truncate;
 use crate::i18n::ts_cached;
@@ -89,7 +89,7 @@ pub(super) fn render(
                 .child(
                     div()
                         .text_sm()
-                        .font_weight(gpui::FontWeight::MEDIUM)
+                        .font_weight(gpui_kit::FontWeight::MEDIUM)
                         .text_color(cx.theme().foreground)
                         .child(div().whitespace_nowrap().text_ellipsis().child(name)),
                 )

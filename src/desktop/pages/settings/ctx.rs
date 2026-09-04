@@ -10,12 +10,12 @@
 
 use std::rc::Rc;
 
-use gpui::{App, ClickEvent, Entity, SharedString, Window};
-use gpui_component::{
-    input::InputState,
+use gpui_kit::component::{
+    input::{InputState, TextareaState},
     select::{SearchableVec, SelectState},
     slider::SliderState,
 };
+use gpui_kit::{App, ClickEvent, Entity, SharedString, Window};
 
 use crate::desktop::model::AppModel;
 
@@ -38,9 +38,11 @@ pub(super) struct PageCtx<'a> {
     pub font_size_state: &'a Entity<SliderState>,
     pub download_path_input: &'a Entity<InputState>,
     /// 起点 cookie 输入框 — `SettingField::render` 闭包每帧重建会丢
-    /// focus / 光标 / 多行 wrap，所以建一次缓存。`multi_line(true).rows(3)`
-    /// 配合 `Input::h(px(80.))` 给一块固定高度的 textarea 给用户粘贴整段
-    /// `Cookie:` 头。`placeholder("w_tsfp=...")` 提示 cookie 头格式起点。
-    pub qidian_cookie_input: &'a Entity<InputState>,
+    /// focus / 光标 / 多行 wrap，所以建一次缓存。gpui-kit 0.6 改用
+    /// `TextareaState::new(window, cx).rows(3)`（多行由模式本身携带，不再
+    /// `multi_line(true)`），配合 `Textarea` 渲染 + `.h(px(80.))` 给一块
+    /// 固定高度的 textarea 给用户粘贴整段 `Cookie:` 头。`placeholder("w_tsfp=...")`
+    /// 提示 cookie 头格式起点。
+    pub qidian_cookie_input: &'a Entity<TextareaState>,
     pub pick_folder_listener: &'a PickFolderListener,
 }

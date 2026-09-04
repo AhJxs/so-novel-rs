@@ -1,4 +1,4 @@
-//! 设置 page：用 gpui-component `Settings` 组件搭的一级导航页面。
+//! 设置 page：用 gpui-kit 组件库的 `Settings` 组件搭的一级导航页面。
 //!
 //! 与其他 4 个 page（Library / Search / Tasks / Sources）一样：
 //! - `RootView` 一次性创建 entity，跨切换保留内部状态；
@@ -22,14 +22,14 @@ mod page_crawl;
 mod page_general;
 mod page_proxy;
 
-use gpui::{App, AppContext, Context, Entity, IntoElement, Render, SharedString, Window};
-use gpui_component::{
+use gpui_kit::component::{
     group_box::GroupBoxVariant,
-    input::{InputEvent, InputState},
+    input::{InputEvent, InputState, TextareaState},
     select::{SearchableVec, SelectDelegate, SelectEvent, SelectState},
     setting::{SettingPage, Settings},
     slider::{SliderEvent, SliderState, SliderValue},
 };
+use gpui_kit::{App, AppContext, Context, Entity, IntoElement, Render, SharedString, Window};
 
 use crate::desktop::model::AppModel;
 use crate::desktop::themes;
@@ -46,7 +46,7 @@ pub struct SettingsPage {
     /// 每帧现建会丢 popup / focus / 拖拽位置。订阅 handler 也只在 owner 上挂一次。
     download_path_input: Entity<InputState>,
     font_size_state: Entity<SliderState>,
-    qidian_cookie_input: Entity<InputState>,
+    qidian_cookie_input: Entity<TextareaState>,
     theme_state_static: Entity<SelectState<SearchableVec<SharedString>>>,
     theme_state_dyn_light: Entity<SelectState<SearchableVec<SharedString>>>,
     theme_state_dyn_dark: Entity<SelectState<SearchableVec<SharedString>>>,
@@ -54,7 +54,7 @@ pub struct SettingsPage {
     /// 主题名快照，用于差量同步到 `SelectState`。
     ///
     /// 主题列表**不是**静态的：启动时 `ThemeRegistry::watch_dir` async 加载 21 个 embed，
-    /// `SettingsPage::new` 跑时列表可能只有 gpui-component 默认 Light + Dark 两个。等
+    /// `SettingsPage::new` 跑时列表可能只有 gpui-kit 组件库默认的 Light + Dark 两个。等
     /// async 加载完 → `apply_theme_pref` 触发 `cx.refresh_windows()` → 下一帧 render
     /// 在 `sync_theme_items` 里重新拍快照 + 对比，发现变了就 `set_items` 推过去 + 按 config
     /// 选中值重定位。
@@ -66,9 +66,9 @@ pub struct SettingsPage {
     /// `new` 里通过 `cx.listener(...)` 建一次并缓存为 `Rc<dyn Fn>`，render 闭包只 `as_ref()` 复用。
     ///
     /// 之前试过在 `SettingField::render` 闭包里现建，但拿不到 `Context<Self>` 调不了 `cx.listener`；
-    /// 也试过 `page_handle.update(cx, |_page, ctx| ctx.spawn(...))` 桥接，但 GPUI 0.2.2 +
-    /// gpui-component 0.5.1 下 click 不触发（suffix 内 button 被 Input 的 `on_mouse_down`
-    /// 抢 hit，或双重 update 后 `WeakEntity` 已 stale）。`sources.rs::pick_and_add` 的 working
+    /// 也试过 `page_handle.update(cx, |_page, ctx| ctx.spawn(...))` 桥接，但该桥接下 click 不触发
+    /// （suffix 内 button 被 Input 的 `on_mouse_down` 抢 hit，或双重 update 后 `WeakEntity` 已 stale）。
+    /// `sources.rs::pick_and_add` 的 working
     /// pattern（`cx.listener` 绑到 entity，entity 方法内直接 `cx.spawn`）才稳。
     pick_folder_listener: PickFolderListener,
 }
@@ -166,8 +166,9 @@ impl SettingsPage {
         // placeholder 提示 cookie 头以 `w_tsfp=` 开头（DevTools 复制）。
         let initial_qidian_cookie = model.read(cx).config.cookie.qidian_cookie.clone();
         let qidian_cookie_input = cx.new(|cx| {
-            InputState::new(window, cx)
-                .multi_line(true)
+            // gpui-kit 0.6：多行不再由 `multi_line(true)` 标记，改用
+            // `TextareaState`（`InputBaseState<TextareaMode>`），模式本身就携带多行。
+            TextareaState::new(window, cx)
                 .rows(3)
                 .placeholder(ts("Settings.placeholder.qidian_cookie"))
                 .default_value(initial_qidian_cookie.clone())
@@ -205,7 +206,11 @@ impl SettingsPage {
         // 拖拽每 px 触发：写 config + persist（500ms debounce 合并）+ apply_font_size。
         // 字号写入 `Theme.font_size` 后 `Root::render` 下一帧用新值设 rem_size → 全 app 缩放。
         cx.subscribe(&font_size_state, |this, _state, event, cx| {
-            let SliderEvent::Change(value) = event;
+            // gpui-kit 0.6 的 SliderEvent 多了一个 `Release` 变体（拖完松手才发）。
+            // 连续拖拽期间只关心 `Change`，Release 不携带新值（最后一次 Change 已落盘）。
+            let SliderEvent::Change(value) = event else {
+                return;
+            };
             let size = match *value {
                 SliderValue::Single(v) => v,
                 SliderValue::Range(_, end) => end,

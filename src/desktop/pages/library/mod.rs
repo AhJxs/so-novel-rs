@@ -3,9 +3,9 @@
 //! 行为：
 //! - 进入页面时若 `library.scanned_dir` 为空 / 不匹配 `config.download.download_path` → 自动扫一次。
 //! - 工具栏：文件名过滤输入 + 文件类型按钮组（不在 State 里实现 —— 切语言即时更新）。
-//! - 列表：gpui-component `List`（虚拟滚动）+ `LibraryDelegate`，每页 30 条（5 列：文件名 /
+//! - 列表：`gpui_kit::component::list::List`（虚拟滚动）+ `LibraryDelegate`，每页 30 条（5 列：文件名 /
 //!   格式 / 大小 / 修改时间 / 3 动作）。
-//! - 分页页脚自写（gpui-component 0.5.1 没 Pagination 组件），≤1 页时整段隐藏。
+//! - 分页页脚自写（gpui-kit 组件库当时没有 Pagination 组件），≤1 页时整段隐藏。
 //! - **没有文件 watcher** —— 列表只在「首次进入 / 下载目录变化」时自动扫一次，
 //!   其余情况靠 `PageHeader` 右上角「刷新」按钮手动触发。
 //! - 删除走 `WindowExt::open_dialog` 二次确认 → `model.delete_library_entry` → `entries_version`
@@ -17,20 +17,20 @@ mod toolbar;
 
 use std::path::PathBuf;
 
-use gpui::prelude::FluentBuilder as _;
-use gpui::{
-    App, AppContext, ClickEvent, Context, Entity, IntoElement, ParentElement, Render, Styled,
-    Window, div, px,
-};
-use gpui_component::{
+use gpui_kit::component::{
     ActiveTheme as _, Disableable as _, Icon, IconName, WindowExt,
     button::{Button, ButtonVariant},
-    dialog::Dialog,
+    dialog::AlertDialog,
     dialog::DialogButtonProps,
     input::{InputEvent, InputState},
     list::List,
     list::ListState,
     v_flex,
+};
+use gpui_kit::prelude::FluentBuilder as _;
+use gpui_kit::{
+    App, AppContext, ClickEvent, Context, Entity, IntoElement, ParentElement, Render, Styled,
+    Window, div, px,
 };
 
 use crate::desktop::components::{EmptyState, PageHeader, Pagination, compute_page_window};
@@ -129,27 +129,28 @@ impl LibraryPage {
             raw_name.to_string()
         };
 
-        window.open_dialog(cx, move |dialog: Dialog, _window, _cx| {
-            // dialog builder 是 Fn（被 open_dialog 复用，每次点击都重调）；
+        window.open_alert_dialog(cx, move |alert: AlertDialog, _window, _cx| {
+            // alert builder 是 Fn（被 open_alert_dialog 复用，每次点击都重调）；
             // on_ok 也必须 Fn —— 全部 clone 捕获，避开 FnOnce。
             let model_for_ok = model.clone();
             let path_for_ok = path.clone();
             let model_id_for_ok = model_id;
 
-            dialog
+            alert
                 .title(ts("Library.delete_dialog.title"))
                 // 占位符必须走 ts_fmt —— 直接 format! 拼字符串会在切语言时让
                 // 占位符翻译也跟着拼，顺序错乱。
-                .child(div().child(ts_fmt(
+                .description(ts_fmt(
                     "Library.delete_dialog.message",
                     &[("file_name", &file_name)],
-                )))
+                ))
                 .button_props(
                     DialogButtonProps::default()
                         .ok_text(ts("Library.delete_dialog.confirm_button"))
                         .cancel_text(ts("Library.delete_dialog.cancel_button"))
                         .ok_variant(ButtonVariant::Danger),
                 )
+                // gpui-kit 0.6：`.confirm()` 是 AlertDialog 的方法（show_cancel=true）。
                 .confirm()
                 .on_ok(move |_ev: &ClickEvent, _window, cx| {
                     model_for_ok.update(cx, |m, _cx| {

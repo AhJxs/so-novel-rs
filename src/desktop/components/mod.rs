@@ -1,6 +1,6 @@
 //! 共享 GPUI 组件 / 格式化工具。
 //!
-//! 严守"小工具 + 复用 gpui-component"原则：
+//! 严守"小工具 + 复用 gpui-kit 组件库"原则：
 //! - **不**重新实现 button / input / popup / icon font。
 //! - **不**复制 theme palette — 颜色全部从 `cx.theme()` 取。
 //! - 仅暴露：EmptyState / Pagination / `PageHeader` / `StatusBadge` / formatting 工具。

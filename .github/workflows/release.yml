@@ -16,7 +16,7 @@
 # Release notes：`docs/CHANGELOG.md` 作为 release 主体 + asset 一同上传。
 # 维护者打 tag 前把"\[Unreleased\]"段改名为"\[X.Y.Z\] - YYYY-MM-DD"即可。
 #
-# GPUI 0.2.2 Linux 编译依赖（apt dev 包）：xkbcommon / xkbcommon-x11 / fontconfig /
+# gpui 层 Linux 编译依赖（apt dev 包）：xkbcommon / xkbcommon-x11 / fontconfig /
 # xcb / wayland / gl / egl + Vulkan headers（blade-graphics）。
 # macOS / Windows 用系统 framework，无需额外包。
 

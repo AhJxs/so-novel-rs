@@ -4,7 +4,7 @@
 //! 主题内容走 [`embedded_themes`] 返回 `(文件名, JSON 字符串)` 列表, 由
 //! [`super::user_dir::ensure_user_themes_dir`] 同步到 `~/.sonovel/themes/`。
 
-/// 字号范围 (px)。gpui-component 默认 16; 设置页 slider 的 min/max 复用这两个常量。
+/// 字号范围 (px)。gpui-kit 组件库默认 16; 设置页 slider 的 min/max 复用这两个常量。
 pub const FONT_SIZE_MIN: f32 = 12.0;
 pub const FONT_SIZE_MAX: f32 = 24.0;
 pub const FONT_SIZE_DEFAULT: f32 = 16.0;

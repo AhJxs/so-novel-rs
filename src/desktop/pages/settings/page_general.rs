@@ -1,4 +1,4 @@
-//! 常规页（gpui-component `Settings` 左侧 sidebar 第 1 项）。
+//! 常规页（gpui-kit 组件库的 `Settings` 左侧 sidebar 第 1 项）。
 //!
 //! 3 个 group：
 //! - 外观：主题模式（dropdown） / 按模式条件渲染的主题 `item（theme_mode_items`）/
@@ -10,16 +10,16 @@
 //! `theme_mode_items` 之前在 `SettingsPage` impl 内（settings.rs:381），是 100 行的
 //! 闭包工厂。拆到本文件 —— 只服务「外观」组，留 `pub(super)` 即可。
 
-use gpui::{App, Entity, ParentElement, SharedString, Styled, div};
-use gpui_component::{
+use gpui_kit::component::{
     ActiveTheme as _, AxisExt as _, IconName, Sizable as _, WindowExt as _,
     button::{Button, ButtonVariants as _},
-    dialog::{Dialog, DialogButtonProps},
+    dialog::{AlertDialog, DialogButtonProps},
     input::Input,
     select::Select,
     setting::{SettingField, SettingGroup, SettingItem, SettingPage},
     slider::SliderValue,
 };
+use gpui_kit::{App, Entity, ParentElement, SharedString, Styled, div};
 use tracing;
 
 use crate::config::ExportFormat;
@@ -152,13 +152,13 @@ pub(super) fn build(ctx: &PageCtx<'_>, cx: &App) -> SettingPage {
                             SettingField::render({
                                 let font_size_state = ctx.font_size_state.clone();
                                 move |options, _window, cx| {
-                                    use gpui_component::slider::Slider;
+                                    use gpui_kit::component::slider::Slider;
                                     let n = match font_size_state.read(cx).value() {
                                         SliderValue::Single(v) => v,
                                         SliderValue::Range(_, end) => end,
                                     };
                                     let mut el = div().flex().items_center().gap_2();
-                                    el = if options.layout.is_horizontal() {
+                                    el = if options.layout().is_horizontal() {
                                         el.w_64()
                                     } else {
                                         el.w_full()
@@ -206,7 +206,7 @@ pub(super) fn build(ctx: &PageCtx<'_>, cx: &App) -> SettingPage {
                 .title(ts("Settings.group.download"))
                 .items(vec![
                     // -- 下载目录（带「浏览…」图标，点击调 rfd 选目录）--
-                    // gpui-component 0.5.1 的 `SettingField::input` 只能给裸 Input
+                    // gpui-kit 组件的 `SettingField::input` 只能给裸 Input
                     // 没法挂 suffix icon。改走 `SettingField::render` + 原生
                     // `Input::new(&ctx.download_path_input).suffix(Button::...)`。
                     // InputState 缓存到 `SettingsPage` struct（和 theme_state 同理，
@@ -224,7 +224,7 @@ pub(super) fn build(ctx: &PageCtx<'_>, cx: &App) -> SettingPage {
                                 // 大小 → text 被裁切看不见、suffix button 没 hit area
                                 // → click 不响应。详见 `string.rs:76-86`。
                                 let mut el = Input::new(&download_path_input)
-                                    .with_size(options.size)
+                                    .with_size(options.size())
                                     .suffix({
                                         // ghost + xsmall 让 button 视觉上就是 icon，
                                         // 不抢 input 焦点、看起来像 input 的一部分。
@@ -235,7 +235,7 @@ pub(super) fn build(ctx: &PageCtx<'_>, cx: &App) -> SettingPage {
                                         // 注释）—— render 闭包拿不到 `Context<Self>`，
                                         // 在这里现建 `cx.listener` 不可行；早先尝试
                                         // 「`page_handle.update(cx, |_page, ctx| cx.spawn(...))`」
-                                        // 双层套娃在 GPUI 0.2.2 下 click 不触发。
+                                        // 双层套娃下 click 不触发。
                                         //
                                         // `Rc<dyn Fn + 'static>::as_ref()` 拿到的是
                                         // `&'a Rc<dyn Fn>`，**不是 `'static`** —— `Button::on_click`
@@ -254,7 +254,7 @@ pub(super) fn build(ctx: &PageCtx<'_>, cx: &App) -> SettingPage {
                                     });
                                 // horizontal layout → 固定 256px（与 `SettingField::input`
                                 // 默认行为一致）；其它 → 占满整行。
-                                if options.layout.is_horizontal() {
+                                if options.layout().is_horizontal() {
                                     el = el.w_64();
                                 } else {
                                     el = el.w_full();
@@ -329,8 +329,8 @@ fn theme_mode_items(ctx: &PageCtx<'_>, kind: ThemeKind, m: &Entity<AppModel>) ->
                 SettingField::render({
                     let state = ctx.theme_state_static.clone();
                     move |options, _window, _cx| {
-                        let mut el = Select::new(&state).with_size(options.size).min_w_48();
-                        el = if options.layout.is_horizontal() {
+                        let mut el = Select::new(&state).with_size(options.size()).min_w_48();
+                        el = if options.layout().is_horizontal() {
                             el.w_64()
                         } else {
                             el.w_full()
@@ -377,8 +377,8 @@ fn theme_mode_items(ctx: &PageCtx<'_>, kind: ThemeKind, m: &Entity<AppModel>) ->
                 SettingItem::new(
                     title,
                     SettingField::render(move |options, _window, _cx| {
-                        let mut el = Select::new(&state).with_size(options.size).min_w_48();
-                        el = if options.layout.is_horizontal() {
+                        let mut el = Select::new(&state).with_size(options.size()).min_w_48();
+                        el = if options.layout().is_horizontal() {
                             el.w_64()
                         } else {
                             el.w_full()
@@ -430,7 +430,7 @@ fn after_theme_kind(m: &Entity<AppModel>, cx: &mut App) {
 /// 报 "window not found"。
 ///
 /// 解法：`cx.defer(closure)` —— 把闭包作为 Effect 推到
-/// flush 队列（gpui 0.2.2 app.rs:1434），下一次 `flush_effects`
+/// flush 队列（gpui 层），下一次 `flush_effects`
 /// 时跑（届时窗口已放回 SlotMap），不再受 `update_window` 嵌套
 /// take 影响。代价 1 帧延迟 ≈ 16ms，跟 `GPApp` 内部调度同步，
 /// 用户无感。
@@ -441,10 +441,10 @@ fn after_language(_m: &Entity<AppModel>, cx: &mut App) {
         tracing::info!("language setter: defer 触发, 调 open_dialog");
         if let Some(handle) = cx.windows().into_iter().next() {
             let result = handle.update(cx, |_view, window, cx| {
-                window.open_dialog(cx, |dialog: Dialog, _w, _cx| {
-                    dialog
+                window.open_alert_dialog(cx, |alert: AlertDialog, _w, _cx| {
+                    alert
                         .title(ts("Settings.language_restart_dialog.title"))
-                        .child(div().child(ts("Settings.language_restart_dialog.message")))
+                        .description(ts("Settings.language_restart_dialog.message"))
                         .button_props(
                             DialogButtonProps::default()
                                 .ok_text(ts("Settings.language_restart_dialog.restart_button"))

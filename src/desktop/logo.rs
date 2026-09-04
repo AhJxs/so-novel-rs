@@ -2,7 +2,7 @@
 //!
 //! 用 `.png` (位图) 而非 `.svg`: gpui 的 `img()` 不直接吃 SVG 字节 —— SVG 需要装到
 //! asset loader 走 `AssetSource` + 内置 SVG 光栅化。本项目 assets loader 是
-//! `gpui_component_assets::Assets`, 不包含我们的 logo。最简、零运行时依赖路径就是
+//! `gpui_kit::assets::Assets`, 不包含我们的 logo。最简、零运行时依赖路径就是
 //! 嵌 PNG 字节 + `image` crate 解码成 `RenderImage` (流程同 `decode_cover_image`)。
 //!
 //! 主流程 [`render_logo`] 在 [`super::root::RootView::render_sidebar`]。
@@ -10,7 +10,7 @@
 use std::io::Cursor;
 use std::sync::{Arc, LazyLock};
 
-use gpui::{
+use gpui_kit::{
     AnyElement, ImageSource, IntoElement, ObjectFit, RenderImage, Styled as _, StyledImage as _,
     div, img,
 };
@@ -41,7 +41,7 @@ fn decode_logo_image(bytes: &[u8]) -> Option<Arc<RenderImage>> {
 ///
 /// 解码失败 → 返回空 div 占位, 不让 UI 崩。`size` 走 `px()` 显式像素而非 rem:
 /// logo 是图标资源, 不跟字号缩放。
-pub(super) fn render_logo(size: gpui::Pixels) -> AnyElement {
+pub(super) fn render_logo(size: gpui_kit::Pixels) -> AnyElement {
     LOGO_IMAGE.as_ref().map_or_else(
         || div().size(size).flex_shrink_0().into_any_element(),
         |rendered| {

@@ -23,20 +23,20 @@ const COVER_IMAGES_CAPACITY: NonZeroUsize = match NonZeroUsize::new(32) {
     None => unreachable!(),
 };
 
-use gpui::{
-    App, AppContext, Context, Entity, IntoElement, ParentElement, Render, RenderImage,
-    SharedString, Styled, Window, div, prelude::FluentBuilder as _, px,
-};
-use gpui_component::{
+use gpui_kit::component::{
     ActiveTheme as _, Icon, IconName, Sizable, WindowExt,
     button::{Button, ButtonVariants as _},
-    dialog::{Dialog, DialogButtonProps},
+    dialog::{AlertDialog, DialogButtonProps},
     h_flex,
     input::{Input, InputEvent, InputState, NumberInputEvent, StepAction},
     list::{List, ListState},
     notification::{Notification, NotificationType},
     select::{SearchableVec, SelectDelegate, SelectEvent, SelectState},
     v_flex,
+};
+use gpui_kit::{
+    App, AppContext, Context, Entity, IntoElement, ParentElement, Render, RenderImage,
+    SharedString, Styled, Window, div, prelude::FluentBuilder as _, px,
 };
 
 use crate::desktop::components::{
@@ -112,7 +112,7 @@ pub struct SearchPage {
     url_input: Entity<InputState>,
     /// URL Dialog 点「解析」成功后，由 `open_url_dialog` 的 `on_ok` 写入。
     /// **不在 `on_ok` 里直接调 `open_range_dialog`**，因为 `on_ok` 返回 true
-    /// 后 gpui-component 的 button click handler 会调 `window.close_dialog`，
+    /// 后 gpui-kit 组件库的 button click handler 会调 `window.close_dialog`，
     /// `close_dialog` 是 `active_dialogs.pop()` —— 此刻新 push 的 range Dialog
     /// 反而被 pop 掉。改为 set flag + `cx.notify()`，`render()` 在下一帧
     /// 检测到 flag 后再调 `open_range_dialog`，这时 URL Dialog 已经被
@@ -168,7 +168,7 @@ impl SearchPage {
         // 订阅两类事件：
         // - `InputEvent::Change`：用户键入数字 → clamp 后 set_value 写回 + 刷新预览。
         // - `NumberInputEvent::Step`：用户按 +/- → ±1 后 set_value。
-        //   NumberInput 的 +/- 只发 Step 事件、不改值（见 gpui-component number_input.rs
+        //   NumberInput 的 +/- 只发 Step 事件、不改值（见 组件库 number_input.rs
         //   L106-112），必须自己处理。
         // clamp 范围 [1, N]：N 取 toc_cache Loaded 章节数；TOC 没回来按 [1, u32::MAX]。
         let range_start_input =
@@ -185,7 +185,7 @@ impl SearchPage {
         // Change 订阅：只在值不同时 set_value —— 无条件写回触发 Change→set_value→
         // Change 死循环，几轮把 Windows 句柄配额耗尽崩溃（0x80070718）。set_value 写回
         // 的值已是规整值，二次 Change want==cur 直接跳过，循环终止。
-        // set_value 要 `&mut Window`（0.5.1 三参签名），用回调自带的 window —— update
+        // set_value 要 `&mut Window`（三参签名），用回调自带的 window —— update
         // 只借 cx，window 是独立可变借用，不冲突。
         cx.subscribe_in(
             &range_start_input,
@@ -395,7 +395,7 @@ impl SearchPage {
     /// `range_dialog::content` 反应式渲染路径。零结构改动。
     fn open_url_dialog(&self, window: &mut Window, cx: &mut Context<Self>) {
         // 自动粘贴：Dialog 打开时把剪贴板里的 URL 填进去（http(s) 才填）。
-        // `read_from_clipboard` 返回 `Option<ClipboardItem>`（gpui 0.2.2），
+        // `read_from_clipboard` 返回 `Option<ClipboardItem>`（gpui 层），
         // `.text()` 把所有 String entry 拼起来返回 Option<String>。
         if let Some(s) = cx.read_from_clipboard().and_then(|item| item.text()) {
             let trimmed = s.trim();
@@ -407,7 +407,7 @@ impl SearchPage {
         }
 
         let page = cx.entity();
-        window.open_dialog(cx, move |dialog: Dialog, _window, cx| {
+        window.open_alert_dialog(cx, move |alert: AlertDialog, _window, cx| {
             // builder 是 Fn（每帧重调）→ 每帧 clone page 进当帧闭包。
             let page = page.clone();
             // 渲染 body：TextInput + 「粘贴」兜底按钮 + 自动粘贴提示行。
@@ -447,9 +447,11 @@ impl SearchPage {
                                 .child(ts("Search.url_download.auto_pasted")),
                         ),
                 );
-            dialog
+            // 复杂 body 走 `.child(body)`（AlertDialog 的 ParentElement 渲染在标题下方）；
+            // 宽用 AlertDialog 的 `.width()`（旧 Dialog 的 `.w()` 是 props 宽度方法）。
+            alert
                 .title(ts("Search.url_download.dialog_title"))
-                .w(px(520.))
+                .width(px(520.))
                 .child(body)
                 .button_props(
                     DialogButtonProps::default()
@@ -514,7 +516,7 @@ impl SearchPage {
                             ));
                         });
                         // 不在此处直接调 `open_range_dialog`：on_ok 返回 true 后
-                        // gpui-component 会调 `window.close_dialog` (pop 栈顶)，
+                        // gpui-kit 组件库会调 `window.close_dialog` (pop 栈顶)，
                         // 此刻栈顶是我们刚 push 的 range Dialog，反而被 pop 掉。
                         // 改为 set flag → `cx.notify()` → render() 下一帧 drain。
                         p.pending_range_dialog = Some(target);
@@ -544,13 +546,14 @@ impl SearchPage {
         self.range_initialized = false;
 
         let page = cx.entity();
-        window.open_dialog(cx, move |dialog: Dialog, window, cx| {
+        window.open_alert_dialog(cx, move |alert: AlertDialog, window, cx| {
             // builder 是 Fn（每帧重调）→ 每帧 clone page 进当帧闭包。
             let page = page.clone();
             let body = range_dialog::content(&page, window, cx);
-            dialog
+            // 复杂 body 走 `.child(body)`；宽用 AlertDialog 的 `.width()`。
+            alert
                 .title(ts("Search.range.title"))
-                .w(px(520.))
+                .width(px(520.))
                 .child(body)
                 // confirm 模式：OK + Cancel 两按钮。OK 文案"下载"。
                 .button_props(
@@ -559,7 +562,7 @@ impl SearchPage {
                         .cancel_text(ts("Search.range.cancel")),
                 )
                 .confirm()
-                // on_ok 在 Dialog 上（0.5.1 的 DialogButtonProps 无 on_ok 方法）。
+                // on_ok 在 Dialog 上（gpui-kit 组件的 DialogButtonProps 无 on_ok 方法）。
                 // 签名 `Fn(&ClickEvent, &mut Window, &mut App) -> bool` —— window 在这层，
                 // page.update 内部拿不到 Window（只有 Context），所以下载派发放 update 里、
                 // 通知用 window 在这层发，用 RangeOutcome 枚举传结果出来。

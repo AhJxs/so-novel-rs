@@ -1,4 +1,4 @@
-//! `UIEvent` → `gpui_component::Notification` 翻译层。
+//! `UIEvent` → `gpui_kit::component::Notification` 翻译层。
 //!
 //! `app/` 是 UI 框架解耦的, 把意图 (要弹什么 toast) 以 plain enum 推到
 //! `AppModel::pending_ui_events`; UI 层 `RootView::render` 拿到 `&mut Window` 后
@@ -7,11 +7,11 @@
 //! 翻译层放 `desktop/`: `Notification::on_click` / `cx.open_url` 是 UI 框架 API,
 //! 跨过去就破坏"app/ 零 GUI 依赖"。`OpenLink` 变体的 `on_click` 在这里挂。
 
-use gpui_component::notification::Notification;
+use gpui_kit::component::notification::Notification;
 
 use crate::desktop::model::UIEvent;
 
-/// 把 `UIEvent` 翻译为 `gpui_component::Notification`, 准备 `window.push_notification(...)`。
+/// 把 `UIEvent` 翻译为 `gpui_kit::component::Notification`, 准备 `window.push_notification(...)`。
 ///
 /// `OpenLink` 变体的 `on_click` 在这里挂 `cx.open_url(&url)` —— 这一步只能在拿到
 /// `App` 上下文时执行, 所以翻译必须发生在 UI 层。

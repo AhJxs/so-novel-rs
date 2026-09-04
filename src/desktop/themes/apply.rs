@@ -6,8 +6,8 @@
 
 use std::rc::Rc;
 
-use gpui::{App, SharedString, Window, px};
-use gpui_component::{Theme, ThemeConfig, ThemeMode, ThemeRegistry};
+use gpui_kit::component::{Theme, ThemeConfig, ThemeMode, ThemeRegistry};
+use gpui_kit::{App, SharedString, Window, px};
 
 use crate::config::{ThemeDynMode, ThemeKind, ThemePref};
 

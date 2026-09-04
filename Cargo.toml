@@ -3,7 +3,7 @@ name = "so-novel-rs"
 version = "0.3.6"
 edition = "2024"
 rust-version = "1.95"
-description = "So Novel — Rust desktop client (gpui + gpui-component)."
+description = "So Novel — Rust desktop client (gpui-kit 0.6)."
 license = "AGPL-3.0-only"
 publish = false
 
@@ -17,9 +17,7 @@ default = ["gui"]
 # 默认开启 —— 主入口是 GUI 客户端（gpui_app::run），CLI / Web 走子路径。
 # `cargo build --no-default-features --features gui` 得到仅含 GUI 的二进制。
 gui = [
-    "dep:gpui",
-    "dep:gpui-component",
-    "dep:gpui-component-assets",
+    "dep:gpui-kit",
     "dep:rfd",
     "dep:notify",
 ]
@@ -37,17 +35,14 @@ web = [
 ]
 
 [dependencies]
-# UI — GPUI 栈（gui feature 专属）
-gpui = { version = "0.2.2", optional = true }
-gpui-component = { version = "0.5.1", optional = true }
-gpui-component-assets = { version = "0.5.1", optional = true }
-# 国际化 —— rust-i18n（同 gpui-component 内部用的库），我们直接复用框架机制：
-rust-i18n = "3"
+gpui-kit = { version = "0.6.0", optional = true }
+# 国际化 —— rust-i18n（同 gpui-kit 组件库内部用的库），我们直接复用框架机制：
+rust-i18n = "4.2.1"
 
 # Async runtime (kept lean — used in later stages; pulled now so tests/integration are stable)
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "fs", "signal"] }
 
-# smol：gpui 0.2.2 的 `cx.spawn` 用的是 smol executor（在 smol 之上封了一层），
+# smol：gpui 层（gpui-kit 内置）的 `cx.spawn` 用的是 smol executor（在 smol 之上封了一层），
 # 不是 tokio。在 cx.spawn 的 future 内部**不能**用 `tokio::time::sleep` /
 # `tokio::sync::mpsc::channel` —— 那边没有 tokio reactor，会 panic。
 # LibraryPage 的 watcher 任务必须用 smol 的 channel + smol 定时器（通过
@@ -78,8 +73,8 @@ toml_edit = { version = "0.25", features = ["serde"] }
 # Filesystem helpers
 directories = "6"
 
-# 文件系统监听（本地书库实时刷新）。gpui-component 0.5.1 内部也用 7.0.0，
-# default-features 在三大平台都给出可用后端（Windows ReadDirectoryChangesW /
+# 文件系统监听（本地书库实时刷新）。gpui-kit 组件库内部也依赖 notify（锁 7.0.0），
+# notify 的 default-features 在三大平台都给出可用后端（Windows ReadDirectoryChangesW /
 # macOS FSEvents / Linux inotify）。debounce 由 LibraryPage 的 watcher 任务
 # 内部用 `background_executor().timer(...)`（gpui/smol timer）+ AtomicU64
 # 计数器自行实现，不再引入 notify-debouncer-mini 增加编译时间和依赖图复杂度。
@@ -166,7 +161,7 @@ zhconv = "0.4.1"
 # 不启用 `rendering` feature：项目只用 `pdf_oxide::writer::{DocumentBuilder, ...}` 直接拼文本
 # （详见 `src/export/pdf.rs:6-7` 注释，不走 `from_html_css` 渲染流水线）。`rendering` 会拉入
 # 一整套 HTML/CSS 解析依赖，编译时间显著增加而无功能收益。
-pdf_oxide = { version = "0.3.73" }
+pdf_oxide = { version = "0.3.77" }
 
 # LRU 缓存（`SearchState::cover_cache` 走有界 LRU 替代无界 HashMap，
 # 避免长会话累积所有查看过的封面字节）。

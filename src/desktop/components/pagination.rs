@@ -30,13 +30,12 @@
 
 use std::rc::Rc;
 
-use gpui::{
-    AnyElement, App, ClickEvent, Component, IntoElement, ParentElement, RenderOnce, Styled, Window,
-    div,
-};
-use gpui_component::{
+use gpui_kit::component::{
     ActiveTheme as _, Disableable, IconName, Selectable, Sizable,
     button::{Button, ButtonVariants as _},
+};
+use gpui_kit::{
+    AnyElement, App, ClickEvent, IntoElement, ParentElement, RenderOnce, Styled, Window, div,
 };
 
 /// 统一的列表分页大小。4 个 page（library / sources / tasks / search）共用。
@@ -121,11 +120,13 @@ impl Pagination {
 
 // `#[derive(IntoElement)]` 对泛型类型工作得很好，但对单态类型 `Pagination`（没有
 // 泛型参数了）也能直接 derive。这里手动写 impl 等价于 derive 产物，更显式。
+// gpui-kit 0.6 里 derive 产物是 `ViewElement<Self>`（`RenderOnce` 类型经 blanket
+// `impl<T: RenderOnce> View for T` 自动成为 `View`），不再是旧版 gpui 层的 `Component` 概念。
 impl IntoElement for Pagination {
-    type Element = Component<Self>;
+    type Element = gpui_kit::ViewElement<Self>;
 
     fn into_element(self) -> Self::Element {
-        Component::new(self)
+        gpui_kit::ViewElement::new(self)
     }
 }
 

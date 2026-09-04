@@ -1,6 +1,6 @@
 //! 选书源下拉的自定义 `SelectItem`。
 //!
-//! 为什么需要：gpui-component 0.5.1 的内置 `SelectItem` impls（`String` / `SharedString` /
+//! 为什么需要：gpui-kit 组件内置的 `SelectItem` impls（`String` / `SharedString` /
 //! `&'static str`）都强制 `value() == title() == self`，无法让 value 是 `"rule:1"`、
 //! title 是 `"起点 (ZH_CN)"`。手写小 struct 是最简方案。
 //!
@@ -11,8 +11,8 @@
 //!   `SharedString`，解析逻辑 `v == "all" → None;
 //!   v.strip_prefix("rule:").and_then(parse) → Some(id)`。
 
-use gpui::SharedString;
-use gpui_component::select::SelectItem;
+use gpui_kit::SharedString;
+use gpui_kit::component::select::SelectItem;
 
 #[derive(Clone, Debug)]
 pub(super) struct SourceSelectItem {

@@ -1,13 +1,13 @@
 //! 业务层 → UI 层的事件枚举。
 //!
-//! Plain data，**零 GUI 依赖**（不 import `gpui` / `gpui_component`）——
+//! Plain data，**零 GUI 依赖**（不 import `gpui_kit`）——
 //! 让 `crate::desktop::model` 保持与 UI 框架解耦（详见 `src/lib.rs` 顶部注释）。
 //!
 //! 流向：
 //! 1. 业务方法（`AppModel::push_*` / `events::drain` 内部）push `UIEvent` 到
 //!    `AppModel::pending_ui_events`；
 //! 2. `desktop::root::render` 每帧排空该队列，调
-//!    `ui_event_to_notification` 翻译成 `gpui_component::notification::Notification`，
+//!    `ui_event_to_notification` 翻译成 `gpui_kit::component::notification::Notification`，
 //!    再 `window.push_notification(...)` 真正弹 toast。
 //!
 //! 为什么有 `OpenLink`：旧实现里"有新版本"toast 挂了

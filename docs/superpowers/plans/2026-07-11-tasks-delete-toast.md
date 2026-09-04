@@ -6,7 +6,7 @@
 
 **Architecture:** 把 `AppModel::delete_task(id) -> bool` 改成 `delete_task(id) -> DeleteTaskResult`（区分 `Deleted` / `StillRunning` / `Missing` 三个分支），UI 在 `on_ok` 闭包里 match 后调 `push_success` / `push_warning`。toast 链路全走既有 `pending_ui_events` 队列（`RootView::render` 每帧排空 + `ui_event_to_notification` 翻译 + `window.push_notification`）—— 零基础设施新增。
 
-**Tech Stack:** Rust + GPUI + `gpui_component::notification` + `rust_i18n` + YAML locales。
+**Tech Stack:** Rust + GPUI + `gpui_kit::component::notification` + `rust_i18n` + YAML locales。
 
 ## File Structure
 

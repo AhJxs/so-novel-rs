@@ -1,25 +1,25 @@
-//! 直接走 `rust_i18n`（gpui-component 同款机制）。
+//! 直接走 `rust_i18n`（gpui_kit::component 同款机制）。
 //!
 //! ## 用法
 //!
 //! 在调用方直接写 `ts!("Settings.item.theme")` 字符串字面量 —— 无 key 常量、无单独枚举。
-//! 翻译表在 `locales/app.yml`（编译期嵌入二进制），YAML 顶层大写（参考 gpui-component/ui.yml）。
+//! 翻译表在 `locales/app.yml`（编译期嵌入二进制），YAML 顶层大写（参考组件库的 `locales/ui.yml`）。
 //!
-//! ## 与 gpui-component 共享全局 locale
+//! ## 与 gpui_kit::component 共享全局 locale
 //!
-//! 我们加载 `so-novel-rs/locales/app.yml`，gpui-component 加载 `gpui-component/locales/ui.yml`，
+//! 我们加载 `so-novel-rs/locales/app.yml`，gpui_kit::component 加载它自带的 `locales/ui.yml`，
 //! 两个 i18n 实例**各自独立**（不会互相看到对方 YAML 的 key），但**全局 locale 是同一个**
-//! （`rust_i18n::set_locale` 写到全局 `CURRENT_LOCALE`）。所以一次 `gpui_component::set_locale("en")`
+//! （`rust_i18n::set_locale` 写到全局 `CURRENT_LOCALE`）。所以一次 `gpui_kit::component::set_locale("en")`
 //! 同时影响双方：`t!("Nav.search")` → "Search"，`t!("Settings.search_placeholder")` → "Search..."
 //!
 //! ## 改语言时的流程（重启生效）
 //!
 //! 1. 用户在设置页选 en → `AppConfig.language = English; persist_settings()`
 //! 2. 弹重启确认 Dialog：立即重启 → `cx.restart()`；取消 → 不动 locale
-//! 3. 重启后新进程启动时 `mod.rs::run` 调 `gpui_component::set_locale(locale_for(language))`
+//! 3. 重启后新进程启动时 `mod.rs::run` 调 `gpui_kit::component::set_locale(locale_for(language))`
 //!    写全局 locale，再开窗 —— 首次 render 就用新 locale
 //!
-//! `为什么不实时切换（set_locale` + refresh_windows）？gpui-component 的 `InputState.placeholder`、
+//! `为什么不实时切换（set_locale` + refresh_windows）？gpui-kit 组件库的 `InputState.placeholder`、
 //! `SettingsState` 等很多翻译是一次性求值缓存在各 entity 里的，切语言当帧 `refresh_windows`
 //! 不会重求这些缓存值（下拉框已选值 / 输入框 placeholder 不更新）。早先用「render 里 sentinel
 //! 差量比对 + `set_placeholder」逐个刷新，代价大且覆盖不全，故改成重启生效，彻底删掉` sentinel 机制。
@@ -41,12 +41,12 @@ use crate::config::Language;
 /// 来源（前后端 locale tag 统一为 `en` / `zh-CN` / `zh-TW`）。
 ///
 /// `Language::as_str()` 返回的是 `toml_io` 持久化用的 `"zh-TW"`，跟 `app.yml`
-/// 现在的 locale 标签（`"zh-TW"`）已经一致；但**跟 `gpui_component::set_locale`
+/// 现在的 locale 标签（`"zh-TW"`）已经一致；但**跟 `gpui_kit::component::set_locale`
 /// 接受的标签（`"zh-HK"`）不一致** —— 那个走 [`locale_for_gpui`]。
 ///
 /// 三种映射：
 /// - `SimplifiedChinese` → `"zh-CN"`
-/// - `TraditionalChinese` → `"zh-TW"`（**不是** gpui-component 用的 `"zh-HK"`）
+/// - `TraditionalChinese` → `"zh-TW"`（**不是** gpui_kit::component 用的 `"zh-HK"`）
 /// - `English` → `"en"`
 ///
 /// **位置历史**：原本在 `desktop::mod::locale_for`（仅 gui feature 编译）。
@@ -61,11 +61,11 @@ pub const fn locale_for(lang: Language) -> &'static str {
     }
 }
 
-/// 把 `Language` 映射到 **gpui-component 接受**的 locale 标签。
+/// 把 `Language` 映射到 **gpui_kit::component 接受**的 locale 标签。
 ///
-/// gpui-component 0.5.1 用 `rust_i18n` + 自家 `locales/ui.yml`，**只支持 4 个 locale**：
+/// gpui_kit::component 用 `rust_i18n` + 它自带的 `locales/ui.yml`，**只支持 4 个 locale**：
 /// `en` / `zh-CN` / `zh-HK` / `it` —— **没有 `zh-TW`**。本项目的 `app.yml` 用 `zh-TW`，
-/// 但调用 `gpui_component::set_locale(...)` 时必须传 `zh-HK`，否则 gpui-component
+/// 但调用 `gpui_kit::component::set_locale(...)` 时必须传 `zh-HK`，否则 gpui_kit::component
 /// 会 fallback 到 `en`（传统中文用户看到英文 UI）。
 ///
 /// 三种映射：
@@ -73,7 +73,7 @@ pub const fn locale_for(lang: Language) -> &'static str {
 /// - `TraditionalChinese` → `"zh-TW"`（同 [`locale_for`]）
 /// - `English` → `"en"`（同 [`locale_for`]）
 ///
-/// 调用点只有 `src/desktop/mod.rs::run` 启动时一行 —— CLI / web 路径不碰 gpui-component。
+/// 调用点只有 `src/desktop/mod.rs::run` 启动时一行 —— CLI / web 路径不碰 gpui_kit::component。
 pub const fn locale_for_gpui(lang: Language) -> &'static str {
     match lang {
         Language::SimplifiedChinese => "zh-CN",
@@ -82,11 +82,11 @@ pub const fn locale_for_gpui(lang: Language) -> &'static str {
     }
 }
 
-/// 翻译返回类型别名：gui feature 开启时为 `gpui::SharedString`（`Arc<str>` 语义，clone 零 alloc）；
+/// 翻译返回类型别名：gui feature 开启时为 `gpui_kit::SharedString`（`Arc<str>` 语义，clone 零 alloc）；
 /// 非 gui 构建（如 web-only Docker）时为 `String`。
 /// 调用方在两种构建下均可直接 `.into()` 得到目标类型。
 #[cfg(feature = "gui")]
-pub type TStr = gpui::SharedString;
+pub type TStr = gpui_kit::SharedString;
 #[cfg(not(feature = "gui"))]
 pub type TStr = String;
 
@@ -317,7 +317,7 @@ mod tests {
     // ── locale_for vs locale_for_gpui：拆分映射 ───────────────────────
     //
     // `locale_for` 跟 web 前端 + app.yml 统一（zh-TW）；
-    // `locale_for_gpui` 跟 gpui-component 0.5.1 接受列表对齐（zh-HK）。
+    // `locale_for_gpui` 跟 gpui_kit::component 接受列表对齐（zh-HK）。
     // 两个分开是为了不互相踩：web 路径走 locale_for，桌面路径走 locale_for_gpui。
 
     #[test]

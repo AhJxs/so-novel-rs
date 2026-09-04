@@ -4,12 +4,7 @@ mod delegate;
 mod row;
 mod toolbar;
 
-use gpui::prelude::FluentBuilder as _;
-use gpui::{
-    AppContext, Context, Entity, IntoElement, ParentElement, Render, SharedString, Styled, Window,
-    div, px,
-};
-use gpui_component::{
+use gpui_kit::component::{
     ActiveTheme as _, Disableable, Icon, IconName, Sizable,
     button::Button,
     h_flex,
@@ -19,6 +14,11 @@ use gpui_component::{
     spinner::Spinner,
     tag::Tag,
     v_flex,
+};
+use gpui_kit::prelude::FluentBuilder as _;
+use gpui_kit::{
+    AppContext, Context, Entity, IntoElement, ParentElement, Render, SharedString, Styled, Window,
+    div, px,
 };
 
 use crate::db::list_rule_files;
@@ -39,7 +39,7 @@ pub struct SourcesPage {
     /// 选择活跃书源文件的下拉框。
     rule_file_select: Entity<SelectState<SearchableVec<String>>>,
 
-    /// gpui-component 虚拟列表。
+    /// gpui-kit 组件库的虚拟列表。
     list_state: Entity<ListState<SourcesDelegate>>,
 
     /// 当前 0-based 页码。UI-only，每次路径或过滤变化时重置为 0。
@@ -52,7 +52,7 @@ pub struct SourcesPage {
 
 impl SourcesPage {
     pub fn new(model: Entity<AppModel>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        // 1. 名字 / URL 过滤 Input。placeholder 在 state 上设初值（gpui-component API
+        // 1. 名字 / URL 过滤 Input。placeholder 在 state 上设初值（gpui-kit 组件 API
         // 限制，element 层无 placeholder 字段），后续 render 里用 sentinel 检测切语言。
         let initial_placeholder = ts("Sources.filter.placeholder");
         let filter_input =
@@ -158,7 +158,7 @@ impl SourcesPage {
 
 impl Render for SourcesPage {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        // 实时 i18n 同步（仅 placeholder —— gpui-component 0.5.1 API 限制必须存在 State）。
+        // 实时 i18n 同步（仅 placeholder —— gpui-kit 组件 API 限制必须存在 State）。
         //
         // 状态过滤不走 sentinel（已经用 button group，label 现取 `ts(...)`）。
         //
@@ -215,7 +215,7 @@ impl Render for SourcesPage {
         let rule_files = list_rule_files(&rules_dir);
         let items: SearchableVec<String> = rule_files.into();
         let sel = active_file;
-        let pos = <SearchableVec<String> as gpui_component::select::SelectDelegate>::position(
+        let pos = <SearchableVec<String> as gpui_kit::component::select::SelectDelegate>::position(
             &items, &sel,
         );
         self.rule_file_select.update(cx, |state, cx| {

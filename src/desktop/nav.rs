@@ -7,13 +7,13 @@
 //!
 //! ## Key bindings 选择
 //!
-//! 翻页不用 `Ctrl+Tab`: gpui-component `InputState` 把 `tab` / `shift-tab` 绑到自己的
+//! 翻页不用 `Ctrl+Tab`: `gpui_kit::component` 的 `InputState` 把 `tab` / `shift-tab` 绑到自己的
 //! `IndentInline` / `OutdentInline` 动作 (多行输入 tab 插入), 焦点在 Input 时 Tab 事件
 //! 被 Input 消费 (某些平台连 `ctrl-tab` 也被 keydown handler stop 冒泡), 应用级翻页
 //! action 拿不到。改用 `F6` 避开。
 
-use gpui::{App, KeyBinding, SharedString};
-use gpui_component::IconName;
+use gpui_kit::component::IconName;
+use gpui_kit::{App, KeyBinding, SharedString};
 
 use crate::i18n::ts;
 
@@ -51,7 +51,7 @@ impl NavPage {
     }
 
     /// 当前应用语言下的用户可见 label —— `t!` 走全局 locale (语言切换时由
-    /// `gpui_component::set_locale` 同步), 所以这里不需要 `lang` 参数。
+    /// `gpui_kit::component::set_locale` 同步), 所以这里不需要 `lang` 参数。
     pub(super) fn label(self) -> SharedString {
         ts(self.label_key())
     }

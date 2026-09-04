@@ -1,4 +1,4 @@
-//! GUI 栈：GPUI + gpui-component。
+//! GUI 栈：gpui-kit 0.6。
 //!
 //! 架构：
 //! - `RootView` 是顶层窗口视图，含 `TitleBar` + 可折叠 Sidebar + 内容区 + 覆盖层（dialog / sheet / notification）。
@@ -6,14 +6,14 @@
 //! - 共享组件（EmptyState / `PageHeader` / `StatusBadge` / Pagination）在 `components/`。
 //! - 后台通道 → UI 重绘由 `drain_loop::spawn_drain_loop` 每 100ms 排空 + `cx.notify()` 驱动。
 //!
-//! 本模块仅依赖 GPUI + gpui-component + 业务模块（`crate::desktop::model`）。
+//! 本模块仅依赖 gpui-kit + 业务模块（`crate::desktop::model`）。
 
 use anyhow::Result;
-use gpui::{
+use gpui_kit::component::{Root, TitleBar};
+use gpui_kit::{
     App, AppContext, Bounds, WindowBackgroundAppearance, WindowBounds, WindowOptions, actions, px,
     size,
 };
-use gpui_component::{Root, TitleBar};
 
 use crate::desktop::model::AppModel;
 
@@ -54,46 +54,46 @@ pub mod themes;
 pub use nav::{NavPage, register_key_bindings};
 pub use root::RootView;
 
-/// 把 `AppConfig.language`（应用语言）映射到 gpui-component 接受的 locale 字符串。
+/// 把 `AppConfig.language`（应用语言）映射到 gpui_kit::component 接受的 locale 字符串。
 ///
-/// gpui-component 用 `rust_i18n` 做内部国际化（`locales/ui.yml`），内置 4 种 locale：
+/// gpui_kit::component 用 `rust_i18n` 做内部国际化（`locales/ui.yml`），内置 4 种 locale：
 /// `en` / `zh-CN` / `zh-HK` / `it`（`fallback = "en"`，找不到 key 就退回英文）。
 ///
 /// 我们的 `Language` 3 个值映射：
 /// - `SimplifiedChinese`  → `"zh-CN"` （精确匹配）
-/// - `TraditionalChinese` → `"zh-HK"` （传统中文；gpui-component 没有 `zh-TW`，fallback 用 `zh-HK`）
+/// - `TraditionalChinese` → `"zh-HK"` （传统中文；gpui_kit::component 没有 `zh-TW`，fallback 用 `zh-HK`）
 /// - `English`            → `"en"`   （精确匹配）
 ///
 /// 不在列表内的 locale `rust_i18n` 自动 fallback 到 `en`，所以传 `zh-TW` 也会显示英文
-/// —— 显式映射到 `zh-HK` 让传统中文用户能直接看到中文 UI（gpui-component
+/// —— 显式映射到 `zh-HK` 让传统中文用户能直接看到中文 UI（gpui_kit::component
 /// 内部 zh-CN/zh-HK 的简体/繁体翻译完全一样）。
 ///
 /// 何时调用：
-/// 1. **启动时**（`desktop::run`）—— 把 `config.global.language` 同步给 gpui-component，
+/// 1. **启动时**（`desktop::run`）—— 把 `config.global.language` 同步给 gpui_kit::component，
 ///    让 Sidebar 搜索框 placeholder / Select placeholder / Dialog OK|Cancel 等
 ///    内部文案立刻用对语言。
 /// 2. **用户改语言时**（settings page 的 `界面语言` setter）—— `set_locale` 立即生效 +
 ///    `cx.refresh_windows()` 触发整 app 重 render，所有 `t!("...")` 重新读取 locale。
 ///
 /// 注意：**只**对应"应用 UI 语言"（`Language`），跟"书源语言"（`LangType`）无关。
-/// `LangType` 是书源筛选用的 locale hint，不影响 gpui-component 内部 i18n。
+/// `LangType` 是书源筛选用的 locale hint，不影响 gpui_kit::component 内部 i18n。
 ///
 /// **跟 `crate::i18n::locale_for` 的区别**：`locale_for` 返回 `zh-TW`（跟本项目
-/// `app.yml` + 前端 JSON 文件名统一），但 gpui-component 不认 `zh-TW`，所以这里
+/// `app.yml` + 前端 JSON 文件名统一），但 gpui_kit::component 不认 `zh-TW`，所以这里
 /// 用专门的 `locale_for_gpui` 返回 `zh-HK`。CLI / web 路径走 `locale_for` 即可。
 use crate::i18n::locale_for_gpui;
 
 /// 启动 GPUI 应用。`main.rs` 在无参数分支调用。
 ///
 /// 启动顺序：
-/// 1. `gpui_component::init(cx)` — 主题 / 内置组件 / 资源；
+/// 1. `gpui_kit::component::init(cx)` — 主题 / 内置组件 / 资源；
 /// 2. 创建 `Entity<AppModel>` — UI 中立的领域状态；
 /// 3. `root::register_key_bindings(cx)` — 绑定 cmd-1..5 + Tab 切页快捷键；
 /// 4. 启动 [`events::spawn_drain_loop`] — 每 100ms 排空后台通道 + `cx.notify()`；
 /// 5. 打开窗口（**自定义 `TitleBar`** + native 拖拽 + 3 按钮）：
 ///    root 是 `Root`（包裹 [`RootView`]，持有 `AppModel` + sidebar + `TitleBar` + actions）。
 ///
-/// 参考官方 `gpui-component` example — 用 `TitleBar::title_bar_options()`
+/// 参考官方 gpui-kit 组件库 example — 用 `TitleBar::title_bar_options()`
 /// 配置 `WindowOptions.titlebar`：
 /// - `title: None` — OS 任务栏仍会显示 "So Novel"（由 `RootView` 内的 `TitleBar` child 渲染标题）
 /// - `appears_transparent: true` — 告诉 OS 不画原生 chrome；GPUI 接管所有视觉和事件
@@ -108,13 +108,13 @@ use crate::i18n::locale_for_gpui;
 ///
 /// `cx.open_window` 失败时（极少见，仅在 `WindowOptions` 非法或 GPU 已满载时），
 /// 内部会通过 `rfd::MessageDialog` 弹错误对话框后直接 `return` 退出 GPUI 启动流程，
-/// 不会 panic。GPUI 0.2.2 在初始化失败的窗口上几乎不会 `Err`，但保留显式处理
+/// 不会 panic。gpui 层在初始化失败的窗口上几乎不会 `Err`，但保留显式处理
 /// 防止无声失败（避免用户看到空白窗口以为还在加载）。
 pub fn run() -> Result<()> {
-    let app = gpui::Application::new().with_assets(gpui_component_assets::Assets);
+    let app = gpui_kit::application().with_assets(gpui_kit::assets::Assets);
     app.run(move |cx: &mut App| {
         // 必须在第一个窗口前调用。
-        gpui_component::init(cx);
+        gpui_kit::component::init(cx);
 
         // 1. 创建 AppModel。
         //    启动期致命错误（如持久化数据库磁盘 + 内存都打不开）→ 弹原生
@@ -142,7 +142,7 @@ pub fn run() -> Result<()> {
         register_key_bindings(cx);
 
         // 3. 启动 drain 循环（内部 detach），100ms 兜底 + wakeup 主动唤醒。
-        drain_loop::spawn_drain_loop(model.clone(), wakeup_rx, cx);
+        drain_loop::spawn_drain_loop(&model, wakeup_rx, cx);
 
         // 4. 加载 themes/*.json 到 ThemeRegistry（on_load 里 apply + refresh）。
         //    themes 目录 = `~/.sonovel/themes/`（首次启动写入 21 个 embed，
@@ -157,11 +157,11 @@ pub fn run() -> Result<()> {
         };
         themes::init(cx, &app_paths, &theme_pref, font_size);
 
-        // 5. 把 `AppConfig.language`（应用语言）同步给 gpui-component —— 影响内部
+        // 5. 把 `AppConfig.language`（应用语言）同步给 gpui_kit::component —— 影响内部
         //    Sidebar 搜索 placeholder / Select placeholder / Dialog OK|Cancel 等所有
         //    `t!()` 调用的文案。必须在开任何带 Sidebar / Select / Dialog 的窗口前调用，
         //    否则首次 render 就会用错误的 fallback locale。
-        gpui_component::set_locale(locale_for_gpui(model.read(cx).config.global.language));
+        gpui_kit::component::set_locale(locale_for_gpui(model.read(cx).config.global.language));
 
         // 6. 居中开窗 + 最小尺寸 + 自定义 TitleBar 配置。
         let window_size = size(px(1200.0), px(800.0));
@@ -184,11 +184,11 @@ pub fn run() -> Result<()> {
         // （X11 仅在 background != Opaque 时启用 alpha blending）。
         #[cfg(target_os = "linux")]
         {
-            opts.window_decorations = Some(gpui::WindowDecorations::Client);
+            opts.window_decorations = Some(gpui_kit::WindowDecorations::Client);
         }
 
         // 7. Root 包装 RootView（持有 AppModel + sidebar + TitleBar）。
-        //    GPUI 0.2.2 在初始化失败的窗口上几乎不会 `Err`，但万一出错
+        //    gpui 层在初始化失败的窗口上几乎不会 `Err`，但万一出错
         //    （如 `WindowOptions` 非法 / GPU 已满载）显式弹错误对话框退出，
         //    而不是无声返回 → 用户看到空白窗口还以为在加载。
         if let Err(e) = cx.open_window(opts, |window, cx| {

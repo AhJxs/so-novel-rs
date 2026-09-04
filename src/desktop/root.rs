@@ -3,10 +3,10 @@
 //! - 左侧 `Sidebar`: `SidebarMenuItem` × 5 (Search / Tasks / Library / Sources / Settings),
 //!   可折叠到 48px 图标宽度 (`SidebarCollapsible::Icon`, 200ms 缓动); 折叠按钮在 `TitleBar`
 //!   最左侧, `Cmd+B` 快捷键也可切换。**无 footer** — sidebar 只渲染 menu + header。
-//! - 右侧内容区: 按 `current_page` 渲染对应 page (`SettingsPage` 用 gpui-component
-//!   `Settings` 组件搭)。
+//! - 右侧内容区: 按 `current_page` 渲染对应 page (`SettingsPage` 用 gpui-kit 组件
+//!   `Settings` 搭)。
 //! - GPUI actions + keybindings: `cmd-1`~`cmd-5` 直接跳, `F6`/`Shift+F6` 循环翻页,
-//!   `cmd-b` 折叠 sidebar; `Escape` 由 `gpui-component::Root` 自动处理顶层覆盖层关闭。
+//!   `cmd-b` 折叠 sidebar; `Escape` 由 `gpui_kit::component::Root` 自动处理顶层覆盖层关闭。
 //! - 顶层覆盖层走 `Root::render_dialog_layer / sheet_layer / notification_layer`。
 //!
 //! 子模块:
@@ -14,14 +14,14 @@
 //! - [`super::nav`] — `NavPage` enum + actions + key bindings
 //! - [`super::notifications`] — `UIEvent → Notification` 翻译层
 
-use gpui::prelude::FluentBuilder;
-use gpui::{
-    AnyElement, AppContext, ClickEvent, Context, Entity, FontWeight, InteractiveElement,
-    IntoElement, ParentElement, Render, Styled, Window, div, px,
-};
-use gpui_component::{
+use gpui_kit::component::{
     ActiveTheme as _, Icon, Root, TitleBar, WindowExt as _,
     sidebar::{Sidebar, SidebarMenu, SidebarMenuItem, SidebarToggleButton},
+};
+use gpui_kit::prelude::FluentBuilder;
+use gpui_kit::{
+    AnyElement, AppContext, ClickEvent, Context, Entity, FontWeight, InteractiveElement,
+    IntoElement, MouseButton, ParentElement, Render, Styled, Window, div, px,
 };
 
 use crate::desktop::model::AppModel;
@@ -44,7 +44,7 @@ pub struct RootView {
     sidebar_collapsed: bool,
     /// `new()` 里 `window.focus(&focus)` 让 `RootView` 拥有初始焦点 —— `KEY_CONTEXT`
     /// 绑定的快捷键 (`F6` / `Cmd+1..5`) 稳定 fire, 不依赖 focus 落到哪个子元素。
-    focus: gpui::FocusHandle,
+    focus: gpui_kit::FocusHandle,
 
     // 5 个 page entity 一次性创建, 跨切换保持内部状态 (输入框 / 滚动位置)。
     library_page: Entity<LibraryPage>,
@@ -57,7 +57,8 @@ pub struct RootView {
 impl RootView {
     pub fn new(model: Entity<AppModel>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let focus = cx.focus_handle();
-        window.focus(&focus);
+        // gpui-kit 0.6 的 `Window::focus` 签名带 `&mut App`，传 `cx`（Context 自动 deref）。
+        window.focus(&focus, cx);
 
         let library_page = cx.new(|cx| LibraryPage::new(model.clone(), window, cx));
         let search_page = cx.new(|cx| SearchPage::new(model.clone(), window, cx));
@@ -115,11 +116,11 @@ impl RootView {
     /// 构建左侧 Sidebar。支持折叠 (`sidebar_collapsed`):
     /// - 展开: 宽 220px, header 显示 "SO NOVEL" + 5 个 `SidebarMenuItem` (Search / Tasks /
     ///   Library / Sources / Settings)。
-    /// - 折叠: 宽 48px (gpui-component `COLLAPSED_WIDTH`), 菜单项自动收成 icon-only
+    /// - 折叠: 宽 48px (组件库 `COLLAPSED_WIDTH`), 菜单项自动收成 icon-only
     ///   (`Collapsible` trait 隐藏文字); header 仍渲染 (保留 logo), 文字由 `when(!collapsed)` 隐藏。
-    /// - **无 footer** — 不调 `.footer(...)`, gpui-component 内部 `when_some` 跳过。
+    /// - **无 footer** — 不调 `.footer(...)`, gpui-kit 组件内部 `when_some` 跳过。
     ///
-    /// 200ms `ease_in_out_cubic` 缓动由 `gpui-component::Sidebar` 内部 `Transition` 提供。
+    /// 200ms `ease_in_out_cubic` 缓动由 `gpui_kit::component::Sidebar` 内部 `Transition` 提供。
     /// 折叠按钮在 `TitleBar` 最左侧 (见 `render_title_bar`)。
     fn render_sidebar(&self, cx: &Context<Self>) -> impl IntoElement {
         let collapsed = self.sidebar_collapsed;
@@ -165,7 +166,7 @@ impl RootView {
                 )
             });
 
-        Sidebar::left()
+        Sidebar::new("app-sidebar")
             .w(px(220.0))
             .collapsible(true)
             .collapsed(collapsed)
@@ -174,7 +175,7 @@ impl RootView {
             .child(SidebarMenu::new().children(items))
     }
 
-    /// 渲染 gpui-component `TitleBar`。
+    /// 渲染 gpui-kit 组件库的 `TitleBar`。
     ///
     /// 最左侧 `SidebarToggleButton` (默认 small ghost 样式), 右侧自动 `WindowControls`。
     /// `TitleBar` 按平台处理 (`WindowDecorations::Client` 在 `mod.rs` 设置):
@@ -186,13 +187,35 @@ impl RootView {
         // 没法直接用 cx.listener, 走 entity.update 桥接到 `toggle_sidebar`。
         let root_entity = cx.entity();
         TitleBar::new().child(
-            SidebarToggleButton::left()
-                .collapsed(self.sidebar_collapsed)
-                .on_click(move |_ev, _window, app_cx| {
-                    root_entity.update(app_cx, |this, ctx| {
-                        this.toggle_sidebar(ctx);
-                    });
-                }),
+            // gpui-kit 0.6 (gpui-pre 0.3.3) 起, Windows 上 gpui-kit 组件库 `TitleBar`
+            // 把整条 children 行 (`"bar"`) 标成 `window_control_area(Drag)`: NCHITTEST
+            // 对按钮区返回 HTCAPTION, OS 在按下瞬间接管为拖窗(模态), 按钮永远收不到
+            // mouse_up → click 失效。hover 仍经 WM_NCMOUSEMOVE 转发到 GPUI, 所以表现成
+            // 「悬浮有反应但点不动」。
+            //
+            // 修法: 用一层 `occlude()` (`HitboxBehavior::BlockMouse`) 把按钮从祖先 Drag
+            // 命中里「挖」出来 —— hit-test 遇到它即截断, 祖先 `"bar"` 的 drag hitbox 不再
+            // 进 `mouse_hit_test.ids`, 该点 NCHITTEST 落回 HTCLIENT, click 正常分发;
+            // 同时在 mousedown 上 `stop_propagation`, 别让 TitleBar 自己的拖窗监听抢走
+            // 手势 (同 gpui-kit 组件库标题栏内按钮: `prevent_default` + `stop_propagation`)。
+            div()
+                .id("sidebar-toggle-hitbox")
+                .flex()
+                .h_full()
+                .items_center()
+                .occlude()
+                .on_mouse_down(MouseButton::Left, |_ev, _window, cx| {
+                    cx.stop_propagation();
+                })
+                .child(
+                    SidebarToggleButton::new()
+                        .collapsed(self.sidebar_collapsed)
+                        .on_click(move |_ev, _window, app_cx| {
+                            root_entity.update(app_cx, |this, ctx| {
+                                this.toggle_sidebar(ctx);
+                            });
+                        }),
+                ),
         )
     }
 
@@ -211,7 +234,7 @@ impl RootView {
     /// 8 个导航 action 的 listener 挂到传入的 div 上, 返回挂好后的 div。
     /// 抽出到独立方法, 避免 render 主体被 action 链淹没。
     /// 不取 `&self` —— 只用 `cx` 就能 `cx.listener(...)`, 避免 `unused_self`。
-    fn bind_nav_actions(root: gpui::Div, cx: &Context<Self>) -> gpui::Div {
+    fn bind_nav_actions(root: gpui_kit::Div, cx: &Context<Self>) -> gpui_kit::Div {
         root.on_action(
             cx.listener(|this, _: &ShowSearch, _, cx| this.navigate(NavPage::Search, cx)),
         )

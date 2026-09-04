@@ -101,11 +101,11 @@ pub struct AppModel {
     /// `events::drain` 跑在 `AsyncApp::update_entity` 闭包里，**拿不到 `&mut Window`**；
     /// 而 `WindowExt::push_notification` 必须 `&mut Window` + `&mut App`。
     /// 解法：drain 把构造好的 [`UIEvent`] 推到这个 Vec，由 `RootView::render`（拿得到
-    /// `&mut Window`）排空 + 翻译成 `gpui_component::notification::Notification` 再
+    /// `&mut Window`）排空 + 翻译成 `gpui_kit::component::notification::Notification` 再
     /// 真正 push 到 UI。
     ///
     /// 为什么用 plain enum：`app/` 想保持 UI 框架解耦（CLAUDE.md 明确要求）；`UIEvent`
-    /// 是业务层 → UI 层的事件桥，零 `gpui` / `gpui_component` 依赖。
+    /// 是业务层 → UI 层的事件桥，零 GUI 依赖（不 import `gpui_kit`）。
     pub(crate) pending_ui_events: Vec<UIEvent>,
 
     /// 列表渲染缓存（Library / Search / Tasks 三页共用）。

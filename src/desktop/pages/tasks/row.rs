@@ -1,15 +1,15 @@
 //! 单条任务行渲染（卡片式：序号 / 标题行 / 进度条 / 失败折叠 / 动作按钮）。
 
-use gpui::prelude::FluentBuilder as _;
-use gpui::{
-    App, Entity, FontWeight, IntoElement, ParentElement, SharedString, Styled, Window, div, px,
-};
-use gpui_component::{
+use gpui_kit::component::{
     ActiveTheme as _, Disableable, Icon, IconName, Sizable,
     button::{Button, ButtonVariants as _},
     h_flex,
     progress::Progress,
     v_flex,
+};
+use gpui_kit::prelude::FluentBuilder as _;
+use gpui_kit::{
+    App, Entity, FontWeight, IntoElement, ParentElement, SharedString, Styled, Window, div, px,
 };
 
 use crate::desktop::components::{StatusBadge, StatusKind, truncate};
@@ -209,13 +209,13 @@ pub(super) fn render(task: &TaskSummary, page: &Entity<TasksPage>, cx: &App) -> 
                                 ),
                         )
                         .child(
-                            Progress::new()
+                            Progress::new("task-progress")
                                 .value(progress_pct)
                                 .w_full()
                                 .bg(cx.theme().success),
                         )
                         // 失败章节不再用行内 Accordion 折叠 —— `List` 要求所有行等高 +
-                        // `overflow_hidden`（见 gpui-component list.rs），Accordion 展开撑高
+                        // `overflow_hidden`（见 组件库 list.rs），Accordion 展开撑高
                         // 会被裁掉。改成动作按钮区的「失败明细」按钮 → 弹 Dialog 只读列表
                         // （`TasksPage::show_failures`），把可变高度内容移出虚拟列表行。
                         // 动作按钮行

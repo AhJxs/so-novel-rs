@@ -1,15 +1,15 @@
-//! `SearchDelegate`: gpui-component List delegate，持有 page handle + 当前页 (index, `SearchResult`)。
+//! `SearchDelegate`: gpui_kit::component::list::List 的 delegate，持有 page handle + 当前页 (index, `SearchResult`)。
 
-use gpui::{App, Context, Entity, ParentElement, Styled, Window, px};
-use gpui_component::list::{ListItem, ListState};
-use gpui_component::{ActiveTheme as _, IndexPath, list::ListDelegate};
+use gpui_kit::component::list::{ListItem, ListState};
+use gpui_kit::component::{ActiveTheme as _, IndexPath, list::ListDelegate};
+use gpui_kit::{App, Context, Entity, ParentElement, Styled, Window, px};
 
 use crate::models::SearchResult;
 
 use super::SearchPage;
 use super::result_row;
 
-/// `gpui-component::List` 的 delegate —— 把当前过滤下的 (index, `SearchResult`) 列表渲染成行。
+/// `gpui_kit::component::list::List` 的 delegate —— 把当前过滤下的 (index, `SearchResult`) 列表渲染成行。
 ///
 /// 完全对齐 `library::LibraryDelegate` / `tasks::TasksDelegate` / `sources::SourcesDelegate` 模式：
 /// - `page_items` 由 `SearchPage::render` 在每帧 render 前写入；`render_item` 直接取。

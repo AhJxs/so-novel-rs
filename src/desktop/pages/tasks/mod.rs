@@ -4,7 +4,7 @@
 //! - PageHeader：title + subtitle（新描述，无统计数字；无 action —— 去掉"清除已完成"）。
 //! - 过滤按钮组：「全部 / 运行中 / 已完成 / 失败 / 已取消」，各带数量后缀，
 //!   `.small().ghost().selected(bool)` 标记当前过滤（跟 sources.rs 状态过滤同款）。
-//! - 结果列表：`gpui-component::List` + `TasksDelegate`（虚拟滚动）。
+//! - 结果列表：`gpui_kit::component::list::List` + `TasksDelegate`（虚拟滚动）。
 //!   每条任务卡片含书名 / 元信息 / 状态徽章 / 进度条 / 失败折叠 / 动作按钮。
 //!   已结束任务（完成 / 失败 / 已取消）显示「删除」按钮 → 弹 confirm Dialog 二次确认
 //!   （复用 library.rs `prompt_delete` 模式）→ `AppModel::delete_task`。
@@ -22,18 +22,18 @@ mod row;
 mod summary;
 mod toolbar;
 
-use gpui::prelude::FluentBuilder as _;
-use gpui::{
-    App, AppContext, ClickEvent, Context, Entity, IntoElement, ParentElement, Render, Styled,
-    Window, div, px,
-};
-use gpui_component::{
+use gpui_kit::component::{
     ActiveTheme as _, IconName, WindowExt,
     button::ButtonVariant,
-    dialog::{Dialog, DialogButtonProps},
+    dialog::{AlertDialog, Dialog, DialogButtonProps},
     list::{List, ListState},
     scroll::ScrollableElement as _,
     v_flex,
+};
+use gpui_kit::prelude::FluentBuilder as _;
+use gpui_kit::{
+    App, AppContext, ClickEvent, Context, Entity, IntoElement, ParentElement, Render, Styled,
+    Window, div, px,
 };
 
 use crate::desktop::components::{EmptyState, PageHeader, Pagination, compute_page_window};
@@ -50,7 +50,7 @@ pub struct TasksPage {
     model: Entity<AppModel>,
     /// 当前过滤。UI-only，切按钮时更新 + cx.notify。
     filter: TaskFilter,
-    /// gpui-component 虚拟列表 + 自定义 Delegate。必须在 `new()` 里建一次并缓存。
+    /// gpui-kit 组件库的虚拟列表 + 自定义 Delegate。必须在 `new()` 里建一次并缓存。
     list_state: Entity<ListState<TasksDelegate>>,
     /// 当前 0-based 页码。UI-only，每次过滤变化时重置为 0。
     current_page: usize,
@@ -115,18 +115,18 @@ impl TasksPage {
             book_name
         };
 
-        window.open_dialog(cx, move |dialog: Dialog, _window, _cx| {
+        window.open_alert_dialog(cx, move |alert: AlertDialog, _window, _cx| {
             // builder 是 Fn（每帧重调）—— on_ok 也要能多次调，用引用捕获 + clone 避 FnOnce。
             let model_for_ok = model.clone();
             let name_for_ok = name.clone();
             let model_id_for_ok = model_id;
 
-            dialog
+            alert
                 .title(ts("Tasks.delete_dialog.title"))
-                .child(div().child(ts_fmt(
+                .description(ts_fmt(
                     "Tasks.delete_dialog.message",
                     &[("book_name", &name_for_ok)],
-                )))
+                ))
                 .button_props(
                     DialogButtonProps::default()
                         .ok_text(ts("Tasks.delete_dialog.confirm_button"))
@@ -157,7 +157,7 @@ impl TasksPage {
     /// 点「失败明细」按钮 → 弹只读 Dialog 列出失败章节 + 原因。
     ///
     /// 不再用行内 `Accordion`：`List` 要求所有行等高 + `overflow_hidden`
-    /// （gpui-component `list.rs`），Accordion 展开撑高会被裁掉。把可变高度内容
+    /// （组件库 `list.rs`），Accordion 展开撑高会被裁掉。把可变高度内容
     /// 移出虚拟列表行，放进 Dialog（`.alert()` 单 OK 按钮 + 可滚动列表）。
     pub(super) fn show_failures(
         failures: Vec<(u32, String, String)>,
