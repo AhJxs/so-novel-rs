@@ -4,7 +4,7 @@
 //!
 //! 21 个 JSON **直接 `include_str!` 进二进制** (编译期嵌入, 见 [`embedded`])。
 //! 启动时 [`init`] 把 embed 字节同步到用户主目录下的 `~/.sonovel/themes/`, 然后调
-//! `ThemeRegistry::watch_dir(themes_dir, cx, _)` 让 gpui-component 扫目录、
+//! `ThemeRegistry::watch_dir(themes_dir, cx, _)` 让 gpui-kit 组件库扫目录、
 //! parse 为 `ThemeSet`、把每个变体注册到 global `HashMap<SharedString, Rc<ThemeConfig>>`。
 //!
 //! ## 同步规则 (见 [`user_dir::ensure_user_themes_dir`])
@@ -12,7 +12,7 @@
 //! - 目录不存在 → 创建 + 写入全部 21 个 embed 主题
 //! - 目录存在 → 只补缺失的 embed 文件 (app 升级加新主题时自动加进来),
 //!   **不覆盖**已有文件 —— 用户可能改过
-//! - 用户也可手动放自定义 *.json 进去, gpui-component 的 file watcher 会自动 reload
+//! - 用户也可手动放自定义 *.json 进去, gpui-kit 组件库的 file watcher 会自动 reload
 //!
 //! ## 业务层 API
 //!

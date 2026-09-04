@@ -48,14 +48,14 @@ pub fn default_template_doc() -> DocumentMut {
 #     - dynamic：theme-light / theme-dark 各选一个主题，按 theme-dyn-mode（system/light/dark）切换
 #     - static  ：固定用 theme-name 这一个主题，不随明暗变化
 #   主题名与 `src/desktop/themes/*.json` 里变体的 name 一致（如 "Catppuccin Latte"），
-#   留空 = 用 gpui-component 内置默认主题。
+#   留空 = 用 gpui-kit 组件库内置默认主题。
 theme-kind = "dynamic"
 theme-name = ""
 theme-dyn-mode = "system"
 theme-light = ""
 theme-dark = ""
 
-# language = 应用语言（Sidebar placeholder / Select / Dialog 等所有 gpui-component
+# language = 应用语言（Sidebar placeholder / Select / Dialog 等所有 gpui-kit 组件库
 # 内部 `t!("...")` 文案的语言，同时决定下载章节正文的目标语言 —— 见
 # `Language::to_book_target_lang`）。三选一：zh-CN / zh-TW / en。
 language = "zh-CN"

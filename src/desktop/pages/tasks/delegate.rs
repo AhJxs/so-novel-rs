@@ -1,14 +1,14 @@
-//! `TasksDelegate`: gpui-component List delegate，持有 page handle + 当前页 `TaskSummary`。
+//! `TasksDelegate`: gpui_kit::component::list::List 的 delegate，持有 page handle + 当前页 `TaskSummary`。
 
-use gpui_kit::{App, Context, Entity, ParentElement, Styled, Window};
 use gpui_kit::component::list::{ListItem, ListState};
 use gpui_kit::component::{ActiveTheme as _, IndexPath, list::ListDelegate};
+use gpui_kit::{App, Context, Entity, ParentElement, Styled, Window};
 
 use super::TasksPage;
 use super::row;
 use super::summary::TaskSummary;
 
-/// `gpui-component::List` 的 delegate —— 把当前过滤下的 `TaskSummary` 列表渲染成行。
+/// `gpui_kit::component::list::List` 的 delegate —— 把当前过滤下的 `TaskSummary` 列表渲染成行。
 pub(super) struct TasksDelegate {
     /// 当前过滤下要展示的任务。
     pub(super) page_items: Vec<TaskSummary>,

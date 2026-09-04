@@ -1,15 +1,15 @@
-//! 代理页（gpui-component `Settings` 左侧 sidebar 第 3 项）。
+//! 代理页（gpui-kit 组件库的 `Settings` 左侧 sidebar 第 3 项）。
 //!
 //! 2 个 group：
 //! - HTTP 代理：启用（switch）/ Host（input）/ Port（u16，1–65535）
 //! - Cookie：起点 Cookie（**多行 textarea + placeholder** —— 详见 page 注释）
 
-use gpui_kit::{App, SharedString, Styled, px};
 use gpui_kit::component::{
     AxisExt,
     input::Textarea,
     setting::{NumberFieldOptions, SettingField, SettingGroup, SettingItem, SettingPage},
 };
+use gpui_kit::{App, SharedString, Styled, px};
 
 use crate::i18n::ts;
 
@@ -62,7 +62,7 @@ pub(super) fn build(ctx: &PageCtx<'_>, _cx: &App) -> SettingPage {
                 ]),
             // ============ Cookie ============
             // 起点 cookie 必须**多行 textarea** —— `Cookie:` 头是多对 `k=v; k=v`
-            // 拼起来的整段，单行 input 既放不下又看不到全貌。gpui-component 的
+            // 拼起来的整段，单行 input 既放不下又看不到全貌。gpui-kit 组件的
             // `SettingField::input` 只支持单行 Input，改走 `SettingField::render`
             // 挂 owner-cached 的 `InputState`（详见 `SettingsPage::new`）。
             // `Input::h(px(80.))` 给 3 行高度（`InputState::rows(3)` + 内置 padding），

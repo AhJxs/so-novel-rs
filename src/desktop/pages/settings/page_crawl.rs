@@ -1,4 +1,4 @@
-//! 抓取页（gpui-component `Settings` 左侧 sidebar 第 2 项）。
+//! 抓取页（gpui-kit 组件库的 `Settings` 左侧 sidebar 第 2 项）。
 //!
 //! 3 个 group：
 //! - 书源：搜索条数上限（number_input，-1 sentinel）/ 过滤低相似度（switch）

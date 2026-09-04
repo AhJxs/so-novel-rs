@@ -1,16 +1,16 @@
-//! 关于页（gpui-component `Settings` 左侧 sidebar 第 4 项）。
+//! 关于页（gpui-kit 组件库的 `Settings` 左侧 sidebar 第 4 项）。
 //!
 //! 1 个 group：版本（静态文本）/ 检查更新 / 项目主页。
 //!
 //! 3 个 item 全部 `SettingField::render` —— 形态各异（裸 div / 带 loading state
 //! 切换的 Button / 跳外链的 Button），不抽 helper，详见 plan「不抽的项」。
 
-use gpui_kit::{App, IntoElement, ParentElement, Styled, div};
 use gpui_kit::component::{
     ActiveTheme as _, Disableable, Icon, IconName, Sizable as _,
     button::Button,
     setting::{SettingField, SettingGroup, SettingItem, SettingPage},
 };
+use gpui_kit::{App, IntoElement, ParentElement, Styled, div};
 
 use crate::i18n::{ts, ts_fmt};
 
@@ -44,7 +44,7 @@ pub(super) fn build(ctx: &PageCtx<'_>, _cx: &App) -> SettingPage {
                             let m = m;
                             move |_opts, _window, cx| {
                                 // 网络请求在跑时 → Button::loading(true) 自动显示
-                                // spinner + 屏蔽 click（gpui-component 0.5.1 button.rs:365：
+                                // spinner + 屏蔽 click（组件库 button.rs:365：
                                 // `!(self.disabled || self.loading) && self.on_click.is_some()`）。
                                 let state = m.read(cx);
                                 let checking = state.update_state.checking;

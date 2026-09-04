@@ -3,9 +3,9 @@
 //! 行为：
 //! - 进入页面时若 `library.scanned_dir` 为空 / 不匹配 `config.download.download_path` → 自动扫一次。
 //! - 工具栏：文件名过滤输入 + 文件类型按钮组（不在 State 里实现 —— 切语言即时更新）。
-//! - 列表：gpui-component `List`（虚拟滚动）+ `LibraryDelegate`，每页 30 条（5 列：文件名 /
+//! - 列表：`gpui_kit::component::list::List`（虚拟滚动）+ `LibraryDelegate`，每页 30 条（5 列：文件名 /
 //!   格式 / 大小 / 修改时间 / 3 动作）。
-//! - 分页页脚自写（gpui-component 0.5.1 没 Pagination 组件），≤1 页时整段隐藏。
+//! - 分页页脚自写（gpui-kit 组件库当时没有 Pagination 组件），≤1 页时整段隐藏。
 //! - **没有文件 watcher** —— 列表只在「首次进入 / 下载目录变化」时自动扫一次，
 //!   其余情况靠 `PageHeader` 右上角「刷新」按钮手动触发。
 //! - 删除走 `WindowExt::open_dialog` 二次确认 → `model.delete_library_entry` → `entries_version`
@@ -17,11 +17,6 @@ mod toolbar;
 
 use std::path::PathBuf;
 
-use gpui_kit::prelude::FluentBuilder as _;
-use gpui_kit::{
-    App, AppContext, ClickEvent, Context, Entity, IntoElement, ParentElement, Render, Styled,
-    Window, div, px,
-};
 use gpui_kit::component::{
     ActiveTheme as _, Disableable as _, Icon, IconName, WindowExt,
     button::{Button, ButtonVariant},
@@ -31,6 +26,11 @@ use gpui_kit::component::{
     list::List,
     list::ListState,
     v_flex,
+};
+use gpui_kit::prelude::FluentBuilder as _;
+use gpui_kit::{
+    App, AppContext, ClickEvent, Context, Entity, IntoElement, ParentElement, Render, Styled,
+    Window, div, px,
 };
 
 use crate::desktop::components::{EmptyState, PageHeader, Pagination, compute_page_window};

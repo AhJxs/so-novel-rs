@@ -15,7 +15,7 @@ use super::user_dir::ensure_user_themes_dir;
 /// reload 完成后用 `saved_theme` 名字应用主题 + refresh 所有窗口。
 ///
 /// 主题目录走 `paths.themes_dir` (`~/.sonovel/themes/`, 由 [`ensure_user_themes_dir`]
-/// 同步), `gpui-component::ThemeRegistry::themes` 字段私有, 公开 API 只有
+/// 同步), `gpui_kit::component::ThemeRegistry::themes` 字段私有, 公开 API 只有
 /// `watch_dir(path, cx, on_load)`, 所以还是需要一个真实目录 —— 这次用持久用户目录,
 /// 不用 `tempfile::tempdir()` + `mem::forget` 泄漏.
 ///
@@ -23,7 +23,7 @@ use super::user_dir::ensure_user_themes_dir;
 /// `on_load` 回调在 reload 完成后被调, 那时 registry 才包含全部主题,
 /// `apply_theme_pref` 在那里调用才对。
 ///
-/// - `saved_theme`: config.toml 里的主题名; 空串 = 保持 gpui-component 默认
+/// - `saved_theme`: config.toml 里的主题名; 空串 = 保持 gpui-kit 组件库默认主题
 /// - `font_size`: config.toml 里的字号 (px); 在 `apply_theme_pref` **之后**应用,
 ///   因为 `Theme::apply_config` 会用主题 JSON 的 `font_size` (缺省 16) 覆盖
 ///   `Theme.font_size`, 先调字号后装主题会被冲掉。

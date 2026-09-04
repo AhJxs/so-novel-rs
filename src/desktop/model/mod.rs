@@ -105,7 +105,7 @@ pub struct AppModel {
     /// 真正 push 到 UI。
     ///
     /// 为什么用 plain enum：`app/` 想保持 UI 框架解耦（CLAUDE.md 明确要求）；`UIEvent`
-    /// 是业务层 → UI 层的事件桥，零 `gpui` / `gpui_component` 依赖。
+    /// 是业务层 → UI 层的事件桥，零 GUI 依赖（不 import `gpui_kit`）。
     pub(crate) pending_ui_events: Vec<UIEvent>,
 
     /// 列表渲染缓存（Library / Search / Tasks 三页共用）。

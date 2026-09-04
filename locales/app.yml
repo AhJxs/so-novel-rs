@@ -1,11 +1,11 @@
 # So Novel 自己的 i18n 翻译表。
 #
 # 加载方式：编译期由 `rust_i18n::i18n!("locales", fallback = "en")` 嵌入二进制。
-# 跟 `gpui-component` 的 `locales/ui.yml` **不共享**（各自 crate 独立的 i18n 实例），
+# 与 gpui_kit::component 自带 `locales/ui.yml` 的实例**不共享**（各自 crate 独立 i18n 实例），
 # 但**全局 locale 是同一个**（`gpui_kit::component::set_locale` 写到全局），
 # 所以一次 set_locale 同时影响两边的翻译。
 #
-# 格式参考 gpui-component 的 `locales/ui.yml`：
+# 格式参考 gpui-kit 组件库的 `locales/ui.yml`：
 # - `_version: 2` 顶层
 # - 顶层 key 大写（Nav / App / Settings / …）
 # - 每 key 下面是 locale → text 映射
@@ -1006,7 +1006,7 @@ Search:
       zh-CN: "已派下载任务"
       zh-TW: "已派下載任務"
   # 选章下载 Dialog：行内"选章"按钮 → 拉 TOC → confirm Dialog 输入起止章节 → 按范围下载。
-  # 用 gpui-component Dialog .confirm()（OK=下载 / Cancel=取消），反应式读 toc_cache。
+  # 用 gpui-kit 组件库的 Dialog .confirm()（OK=下载 / Cancel=取消），反应式读 toc_cache。
   range:
     # Dialog 标题
     title:

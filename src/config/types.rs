@@ -75,7 +75,7 @@ impl LangType {
 ///
 /// 与 `LangType` 区分：`LangType` 是 zhconv 用的目标语言变体；`Language` 是
 /// **应用**语言，决定 Sidebar placeholder / Select placeholder / Dialog OK|Cancel
-/// 等所有 gpui-component `t!("...")` 调用的文案，同时也决定下载章节正文的目标语言
+/// 等所有 gpui_kit::component 内部 `t!("...")` 调用的文案，同时也决定下载章节正文的目标语言
 /// —— 见 `Language::to_book_target_lang`。
 ///
 /// 三种：简体中文 / 繁體中文 / English。存到 TOML `[global].language`
@@ -187,7 +187,7 @@ impl ThemeDynMode {
 /// 两种模式共用一个 struct（而非 enum）—— 切换 [`ThemeKind`] 时**保留**另一模式的
 /// 选项，用户在静态/动态间来回切不会丢失已选的浅/深主题名。
 ///
-/// - [`ThemeKind::Static`] → 用 `static_name`（空串 = gpui-component 默认主题）。
+/// - [`ThemeKind::Static`] → 用 `static_name`（空串 = gpui-kit 组件库默认主题）。
 /// - [`ThemeKind::Dynamic`] → `dyn_light` / `dyn_dark` 各指定一个主题名（空串 = 用
 ///   registry 默认浅/深主题），`dyn_mode` 决定按系统 / 强制浅 / 强制深切换。
 ///
@@ -266,7 +266,7 @@ pub struct GlobalCfg {
     pub cf_bypass: String,
     /// 左侧 Sidebar 是否折叠。重启后保持上次状态。
     pub sidebar_collapsed: bool,
-    /// UI 字号 (px)。gpui-component 默认 16; `Root::render` 每帧用它设 rem 基准,
+    /// UI 字号 (px)。gpui-kit 组件库默认 16; `Root::render` 每帧用它设 rem 基准,
     /// 组件全用 `rems(...)` 缩放, 改这一个字段 = 全局缩放。
     /// 范围由 `validate()` 钳制到 [12, 24], 渲染层还会再夹一次防越界。
     pub font_size: f32,
@@ -338,7 +338,7 @@ impl AppConfig {
             version: env!("CARGO_PKG_VERSION").to_string(),
             global: GlobalCfg {
                 theme_pref: ThemePref::default(),
-                // 默认 = Dynamic + System + 空名 (gpui-component 默认浅/深主题, 跟 OS 走)
+                // 默认 = Dynamic + System + 空名 (gpui-kit 组件库默认浅/深主题, 跟 OS 走)
                 language: Language::SimplifiedChinese,
                 gh_proxy: String::new(),
                 cf_bypass: String::new(),

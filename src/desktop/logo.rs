@@ -2,7 +2,7 @@
 //!
 //! 用 `.png` (位图) 而非 `.svg`: gpui 的 `img()` 不直接吃 SVG 字节 —— SVG 需要装到
 //! asset loader 走 `AssetSource` + 内置 SVG 光栅化。本项目 assets loader 是
-//! `gpui_component_assets::Assets`, 不包含我们的 logo。最简、零运行时依赖路径就是
+//! `gpui_kit::assets::Assets`, 不包含我们的 logo。最简、零运行时依赖路径就是
 //! 嵌 PNG 字节 + `image` crate 解码成 `RenderImage` (流程同 `decode_cover_image`)。
 //!
 //! 主流程 [`render_logo`] 在 [`super::root::RootView::render_sidebar`]。

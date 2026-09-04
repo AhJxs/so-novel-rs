@@ -1,6 +1,6 @@
 //! 业务层 → UI 层的事件枚举。
 //!
-//! Plain data，**零 GUI 依赖**（不 import `gpui` / `gpui_component`）——
+//! Plain data，**零 GUI 依赖**（不 import `gpui_kit`）——
 //! 让 `crate::desktop::model` 保持与 UI 框架解耦（详见 `src/lib.rs` 顶部注释）。
 //!
 //! 流向：

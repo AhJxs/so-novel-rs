@@ -1,10 +1,10 @@
-//! `SourcesDelegate`: gpui-component List delegate，持有 page handle + 当前页 (index, Rule) + health map。
+//! `SourcesDelegate`: gpui_kit::component::list::List 的 delegate，持有 page handle + 当前页 (index, Rule) + health map。
 
 use std::collections::HashMap;
 
-use gpui_kit::{App, Context, Entity, ParentElement, Styled, Window, px};
 use gpui_kit::component::list::{ListItem, ListState};
 use gpui_kit::component::{ActiveTheme as _, IndexPath, list::ListDelegate};
+use gpui_kit::{App, Context, Entity, ParentElement, Styled, Window, px};
 
 use crate::crawler::health::SourceHealth;
 use crate::models::Rule;
@@ -12,7 +12,7 @@ use crate::models::Rule;
 use super::SourcesPage;
 use super::row;
 
-/// `gpui-component::List` 的 delegate —— 把当前过滤下的 (index, Rule) 列表渲染成行。
+/// `gpui_kit::component::list::List` 的 delegate —— 把当前过滤下的 (index, Rule) 列表渲染成行。
 pub(super) struct SourcesDelegate {
     pub(super) page_items: Vec<(usize, Rule)>,
     pub(super) health: HashMap<i32, SourceHealth>,

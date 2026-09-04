@@ -4,13 +4,13 @@
 //! 删除按钮 → `page.update(|p| p.prompt_delete(...))` 转发给 `LibraryPage::prompt_delete`
 //! 方法（定义在 `mod.rs`）。
 
-use gpui_kit::{App, Entity, IntoElement, ParentElement, Styled, div, px};
 use gpui_kit::component::{
     ActiveTheme as _, Icon, IconName, Sizable,
     button::{Button, ButtonVariants as _},
     h_flex,
     tag::Tag,
 };
+use gpui_kit::{App, Entity, IntoElement, ParentElement, Styled, div, px};
 
 use crate::desktop::components::truncate;
 use crate::desktop::model::LibraryEntry;
@@ -76,7 +76,7 @@ pub(super) fn render_row(
         // 书名去掉 `.epub`/`.txt` 等扩展名（用户已经在 tag 看到类型了）；tag 紧贴
         // 书名右侧，显示大写扩展名（EPUB / TXT / ZIP / HTML / PDF）。
         //
-        // 用 gpui-component `Tag::secondary().small()` —— 主题色 secondary bg + 圆角 +
+        // 用 组件库的 `Tag::secondary().small()` —— 主题色 secondary bg + 圆角 +
         // border，跟周围元素视觉权重区分；小号 (px_1p5 py_0p5) 不抢书名焦点。
         //
         // **布局**：整个 h_flex 列 `flex_1()` 占满 row 减去其他固定列（序号 48px /

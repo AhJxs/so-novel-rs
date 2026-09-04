@@ -9,10 +9,10 @@
 //! 就绪与否由 `on_ok` 通过 `confirm_range_download` 返回的 `RangeOutcome::Pending` 判定，
 //! 这里只负责渲染。
 
-use gpui_kit::{App, Entity, IntoElement, ParentElement, SharedString, Styled, Window, div, px};
 use gpui_kit::component::{
     ActiveTheme as _, Sizable, h_flex, input::NumberInput, spinner::Spinner, v_flex,
 };
+use gpui_kit::{App, Entity, IntoElement, ParentElement, SharedString, Styled, Window, div, px};
 
 use crate::desktop::components::truncate;
 use crate::desktop::model::TocState;
@@ -128,7 +128,7 @@ pub(super) fn content(
                                         .child(ts("Search.range.start")),
                                 )
                                 // 加宽到 160px（minus/plus 按钮各占 ~28px，留 ~100px 给数字）。
-                                // 注：gpui-component 0.5.1 的 Input/NumberInput 不支持文本水平
+                                // 注：gpui-kit 组件的 Input/NumberInput 不支持文本水平
                                 // 居中——数字由自定义 element 固定左对齐绘制，无对齐 API，
                                 // 外层 styled 的 text_align 也不会被内部 Input 继承。接受左对齐。
                                 .child(NumberInput::new(&page.read(cx).range_start_input).w(px(160.0))),
