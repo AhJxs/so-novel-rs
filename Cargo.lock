@@ -2483,6 +2483,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "caf1079563223d5d59d83c85886a56e586cfd5c1a26292e971a0fa266531ac5a"
 
 [[package]]
+name = "fax"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "70ed8646f3993cad0585c6669ffba6f7e5440a0bfb0a1f16600cae33ce7cf307"
+
+[[package]]
 name = "fdeflate"
 version = "0.3.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3011,7 +3017,7 @@ dependencies = [
  "log",
  "presser",
  "thiserror 2.0.18",
- "windows 0.61.3",
+ "windows 0.62.2",
 ]
 
 [[package]]
@@ -4042,7 +4048,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.61.2",
+ "windows-core 0.62.2",
 ]
 
 [[package]]
@@ -5712,9 +5718,9 @@ dependencies = [
 
 [[package]]
 name = "office_oxide"
-version = "0.1.3"
+version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8900703278aea7d2329f5c490b62653306b1083efc7993ee18e3e86dcfd5afeb"
+checksum = "e07e156a6bc62caaa66fc698daad7405dd62e86f5292fd22898c1a55f154748d"
 dependencies = [
  "atoi_simd",
  "encoding_rs",
@@ -5894,9 +5900,9 @@ dependencies = [
 
 [[package]]
 name = "pdf_oxide"
-version = "0.3.73"
+version = "0.3.77"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cf6730b3cabd41b9e813c9ab1e536c99e685adc8c06d6755b82b66dcedd49a95"
+checksum = "cd381aa999194b6c9477934a508cc37adc474c6c0cd712e8ab826cf4ab6d8310"
 dependencies = [
  "aes 0.9.1",
  "base64",
@@ -5908,7 +5914,7 @@ dependencies = [
  "chrono",
  "encoding_rs",
  "env_logger",
- "fax",
+ "fax 0.3.0",
  "flate2",
  "getrandom 0.4.2",
  "image",
@@ -5929,7 +5935,7 @@ dependencies = [
  "smallvec",
  "stringprep",
  "subsetter",
- "taffy 0.11.0",
+ "taffy 0.12.2",
  "thiserror 2.0.18",
  "ttf-parser",
  "unicode-bidi",
@@ -8145,9 +8151,9 @@ dependencies = [
 
 [[package]]
 name = "taffy"
-version = "0.11.0"
+version = "0.12.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dfde4e2f8595f222ceaae1fb16b4963952e9b33e358869dc4cd6316b0e0790cd"
+checksum = "340a09581f29809fc0df82a3955501dc7f2a21f887e5d1c13dbe288fe1c0bef4"
 dependencies = [
  "arrayvec",
  "grid",
@@ -8306,7 +8312,7 @@ version = "0.11.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b63feaf3343d35b6ca4d50483f94843803b0f51634937cc2ec519fc32232bc52"
 dependencies = [
- "fax",
+ "fax 0.2.7",
  "flate2",
  "half",
  "quick-error",

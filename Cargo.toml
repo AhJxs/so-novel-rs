@@ -161,7 +161,7 @@ zhconv = "0.4.1"
 # 不启用 `rendering` feature：项目只用 `pdf_oxide::writer::{DocumentBuilder, ...}` 直接拼文本
 # （详见 `src/export/pdf.rs:6-7` 注释，不走 `from_html_css` 渲染流水线）。`rendering` 会拉入
 # 一整套 HTML/CSS 解析依赖，编译时间显著增加而无功能收益。
-pdf_oxide = { version = "0.3.73" }
+pdf_oxide = { version = "0.3.77" }
 
 # LRU 缓存（`SearchState::cover_cache` 走有界 LRU 替代无界 HashMap，
 # 避免长会话累积所有查看过的封面字节）。
