@@ -7,7 +7,7 @@
 //! 1. 业务方法（`AppModel::push_*` / `events::drain` 内部）push `UIEvent` 到
 //!    `AppModel::pending_ui_events`；
 //! 2. `desktop::root::render` 每帧排空该队列，调
-//!    `ui_event_to_notification` 翻译成 `gpui_component::notification::Notification`，
+//!    `ui_event_to_notification` 翻译成 `gpui_kit::component::notification::Notification`，
 //!    再 `window.push_notification(...)` 真正弹 toast。
 //!
 //! 为什么有 `OpenLink`：旧实现里"有新版本"toast 挂了

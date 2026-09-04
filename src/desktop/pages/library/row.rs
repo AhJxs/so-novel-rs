@@ -4,8 +4,8 @@
 //! 删除按钮 → `page.update(|p| p.prompt_delete(...))` 转发给 `LibraryPage::prompt_delete`
 //! 方法（定义在 `mod.rs`）。
 
-use gpui::{App, Entity, IntoElement, ParentElement, Styled, div, px};
-use gpui_component::{
+use gpui_kit::{App, Entity, IntoElement, ParentElement, Styled, div, px};
+use gpui_kit::component::{
     ActiveTheme as _, Icon, IconName, Sizable,
     button::{Button, ButtonVariants as _},
     h_flex,

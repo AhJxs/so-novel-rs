@@ -23,14 +23,14 @@ const COVER_IMAGES_CAPACITY: NonZeroUsize = match NonZeroUsize::new(32) {
     None => unreachable!(),
 };
 
-use gpui::{
+use gpui_kit::{
     App, AppContext, Context, Entity, IntoElement, ParentElement, Render, RenderImage,
     SharedString, Styled, Window, div, prelude::FluentBuilder as _, px,
 };
-use gpui_component::{
+use gpui_kit::component::{
     ActiveTheme as _, Icon, IconName, Sizable, WindowExt,
     button::{Button, ButtonVariants as _},
-    dialog::{Dialog, DialogButtonProps},
+    dialog::{AlertDialog, DialogButtonProps},
     h_flex,
     input::{Input, InputEvent, InputState, NumberInputEvent, StepAction},
     list::{List, ListState},
@@ -407,7 +407,7 @@ impl SearchPage {
         }
 
         let page = cx.entity();
-        window.open_dialog(cx, move |dialog: Dialog, _window, cx| {
+        window.open_alert_dialog(cx, move |alert: AlertDialog, _window, cx| {
             // builder 是 Fn（每帧重调）→ 每帧 clone page 进当帧闭包。
             let page = page.clone();
             // 渲染 body：TextInput + 「粘贴」兜底按钮 + 自动粘贴提示行。
@@ -447,9 +447,11 @@ impl SearchPage {
                                 .child(ts("Search.url_download.auto_pasted")),
                         ),
                 );
-            dialog
+            // 复杂 body 走 `.child(body)`（AlertDialog 的 ParentElement 渲染在标题下方）；
+            // 宽用 AlertDialog 的 `.width()`（旧 Dialog 的 `.w()` 是 props 宽度方法）。
+            alert
                 .title(ts("Search.url_download.dialog_title"))
-                .w(px(520.))
+                .width(px(520.))
                 .child(body)
                 .button_props(
                     DialogButtonProps::default()
@@ -544,13 +546,14 @@ impl SearchPage {
         self.range_initialized = false;
 
         let page = cx.entity();
-        window.open_dialog(cx, move |dialog: Dialog, window, cx| {
+        window.open_alert_dialog(cx, move |alert: AlertDialog, window, cx| {
             // builder 是 Fn（每帧重调）→ 每帧 clone page 进当帧闭包。
             let page = page.clone();
             let body = range_dialog::content(&page, window, cx);
-            dialog
+            // 复杂 body 走 `.child(body)`；宽用 AlertDialog 的 `.width()`。
+            alert
                 .title(ts("Search.range.title"))
-                .w(px(520.))
+                .width(px(520.))
                 .child(body)
                 // confirm 模式：OK + Cancel 两按钮。OK 文案"下载"。
                 .button_props(

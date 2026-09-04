@@ -22,15 +22,15 @@ mod row;
 mod summary;
 mod toolbar;
 
-use gpui::prelude::FluentBuilder as _;
-use gpui::{
+use gpui_kit::prelude::FluentBuilder as _;
+use gpui_kit::{
     App, AppContext, ClickEvent, Context, Entity, IntoElement, ParentElement, Render, Styled,
     Window, div, px,
 };
-use gpui_component::{
+use gpui_kit::component::{
     ActiveTheme as _, IconName, WindowExt,
     button::ButtonVariant,
-    dialog::{Dialog, DialogButtonProps},
+    dialog::{AlertDialog, Dialog, DialogButtonProps},
     list::{List, ListState},
     scroll::ScrollableElement as _,
     v_flex,
@@ -115,18 +115,18 @@ impl TasksPage {
             book_name
         };
 
-        window.open_dialog(cx, move |dialog: Dialog, _window, _cx| {
+        window.open_alert_dialog(cx, move |alert: AlertDialog, _window, _cx| {
             // builder 是 Fn（每帧重调）—— on_ok 也要能多次调，用引用捕获 + clone 避 FnOnce。
             let model_for_ok = model.clone();
             let name_for_ok = name.clone();
             let model_id_for_ok = model_id;
 
-            dialog
+            alert
                 .title(ts("Tasks.delete_dialog.title"))
-                .child(div().child(ts_fmt(
+                .description(ts_fmt(
                     "Tasks.delete_dialog.message",
                     &[("book_name", &name_for_ok)],
-                )))
+                ))
                 .button_props(
                     DialogButtonProps::default()
                         .ok_text(ts("Tasks.delete_dialog.confirm_button"))

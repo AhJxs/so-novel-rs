@@ -5,10 +5,10 @@
 //! 闭包里，**拿不到 `&mut Window`**，所以 `WindowExt::push_notification`
 //! 不能直接调；drain 把构造好的 [`UIEvent`] 推到 `model.pending_ui_events`，
 //! 由 `desktop::RootView::render` 排空 + 翻译成
-//! `gpui_component::notification::Notification` 再真正 push。
+//! `gpui_kit::component::notification::Notification` 再真正 push。
 //!
 //! 100ms `drain` + `cx.notify()` 的 GPUI 循环在 `desktop::drain_loop::spawn_drain_loop`
-//! —— 那是 100% GPUI 代码（`gpui::AsyncApp` / `cx.spawn().detach()` /
+//! —— 那是 100% GPUI 代码（`gpui_kit::AsyncApp` / `cx.spawn().detach()` /
 //! `background_executor().timer()` / `update_entity` / `ctx.notify()`），
 //! 不属于"业务层与 UI 框架解耦"的 `crate::desktop::model`。
 
@@ -69,7 +69,7 @@ pub fn new_wakeup() -> (WakeupHandle, WakeupReceiver) {
 /// - 派发 `search.pending_cover_prefetch`（详情后端返回 `cover_url` 时挂的）。
 /// - `update_state` 完成时按结果推 `UIEvent`（成功 / 失败 / 新版本 / 已是最新），
 ///   推到 `model.pending_ui_events` 由 `RootView::render` 翻译成
-///   `gpui_component::notification::Notification` 真正弹 toast。
+///   `gpui_kit::component::notification::Notification` 真正弹 toast。
 ///
 /// 调用方：拿到 `&mut AppModel` 时调一次。如果返回 `true`，调 `cx.notify()` 触发
 /// 当前 view 的 `Render` 重绘。

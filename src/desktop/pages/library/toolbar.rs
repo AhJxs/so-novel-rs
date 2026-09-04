@@ -7,9 +7,9 @@
 //! 改用 7 个 Button，label 在 render 里现取 `ts(...)`，切语言自动同步。
 //! 7 个值 = "全部" + epub/txt/zip/html/pdf/md。扩展名不译（技术名词）。
 
-use gpui::Context;
-use gpui::{Entity, IntoElement, ParentElement, Styled, px};
-use gpui_component::{
+use gpui_kit::Context;
+use gpui_kit::{Entity, IntoElement, ParentElement, Styled, px};
+use gpui_kit::component::{
     ActiveTheme as _, Icon, IconName, Selectable, Sizable,
     button::{Button, ButtonVariants as _},
     h_flex,
@@ -62,7 +62,7 @@ fn ext_filter_buttons(
 /// 单个 ext 过滤 Button：点击 → `set_ext_filter(value)`。
 fn ext_button(
     id: &'static str,
-    label: gpui::SharedString,
+    label: gpui_kit::SharedString,
     value: Option<&'static str>,
     current_ext: Option<&str>,
     cx: &Context<'_, super::LibraryPage>,

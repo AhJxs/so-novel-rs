@@ -1,8 +1,8 @@
 //! `SearchDelegate`: gpui-component List delegate，持有 page handle + 当前页 (index, `SearchResult`)。
 
-use gpui::{App, Context, Entity, ParentElement, Styled, Window, px};
-use gpui_component::list::{ListItem, ListState};
-use gpui_component::{ActiveTheme as _, IndexPath, list::ListDelegate};
+use gpui_kit::{App, Context, Entity, ParentElement, Styled, Window, px};
+use gpui_kit::component::list::{ListItem, ListState};
+use gpui_kit::component::{ActiveTheme as _, IndexPath, list::ListDelegate};
 
 use crate::models::SearchResult;
 

@@ -6,10 +6,10 @@
 //!
 //! `mod.rs::impl Render` 依次 `.child(toolbar_row(...))` + `.child(source_status_row(...))`。
 
-use gpui::{
+use gpui_kit::{
     App, Context, Entity, IntoElement, ParentElement, Styled, div, prelude::FluentBuilder as _, px,
 };
-use gpui_component::{
+use gpui_kit::component::{
     ActiveTheme as _, Disableable, Icon, IconName, Sizable,
     button::Button,
     h_flex,

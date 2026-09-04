@@ -17,9 +17,7 @@ default = ["gui"]
 # 默认开启 —— 主入口是 GUI 客户端（gpui_app::run），CLI / Web 走子路径。
 # `cargo build --no-default-features --features gui` 得到仅含 GUI 的二进制。
 gui = [
-    "dep:gpui",
-    "dep:gpui-component",
-    "dep:gpui-component-assets",
+    "dep:gpui-kit",
     "dep:rfd",
     "dep:notify",
 ]
@@ -37,12 +35,9 @@ web = [
 ]
 
 [dependencies]
-# UI — GPUI 栈（gui feature 专属）
-gpui = { version = "0.2.2", optional = true }
-gpui-component = { version = "0.5.1", optional = true }
-gpui-component-assets = { version = "0.5.1", optional = true }
+gpui-kit = { version = "0.6.0", optional = true }
 # 国际化 —— rust-i18n（同 gpui-component 内部用的库），我们直接复用框架机制：
-rust-i18n = "3"
+rust-i18n = "4.2.1"
 
 # Async runtime (kept lean — used in later stages; pulled now so tests/integration are stable)
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "fs", "signal"] }

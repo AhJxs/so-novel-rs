@@ -9,12 +9,14 @@
 use std::io::Cursor;
 use std::sync::Arc;
 
-use gpui::{
+use gpui_kit::component::scroll::ScrollableElement as _;
+use gpui_kit::component::{
+    ActiveTheme as _, Sizable, h_flex, link::Link, spinner::Spinner, v_flex,
+};
+use gpui_kit::{
     App, Entity, ImageSource, IntoElement, ObjectFit, ParentElement, RenderImage, SharedString,
     Styled, StyledImage, div, img, px,
 };
-use gpui_component::scroll::ScrollableElement as _;
-use gpui_component::{ActiveTheme as _, Sizable, h_flex, link::Link, spinner::Spinner, v_flex};
 
 use crate::desktop::model::{CoverEntry, DetailState};
 use crate::i18n::ts;
@@ -203,7 +205,7 @@ fn detail_row(
 
     // `overflow_y_scrollbar` 是 terminal builder（返回 `Scrollable<Div>`），类型与
     // `Div` 不同 → 不能用 `when_some` 链在内部，按 max_h 分支构造两种 element。
-    let value_el: gpui::AnyElement = if let Some(h) = max_h {
+    let value_el: gpui_kit::AnyElement = if let Some(h) = max_h {
         value_inner
             .max_h(px(h))
             .overflow_y_scrollbar()
@@ -248,7 +250,7 @@ fn decode_cover_image(bytes: &[u8]) -> Option<Arc<RenderImage>> {
     }
 
     // `Frame` 是 `image::Frame`（跟 gpui 的 `RenderImage::new` 内部一致，见 gpui img.rs
-    // L669-692 用 `image::Frame::new`）。**别**写成 `gpui::Frame` —— 那是 window 模块的
+    // L669-692 用 `image::Frame::new`）。**别**写成 `gpui_kit::Frame` —— 那是 window 模块的
     // dispatch tree Frame（pub(crate)，外部不可构造，类型也对不上）。
     let frame = image::Frame::new(rgba);
     Some(Arc::new(RenderImage::new(vec![frame])))
@@ -341,7 +343,7 @@ fn render_detail_cover(
 
     match view {
         CoverView::Image(rendered) => container.child(
-            // 变量改名 `rendered` —— `img` 是 gpui 自由函数（`gpui::img(source)`），避免遮蔽。
+            // 变量改名 `rendered` —— `img` 是 gpui 自由函数（`gpui_kit::img(source)`），避免遮蔽。
             img(ImageSource::Render(rendered))
                 .rounded(cx.theme().radius)
                 .object_fit(ObjectFit::Fill)

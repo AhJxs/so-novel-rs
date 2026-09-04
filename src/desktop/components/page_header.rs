@@ -1,10 +1,10 @@
 //! 通用页面顶栏：左侧 title + subtitle，右侧 actions slot。
 
-use gpui::{
+use gpui_kit::{
     App, Div, IntoElement, ParentElement, RenderOnce, SharedString, Styled, Window, div,
     prelude::FluentBuilder as _,
 };
-use gpui_component::ActiveTheme as _;
+use gpui_kit::component::ActiveTheme as _;
 
 /// 页面顶栏。最常见的 `<h1> + 副标题 + 右侧按钮组` 模式。
 #[derive(IntoElement)]
@@ -29,7 +29,7 @@ impl PageHeader {
         self
     }
 
-    /// 添加一个右侧 action。`Slot` 是 `gpui::Div` — 调用方自己 `Button::new(...)` 后
+    /// 添加一个右侧 action。`Slot` 是 `gpui_kit::Div` — 调用方自己 `Button::new(...)` 后
     /// `.into_any_element()` 转 `Div` 即可（gpui 的 Div 可以套任何 element）。
     #[must_use]
     pub fn action(mut self, action: impl IntoElement) -> Self {
@@ -56,7 +56,7 @@ impl RenderOnce for PageHeader {
                     .child(
                         div()
                             .text_lg()
-                            .font_weight(gpui::FontWeight::BOLD)
+                            .font_weight(gpui_kit::FontWeight::BOLD)
                             .text_color(cx.theme().foreground)
                             .child(self.title),
                     )

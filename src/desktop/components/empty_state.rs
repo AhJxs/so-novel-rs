@@ -3,11 +3,11 @@
 //! 用在：Library 空目录、Sources 0 书源、Tasks 0 任务、Search 0 结果 等。
 //! 颜色全部走 `cx.theme()`；不写自定义调色板。
 
-use gpui::{
+use gpui_kit::{
     App, IntoElement, ParentElement, RenderOnce, SharedString, Styled, Window, div,
     prelude::FluentBuilder as _,
 };
-use gpui_component::{ActiveTheme as _, Icon, IconName, Sizable};
+use gpui_kit::component::{ActiveTheme as _, Icon, IconName, Sizable};
 
 /// 空态展示。`RenderOnce` — 没有内部状态，构造即可用。
 #[derive(IntoElement)]
@@ -50,7 +50,7 @@ impl RenderOnce for EmptyState {
             .child(
                 div()
                     .text_base()
-                    .font_weight(gpui::FontWeight::MEDIUM)
+                    .font_weight(gpui_kit::FontWeight::MEDIUM)
                     .text_color(cx.theme().foreground)
                     .child(self.title),
             )

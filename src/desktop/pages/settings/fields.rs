@@ -11,8 +11,8 @@
 //! `number_field` 拆 3 个 helper —— `Option<i32>` 的 -1 sentinel / `u32` 的 `clamp(val, 0.0)`
 //! / `u16` 的 `as` cast 三者语义不同，硬抽成 1 个会让 caller 写更多类型注解。
 
-use gpui::{App, Entity, SharedString};
-use gpui_component::setting::{NumberFieldOptions, SettingField};
+use gpui_kit::{App, Entity, SharedString};
+use gpui_kit::component::setting::{NumberFieldOptions, SettingField};
 
 use crate::config::ExportFormat;
 use crate::desktop::model::AppModel;

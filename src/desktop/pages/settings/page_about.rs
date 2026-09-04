@@ -5,8 +5,8 @@
 //! 3 个 item 全部 `SettingField::render` —— 形态各异（裸 div / 带 loading state
 //! 切换的 Button / 跳外链的 Button），不抽 helper，详见 plan「不抽的项」。
 
-use gpui::{App, IntoElement, ParentElement, Styled, div};
-use gpui_component::{
+use gpui_kit::{App, IntoElement, ParentElement, Styled, div};
+use gpui_kit::component::{
     ActiveTheme as _, Disableable, Icon, IconName, Sizable as _,
     button::Button,
     setting::{SettingField, SettingGroup, SettingItem, SettingPage},

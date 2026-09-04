@@ -9,8 +9,8 @@
 //! 就绪与否由 `on_ok` 通过 `confirm_range_download` 返回的 `RangeOutcome::Pending` 判定，
 //! 这里只负责渲染。
 
-use gpui::{App, Entity, IntoElement, ParentElement, SharedString, Styled, Window, div, px};
-use gpui_component::{
+use gpui_kit::{App, Entity, IntoElement, ParentElement, SharedString, Styled, Window, div, px};
+use gpui_kit::component::{
     ActiveTheme as _, Sizable, h_flex, input::NumberInput, spinner::Spinner, v_flex,
 };
 

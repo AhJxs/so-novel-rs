@@ -1,6 +1,6 @@
 //! 100ms 兜底 + 事件驱动唤醒的 GPUI 排空循环。
 //!
-//! 从 `crate::desktop::model::events` 搬过来 —— 它 100% 是 GPUI 桥（`gpui::AsyncApp` /
+//! 从 `crate::desktop::model::events` 搬过来 —— 它 100% 是 GPUI 桥（`gpui_kit::AsyncApp` /
 //! `cx.spawn().detach()` / `background_executor().timer()` / `update_entity`），
 //! 不属于"业务层与 UI 框架解耦"的 `crate::desktop::model`。原 `events.rs` 现在只保留
 //! 纯排空逻辑（drain channels + push `UIEvent`）。
@@ -29,7 +29,7 @@
 
 use std::time::Duration;
 
-use gpui::{App, AppContext, Entity};
+use gpui_kit::{App, AppContext, Entity};
 
 use crate::desktop::model::AppModel;
 use crate::desktop::model::events::{WakeupReceiver, drain};
@@ -41,8 +41,13 @@ use crate::desktop::model::events::{WakeupReceiver, drain};
 /// 在 `open_window` 前后调都可以。
 ///
 /// 任务 detached：返回 `()`，不暴露 Task handle，进程退出时随 executor 终止。
-pub fn spawn_drain_loop(model: Entity<AppModel>, wakeup: WakeupReceiver, cx: &App) {
-    cx.spawn(async move |async_cx: &mut gpui::AsyncApp| {
+pub fn spawn_drain_loop(model: &Entity<AppModel>, wakeup: WakeupReceiver, cx: &App) {
+    // 只持弱引用：强 `Entity` 留在循环里会保证 entity 永不释放，app 退出时
+    // `upgrade` 也就永远不失败、循环没法感知退出。gpui-kit 0.6 的
+    // `update_entity` 返回闭包结果 `R`（不再是旧的 `Result<R>`），entity
+    // 已释放时直接 panic —— 所以改用 `WeakEntity::upgrade` 探测退出。
+    let weak_model = model.downgrade();
+    cx.spawn(async move |async_cx: &mut gpui_kit::AsyncApp| {
         loop {
             // 等待：要么被 wakeup 唤醒，要么兜底 100ms tick。
             // 简化做法：先 try_recv（非阻塞），拿不到就 100ms 兜底。
@@ -58,16 +63,16 @@ pub fn spawn_drain_loop(model: Entity<AppModel>, wakeup: WakeupReceiver, cx: &Ap
                 let _ = wakeup.try_recv();
             }
 
-            // 排空一次；entity 已释放（app 退出）时返回 Err，直接 break。
-            let result = async_cx.update_entity(&model, |m, ctx| {
+            // 排空一次；entity 已释放（app 退出）时 upgrade 返回 None，直接 break。
+            let Some(model) = weak_model.upgrade() else {
+                break;
+            };
+            async_cx.update_entity(&model, |m, ctx| {
                 let any = drain(m);
                 if any {
                     ctx.notify();
                 }
             });
-            if result.is_err() {
-                break;
-            }
         }
     })
     .detach();

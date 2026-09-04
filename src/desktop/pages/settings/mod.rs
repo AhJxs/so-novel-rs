@@ -22,10 +22,10 @@ mod page_crawl;
 mod page_general;
 mod page_proxy;
 
-use gpui::{App, AppContext, Context, Entity, IntoElement, Render, SharedString, Window};
-use gpui_component::{
+use gpui_kit::{App, AppContext, Context, Entity, IntoElement, Render, SharedString, Window};
+use gpui_kit::component::{
     group_box::GroupBoxVariant,
-    input::{InputEvent, InputState},
+    input::{InputEvent, InputState, TextareaState},
     select::{SearchableVec, SelectDelegate, SelectEvent, SelectState},
     setting::{SettingPage, Settings},
     slider::{SliderEvent, SliderState, SliderValue},
@@ -46,7 +46,7 @@ pub struct SettingsPage {
     /// 每帧现建会丢 popup / focus / 拖拽位置。订阅 handler 也只在 owner 上挂一次。
     download_path_input: Entity<InputState>,
     font_size_state: Entity<SliderState>,
-    qidian_cookie_input: Entity<InputState>,
+    qidian_cookie_input: Entity<TextareaState>,
     theme_state_static: Entity<SelectState<SearchableVec<SharedString>>>,
     theme_state_dyn_light: Entity<SelectState<SearchableVec<SharedString>>>,
     theme_state_dyn_dark: Entity<SelectState<SearchableVec<SharedString>>>,
@@ -166,8 +166,9 @@ impl SettingsPage {
         // placeholder 提示 cookie 头以 `w_tsfp=` 开头（DevTools 复制）。
         let initial_qidian_cookie = model.read(cx).config.cookie.qidian_cookie.clone();
         let qidian_cookie_input = cx.new(|cx| {
-            InputState::new(window, cx)
-                .multi_line(true)
+            // gpui-kit 0.6：多行不再由 `multi_line(true)` 标记，改用
+            // `TextareaState`（`InputBaseState<TextareaMode>`），模式本身就携带多行。
+            TextareaState::new(window, cx)
                 .rows(3)
                 .placeholder(ts("Settings.placeholder.qidian_cookie"))
                 .default_value(initial_qidian_cookie.clone())
@@ -205,7 +206,11 @@ impl SettingsPage {
         // 拖拽每 px 触发：写 config + persist（500ms debounce 合并）+ apply_font_size。
         // 字号写入 `Theme.font_size` 后 `Root::render` 下一帧用新值设 rem_size → 全 app 缩放。
         cx.subscribe(&font_size_state, |this, _state, event, cx| {
-            let SliderEvent::Change(value) = event;
+            // gpui-kit 0.6 的 SliderEvent 多了一个 `Release` 变体（拖完松手才发）。
+            // 连续拖拽期间只关心 `Change`，Release 不携带新值（最后一次 Change 已落盘）。
+            let SliderEvent::Change(value) = event else {
+                return;
+            };
             let size = match *value {
                 SliderValue::Single(v) => v,
                 SliderValue::Range(_, end) => end,

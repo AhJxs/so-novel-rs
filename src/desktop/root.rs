@@ -14,14 +14,14 @@
 //! - [`super::nav`] — `NavPage` enum + actions + key bindings
 //! - [`super::notifications`] — `UIEvent → Notification` 翻译层
 
-use gpui::prelude::FluentBuilder;
-use gpui::{
-    AnyElement, AppContext, ClickEvent, Context, Entity, FontWeight, InteractiveElement,
-    IntoElement, ParentElement, Render, Styled, Window, div, px,
-};
-use gpui_component::{
+use gpui_kit::component::{
     ActiveTheme as _, Icon, Root, TitleBar, WindowExt as _,
     sidebar::{Sidebar, SidebarMenu, SidebarMenuItem, SidebarToggleButton},
+};
+use gpui_kit::prelude::FluentBuilder;
+use gpui_kit::{
+    AnyElement, AppContext, ClickEvent, Context, Entity, FontWeight, InteractiveElement,
+    IntoElement, ParentElement, Render, Styled, Window, div, px,
 };
 
 use crate::desktop::model::AppModel;
@@ -44,7 +44,7 @@ pub struct RootView {
     sidebar_collapsed: bool,
     /// `new()` 里 `window.focus(&focus)` 让 `RootView` 拥有初始焦点 —— `KEY_CONTEXT`
     /// 绑定的快捷键 (`F6` / `Cmd+1..5`) 稳定 fire, 不依赖 focus 落到哪个子元素。
-    focus: gpui::FocusHandle,
+    focus: gpui_kit::FocusHandle,
 
     // 5 个 page entity 一次性创建, 跨切换保持内部状态 (输入框 / 滚动位置)。
     library_page: Entity<LibraryPage>,
@@ -57,7 +57,8 @@ pub struct RootView {
 impl RootView {
     pub fn new(model: Entity<AppModel>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let focus = cx.focus_handle();
-        window.focus(&focus);
+        // gpui-kit 0.6 的 `Window::focus` 签名带 `&mut App`，传 `cx`（Context 自动 deref）。
+        window.focus(&focus, cx);
 
         let library_page = cx.new(|cx| LibraryPage::new(model.clone(), window, cx));
         let search_page = cx.new(|cx| SearchPage::new(model.clone(), window, cx));
@@ -165,7 +166,7 @@ impl RootView {
                 )
             });
 
-        Sidebar::left()
+        Sidebar::new("app-sidebar")
             .w(px(220.0))
             .collapsible(true)
             .collapsed(collapsed)
@@ -186,7 +187,7 @@ impl RootView {
         // 没法直接用 cx.listener, 走 entity.update 桥接到 `toggle_sidebar`。
         let root_entity = cx.entity();
         TitleBar::new().child(
-            SidebarToggleButton::left()
+            SidebarToggleButton::new()
                 .collapsed(self.sidebar_collapsed)
                 .on_click(move |_ev, _window, app_cx| {
                     root_entity.update(app_cx, |this, ctx| {
@@ -211,7 +212,7 @@ impl RootView {
     /// 8 个导航 action 的 listener 挂到传入的 div 上, 返回挂好后的 div。
     /// 抽出到独立方法, 避免 render 主体被 action 链淹没。
     /// 不取 `&self` —— 只用 `cx` 就能 `cx.listener(...)`, 避免 `unused_self`。
-    fn bind_nav_actions(root: gpui::Div, cx: &Context<Self>) -> gpui::Div {
+    fn bind_nav_actions(root: gpui_kit::Div, cx: &Context<Self>) -> gpui_kit::Div {
         root.on_action(
             cx.listener(|this, _: &ShowSearch, _, cx| this.navigate(NavPage::Search, cx)),
         )

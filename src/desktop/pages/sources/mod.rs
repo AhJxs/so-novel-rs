@@ -4,12 +4,12 @@ mod delegate;
 mod row;
 mod toolbar;
 
-use gpui::prelude::FluentBuilder as _;
-use gpui::{
+use gpui_kit::prelude::FluentBuilder as _;
+use gpui_kit::{
     AppContext, Context, Entity, IntoElement, ParentElement, Render, SharedString, Styled, Window,
     div, px,
 };
-use gpui_component::{
+use gpui_kit::component::{
     ActiveTheme as _, Disableable, Icon, IconName, Sizable,
     button::Button,
     h_flex,
@@ -215,7 +215,7 @@ impl Render for SourcesPage {
         let rule_files = list_rule_files(&rules_dir);
         let items: SearchableVec<String> = rule_files.into();
         let sel = active_file;
-        let pos = <SearchableVec<String> as gpui_component::select::SelectDelegate>::position(
+        let pos = <SearchableVec<String> as gpui_kit::component::select::SelectDelegate>::position(
             &items, &sel,
         );
         self.rule_file_select.update(cx, |state, cx| {

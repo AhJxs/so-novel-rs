@@ -1,10 +1,10 @@
 //! 单条任务行渲染（卡片式：序号 / 标题行 / 进度条 / 失败折叠 / 动作按钮）。
 
-use gpui::prelude::FluentBuilder as _;
-use gpui::{
+use gpui_kit::prelude::FluentBuilder as _;
+use gpui_kit::{
     App, Entity, FontWeight, IntoElement, ParentElement, SharedString, Styled, Window, div, px,
 };
-use gpui_component::{
+use gpui_kit::component::{
     ActiveTheme as _, Disableable, Icon, IconName, Sizable,
     button::{Button, ButtonVariants as _},
     h_flex,
@@ -209,7 +209,7 @@ pub(super) fn render(task: &TaskSummary, page: &Entity<TasksPage>, cx: &App) -> 
                                 ),
                         )
                         .child(
-                            Progress::new()
+                            Progress::new("task-progress")
                                 .value(progress_pct)
                                 .w_full()
                                 .bg(cx.theme().success),

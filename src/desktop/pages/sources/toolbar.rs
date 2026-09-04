@@ -7,8 +7,8 @@
 //! 名字过滤：placeholder 在 `InputState` 上（gpui-component 0.5.1 API 限制），
 //! 切语言靠 `mod.rs` 顶部的 sentinel + `set_placeholder` 实时刷新。
 
-use gpui::{Context, Entity, IntoElement, ParentElement, Styled, div, px};
-use gpui_component::{
+use gpui_kit::{Context, Entity, IntoElement, ParentElement, Styled, div, px};
+use gpui_kit::component::{
     ActiveTheme as _, Icon, IconName, Selectable, Sizable,
     button::{Button, ButtonVariants as _},
     h_flex,
@@ -88,7 +88,7 @@ fn status_filter_buttons(
 /// 单个 status 过滤 Button：点击 → `set_status_filter(new_status)`。
 fn status_button(
     id: &'static str,
-    label: gpui::SharedString,
+    label: gpui_kit::SharedString,
     value: SourcesFilterStatus,
     current_status: SourcesFilterStatus,
     cx: &Context<'_, SourcesPage>,

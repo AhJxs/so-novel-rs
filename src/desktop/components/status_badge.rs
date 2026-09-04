@@ -3,8 +3,8 @@
 //! gpui-component 本身已有 `Badge` + `Alert`，颜色自动走 `cx.theme().info / success / warning / error`。
 //! 这里只做"业务命名 → Badge"的便捷构造器，不引入新调色板。
 
-use gpui::{App, IntoElement, ParentElement, RenderOnce, SharedString, Styled, Window, div};
-use gpui_component::{ActiveTheme as _, badge::Badge};
+use gpui_kit::{App, IntoElement, ParentElement, RenderOnce, SharedString, Styled, Window, div};
+use gpui_kit::component::{ActiveTheme as _, badge::Badge};
 
 /// 业务状态的 4 个语义色（与 gpui-component 主题色对齐）。
 #[derive(Debug, Clone, Copy)]
@@ -18,7 +18,7 @@ pub enum StatusKind {
 }
 
 impl StatusKind {
-    fn color(self, cx: &App) -> gpui::Hsla {
+    fn color(self, cx: &App) -> gpui_kit::Hsla {
         match self {
             Self::Info => cx.theme().info,
             Self::Success => cx.theme().success,

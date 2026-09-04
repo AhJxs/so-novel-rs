@@ -2,9 +2,9 @@
 
 use std::collections::HashMap;
 
-use gpui::{App, Context, Entity, ParentElement, Styled, Window, px};
-use gpui_component::list::{ListItem, ListState};
-use gpui_component::{ActiveTheme as _, IndexPath, list::ListDelegate};
+use gpui_kit::{App, Context, Entity, ParentElement, Styled, Window, px};
+use gpui_kit::component::list::{ListItem, ListState};
+use gpui_kit::component::{ActiveTheme as _, IndexPath, list::ListDelegate};
 
 use crate::crawler::health::SourceHealth;
 use crate::models::Rule;

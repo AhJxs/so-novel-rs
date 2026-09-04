@@ -8,8 +8,8 @@
 //! 全是纯 field + setter，无 dropdown 副作用（不调 `apply_theme_pref` 等），
 //! 所以 8 个 setter 一致走 `bool_field` / `number_field_option_i32` / `number_field_u32_clamped`。
 
-use gpui::App;
-use gpui_component::setting::{NumberFieldOptions, SettingGroup, SettingItem, SettingPage};
+use gpui_kit::App;
+use gpui_kit::component::setting::{NumberFieldOptions, SettingGroup, SettingItem, SettingPage};
 
 use crate::i18n::ts;
 

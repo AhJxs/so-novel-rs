@@ -2,7 +2,7 @@
 #
 # 加载方式：编译期由 `rust_i18n::i18n!("locales", fallback = "en")` 嵌入二进制。
 # 跟 `gpui-component` 的 `locales/ui.yml` **不共享**（各自 crate 独立的 i18n 实例），
-# 但**全局 locale 是同一个**（`gpui_component::set_locale` 写到全局），
+# 但**全局 locale 是同一个**（`gpui_kit::component::set_locale` 写到全局），
 # 所以一次 set_locale 同时影响两边的翻译。
 #
 # 格式参考 gpui-component 的 `locales/ui.yml`：

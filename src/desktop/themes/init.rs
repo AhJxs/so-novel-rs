@@ -3,8 +3,8 @@
 //! `apply_theme_pref` / `apply_font_size` 在 [`super::apply`], 目录同步在
 //! [`super::user_dir`], embed consts 在 [`super::embedded`]。
 
-use gpui::App;
-use gpui_component::ThemeRegistry;
+use gpui_kit::App;
+use gpui_kit::component::ThemeRegistry;
 
 use crate::config::{ConfigPaths, ThemePref};
 

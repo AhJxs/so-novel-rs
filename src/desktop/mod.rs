@@ -9,11 +9,11 @@
 //! 本模块仅依赖 GPUI + gpui-component + 业务模块（`crate::desktop::model`）。
 
 use anyhow::Result;
-use gpui::{
+use gpui_kit::component::{Root, TitleBar};
+use gpui_kit::{
     App, AppContext, Bounds, WindowBackgroundAppearance, WindowBounds, WindowOptions, actions, px,
     size,
 };
-use gpui_component::{Root, TitleBar};
 
 use crate::desktop::model::AppModel;
 
@@ -86,7 +86,7 @@ use crate::i18n::locale_for_gpui;
 /// 启动 GPUI 应用。`main.rs` 在无参数分支调用。
 ///
 /// 启动顺序：
-/// 1. `gpui_component::init(cx)` — 主题 / 内置组件 / 资源；
+/// 1. `gpui_kit::component::init(cx)` — 主题 / 内置组件 / 资源；
 /// 2. 创建 `Entity<AppModel>` — UI 中立的领域状态；
 /// 3. `root::register_key_bindings(cx)` — 绑定 cmd-1..5 + Tab 切页快捷键；
 /// 4. 启动 [`events::spawn_drain_loop`] — 每 100ms 排空后台通道 + `cx.notify()`；
@@ -111,10 +111,10 @@ use crate::i18n::locale_for_gpui;
 /// 不会 panic。GPUI 0.2.2 在初始化失败的窗口上几乎不会 `Err`，但保留显式处理
 /// 防止无声失败（避免用户看到空白窗口以为还在加载）。
 pub fn run() -> Result<()> {
-    let app = gpui::Application::new().with_assets(gpui_component_assets::Assets);
+    let app = gpui_kit::application().with_assets(gpui_kit::assets::Assets);
     app.run(move |cx: &mut App| {
         // 必须在第一个窗口前调用。
-        gpui_component::init(cx);
+        gpui_kit::component::init(cx);
 
         // 1. 创建 AppModel。
         //    启动期致命错误（如持久化数据库磁盘 + 内存都打不开）→ 弹原生
@@ -142,7 +142,7 @@ pub fn run() -> Result<()> {
         register_key_bindings(cx);
 
         // 3. 启动 drain 循环（内部 detach），100ms 兜底 + wakeup 主动唤醒。
-        drain_loop::spawn_drain_loop(model.clone(), wakeup_rx, cx);
+        drain_loop::spawn_drain_loop(&model, wakeup_rx, cx);
 
         // 4. 加载 themes/*.json 到 ThemeRegistry（on_load 里 apply + refresh）。
         //    themes 目录 = `~/.sonovel/themes/`（首次启动写入 21 个 embed，
@@ -161,7 +161,7 @@ pub fn run() -> Result<()> {
         //    Sidebar 搜索 placeholder / Select placeholder / Dialog OK|Cancel 等所有
         //    `t!()` 调用的文案。必须在开任何带 Sidebar / Select / Dialog 的窗口前调用，
         //    否则首次 render 就会用错误的 fallback locale。
-        gpui_component::set_locale(locale_for_gpui(model.read(cx).config.global.language));
+        gpui_kit::component::set_locale(locale_for_gpui(model.read(cx).config.global.language));
 
         // 6. 居中开窗 + 最小尺寸 + 自定义 TitleBar 配置。
         let window_size = size(px(1200.0), px(800.0));
@@ -184,7 +184,7 @@ pub fn run() -> Result<()> {
         // （X11 仅在 background != Opaque 时启用 alpha blending）。
         #[cfg(target_os = "linux")]
         {
-            opts.window_decorations = Some(gpui::WindowDecorations::Client);
+            opts.window_decorations = Some(gpui_kit::WindowDecorations::Client);
         }
 
         // 7. Root 包装 RootView（持有 AppModel + sidebar + TitleBar）。

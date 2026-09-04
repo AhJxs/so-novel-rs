@@ -334,8 +334,8 @@ cd C:/Users/pc/Documents/GitHub/so-novel-rs && git add locales/app.yml src/i18n.
 - `AppModel::spawn_resolve_toc(target)` (existing, called by `open_range_dialog` already)
 - `SearchPage::open_range_dialog(target, window, cx)` (existing, line 371)
 - `SearchResult { source_id, source_name, url, book_name, author, ... }` — construct directly with `book_name: ""` and other fields `None` / empty
-- `gpui::Window::open_dialog(cx, |Dialog, ...| ...)` (same pattern as `open_range_dialog`)
-- `gpui::AppContext::read_from_clipboard() -> Option<String>` (gpui std API for clipboard)
+- `gpui_kit::Window::open_dialog(cx, |Dialog, ...| ...)` (same pattern as `open_range_dialog`)
+- `gpui_kit::AppContext::read_from_clipboard() -> Option<String>` (gpui std API for clipboard)
 
 **Interfaces produced:**
 - `SearchPage::open_url_dialog(window, cx)` — public method called by PageHeader action in Task 4
@@ -524,7 +524,7 @@ Add this method right above `open_range_dialog` (line 371). The method:
 **Required imports to add at top of `src/desktop/pages/search/mod.rs`** (some may already exist; check before adding):
 
 ```rust
-use gpui_component::{
+use gpui_kit::component::{
     // ...existing...
     input::Input,  // 新增：TextInput 用 Input::new(&state)
     button::Button,  // 新增：「粘贴」兜底按钮 + PageHeader 按钮
@@ -604,7 +604,7 @@ Replace it with:
 Confirm `Icon` is imported. The current import at line 30-32 of `search/mod.rs` is:
 
 ```rust
-use gpui_component::{
+use gpui_kit::component::{
     ActiveTheme as _, IconName, WindowExt,
     dialog::{Dialog, DialogButtonProps},
     ...
@@ -614,7 +614,7 @@ use gpui_component::{
 `IconName` is imported but `Icon` is not. Add:
 
 ```rust
-use gpui_component::{
+use gpui_kit::component::{
     ActiveTheme as _, Icon, IconName, WindowExt,  // 加 Icon
     ...
 };

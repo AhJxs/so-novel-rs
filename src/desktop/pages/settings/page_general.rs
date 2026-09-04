@@ -10,11 +10,11 @@
 //! `theme_mode_items` 之前在 `SettingsPage` impl 内（settings.rs:381），是 100 行的
 //! 闭包工厂。拆到本文件 —— 只服务「外观」组，留 `pub(super)` 即可。
 
-use gpui::{App, Entity, ParentElement, SharedString, Styled, div};
-use gpui_component::{
+use gpui_kit::{App, Entity, ParentElement, SharedString, Styled, div};
+use gpui_kit::component::{
     ActiveTheme as _, AxisExt as _, IconName, Sizable as _, WindowExt as _,
     button::{Button, ButtonVariants as _},
-    dialog::{Dialog, DialogButtonProps},
+    dialog::{AlertDialog, DialogButtonProps},
     input::Input,
     select::Select,
     setting::{SettingField, SettingGroup, SettingItem, SettingPage},
@@ -152,13 +152,13 @@ pub(super) fn build(ctx: &PageCtx<'_>, cx: &App) -> SettingPage {
                             SettingField::render({
                                 let font_size_state = ctx.font_size_state.clone();
                                 move |options, _window, cx| {
-                                    use gpui_component::slider::Slider;
+                                    use gpui_kit::component::slider::Slider;
                                     let n = match font_size_state.read(cx).value() {
                                         SliderValue::Single(v) => v,
                                         SliderValue::Range(_, end) => end,
                                     };
                                     let mut el = div().flex().items_center().gap_2();
-                                    el = if options.layout.is_horizontal() {
+                                    el = if options.layout().is_horizontal() {
                                         el.w_64()
                                     } else {
                                         el.w_full()
@@ -224,7 +224,7 @@ pub(super) fn build(ctx: &PageCtx<'_>, cx: &App) -> SettingPage {
                                 // 大小 → text 被裁切看不见、suffix button 没 hit area
                                 // → click 不响应。详见 `string.rs:76-86`。
                                 let mut el = Input::new(&download_path_input)
-                                    .with_size(options.size)
+                                    .with_size(options.size())
                                     .suffix({
                                         // ghost + xsmall 让 button 视觉上就是 icon，
                                         // 不抢 input 焦点、看起来像 input 的一部分。
@@ -254,7 +254,7 @@ pub(super) fn build(ctx: &PageCtx<'_>, cx: &App) -> SettingPage {
                                     });
                                 // horizontal layout → 固定 256px（与 `SettingField::input`
                                 // 默认行为一致）；其它 → 占满整行。
-                                if options.layout.is_horizontal() {
+                                if options.layout().is_horizontal() {
                                     el = el.w_64();
                                 } else {
                                     el = el.w_full();
@@ -329,8 +329,8 @@ fn theme_mode_items(ctx: &PageCtx<'_>, kind: ThemeKind, m: &Entity<AppModel>) ->
                 SettingField::render({
                     let state = ctx.theme_state_static.clone();
                     move |options, _window, _cx| {
-                        let mut el = Select::new(&state).with_size(options.size).min_w_48();
-                        el = if options.layout.is_horizontal() {
+                        let mut el = Select::new(&state).with_size(options.size()).min_w_48();
+                        el = if options.layout().is_horizontal() {
                             el.w_64()
                         } else {
                             el.w_full()
@@ -377,8 +377,8 @@ fn theme_mode_items(ctx: &PageCtx<'_>, kind: ThemeKind, m: &Entity<AppModel>) ->
                 SettingItem::new(
                     title,
                     SettingField::render(move |options, _window, _cx| {
-                        let mut el = Select::new(&state).with_size(options.size).min_w_48();
-                        el = if options.layout.is_horizontal() {
+                        let mut el = Select::new(&state).with_size(options.size()).min_w_48();
+                        el = if options.layout().is_horizontal() {
                             el.w_64()
                         } else {
                             el.w_full()
@@ -441,10 +441,10 @@ fn after_language(_m: &Entity<AppModel>, cx: &mut App) {
         tracing::info!("language setter: defer 触发, 调 open_dialog");
         if let Some(handle) = cx.windows().into_iter().next() {
             let result = handle.update(cx, |_view, window, cx| {
-                window.open_dialog(cx, |dialog: Dialog, _w, _cx| {
-                    dialog
+                window.open_alert_dialog(cx, |alert: AlertDialog, _w, _cx| {
+                    alert
                         .title(ts("Settings.language_restart_dialog.title"))
-                        .child(div().child(ts("Settings.language_restart_dialog.message")))
+                        .description(ts("Settings.language_restart_dialog.message"))
                         .button_props(
                             DialogButtonProps::default()
                                 .ok_text(ts("Settings.language_restart_dialog.restart_button"))

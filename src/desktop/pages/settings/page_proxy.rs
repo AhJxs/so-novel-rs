@@ -4,10 +4,10 @@
 //! - HTTP 代理：启用（switch）/ Host（input）/ Port（u16，1–65535）
 //! - Cookie：起点 Cookie（**多行 textarea + placeholder** —— 详见 page 注释）
 
-use gpui::{App, SharedString, Styled, px};
-use gpui_component::{
-    AxisExt, Sizable,
-    input::Input,
+use gpui_kit::{App, SharedString, Styled, px};
+use gpui_kit::component::{
+    AxisExt,
+    input::Textarea,
     setting::{NumberFieldOptions, SettingField, SettingGroup, SettingItem, SettingPage},
 };
 
@@ -75,13 +75,14 @@ pub(super) fn build(ctx: &PageCtx<'_>, _cx: &App) -> SettingPage {
                         SettingField::render({
                             let qidian_cookie_input = ctx.qidian_cookie_input.clone();
                             move |options, _window, _cx| {
-                                let mut el = Input::new(&qidian_cookie_input)
-                                    .with_size(options.size)
+                                let mut el = Textarea::new(&qidian_cookie_input)
+                                    // Textarea 无 `Sizable::with_size`（gpui-kit 0.6）——
+                                    // 高度已由 `.h(px(80.))` 固定，宽度走下方 w_64/w_full。
                                     .h(px(80.));
                                 // horizontal layout → 固定 256px；其它 → 占满整行。
                                 // 宽度逻辑和 download_path 保持一致 —— 见 page_general.rs
                                 // download_path 设置项注释。
-                                if options.layout.is_horizontal() {
+                                if options.layout().is_horizontal() {
                                     el = el.w_64();
                                 } else {
                                     el = el.w_full();

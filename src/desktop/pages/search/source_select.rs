@@ -11,8 +11,8 @@
 //!   `SharedString`，解析逻辑 `v == "all" → None;
 //!   v.strip_prefix("rule:").and_then(parse) → Some(id)`。
 
-use gpui::SharedString;
-use gpui_component::select::SelectItem;
+use gpui_kit::SharedString;
+use gpui_kit::component::select::SelectItem;
 
 #[derive(Clone, Debug)]
 pub(super) struct SourceSelectItem {

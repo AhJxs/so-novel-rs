@@ -10,7 +10,7 @@
 use std::io::Cursor;
 use std::sync::{Arc, LazyLock};
 
-use gpui::{
+use gpui_kit::{
     AnyElement, ImageSource, IntoElement, ObjectFit, RenderImage, Styled as _, StyledImage as _,
     div, img,
 };
@@ -41,7 +41,7 @@ fn decode_logo_image(bytes: &[u8]) -> Option<Arc<RenderImage>> {
 ///
 /// 解码失败 → 返回空 div 占位, 不让 UI 崩。`size` 走 `px()` 显式像素而非 rem:
 /// logo 是图标资源, 不跟字号缩放。
-pub(super) fn render_logo(size: gpui::Pixels) -> AnyElement {
+pub(super) fn render_logo(size: gpui_kit::Pixels) -> AnyElement {
     LOGO_IMAGE.as_ref().map_or_else(
         || div().size(size).flex_shrink_0().into_any_element(),
         |rendered| {
