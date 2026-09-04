@@ -1,38 +1,27 @@
 # Changelog
 
-## [0.3.6] - 2026-07-12
+## [0.4.0] - 2026-09-04
 
-主题：**Markdown 导出 + URL 直接下载 + Tasks 删除 toast 反馈**（32 commits，
-详见 [`CHANGELOG_ALL.md`](./CHANGELOG_ALL.md)）。
-
-### Added
-
-- **Markdown 导出格式**：`ExportFormat::Markdown` + `MdExporter`
-  （YAML front matter + H1 书名 + TOC + 章节锚点）；desktop settings、
-  web `FORMAT_OPTIONS`、CLI `--format markdown`、library `.md` 扩展名过滤按钮
-  全链路打通
-- **URL 直接下载**（SearchPage header「下载链接」按钮）：弹 Dialog 自动粘贴
-  剪贴板 + 「粘贴」兜底按钮；按 URL origin / hash / port 匹配书源，复用
-  `open_range_dialog` 走选章下载流程
-- **Tasks 删除 toast 反馈**：`DeleteTaskResult` 枚举（`Ok` /
-  `StillRunning` / `Missing`），`prompt_delete.on_ok` 按结果推
-  success / warning toast
-- **`match_source_by_url` 测试矩阵**：锁定 query / hash / port 三个易踩点的
-  匹配敏感性，防止后续回归
+主题：**底层 UI 栈迁移 gpui-kit 0.6.0**（7 commits，经 PR #5 从
+`fix/gpui-kit-0.6-migration` 合入，详见 [`CHANGELOG_ALL.md`](./CHANGELOG_ALL.md)）。
 
 ### Changed
 
-- **Library 移除 `notify` watcher**：改用手动「刷新」按钮 + 加载态，避免
-  watcher 在打包后的 Windows 资源占用 + 资源刷新双触发问题
-- **ExportFormat 三端对齐**：`Markdown` 在 desktop settings / web
-  `FORMAT_OPTIONS` / CLI `--format` 一致暴露 `'md'`
+- **UI 栈整体迁移**：`gpui + gpui-component 0.5.1` → `gpui-kit 0.6.0`
+  （底层 gpui-pre 0.3.3）。适配破坏性 API：确认对话框 `Dialog` → `AlertDialog`
+  （`.confirm()` / `.button_props()` / `.on_ok()` 语义保留）；多行输入
+  `Input::multi_line` → `TextareaState` + `Textarea`；`SliderEvent` 新增 `Release`
+  变体；`Progress::new()` 增加必填 `id`；`Sidebar` / `SidebarToggleButton`
+  `left()` → `new()`；`update_entity` 返回 `R`；`IntoElement` `Component` →
+  `ViewElement`
+- **注释 / 文档术语统一**：gpui-component / GPUI 0.2.2 旧称呼 → gpui-kit 0.6 词汇
+- **pdf_oxide** `0.3.73` → `0.3.77`（连带 office_oxide / fax / taffy / windows 重新解析）
+- **web-ui 前端**：补齐 node_modules 依赖，tsc + vite 构建恢复
 
 ### Fixed
 
-- **Dialog-stack pop race**：URL 匹配成功后 `open_range_dialog` 通过 flag
-  延迟到下一帧弹出，避免与正在关闭的 URL Dialog 栈冲突
-- **`download_path` 默认值**：fallback `'./downloads'` 改带 `./` 前缀，
-  与显式配置统一路径解析语义
-- **Export 新代码 clippy nits** + md i18n key 补全 + 2 个缺失测试（review 反馈）
-- **`mod tasks` 可见性**：提升到 `pub(crate)`，让 `DeleteTaskResult` 跨模块
-  可见（之前需在 model 内重组才能导出）
+- **SidebarToggleButton 点击失效**：gpui-kit 0.6 起 Windows 上组件库 `TitleBar`
+  把 children 行标成 `window_control_area(Drag)`，NCHITTEST 返回 HTCAPTION 让 OS
+  按下即接管为拖窗 → click 丢失（hover 仍正常）；改用 `.occlude()` + mousedown
+  `stop_propagation` 修复
+- **鸟书网书源失效**：域名 `99xs.info` → `99wx.info`

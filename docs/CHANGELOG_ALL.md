@@ -17,6 +17,45 @@ so-novel-rs 的**所有 git 提交**，按版本分组。最近版本与对外�
 
 > 等待下一个 release 的占位段。
 
+## [0.4.0] - 2026-09-04
+
+> 本版本含 **7 个 commit**（6 个改动 + 1 个 merge，经 PR #5 从
+> `fix/gpui-kit-0.6-migration` 合入）。主题：UI 栈整体迁移 gpui-kit 0.6.0
+> + 迁移后修复、依赖与文档清理。
+
+- **Cargo.toml** `version = "0.3.6"` → `"0.4.0"`；`web-ui/package.json` 同步；
+  `cli::args.rs::VERSION_STRING` 走 `env!("CARGO_PKG_VERSION")` 自动跟随
+
+### gpui-kit 0.6.0 迁移（PR #5）
+
+- `86dc29d` 2026-09-04 — **fix**: migrate to gpui-kit 0.6.0 and fix all compile errors
+  —— `gpui + gpui-component 0.5.1` → `gpui-kit 0.6.0`，修 25 个编译错误：
+  Dialog confirm → AlertDialog（`.confirm()` / `.button_props()` / `.on_ok()`）；
+  `Input::multi_line` → TextareaState + Textarea；SliderEvent 新增 Release；
+  Progress::new 必填 id；Sidebar `left()` → `new()`；`update_entity` 返回 `R`；
+  Component → ViewElement；web-ui npm 依赖补齐，tsc + vite 构建通过
+  （553 测试通过）
+- `f217595` 2026-09-04 — **merge**: PR #5 `fix/gpui-kit-0.6-migration` → master
+
+### 迁移后修复
+
+- `cf93ca9` 2026-09-04 — **fix(titlebar)**: SidebarToggleButton 点击失效
+  —— gpui-kit 0.6 把 TitleBar children 行标成 `window_control_area(Drag)`，
+  NCHITTEST 返回 HTCAPTION 使 OS 按下即接管为拖窗 → click 丢失（hover 仍正常）；
+  用 `.occlude()` + mousedown `stop_propagation` 修复
+
+### Deps / Rules
+
+- `a7ab0fd` 2026-09-04 — **build(deps)**: pdf_oxide 0.3.73 → 0.3.77
+  —— 连带 office_oxide 0.1.3→0.1.9、fax 0.3.0、taffy 0.11.0→0.12.2、
+  windows 0.61.3→0.62.2 重新解析
+- `827948e` 2026-09-04 — **fix(sources)**: 鸟书网域名 99xs.info → 99wx.info
+
+### Docs / Style
+
+- `b2c1935` 2026-09-04 — **refactor**: 注释/文档术语统一为 gpui-kit 0.6 词汇
+- `17ba8a4` 2026-09-04 — **style**: cargo fmt 规范化 use 导入排序
+
 ## [0.3.6] - 2026-07-12
 
 > 本版本含 **30 个 commit**。主题：Markdown 导出格式 + URL 直接下载 +
@@ -514,9 +553,9 @@ CLI `--format markdown` / library `.md` ext 过滤按钮 全链路打通。
 
 ## 元数据
 
-- **总提交数**：72（含 release commit）
+- **总提交数**：164（不含 merge commit）
 - **首个 commit**：早于 2026-06-14（项目从 `freeok/so-novel` Java 移植启动）
-- **当前版本**：`v0.3.3`（Cargo.toml + git tag）
+- **当前版本**：`v0.4.0`（Cargo.toml + git tag）
 - **CHANGELOG 规范**：[Keep a Changelog 1.1.0](https://keepachangelog.com/zh-CN/1.1.0/)
 - **版本号规范**：[Semantic Versioning 2.0](https://semver.org/lang/zh-CN/)
 - **commit 类型**：`feat` / `fix` / `refactor` / `perf` / `test` / `docs` /
