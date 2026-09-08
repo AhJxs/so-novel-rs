@@ -156,12 +156,15 @@ so-novel-rs sources --json
 启动 Web 服务器，通过浏览器访问：
 
 ```sh
-# 命令行启动
-so-novel-rs --web
-so-novel-rs --web --host 0.0.0.0 --port 9000
+# 先构建（web 是可选 feature，默认构建不含）
+cargo build --features web
+./target/debug/so-novel-rs --web --host 0.0.0.0 --port 9000
+
+# 或一步构建并启动
+cargo run --features web -- --web
 
 # 环境变量（Docker 友好）
-SO_NOVEL_WEB=1 so-novel-rs
+SO_NOVEL_WEB=1 ./target/debug/so-novel-rs
 ```
 
 浏览器打开 `http://localhost:8080` 即可使用。支持手机、平板、桌面多端响应式。
