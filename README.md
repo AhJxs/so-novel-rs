@@ -71,7 +71,7 @@ so-novel-rs/
 ├── bundle/web/            # Web 前端 build 产物
 ├── docs/                  # CLI / 书源 / 部署等长文档
 ├── locales/app.yml        # i18n 翻译（zh-CN / zh-TW / en）
-├── web-ui/                # React + Vite SPA（前端独立 package）
+├── web-ui/                # Turborepo + Bun monorepo（apps/web + packages/ui，shadcn base-nova）
 └── src/
     ├── main.rs / lib.rs   # 入口 + crate 根
     ├── startup/           # 启动层（mode 判定 / console attach）

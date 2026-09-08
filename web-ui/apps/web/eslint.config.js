@@ -18,5 +18,9 @@ export default defineConfig([
     languageOptions: {
       globals: globals.browser,
     },
+    rules: {
+      // 分页页码夹取（数据变化时 setPage 夹回合法范围）是既有行为模式
+      'react-hooks/set-state-in-effect': 'off',
+    },
   },
 ])
