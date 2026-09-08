@@ -1,19 +1,24 @@
-import { Button } from "@workspace/ui/components/button"
+import { Navigate, Route, Routes } from "react-router-dom"
+import Layout from "@/components/layout/layout"
+import SearchPage from "@/routes/search"
+import BookDetailPage from "@/routes/book-detail"
+import TasksPage from "@/routes/tasks"
+import LibraryPage from "@/routes/library"
+import SourcesPage from "@/routes/sources"
+import SettingsPage from "@/routes/settings"
 
 export function App() {
   return (
-    <div className="flex min-h-svh p-6">
-      <div className="flex max-w-md min-w-0 flex-col gap-4 text-sm leading-loose">
-        <div>
-          <h1 className="font-medium">Project ready!</h1>
-          <p>You may now add components and start building.</p>
-          <p>We&apos;ve already added the button component for you.</p>
-          <Button className="mt-2">Button</Button>
-        </div>
-        <div className="text-muted-foreground font-mono text-xs">
-          (Press <kbd>d</kbd> to toggle dark mode)
-        </div>
-      </div>
-    </div>
+    <Routes>
+      <Route element={<Layout />}>
+        <Route index element={<Navigate to="/search" replace />} />
+        <Route path="search" element={<SearchPage />} />
+        <Route path="search/:bookUrl" element={<BookDetailPage />} />
+        <Route path="tasks" element={<TasksPage />} />
+        <Route path="library" element={<LibraryPage />} />
+        <Route path="sources" element={<SourcesPage />} />
+        <Route path="settings" element={<SettingsPage />} />
+      </Route>
+    </Routes>
   )
 }
