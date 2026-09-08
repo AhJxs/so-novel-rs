@@ -1,13 +1,13 @@
-//! 直接走 `rust_i18n`（gpui_kit::component 同款机制）。
+//! 直接走 `rust_i18n`（`gpui_kit::component` 同款机制）。
 //!
 //! ## 用法
 //!
 //! 在调用方直接写 `ts!("Settings.item.theme")` 字符串字面量 —— 无 key 常量、无单独枚举。
 //! 翻译表在 `locales/app.yml`（编译期嵌入二进制），YAML 顶层大写（参考组件库的 `locales/ui.yml`）。
 //!
-//! ## 与 gpui_kit::component 共享全局 locale
+//! ## 与 `gpui_kit::component` 共享全局 locale
 //!
-//! 我们加载 `so-novel-rs/locales/app.yml`，gpui_kit::component 加载它自带的 `locales/ui.yml`，
+//! 我们加载 `so-novel-rs/locales/app.yml`，`gpui_kit::component` 加载它自带的 `locales/ui.yml`，
 //! 两个 i18n 实例**各自独立**（不会互相看到对方 YAML 的 key），但**全局 locale 是同一个**
 //! （`rust_i18n::set_locale` 写到全局 `CURRENT_LOCALE`）。所以一次 `gpui_kit::component::set_locale("en")`
 //! 同时影响双方：`t!("Nav.search")` → "Search"，`t!("Settings.search_placeholder")` → "Search..."
@@ -41,12 +41,12 @@ use crate::config::Language;
 /// 来源（前后端 locale tag 统一为 `en` / `zh-CN` / `zh-TW`）。
 ///
 /// `Language::as_str()` 返回的是 `toml_io` 持久化用的 `"zh-TW"`，跟 `app.yml`
-/// 现在的 locale 标签（`"zh-TW"`）已经一致；但**跟 `gpui_kit::component::set_locale`
-/// 接受的标签（`"zh-HK"`）不一致** —— 那个走 [`locale_for_gpui`]。
+/// 现在的 locale 标签（`"zh-TW"`）一致；`gpui_kit::component::set_locale`
+/// 接受的标签也统一为 `zh-TW`（见 [`locale_for_gpui`]）。
 ///
 /// 三种映射：
 /// - `SimplifiedChinese` → `"zh-CN"`
-/// - `TraditionalChinese` → `"zh-TW"`（**不是** gpui_kit::component 用的 `"zh-HK"`）
+/// - `TraditionalChinese` → `"zh-TW"`（**不是** `gpui_kit::component` 用的 `"zh-HK"`）
 /// - `English` → `"en"`
 ///
 /// **位置历史**：原本在 `desktop::mod::locale_for`（仅 gui feature 编译）。
@@ -61,19 +61,19 @@ pub const fn locale_for(lang: Language) -> &'static str {
     }
 }
 
-/// 把 `Language` 映射到 **gpui_kit::component 接受**的 locale 标签。
+/// 把 `Language` 映射到 **`gpui_kit::component` 接受**的 locale 标签。
 ///
-/// gpui_kit::component 用 `rust_i18n` + 它自带的 `locales/ui.yml`，**只支持 4 个 locale**：
-/// `en` / `zh-CN` / `zh-HK` / `it` —— **没有 `zh-TW`**。本项目的 `app.yml` 用 `zh-TW`，
-/// 但调用 `gpui_kit::component::set_locale(...)` 时必须传 `zh-HK`，否则 gpui_kit::component
-/// 会 fallback 到 `en`（传统中文用户看到英文 UI）。
+/// `gpui_kit::component` 用 `rust_i18n` + 它自带的 `locales/ui.yml`。0.5 时代它只有
+/// `en` / `zh-CN` / `zh-HK` / `it`（没有 `zh-TW`，当时要传 `zh-HK`）；**0.6 起的
+/// `ui.yml` 已含 `zh-TW`**（en / zh-CN / zh-TW / zh-HK 各 55 个 key 全覆盖），
+/// 与本项目 `app.yml` 的标签统一 —— 映射跟 [`locale_for`] 完全一致。
 ///
 /// 三种映射：
 /// - `SimplifiedChinese` → `"zh-CN"`（同 [`locale_for`]）
 /// - `TraditionalChinese` → `"zh-TW"`（同 [`locale_for`]）
 /// - `English` → `"en"`（同 [`locale_for`]）
 ///
-/// 调用点只有 `src/desktop/mod.rs::run` 启动时一行 —— CLI / web 路径不碰 gpui_kit::component。
+/// 调用点只有 `src/desktop/mod.rs::run` 启动时一行 —— CLI / web 路径不碰 `gpui_kit::component`。
 pub const fn locale_for_gpui(lang: Language) -> &'static str {
     match lang {
         Language::SimplifiedChinese => "zh-CN",
@@ -263,7 +263,8 @@ mod tests {
         assert_eq!(ts("Nav.tasks"), "下载任务");
         assert_eq!(ts_fmt("Search.result.source", &[("id", "3")]), "源 #3");
 
-        // ---- zh-TW：传统中文（本项目 app.yml 现在用 zh-TW，跟前端 JSON 文件名一致）----
+        // ---- zh-TW：传统中文（本项目 app.yml 现在用 zh-TW，跟前端 JSON 文件名一致；
+        // gpui-kit 0.6 的 ui.yml 同样有 zh-TW，桌面路径 locale_for_gpui 也返回 zh-TW）----
         rust_i18n::set_locale("zh-TW");
         assert_eq!(ts("Nav.tasks"), "下載任務");
         assert_eq!(ts_fmt("Search.result.source", &[("id", "3")]), "源 #3");

@@ -1,4 +1,4 @@
-//! `SourcesDelegate`: gpui_kit::component::list::List 的 delegate，持有 page handle + 当前页 (index, Rule) + health map。
+//! `SourcesDelegate`: `gpui_kit::component::list::List` 的 delegate，持有 page handle + 当前页 (index, Rule) + health map。
 
 use std::collections::HashMap;
 

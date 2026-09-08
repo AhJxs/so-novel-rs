@@ -1,4 +1,4 @@
-//! `TasksDelegate`: gpui_kit::component::list::List 的 delegate，持有 page handle + 当前页 `TaskSummary`。
+//! `TasksDelegate`: `gpui_kit::component::list::List` 的 delegate，持有 page handle + 当前页 `TaskSummary`。
 
 use gpui_kit::component::list::{ListItem, ListState};
 use gpui_kit::component::{ActiveTheme as _, IndexPath, list::ListDelegate};

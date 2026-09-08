@@ -75,7 +75,7 @@ impl LangType {
 ///
 /// 与 `LangType` 区分：`LangType` 是 zhconv 用的目标语言变体；`Language` 是
 /// **应用**语言，决定 Sidebar placeholder / Select placeholder / Dialog OK|Cancel
-/// 等所有 gpui_kit::component 内部 `t!("...")` 调用的文案，同时也决定下载章节正文的目标语言
+/// 等所有 `gpui_kit::component` 内部 `t!("...")` 调用的文案，同时也决定下载章节正文的目标语言
 /// —— 见 `Language::to_book_target_lang`。
 ///
 /// 三种：简体中文 / 繁體中文 / English。存到 TOML `[global].language`
