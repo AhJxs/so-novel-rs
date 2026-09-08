@@ -362,6 +362,87 @@ async fn task_cancel_404_on_unknown_id() {
 
 // ── /api/library ─────────────────────────────────────────────────────────
 
+// ── /api/search (任务轮询) ────────────────────────────────────────────
+
+#[tokio::test]
+async fn search_create_returns_task_id_then_done_with_zero_sources() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let state = build_test_state_with(tmp.path()); // 空 rules
+    let app = build_test_router(state).await;
+
+    let body = serde_json::json!({ "keyword": "三体" });
+    // dispatch 按值消费 router，后续轮询都传 app.clone()
+    let resp = dispatch(
+        app.clone(),
+        Request::builder()
+            .method("POST")
+            .uri("/api/search")
+            .header("content-type", "application/json")
+            .body(Body::from(serde_json::to_vec(&body).unwrap()))
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    let json = read_json(resp).await;
+    let task_id = json["task_id"].as_u64().expect("task_id present");
+
+    // 空 rules → 0 源 → 后台 spawn 很快标 done。轮询几次等 done。
+    for _ in 0..50 {
+        let resp = dispatch(
+            app.clone(),
+            Request::builder()
+                .uri(format!("/api/search/{task_id}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        let st = read_json(resp).await;
+        assert_eq!(st["total_sources"], 0);
+        if st["status"] == "Done" {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    panic!("search task did not reach Done");
+}
+
+#[tokio::test]
+async fn search_create_rejects_empty_keyword() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let state = build_test_state_with(tmp.path());
+    let app = build_test_router(state).await;
+
+    let body = serde_json::json!({ "keyword": "   " });
+    let resp = dispatch(
+        app,
+        Request::builder()
+            .method("POST")
+            .uri("/api/search")
+            .header("content-type", "application/json")
+            .body(Body::from(serde_json::to_vec(&body).unwrap()))
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn search_status_404_on_unknown_task() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let state = build_test_state_with(tmp.path());
+    let app = build_test_router(state).await;
+    let resp = dispatch(
+        app,
+        Request::builder()
+            .uri("/api/search/99999")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+}
+
 #[tokio::test]
 async fn library_list_handles_missing_dir_gracefully() {
     // 默认 download_path 指向用户家目录下的 .sonovel —— 测试机不一定存在。

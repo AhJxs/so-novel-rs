@@ -48,8 +48,8 @@ fn loopback_origins() -> Vec<HeaderValue> {
 /// SPA 前端由 rust-embed 编译期嵌入，通过 `spa_handler` fallback 提供。
 pub fn build_router(state: SharedState, session_store: SessionStore<SessionNullPool>) -> Router {
     let api = Router::new()
-        // 搜索
-        .route("/search", get(handlers::search::search))
+        // 搜索（任务轮询：POST 建任务 → GET 轮询 → DELETE 清理）
+        .route("/search", post(handlers::search::search_create))
         .route("/book/detail", get(handlers::book::book_detail))
         .route("/book/toc", get(handlers::book::book_toc))
         // 下载 + 任务

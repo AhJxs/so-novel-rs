@@ -148,7 +148,7 @@ pub struct SourceSearchError {
 pub struct SearchTask {
     pub id: u64,
     pub keyword: String,
-    pub created_at_unix: u64,
+    pub created_at_unix: i64,
     pub status: SearchStatus,
     pub sources_total: usize,
     pub sources_done: usize,
