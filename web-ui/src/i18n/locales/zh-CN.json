@@ -101,11 +101,6 @@
   "settings": {
     "title": "设置",
     "loading": "加载中...",
-    "status": {
-      "saving": "保存中…",
-      "saved": "已保存 ✓",
-      "error": "保存失败"
-    },
     "errors": {
       "pathEmpty": "下载目录不能为空",
       "pathNotDir": "目录不存在，请填写有效路径",
@@ -142,6 +137,14 @@
       "minInterval": "最小间隔 (ms)：",
       "maxInterval": "最大间隔 (ms)：",
       "cfBypass": "CF 绕过："
+    },
+    "saving": "保存中…",
+    "saved": "已保存 ✓",
+    "saveFailed": "保存失败",
+    "error": {
+      "pathEmpty": "下载目录不能为空",
+      "pathNotDir": "目录不存在或无法访问",
+      "hostEmpty": "代理主机不能为空"
     }
   },
   "theme": {

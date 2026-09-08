@@ -22,6 +22,8 @@
 
 ## 📸 截图
 
+> ⚠️ 旧截图已随 Web 前端迁移 shadcn 失效，待重新截图替换。
+
 | 搜索 | 任务 |
 |:---:|:---:|
 | ![搜索](screenshots/search.png) | ![任务](screenshots/task.png) |
@@ -76,7 +78,7 @@ so-novel-rs/
     ├── cli/               # CLI 子命令（search / download / sources / ...）
     ├── core/              # 业务层（桌面 / Web / CLI 三端共享）
     ├── desktop/           # GPUI 桌面 GUI（components / model / pages / themes/）
-    ├── web/               # Web 服务（axum + SSE）
+    ├── web/               # Web 服务（axum + 任务轮询）
     ├── parser/            # HTML 解析（book / chapter / toc / dom 子模块）
     ├── crawler/           # 搜索 / 下载 / 重试 / 健康检测
     ├── export/            # EPUB / TXT / HTML / PDF（含 pdf/ 子模块）
@@ -86,7 +88,7 @@ so-novel-rs/
     ├── logger.rs utils/   # tracing 初始化 + 工具函数
 ```
 
-**分层**: `core/` 提供与 GUI / Web 解耦的业务逻辑,`desktop/` 是 GPUI 渲染层,`web/` 是 axum + SSE API 层,三端共享同一份核心代码。Web handler 通过 `Locale` extractor + `WebError::into_response_for_locale` 按 per-request locale 翻译错误,无全局 mutation。
+**分层**: `core/` 提供与 GUI / Web 解耦的业务逻辑,`desktop/` 是 GPUI 渲染层,`web/` 是 axum + 任务轮询 API 层（搜索 / 下载均「建任务 → 轮询」，无 SSE）,三端共享同一份核心代码。Web handler 通过 `Locale` extractor + `WebError::into_response_for_locale` 按 per-request locale 翻译错误,无全局 mutation。
 
 ## 🚀 快速开始
 

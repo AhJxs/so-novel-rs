@@ -142,20 +142,20 @@ function SaveStatus({ state, t }: { state: SaveState; t: (k: string) => string }
   if (state === 'saving') {
     return (
       <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
-        <Loader2 className="size-4 animate-spin" /> {t('settings.status.saving')}
+        <Loader2 className="size-4 animate-spin" /> {t('settings.saving')}
       </span>
     )
   }
   if (state === 'saved') {
     return (
       <span className="flex items-center gap-1.5 text-sm text-emerald-600">
-        <CheckCircle2 className="size-4" /> {t('settings.status.saved')}
+        <CheckCircle2 className="size-4" /> {t('settings.saved')}
       </span>
     )
   }
   return (
     <span className="flex items-center gap-1.5 text-sm text-destructive">
-      <XCircle className="size-4" /> {t('settings.status.error')}
+      <XCircle className="size-4" /> {t('settings.saveFailed')}
     </span>
   )
 }
@@ -242,10 +242,10 @@ export default function SettingsPage() {
     (f: EditableSettings): FieldErrors => {
       const errs: FieldErrors = {}
       if (f.download_path.trim() === '') {
-        errs.download_path = t('settings.errors.pathEmpty')
+        errs.download_path = t('settings.error.pathEmpty')
       }
       if (f.proxy_enabled && f.proxy_host.trim() === '') {
-        errs.proxy_host = t('settings.errors.hostEmpty')
+        errs.proxy_host = t('settings.error.hostEmpty')
       }
       return errs
     },
@@ -274,10 +274,10 @@ export default function SettingsPage() {
           //   3004 = download_path_empty
           //   3005 = download_path_not_dir
           if (err instanceof ApiError && err.codeId === '3005') {
-            setErrors((e) => ({ ...e, download_path: t('settings.errors.pathNotDir') }))
+            setErrors((e) => ({ ...e, download_path: t('settings.error.pathNotDir') }))
             setSaveState('idle')
           } else if (err instanceof ApiError && err.codeId === '3004') {
-            setErrors((e) => ({ ...e, download_path: t('settings.errors.pathEmpty') }))
+            setErrors((e) => ({ ...e, download_path: t('settings.error.pathEmpty') }))
             setSaveState('idle')
           } else {
             setSaveState('error')
