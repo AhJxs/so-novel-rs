@@ -1,18 +1,24 @@
 // 设置页面。自动保存：字段变化即校验 + 防抖 PUT，无保存按钮。
 // 只读字段（min_interval、max_interval、cf_bypass）灰显。
-// 现代化布局：分区卡片（图标 + 标题 + 说明），字段左右结构，数字用 NumberField，
+// 布局：分区卡片（图标 + 标题 + 说明），字段左右结构，数字用原生 number 输入，
 // 顶部轻量保存状态（保存中 / 已保存 ✓ / 保存失败）替代 toast。
 
 import { useState, useEffect, useRef, useCallback, type ReactNode } from 'react'
-import { Globe, Folder, Cloud, ArrowsRotateLeft, Gear, CircleCheck, CircleXmark } from '@gravity-ui/icons'
-import { Card, Spinner } from '@heroui/react'
+import { CheckCircle2, Cloud, Folder, Globe, Loader2, RotateCcw, Settings, XCircle } from 'lucide-react'
+import { Card, CardContent } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
+import { Switch } from '@/components/ui/switch'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { useTranslation } from 'react-i18next'
 import { useSettings, useSaveSettings } from '@/hooks/use-settings'
 import { languageToLocale, localeToLanguage, type Locale, type BackendLanguage } from '@/lib/language'
 import { ApiError } from '@/lib/api'
-import AppSelect from '@/components/app-select'
-import AppSwitch from '@/components/app-switch'
-import NumberInput from '@/components/number-input'
 import type { ExportFormat } from '@/lib/types'
 
 /** 可编辑字段子集（PUT body 接受的字段） */
@@ -39,7 +45,7 @@ const TXT_ENCODINGS = ['UTF-8', 'GBK', 'GB18030', 'Big5', 'BIG5HKSCS', 'UTF-16LE
 const DEBOUNCE_MS = 800
 
 /** 规范化后端返回的导出格式。后端 serde 默认序列化枚举为 PascalCase（"Epub"），
- *  这里统一转小写以匹配 AppSelect 选项 key（"epub"）。未知值回落 'epub'。 */
+ *  这里统一转小写以匹配 Select 选项 value（"epub"）。未知值回落 'epub'。 */
 function normalizeFormat(raw: string | undefined): ExportFormat {
   const v = (raw ?? '').toLowerCase()
   return (FORMAT_OPTIONS as string[]).includes(v) ? (v as ExportFormat) : 'epub'
@@ -50,9 +56,6 @@ type SaveState = 'idle' | 'saving' | 'saved' | 'error'
 
 /** 字段级错误 key（i18n）。仅前端能判空的字段在此校验；目录存在性由后端返回。 */
 type FieldErrors = Partial<Record<'download_path' | 'proxy_host', string>>
-
-const inputBase =
-  'w-full h-10 rounded-field border bg-field px-3 text-sm text-field-foreground outline-none transition-colors placeholder:text-field-placeholder focus:ring-2 focus:ring-focus/20 disabled:cursor-not-allowed disabled:opacity-50'
 
 /** 分区卡片：图标徽标 + 标题 + 说明 + 内容。 */
 function Section({
@@ -67,17 +70,19 @@ function Section({
   children: ReactNode
 }) {
   return (
-    <Card className="p-5 sm:p-6">
-      <div className="flex items-start gap-3 mb-5">
-        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent-soft text-accent-soft-foreground">
-          {icon}
+    <Card>
+      <CardContent className="flex flex-col gap-5 p-5 sm:p-6">
+        <div className="flex items-start gap-3">
+          <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted text-foreground">
+            {icon}
+          </div>
+          <div className="min-w-0">
+            <h2 className="font-semibold leading-tight">{title}</h2>
+            {description && <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>}
+          </div>
         </div>
-        <div className="min-w-0">
-          <h2 className="font-semibold leading-tight">{title}</h2>
-          {description && <p className="text-xs text-default-500 mt-0.5">{description}</p>}
-        </div>
-      </div>
-      {children}
+        {children}
+      </CardContent>
     </Card>
   )
 }
@@ -95,16 +100,16 @@ function Field({
   children: ReactNode
 }) {
   return (
-    <label className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+    <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
       <div className="min-w-0 sm:pt-2">
         <span className="text-sm font-medium">{label}</span>
-        {description && <p className="text-xs text-default-500 mt-0.5">{description}</p>}
+        {description && <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>}
       </div>
       <div className="w-full sm:w-56 sm:shrink-0">
         {children}
-        {error && <p className="mt-1 text-xs text-danger">{error}</p>}
+        {error && <p className="mt-1 text-xs text-destructive">{error}</p>}
       </div>
-    </label>
+    </div>
   )
 }
 
@@ -124,9 +129,9 @@ function ToggleRow({
     <div className="flex items-center justify-between gap-4">
       <div className="min-w-0">
         <span className="text-sm font-medium">{label}</span>
-        {description && <p className="text-xs text-default-500 mt-0.5">{description}</p>}
+        {description && <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>}
       </div>
-      <AppSwitch isSelected={isSelected} onChange={onChange} aria-label={label} />
+      <Switch checked={isSelected} onCheckedChange={onChange} aria-label={label} />
     </div>
   )
 }
@@ -136,22 +141,54 @@ function SaveStatus({ state, t }: { state: SaveState; t: (k: string) => string }
   if (state === 'idle') return null
   if (state === 'saving') {
     return (
-      <span className="flex items-center gap-1.5 text-sm text-default-500">
-        <Spinner size="sm" /> {t('settings.status.saving')}
+      <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
+        <Loader2 className="size-4 animate-spin" /> {t('settings.status.saving')}
       </span>
     )
   }
   if (state === 'saved') {
     return (
-      <span className="flex items-center gap-1.5 text-sm text-success">
-        <CircleCheck width={16} height={16} /> {t('settings.status.saved')}
+      <span className="flex items-center gap-1.5 text-sm text-emerald-600">
+        <CheckCircle2 className="size-4" /> {t('settings.status.saved')}
       </span>
     )
   }
   return (
-    <span className="flex items-center gap-1.5 text-sm text-danger">
-      <CircleXmark width={16} height={16} /> {t('settings.status.error')}
+    <span className="flex items-center gap-1.5 text-sm text-destructive">
+      <XCircle className="size-4" /> {t('settings.status.error')}
     </span>
+  )
+}
+
+/** 数字输入：原生 number（min/max 由浏览器步进/箭头控制）。 */
+function NumberInput({
+  value,
+  onChange,
+  minValue,
+  maxValue,
+  isDisabled,
+  ariaLabel,
+}: {
+  value: number
+  onChange: (v: number) => void
+  minValue: number
+  maxValue: number
+  isDisabled?: boolean
+  ariaLabel: string
+}) {
+  return (
+    <Input
+      type="number"
+      value={Number.isFinite(value) ? value : ''}
+      min={minValue}
+      max={maxValue}
+      disabled={isDisabled}
+      aria-label={ariaLabel}
+      onChange={(e) => {
+        const v = e.target.value === '' ? minValue : Number(e.target.value)
+        if (Number.isFinite(v)) onChange(v)
+      }}
+    />
   )
 }
 
@@ -233,9 +270,7 @@ export default function SettingsPage() {
           savedTimer.current = setTimeout(() => setSaveState('idle'), 2000)
         },
         onError: (err) => {
-          // 后端目录校验失败：按 `codeId`（稳定数字码）dispatch —— 不要按
-          // `err.message` substring 匹配（message 是 i18n 翻译后的 localized
-          // 文本，会因 locale 变化导致匹配失败）。
+          // 后端目录校验失败：按 `codeId`（稳定数字码）dispatch。
           //   3004 = download_path_empty
           //   3005 = download_path_not_dir
           if (err instanceof ApiError && err.codeId === '3005') {
@@ -288,8 +323,8 @@ export default function SettingsPage() {
 
   if (isLoading || !form) {
     return (
-      <div className="space-y-4">
-        <p className="text-default-500">{t('settings.loading')}</p>
+      <div className="flex flex-col gap-4">
+        <p className="text-muted-foreground">{t('settings.loading')}</p>
       </div>
     )
   }
@@ -301,26 +336,31 @@ export default function SettingsPage() {
         <SaveStatus state={saveState} t={t} />
       </div>
 
-      <div className="space-y-5">
+      <div className="flex flex-col gap-5">
         {/* 语言 */}
-        <Section icon={<Globe width={18} height={18} />} title={t('settings.language.title')}>
+        <Section icon={<Globe className="size-4" />} title={t('settings.language.title')}>
           <Field label={t('settings.language.label')}>
-            <AppSelect
-              className="w-full"
-              selectedKey={i18n.language}
-              onChange={(key) => handleLanguageChange(key as Locale)}
-              options={LOCALES.map(locale => ({ key: locale, label: t(`settings.language.${locale}`) }))}
-            />
+            <Select value={i18n.language} onValueChange={(v) => handleLanguageChange(v as Locale)}>
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder={t('settings.language.label')} />
+              </SelectTrigger>
+              <SelectContent>
+                {LOCALES.map(locale => (
+                  <SelectItem key={locale} value={locale}>{t(`settings.language.${locale}`)}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </Field>
         </Section>
 
         {/* 下载 */}
-        <Section icon={<Folder width={18} height={18} />} title={t('settings.download.title')}>
-          <div className="divide-y divide-separator">
+        <Section icon={<Folder className="size-4" />} title={t('settings.download.title')}>
+          <div className="flex flex-col divide-y divide-border">
             <div className="pb-4">
               <Field label={t('settings.download.path')} error={errors.download_path}>
-                <input
-                  className={`${inputBase} ${errors.download_path ? 'border-danger' : 'border-field-border focus:border-field-border-focus'}`}
+                <Input
+                  className={errors.download_path ? 'border-destructive focus-visible:ring-destructive/30' : ''}
+                  aria-invalid={!!errors.download_path}
                   value={form.download_path}
                   onChange={(e) => update('download_path', e.target.value)}
                   placeholder="./downloads"
@@ -329,22 +369,30 @@ export default function SettingsPage() {
             </div>
             <div className="py-4">
               <Field label={t('settings.download.format')}>
-                <AppSelect
-                  className="w-full"
-                  selectedKey={form.ext_name}
-                  onChange={(key) => update('ext_name', key as ExportFormat, true)}
-                  options={FORMAT_OPTIONS.map(f => ({ key: f, label: f.toUpperCase() }))}
-                />
+                <Select value={form.ext_name} onValueChange={(v) => update('ext_name', v as ExportFormat, true)}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {FORMAT_OPTIONS.map(f => (
+                      <SelectItem key={f} value={f}>{f.toUpperCase()}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </Field>
             </div>
             <div className="py-4">
               <Field label={t('settings.download.encoding')}>
-                <AppSelect
-                  className="w-full"
-                  selectedKey={form.txt_encoding}
-                  onChange={(key) => update('txt_encoding', key, true)}
-                  options={TXT_ENCODINGS.map(e => ({ key: e, label: e }))}
-                />
+                <Select value={form.txt_encoding} onValueChange={(v) => update('txt_encoding', v, true)}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {TXT_ENCODINGS.map(e => (
+                      <SelectItem key={e} value={e}>{e}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </Field>
             </div>
             <div className="pt-4">
@@ -358,8 +406,8 @@ export default function SettingsPage() {
         </Section>
 
         {/* 代理 */}
-        <Section icon={<Cloud width={18} height={18} />} title={t('settings.proxy.title')}>
-          <div className="divide-y divide-separator">
+        <Section icon={<Cloud className="size-4" />} title={t('settings.proxy.title')}>
+          <div className="flex flex-col divide-y divide-border">
             <div className="pb-4">
               <ToggleRow
                 label={t('settings.proxy.enabled')}
@@ -369,8 +417,9 @@ export default function SettingsPage() {
             </div>
             <div className="py-4">
               <Field label={t('settings.proxy.host')} error={errors.proxy_host}>
-                <input
-                  className={`${inputBase} ${errors.proxy_host ? 'border-danger' : 'border-field-border focus:border-field-border-focus'}`}
+                <Input
+                  className={errors.proxy_host ? 'border-destructive focus-visible:ring-destructive/30' : ''}
+                  aria-invalid={!!errors.proxy_host}
                   value={form.proxy_host}
                   onChange={(e) => update('proxy_host', e.target.value)}
                   disabled={!form.proxy_enabled}
@@ -386,7 +435,7 @@ export default function SettingsPage() {
                   minValue={0}
                   maxValue={65535}
                   isDisabled={!form.proxy_enabled}
-                  aria-label={t('settings.proxy.port')}
+                  ariaLabel={t('settings.proxy.port')}
                 />
               </Field>
             </div>
@@ -394,8 +443,8 @@ export default function SettingsPage() {
         </Section>
 
         {/* 重试 */}
-        <Section icon={<ArrowsRotateLeft width={18} height={18} />} title={t('settings.retry.title')}>
-          <div className="divide-y divide-separator">
+        <Section icon={<RotateCcw className="size-4" />} title={t('settings.retry.title')}>
+          <div className="flex flex-col divide-y divide-border">
             <div className="pb-4">
               <ToggleRow
                 label={t('settings.retry.enabled')}
@@ -410,7 +459,7 @@ export default function SettingsPage() {
                   onChange={(v) => update('concurrency', v, true)}
                   minValue={1}
                   maxValue={64}
-                  aria-label={t('settings.retry.concurrency')}
+                  ariaLabel={t('settings.retry.concurrency')}
                 />
               </Field>
             </div>
@@ -422,7 +471,7 @@ export default function SettingsPage() {
                   minValue={0}
                   maxValue={20}
                   isDisabled={!form.enable_retry}
-                  aria-label={t('settings.retry.maxRetries')}
+                  ariaLabel={t('settings.retry.maxRetries')}
                 />
               </Field>
             </div>
@@ -430,22 +479,19 @@ export default function SettingsPage() {
         </Section>
 
         {/* 只读 */}
-        <Section
-          icon={<Gear width={18} height={18} />}
-          title={t('settings.readonly.title')}
-        >
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm">
-            <div className="rounded-lg bg-default-100/50 px-4 py-3">
-              <p className="text-xs text-default-500">{t('settings.readonly.minInterval')}</p>
+        <Section icon={<Settings className="size-4" />} title={t('settings.readonly.title')}>
+          <div className="grid grid-cols-1 gap-4 text-sm sm:grid-cols-3">
+            <div className="rounded-lg bg-muted px-4 py-3">
+              <p className="text-xs text-muted-foreground">{t('settings.readonly.minInterval')}</p>
               <p className="mt-1 font-medium tabular-nums">{settings?.min_interval ?? '-'}</p>
             </div>
-            <div className="rounded-lg bg-default-100/50 px-4 py-3">
-              <p className="text-xs text-default-500">{t('settings.readonly.maxInterval')}</p>
+            <div className="rounded-lg bg-muted px-4 py-3">
+              <p className="text-xs text-muted-foreground">{t('settings.readonly.maxInterval')}</p>
               <p className="mt-1 font-medium tabular-nums">{settings?.max_interval ?? '-'}</p>
             </div>
-            <div className="rounded-lg bg-default-100/50 px-4 py-3">
-              <p className="text-xs text-default-500">{t('settings.readonly.cfBypass')}</p>
-              <p className="mt-1 font-medium truncate">{settings?.cf_bypass || '-'}</p>
+            <div className="rounded-lg bg-muted px-4 py-3">
+              <p className="text-xs text-muted-foreground">{t('settings.readonly.cfBypass')}</p>
+              <p className="mt-1 truncate font-medium">{settings?.cf_bypass || '-'}</p>
             </div>
           </div>
         </Section>
