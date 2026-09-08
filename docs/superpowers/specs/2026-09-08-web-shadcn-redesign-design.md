@@ -271,3 +271,40 @@ HeroUI → shadcn 映射：`Chip→Badge`、`ProgressBar→Progress`、`SearchFi
 - **搜索体验回归**：增量轮询的 800ms 延迟相对 SSE 有感知差异，但结果累计显示保住了渐进体验；若用户觉得卡顿可调小轮询间隔（实现期可参数化）。
 - **Phase B 机械性替换面大**：HeroUI class → shadcn token 的批量替换易漏，靠 `npm run build` + 视觉走查兜底。
 - **shadcn init 覆盖 index.css**：初始化会重写 index.css，现有自定义（accent 等）在 Nova 下不再需要，属预期。
+
+---
+
+## 追加：Monorepo 重构方向（2026-09-08）
+
+> 上述设计（独立 web-ui + Radix shadcn）已实现并通过验收。用户随后提供
+> shadcn monorepo 模板（`C:\Users\ThinkBook\Desktop\vite-monorepo`），决定
+> **以模板为基准重写 web-ui**，本追加段覆盖该新方向。
+
+### 已确认决策（追加）
+
+| 决策点 | 结论 |
+|---|---|
+| monorepo 位置 | `web-ui/` 就地转 Turborepo + Bun monorepo（`apps/web` + `packages/ui`） |
+| 包管理器 | **Bun**（1.4.0 已装；绕过 npm allow-scripts 限制） |
+| 分支策略 | 继续 `web-shadcn-redesign` 分支（数据层沿用） |
+| 迁移范围 | 全量：6 页 + 侧边栏 + 数据层迁入；后端只改 embed 路径 |
+| 组件层 | 模板 base-nova 的 **Base UI** 组件（`@workspace/ui/components/*`，`render` prop） |
+| 主题 | 模板 `globals.css`（Geist 字体 + `shadcn/tailwind.css` + base-nova neutral） |
+| 主题切换 | 模板自研 ThemeProvider（localStorage `theme`，class light/dark，`d` 键），弃 next-themes |
+
+### 目标结构
+
+见 plan `2026-09-08-web-monorepo-rewrite.md` 的 File Structure 节。
+
+### 关键改动
+
+1. **packages/ui**（`@workspace/ui`）：模板 globals.css 主题 + `bunx shadcn add` 拉取 base-nova 组件。
+2. **apps/web**：数据层（api/types/utils/language/hooks/contexts/i18n）原样迁入；6 页 + sidebar + layout 按 Base UI 组件 API 重写；theme-toggle 适配模板 useTheme。
+3. **Rust 集成**：`#[folder = "web-ui/dist/"]` → `web-ui/apps/web/dist/`；`build.rs` 触发命令 `npm run build --prefix web-ui` → `bun run build`（web-ui 根，turbo）；Dockerfile 同理。
+4. **验证**：`bun install && bun run build`（turbo）→ apps/web/dist；cargo build/test 回归；浏览器端到端走查。
+
+### 边界（追加）
+
+- 后端 API 契约不再动（轮询模型已落地）。
+- 数据层 hooks/contexts 不改逻辑。
+- 桌面 GPUI / CLI 不受影响。
