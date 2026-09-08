@@ -444,6 +444,62 @@ async fn search_status_404_on_unknown_task() {
 }
 
 #[tokio::test]
+async fn search_delete_is_idempotent_204() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let state = build_test_state_with(tmp.path());
+    let app = build_test_router(state).await;
+
+    // 先建一个任务
+    let body = serde_json::json!({ "keyword": "test" });
+    let resp = dispatch(
+        app.clone(),
+        Request::builder()
+            .method("POST")
+            .uri("/api/search")
+            .header("content-type", "application/json")
+            .body(Body::from(serde_json::to_vec(&body).unwrap()))
+            .unwrap(),
+    )
+    .await;
+    let task_id = read_json(resp).await["task_id"].as_u64().expect("task_id");
+
+    // 删除 → 204
+    let resp = dispatch(
+        app.clone(),
+        Request::builder()
+            .method("DELETE")
+            .uri(format!("/api/search/{task_id}"))
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+
+    // 再删同一 id → 仍 204（幂等）
+    let resp = dispatch(
+        app.clone(),
+        Request::builder()
+            .method("DELETE")
+            .uri(format!("/api/search/{task_id}"))
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+
+    // 删后 GET → 404
+    let resp = dispatch(
+        app,
+        Request::builder()
+            .uri(format!("/api/search/{task_id}"))
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
 async fn library_list_handles_missing_dir_gracefully() {
     // 默认 download_path 指向用户家目录下的 .sonovel —— 测试机不一定存在。
     // 关键诉求：路由能命中、不 panic；返回 200 + 数组就是合格。

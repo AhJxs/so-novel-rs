@@ -7,7 +7,7 @@
 use std::sync::Arc;
 
 use axum::Json;
-use axum::extract::State;
+use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
@@ -157,4 +157,42 @@ pub async fn search_create(
     });
 
     Ok((StatusCode::CREATED, Json(SearchCreateResponse { task_id })))
+}
+
+/// `GET /api/search/{task_id}` 响应体（每轮轮询返回当前累计）。
+#[derive(Serialize)]
+pub struct SearchStatusResponse {
+    pub status: SearchStatus,
+    pub total_sources: usize,
+    pub done_sources: usize,
+    pub results: Vec<SearchResult>,
+    pub source_errors: Vec<SourceSearchError>,
+}
+
+/// `GET /api/search/{task_id}` — 轮询当前累计状态。
+pub async fn search_status(
+    State(state): State<SharedState>,
+    Path(task_id): Path<u64>,
+) -> Result<Json<SearchStatusResponse>, WebError> {
+    let tasks =
+        read_state_or_json("search:status", || mutex_or("search:status", &state.search_tasks))?;
+    let Some(task) = tasks.get(&task_id) else {
+        return Err(WebError::NotFound("search_task"));
+    };
+    Ok(Json(SearchStatusResponse {
+        status: task.status,
+        total_sources: task.sources_total,
+        done_sources: task.sources_done,
+        results: task.results.clone(),
+        source_errors: task.source_errors.clone(),
+    }))
+}
+
+/// `DELETE /api/search/{task_id}` — 丢弃搜索任务（幂等，不存在也 204）。
+pub async fn search_delete(
+    State(state): State<SharedState>,
+    Path(task_id): Path<u64>,
+) -> Result<StatusCode, WebError> {
+    mutex_or("search:delete", &state.search_tasks)?.remove(&task_id);
+    Ok(StatusCode::NO_CONTENT)
 }

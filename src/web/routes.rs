@@ -50,6 +50,8 @@ pub fn build_router(state: SharedState, session_store: SessionStore<SessionNullP
     let api = Router::new()
         // 搜索（任务轮询：POST 建任务 → GET 轮询 → DELETE 清理）
         .route("/search", post(handlers::search::search_create))
+        .route("/search/{task_id}", get(handlers::search::search_status))
+        .route("/search/{task_id}", delete(handlers::search::search_delete))
         .route("/book/detail", get(handlers::book::book_detail))
         .route("/book/toc", get(handlers::book::book_toc))
         // 下载 + 任务
