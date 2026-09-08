@@ -1,6 +1,7 @@
 //! Web 服务模块：axum HTTP 服务器 + 单页前端。
 //!
-//! 提供 REST API 和 SSE 推送，让用户通过浏览器搜索、下载小说。
+//! 提供 REST API + 任务轮询（搜索/下载均为「建任务 → 轮询状态」），
+//! 让用户通过浏览器搜索、下载小说。
 //! 与 CLI 模式同构，直接调用底层 crawler / parser / export 函数。
 
 mod error;
@@ -89,8 +90,8 @@ pub struct WebInitParams {
 /// - 持久化字段全在 record-like fields 上（id / origin / `started_at_unix` / ...）
 /// - 运行期字段 `rx` / `cancel` / `cancelling` 也只是这个 struct 的一部分
 /// - 每个下载一个 per-task drain tokio task 排空 mpsc rx（详见
-///   `crate::web::handlers::download::spawn_task_drain`），同时负责
-///   "drain 到的事件 → SSE `broadcast_tx"，把"状态更新"和"事件转发"合并到一处`。
+///   `crate::web::handlers::download::spawn_task_drain`），负责把事件
+///   应用到 `state.tasks`（单源真相），前端轮询 `GET /api/tasks` 读进度。
 ///
 /// `tasks_file` 只是磁盘路径，由调用方 inline 走 `crate::db::save_with_trim` 写盘。
 pub struct WebState {
