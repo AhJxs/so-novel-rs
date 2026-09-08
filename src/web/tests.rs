@@ -360,6 +360,51 @@ async fn task_cancel_404_on_unknown_id() {
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 }
 
+// ── /api/download (JSON task_id) ───────────────────────────────────────
+
+#[tokio::test]
+async fn download_returns_task_id_json_and_pushes_task() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let dir = tmp.path();
+    let rules = vec![make_rule(7, "src", "https://example.com", false)];
+    let state = build_test_state_with_rules(dir, rules);
+    let app = build_test_router(Arc::clone(&state)).await;
+
+    let body = serde_json::json!({ "url": "https://example.com/book/1", "source_id": 7 });
+    let resp = dispatch(
+        app,
+        Request::builder()
+            .method("POST")
+            .uri("/api/download")
+            .header("content-type", "application/json")
+            .body(Body::from(serde_json::to_vec(&body).unwrap()))
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(resp.status(), StatusCode::OK);
+    let json = read_json(resp).await;
+    let task_id = json["task_id"].as_u64().expect("task_id present");
+
+    // 任务已入 state.tasks：GET /api/tasks 应能看到该 id
+    let app2 = build_test_router(state).await;
+    let resp = dispatch(
+        app2,
+        Request::builder()
+            .uri("/api/tasks")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    let arr = read_json(resp).await;
+    let ids: Vec<u64> = arr
+        .as_array()
+        .expect("array")
+        .iter()
+        .filter_map(|t| t["id"].as_u64())
+        .collect();
+    assert!(ids.contains(&task_id), "task {task_id} should be listed, got {ids:?}");
+}
+
 // ── /api/library ─────────────────────────────────────────────────────────
 
 // ── /api/search (任务轮询) ────────────────────────────────────────────
