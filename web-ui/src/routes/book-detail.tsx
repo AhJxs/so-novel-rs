@@ -4,12 +4,19 @@
 
 import { useState } from 'react'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
-import { ChevronLeft } from '@gravity-ui/icons'
-import { Button, Chip, Skeleton, ButtonGroup } from '@heroui/react'
+import { ChevronLeft } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import { Skeleton } from '@/components/ui/skeleton'
+import { ScrollArea } from '@/components/ui/scroll-area'
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
+import { Card, CardContent } from '@/components/ui/card'
 import { useTranslation } from 'react-i18next'
 import { useBookDetail, useToc } from '@/hooks/use-book'
 import { useDownload } from '@/hooks/use-download'
 import type { ExportFormat } from '@/lib/types'
+
+const FORMATS: ExportFormat[] = ['epub', 'txt', 'html', 'pdf', 'markdown']
 
 export default function BookDetailPage() {
   const { bookUrl } = useParams<{ bookUrl: string }>()
@@ -26,128 +33,134 @@ export default function BookDetailPage() {
 
   const [format, setFormat] = useState<ExportFormat>('epub')
 
-  // 启动下载：等后端把任务 push 到 state.tasks（即 `startDownload.started` resolve）
-  // 才跳任务页。`useTasks` 的 `refetchInterval` 只有在缓存里看到 Downloading 任务
-  // 才会轮询；立即跳转可能让 tasks 页拿着无 Downloading 的旧缓存 + 没到位的
-  // refetch，就看不到新任务。await `startDl(...)` 让 useDownload 在 onStarted
-  // 时 invalidate ['tasks']，跳转瞬间 refetch 已经在进行 + 后端一定已入库。
+  // 启动下载：等后端把任务 push 到 state.tasks（POST 返回即入库）才跳任务页。
   const handleDownload = async () => {
     if (!bookUrl || sourceId == null) return
     await startDl({ url: decoded, sourceId, format })
     navigate('/tasks')
   }
 
+  const BackButton = (
+    <Button variant="ghost" size="sm" onClick={() => navigate(-1)}>
+      <ChevronLeft data-icon="inline-start" /> {t('book.backToSearch')}
+    </Button>
+  )
+
   if (sourceId == null) {
     return (
-      <div className="space-y-4">
-        <Button variant="ghost" size="sm" onPress={() => navigate(-1)}>
-          <ChevronLeft className="w-4 h-4 mr-1" /> {t('book.backToSearch')}
-        </Button>
-        <p className="text-center py-16 text-default-500">{t('book.missingSource')}</p>
+      <div className="flex flex-col gap-4">
+        {BackButton}
+        <p className="py-16 text-center text-muted-foreground">{t('book.missingSource')}</p>
       </div>
     )
   }
 
   if (isLoading) {
     return (
-      <div className="space-y-4">
-        <Button variant="ghost" size="sm" onPress={() => navigate(-1)}>
-          <ChevronLeft className="w-4 h-4 mr-1" /> {t('book.backToSearch')}
-        </Button>
-        <Skeleton className="h-64 w-full rounded-2xl" />
+      <div className="flex flex-col gap-4">
+        {BackButton}
+        <Skeleton className="h-64 w-full" />
       </div>
     )
   }
 
   if (!book) {
     return (
-      <div className="space-y-4">
-        <Button variant="ghost" size="sm" onPress={() => navigate(-1)}>
-          <ChevronLeft className="w-4 h-4 mr-1" /> {t('book.backToSearch')}
-        </Button>
-        <p className="text-center py-16 text-default-500">{t('book.loadFailed')}</p>
+      <div className="flex flex-col gap-4">
+        {BackButton}
+        <p className="py-16 text-center text-muted-foreground">{t('book.loadFailed')}</p>
       </div>
     )
   }
 
   return (
-    <div className="space-y-4">
-      <Button variant="ghost" size="sm" onPress={() => navigate(-1)}>
-        <ChevronLeft className="w-4 h-4 mr-1" /> {t('book.backToSearch')}
-      </Button>
+    <div className="flex flex-col gap-4">
+      {BackButton}
 
-      {/* 书籍信息卡片 */}
-      <div className="bg-surface border rounded-2xl overflow-hidden">
-        {/* 基本信息 */}
-        <div className="p-6 flex gap-6">
-          <div className="w-24 h-32 rounded-xl flex-shrink-0 overflow-hidden bg-default relative">
-            {book.cover_url
-              ? <img src={book.cover_url} alt={book.book_name} referrerPolicy="no-referrer"
-                  className="absolute inset-0 w-full h-full object-cover" />
-              : <div className="absolute inset-0 bg-gradient-to-br from-violet-400 to-purple-600
-                  flex items-center justify-center text-white text-3xl font-bold">{book.book_name[0]}</div>
-            }
-          </div>
-          <div className="flex-1 min-w-0">
-            <h2 className="text-xl font-bold">{book.book_name}</h2>
-            <p className="text-default-500 text-sm mt-1">{book.author}</p>
-            {book.intro && <p className="text-sm mt-3 line-clamp-3 text-default-500">{book.intro}</p>}
-            <div className="flex gap-2 mt-3 flex-wrap">
-              {book.status && <Chip size="sm" variant="soft" className="text-success">{book.status}</Chip>}
-              {book.latest_chapter && <Chip size="sm" variant="soft">{t('book.latestChapter')}: {book.latest_chapter}</Chip>}
-            </div>
-          </div>
-        </div>
-
-        {/* 目录 */}
-        <div className="border-t p-6">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="font-semibold">
-              {t('book.toc')}
-              {chapters.length > 0 && <span className="text-sm text-default-500 ml-1">({t('book.chapters', { count: chapters.length })})</span>}
-            </h3>
-            <Button variant="ghost" size="sm" onPress={() => loadToc()} isDisabled={loadingToc}>
-              {loadingToc ? t('book.loading') : chapters.length ? t('book.refreshToc') : t('book.loadToc')}
-            </Button>
-          </div>
-          {chapters.length > 0 && (
-            <div className="h-48 overflow-y-auto">
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-1">
-                {chapters.slice(0, 200).map(ch => (
-                  <div key={ch.order}
-                    className="text-xs px-2 py-1 rounded truncate text-default-500 hover:bg-default-100">
-                    {ch.order}. {ch.title}
+      {/* 双栏：左封面 / 右信息+TOC */}
+      <div className="grid gap-6 md:grid-cols-[280px_1fr]">
+        {/* 封面 */}
+        <Card className="self-start">
+          <CardContent className="p-4">
+            <div className="aspect-[3/4] w-full overflow-hidden rounded-lg bg-muted relative">
+              {book.cover_url
+                ? <img src={book.cover_url} alt={book.book_name} referrerPolicy="no-referrer"
+                    className="absolute inset-0 h-full w-full object-cover" />
+                : <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-violet-400 to-purple-600 text-3xl font-bold text-white">
+                    {book.book_name[0]}
                   </div>
-                ))}
-              </div>
+              }
             </div>
-          )}
-          {!loadingToc && chapters.length === 0 && (
-            <p className="text-xs text-default-500">{t('book.notLoaded')}</p>
-          )}
-        </div>
+          </CardContent>
+        </Card>
 
-        {/* 下载：选格式 + 启动（跳转到任务页看进度） */}
-        <div className="border-t p-6 bg-default-50 dark:bg-default-100/20">
-          <div className="flex flex-wrap items-center gap-3">
-            <span className="text-sm font-medium">{t('book.format')}</span>
-            <ButtonGroup>
-              {(['epub','txt','html','pdf','markdown'] as ExportFormat[]).map(f => (
-                <Button
-                  key={f}
-                  size="sm"
-                  variant={format === f ? 'primary' : 'ghost'}
-                  onPress={() => setFormat(f)}
-                  className="uppercase text-xs"
-                >
-                  {f}
+        {/* 信息 + 目录 + 下载 */}
+        <div className="flex min-w-0 flex-col gap-4">
+          {/* 基本信息 */}
+          <Card>
+            <CardContent className="flex flex-col gap-3 p-5">
+              <h2 className="text-xl font-bold">{book.book_name}</h2>
+              <p className="text-sm text-muted-foreground">{book.author}</p>
+              {book.intro && <p className="line-clamp-3 text-sm text-muted-foreground">{book.intro}</p>}
+              <div className="flex flex-wrap gap-2">
+                {book.status && <Badge variant="secondary">{book.status}</Badge>}
+                {book.latest_chapter && (
+                  <Badge variant="secondary">{t('book.latestChapter')}: {book.latest_chapter}</Badge>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* 目录 */}
+          <Card>
+            <CardContent className="flex flex-col gap-3 p-5">
+              <div className="flex items-center justify-between">
+                <h3 className="font-semibold">
+                  {t('book.toc')}
+                  {chapters.length > 0 && (
+                    <span className="ml-1 text-sm text-muted-foreground">
+                      ({t('book.chapters', { count: chapters.length })})
+                    </span>
+                  )}
+                </h3>
+                <Button variant="ghost" size="sm" onClick={() => loadToc()} disabled={loadingToc}>
+                  {loadingToc ? t('book.loading') : chapters.length ? t('book.refreshToc') : t('book.loadToc')}
                 </Button>
-              ))}
-            </ButtonGroup>
-            <Button className="ml-auto" variant="primary" onPress={handleDownload}>
-              {t('book.startDownload')}
-            </Button>
-          </div>
+              </div>
+              {chapters.length > 0 && (
+                <ScrollArea className="h-56">
+                  <div className="grid grid-cols-2 gap-1 pr-4 sm:grid-cols-3">
+                    {chapters.slice(0, 200).map(ch => (
+                      <div key={ch.order}
+                        className="truncate rounded px-2 py-1 text-xs text-muted-foreground hover:bg-muted">
+                        {ch.order}. {ch.title}
+                      </div>
+                    ))}
+                  </div>
+                </ScrollArea>
+              )}
+              {!loadingToc && chapters.length === 0 && (
+                <p className="text-xs text-muted-foreground">{t('book.notLoaded')}</p>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* 下载：选格式 + 启动 */}
+          <Card>
+            <CardContent className="flex flex-wrap items-center gap-3 bg-muted/40 p-5">
+              <span className="text-sm font-medium">{t('book.format')}</span>
+              <ToggleGroup type="single" value={format} onValueChange={(v) => { if (v) setFormat(v as ExportFormat) }}>
+                {FORMATS.map(f => (
+                  <ToggleGroupItem key={f} value={f} className="text-xs uppercase" aria-label={f}>
+                    {f}
+                  </ToggleGroupItem>
+                ))}
+              </ToggleGroup>
+              <Button className="ml-auto" onClick={handleDownload}>
+                {t('book.startDownload')}
+              </Button>
+            </CardContent>
+          </Card>
         </div>
       </div>
     </div>
