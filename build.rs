@@ -2,43 +2,32 @@
 
 use std::process::Command;
 
+/// 前端产物目录（monorepo 后：`web-ui/apps/web/dist`）。
+const FRONTEND_DIST: &str = "web-ui/apps/web/dist";
+
 fn main() {
     // ── Frontend build: only when web feature is enabled ──────────────────
-    println!("cargo:rerun-if-changed=web-ui/src");
-    println!("cargo:rerun-if-changed=web-ui/package.json");
-    println!("cargo:rerun-if-changed=web-ui/vite.config.ts");
-    println!("cargo:rerun-if-changed=web-ui/index.html");
+    println!("cargo:rerun-if-changed=web-ui/apps/web/src");
+    println!("cargo:rerun-if-changed=web-ui/apps/web/package.json");
+    println!("cargo:rerun-if-changed=web-ui/apps/web/vite.config.ts");
+    println!("cargo:rerun-if-changed=web-ui/apps/web/index.html");
+    println!("cargo:rerun-if-changed=web-ui/packages/ui/src");
 
     if std::env::var("CARGO_FEATURE_WEB").is_ok() {
-        // SO_NOVEL_SKIP_WEB_BUILD=1: explicitly skip `npm run build` here.
+        // SO_NOVEL_SKIP_WEB_BUILD=1: explicitly skip `bun run build` here.
         // Only intended for Rust static-analysis runs where the caller has
-        // already produced web-ui/dist/. Release / Docker builds must leave
-        // this unset so the latest frontend is compiled in.
+        // already produced the frontend dist. Release / Docker builds must
+        // leave this unset so the latest frontend is compiled in.
         if std::env::var("SO_NOVEL_SKIP_WEB_BUILD").as_deref() == Ok("1") {
-            let index = std::path::Path::new("web-ui/dist/index.html");
+            let index = std::path::Path::new(FRONTEND_DIST).join("index.html");
             assert!(
                 index.exists(),
-                "SO_NOVEL_SKIP_WEB_BUILD=1 set but web-ui/dist/index.html is missing; \
-                 pre-build with `npm run build --prefix web-ui` or unset the flag."
+                "SO_NOVEL_SKIP_WEB_BUILD=1 set but {FRONTEND_DIST}/index.html is missing; \
+                 pre-build with `cd web-ui && bun run build` or unset the flag."
             );
-            println!("cargo:warning=SO_NOVEL_SKIP_WEB_BUILD=1, reusing web-ui/dist/");
+            println!("cargo:warning=SO_NOVEL_SKIP_WEB_BUILD=1, reusing {FRONTEND_DIST}/");
         } else {
-            #[cfg(target_os = "windows")]
-            let mut cmd = {
-                // On Windows, `npm` is `npm.cmd` — `cmd /c` resolves it reliably
-                // through %PATHEXT%, even when cargo inherits a bash-modified PATH.
-                let mut c = Command::new("cmd");
-                c.args(["/c", "npm", "run", "build", "--prefix", "web-ui"]);
-                c
-            };
-            #[cfg(not(target_os = "windows"))]
-            let mut cmd = {
-                let mut c = Command::new("npm");
-                c.args(["run", "build", "--prefix", "web-ui"]);
-                c
-            };
-
-            run_npm_build(&mut cmd);
+            run_bun_build();
         }
     }
 
@@ -64,25 +53,27 @@ fn main() {
     }
 }
 
-/// Run `cmd` (npm / cmd) and handle failures gracefully.
-fn run_npm_build(cmd: &mut Command) {
+/// 在 web-ui 根跑 `bun run build`（turbo 全链构建 → apps/web/dist）。
+fn run_bun_build() {
+    let mut cmd = Command::new("bun");
+    cmd.args(["run", "build"]).current_dir("web-ui");
     match cmd.status() {
         Ok(status) => {
             assert!(
                 status.success(),
-                "Vite build failed — check web-ui/ for errors"
+                "bun run build failed — check web-ui/ for errors"
             );
         }
         Err(e) => {
-            // npm not found (e.g. CI without Node.js, or non-standard PATH).
-            // Only fatal if web-ui/dist/ doesn't already exist.
-            let index = std::path::Path::new("web-ui/dist/index.html");
+            // bun not found (e.g. CI without bun, or non-standard PATH).
+            // Only fatal if the frontend dist doesn't already exist.
+            let index = std::path::Path::new(FRONTEND_DIST).join("index.html");
             assert!(
                 index.exists(),
-                "npm not found ({e}) and web-ui/dist/index.html is missing. \
-                 Install Node.js or pre-build the frontend with `npm run build --prefix web-ui`."
+                "bun not found ({e}) and {FRONTEND_DIST}/index.html is missing. \
+                 Install bun or pre-build the frontend with `cd web-ui && bun run build`."
             );
-            println!("cargo:warning=npm not found ({e}), using pre-built web-ui/dist/");
+            println!("cargo:warning=bun not found ({e}), using pre-built {FRONTEND_DIST}/");
         }
     }
 }

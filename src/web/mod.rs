@@ -38,11 +38,11 @@ use axum::{
 #[cfg(feature = "web")]
 use rust_embed::RustEmbed;
 
-/// 编译期嵌入 `web-ui/dist/` 下所有静态文件。
+/// 编译期嵌入 `web-ui/apps/web/dist/` 下所有静态文件（monorepo 后产物路径）。
 /// `include-exclude` feature 会按 .gitignore 跳过 `node_modules/src`/ 等。
 #[cfg(feature = "web")]
 #[derive(RustEmbed)]
-#[folder = "web-ui/dist/"]
+#[folder = "web-ui/apps/web/dist/"]
 pub struct Assets;
 
 #[cfg(feature = "web")]
