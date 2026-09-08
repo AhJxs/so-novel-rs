@@ -12,6 +12,7 @@ mod routes;
 #[cfg(test)]
 mod tests;
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, RwLock};
 
@@ -101,6 +102,10 @@ pub struct WebState {
     /// 跟 `crate::desktop::model::AppModel::tasks` 同型 —— web 和 GUI 用的是同一个类型。
     pub tasks: Mutex<Vec<DownloadTask>>,
     pub next_task_id: Mutex<u64>,
+    /// 内存态搜索任务注册表（搜索是瞬态，不落盘）。
+    pub search_tasks: Mutex<HashMap<u64, SearchTask>>,
+    /// 搜索任务 id 计数器（与 `next_task_id` 独立）。
+    pub next_search_id: Mutex<u64>,
     /// 访问码（仅存内存，启动时为空，用户通过 Web UI 设置）。
     pub access_code: Mutex<String>,
     /// 书源配置（禁用列表等），toggle 时需要同步更新并持久化。
@@ -123,6 +128,34 @@ pub enum TaskStatus {
     Cancelled,
 }
 
+/// 搜索任务状态（API 返回用）。搜索是内存态，进程重启即失。
+#[derive(Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum SearchStatus {
+    Running,
+    Done,
+}
+
+/// 单源搜索失败信息（`GET /api/search/{id}` 的 `source_errors` 项）。
+#[derive(Clone, Serialize)]
+pub struct SourceSearchError {
+    pub source_id: i32,
+    pub source_name: String,
+    /// 按请求 locale 翻译的错误文案（不泄漏内部 cause）。
+    pub error: String,
+}
+
+/// 内存态搜索任务（**不持久化**）。
+pub struct SearchTask {
+    pub id: u64,
+    pub keyword: String,
+    pub created_at_unix: u64,
+    pub status: SearchStatus,
+    pub sources_total: usize,
+    pub sources_done: usize,
+    pub results: Vec<crate::models::SearchResult>,
+    pub source_errors: Vec<SourceSearchError>,
+}
+
 /// 所有 handler 共享的状态类型别名。
 pub type SharedState = Arc<WebState>;
 
@@ -141,6 +174,8 @@ impl WebState {
             download_path,
             tasks: Mutex::new(params.tasks),
             next_task_id: Mutex::new(params.next_task_id),
+            search_tasks: Mutex::new(HashMap::new()),
+            next_search_id: Mutex::new(1),
             access_code: Mutex::new(String::new()),
             sources_config: RwLock::new(params.sources_config),
             sources_config_path: params.sources_config_path,
