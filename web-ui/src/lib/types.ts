@@ -18,6 +18,25 @@ export interface SearchResult {
   word_count: string | null
 }
 
+/** 搜索任务状态。对应后端 `web::SearchStatus`（Running/Done，PascalCase 序列化）。 */
+export type SearchStatus = 'Running' | 'Done'
+
+/** 单源搜索失败。对应后端 `web::SourceSearchError`。 */
+export interface SearchSourceError {
+  source_id: number
+  source_name: string
+  error: string
+}
+
+/** GET /api/search/{task_id} 轮询体。对应后端 `handlers::search::SearchStatusResponse`。 */
+export interface SearchStatusResponse {
+  status: SearchStatus
+  total_sources: number
+  done_sources: number
+  results: SearchResult[]
+  source_errors: SearchSourceError[]
+}
+
 /** 详情页解析后的书籍数据。对应后端 `models::Book`。 */
 export interface Book {
   url: string
@@ -119,39 +138,6 @@ export interface StartDownloadResult {
   task_id: number
 }
 
-// ─── SSE 事件类型 ─────────────────────────────────────────────
-// 后端搜索与下载均走 SSE（axum::response::Sse），前端用 fetch + ReadableStream 解析。
-
-/** 搜索 SSE 单条事件 data。对应后端 `handlers::search::SearchEvent`。 */
-export interface SearchStreamEvent {
-  source_id: number
-  source_name: string
-  results: SearchResult[]
-  error: string | null
-}
-
-/** 搜索 SSE 结束事件 data。对应后端 `handlers::search::SearchDoneEvent`。 */
-export interface SearchDoneEvent {
-  total: number
-}
-
-/**
- * 下载进度 SSE 事件 data。对应后端 `handlers::download::ProgressEvent`
- * （字段名 type，其余按 kind 按需出现）。
- */
-export interface DownloadProgressEvent {
-  type:
-    | 'book_resolved'
-    | 'chapter_done'
-    | 'chapter_failed'
-    | 'finished'
-    | 'cancelled'
-    | 'failed'
-  index?: number
-  title?: string
-  task_id?: number
-  filename?: string
-  reason?: string
-  total?: number
-  book_name?: string
-}
+// ─── 搜索/下载均为任务轮询模型 ──────────────────────────────────
+// 搜索：POST /api/search 建任务 → GET /api/search/{id} 轮询累计结果。
+// 下载：POST /api/download 返回 { task_id } → 进度走 GET /api/tasks 轮询。
