@@ -128,3 +128,18 @@
     @apply bg-background text-foreground;
     }
 }
+
+/* Progress 不定态：value=null 时 Base UI 给 indicator 加 data-indeterminate，
+   条幅从左侧扫出（任务解析阶段、总章节数未知前展示）。 */
+@keyframes progress-indeterminate {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(300%);
+  }
+}
+[data-slot="progress-indicator"][data-indeterminate] {
+  width: 33.333%;
+  animation: progress-indeterminate 1.5s ease-in-out infinite;
+}
