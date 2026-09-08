@@ -1,10 +1,31 @@
-// 搜索页 —— SSE 流式搜索，结果逐源累加。状态在 SearchProvider 里，
+// 搜索页 —— 任务轮询搜索，结果渐进累计。状态在 SearchProvider 里，
 // 跨路由切换（去书库/任务等再回来）保留已加载的结果。
 
 import { useState, useCallback, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Button, SearchField, Card, Chip, Skeleton, Pagination } from '@heroui/react'
-import AppSelect from '@/components/app-select'
+import { Search as SearchIcon } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Card, CardContent } from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
+import { Skeleton } from '@/components/ui/skeleton'
+import { Alert, AlertDescription } from '@/components/ui/alert'
+import {
+  Pagination,
+  PaginationContent,
+  PaginationEllipsis,
+  PaginationItem,
+  PaginationLink,
+  PaginationNext,
+  PaginationPrevious,
+} from '@/components/ui/pagination'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { useSearch } from '@/hooks/use-search'
 import { useSources } from '@/hooks/use-sources'
 import { useTranslation } from 'react-i18next'
@@ -49,48 +70,35 @@ export default function SearchPage() {
   }, [keyword, sourceId, doSearch])
 
   return (
-    <div className="space-y-6">
-      {/* 搜索栏：SearchField（自带放大镜 + 清空按钮）+ 源下拉 + 搜索按钮，三个独立控件。
-          响应式布局：
-            - 小屏（< sm）：SearchField 占满第一行；源下拉 + 搜索按钮在第二行右对齐
-              —— 源下拉 flex-1 撑开，按钮 shrink-0 贴右，保证两个控件垂直对齐
-            - sm+：恢复横向 1 行（SearchField flex-1 + 源下拉固定 w-36 + 按钮） */}
-      <div className="flex flex-col sm:flex-row sm:items-center gap-2">
-        <SearchField
-          className="w-full sm:flex-1"
-          value={keyword}
-          onChange={setKeyword}
-        >
-          <SearchField.Group>
-            <SearchField.SearchIcon />
-            <SearchField.Input
-              placeholder={t('search.placeholder')}
-              onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-            />
-            <SearchField.ClearButton />
-          </SearchField.Group>
-        </SearchField>
-        {/* 小屏下把 select + button 包到子行：select flex-1 撑开剩余，button 固定。
-            sm+ 下这层 wrapper 退化为普通 flex row，跟外层 flex-row 视觉一致 —— children
-            横向排列、跟 SearchField 同一基线。 */}
-        <div className="flex items-center gap-2">
-          <AppSelect
-            className="w-full sm:w-36"
-            aria-label={t('search.allSources')}
-            selectedKey={sourceId}
-            onChange={(key) => setSourceId(key)}
-            options={[
-              { key: '', label: t('search.allSources') },
-              ...sources.filter(s => s.enabled).map(s => ({ key: String(s.id), label: s.name })),
-            ]}
+    <div className="flex flex-col gap-6">
+      {/* 搜索栏：Input（带放大镜）+ 源下拉 + 搜索按钮。
+          响应式：小屏换行（Input 占满、select+button 第二行右对齐），sm+ 单行。 */}
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+        <div className="relative w-full sm:flex-1">
+          <SearchIcon className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            className="pl-9"
+            placeholder={t('search.placeholder')}
+            value={keyword}
+            onChange={(e) => setKeyword(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
           />
-          {/* isDisabled 三种条件取或：正在请求 / 输入框为空 / 只有空白字符。
-              空白 trim 跟 handleSearch 内 sendQuery 行为对齐 —— trim 后空串后端会
-              直接报 400 或返回空列表，提前在 UI 阻止更友好。 */}
+        </div>
+        <div className="flex items-center gap-2">
+          <Select value={sourceId} onValueChange={setSourceId}>
+            <SelectTrigger className="w-full sm:w-36" aria-label={t('search.allSources')}>
+              <SelectValue placeholder={t('search.allSources')} />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="">{t('search.allSources')}</SelectItem>
+              {sources.filter(s => s.enabled).map(s => (
+                <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           <Button
-            variant="primary"
-            onPress={handleSearch}
-            isDisabled={isFetching || !keyword.trim()}
+            onClick={handleSearch}
+            disabled={isFetching || !keyword.trim()}
             className="shrink-0"
           >
             {isFetching ? t('search.searching', { count: sourceCount }) : t('search.searchButton')}
@@ -100,21 +108,23 @@ export default function SearchPage() {
 
       {/* 流式错误提示 */}
       {error && (
-        <p className="text-sm text-danger">{error}</p>
+        <Alert variant="destructive">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
       )}
 
       {/* 加载骨架屏 */}
       {isFetching && (
-        <div className="space-y-2">
+        <div className="flex flex-col gap-2">
           {Array.from({ length: 5 }).map((_, i) => (
-            <Skeleton key={i} className="h-16 w-full rounded-xl" />
+            <Skeleton key={i} className="h-16 w-full" />
           ))}
         </div>
       )}
 
       {/* 搜索结果 */}
       {!isFetching && paged.length > 0 && (
-        <div className="space-y-2">
+        <div className="flex flex-col gap-2">
           {paged.map((r, i) => (
             <ResultCard key={`${r.source_id}-${r.url}-${i}`} result={r}
               onClick={() => navigate(`/search/${encodeURIComponent(r.url)}`, { state: { sourceId: r.source_id } })} />
@@ -123,39 +133,37 @@ export default function SearchPage() {
           {totalPages > 1 && (
             <div className="pt-2">
               <Pagination className="justify-end">
-                <Pagination.Content>
-                  <Pagination.Item>
-                    <Pagination.Previous
-                      isDisabled={page === 1}
-                      onPress={() => setPage(p => Math.max(1, p - 1))}
-                    >
-                      <Pagination.PreviousIcon />
-                    </Pagination.Previous>
-                  </Pagination.Item>
+                <PaginationContent>
+                  <PaginationItem>
+                    <PaginationPrevious
+                      isActive={false}
+                      aria-disabled={page === 1}
+                      onClick={() => setPage(p => Math.max(1, p - 1))}
+                    />
+                  </PaginationItem>
                   {pageItems().map((n, i) => (
                     n === 'ellipsis'
                       ? (
-                        <Pagination.Item key={`e-${i}`}>
-                          <Pagination.Ellipsis />
-                        </Pagination.Item>
+                        <PaginationItem key={`e-${i}`}>
+                          <PaginationEllipsis />
+                        </PaginationItem>
                       )
                       : (
-                        <Pagination.Item key={n}>
-                          <Pagination.Link isActive={n === page} onPress={() => setPage(n)}>
+                        <PaginationItem key={n}>
+                          <PaginationLink isActive={n === page} onClick={() => setPage(n)}>
                             {n}
-                          </Pagination.Link>
-                        </Pagination.Item>
+                          </PaginationLink>
+                        </PaginationItem>
                       )
                   ))}
-                  <Pagination.Item>
-                    <Pagination.Next
-                      isDisabled={page === totalPages}
-                      onPress={() => setPage(p => Math.min(totalPages, p + 1))}
-                    >
-                      <Pagination.NextIcon />
-                    </Pagination.Next>
-                  </Pagination.Item>
-                </Pagination.Content>
+                  <PaginationItem>
+                    <PaginationNext
+                      isActive={false}
+                      aria-disabled={page === totalPages}
+                      onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                    />
+                  </PaginationItem>
+                </PaginationContent>
               </Pagination>
             </div>
           )}
@@ -164,12 +172,12 @@ export default function SearchPage() {
 
       {/* 无结果（已搜索） */}
       {!isFetching && searched && results.length === 0 && (
-        <p className="text-center py-16 text-default-500">{t('search.noResults')}</p>
+        <p className="py-16 text-center text-muted-foreground">{t('search.noResults')}</p>
       )}
 
       {/* 未搜索初始态 */}
       {!searched && (
-        <p className="text-center py-16 text-default-500">{t('search.initialPrompt')}</p>
+        <p className="py-16 text-center text-muted-foreground">{t('search.initialPrompt')}</p>
       )}
     </div>
   )
@@ -181,47 +189,47 @@ function ResultCard({ result: r, onClick }: { result: SearchResult; onClick: () 
     <button
       type="button"
       onClick={onClick}
-      className="block w-full text-left rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+      className="block w-full rounded-xl text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
     >
-      <Card className="px-5 py-4 w-full transition-colors hover:bg-default-100 dark:hover:bg-default-50/40">
-        <div className="space-y-2">
+      <Card className="w-full transition-colors hover:bg-muted/50">
+        <CardContent className="flex flex-col gap-2 p-4 sm:p-5">
           {/* 标题 + 作者 */}
-          <div className="flex items-baseline gap-2 min-w-0">
-            <span className="font-semibold text-base truncate">{r.book_name}</span>
+          <div className="flex min-w-0 items-baseline gap-2">
+            <span className="truncate text-base font-semibold">{r.book_name}</span>
             {r.author && (
-              <span className="text-xs text-default-500 truncate flex-shrink min-w-0">{r.author}</span>
+              <span className="min-w-0 flex-shrink truncate text-xs text-muted-foreground">{r.author}</span>
             )}
           </div>
           {/* 简介 */}
           {r.intro && (
-            <p className="text-sm text-default-500 line-clamp-2">{r.intro}</p>
+            <p className="line-clamp-2 text-sm text-muted-foreground">{r.intro}</p>
           )}
-          {/* chip 行：分类 / 状态 / 字数 — 来源靠右 */}
-          <div className="flex items-center gap-2 pt-1 flex-wrap">
-            {r.category && <Chip size="sm" variant="soft">{r.category}</Chip>}
-            {r.status && <Chip size="sm" variant="soft" className="text-success">{r.status}</Chip>}
+          {/* badge 行：分类 / 状态 / 字数 — 来源靠右 */}
+          <div className="flex flex-wrap items-center gap-2 pt-1">
+            {r.category && <Badge variant="secondary">{r.category}</Badge>}
+            {r.status && <Badge variant="secondary">{r.status}</Badge>}
             {r.word_count && (
-              <Chip size="sm" variant="soft" className="text-default-500">
+              <Badge variant="secondary" className="text-muted-foreground">
                 {t('search.card.wordCount')} {r.word_count}
-              </Chip>
+              </Badge>
             )}
-            <span className="ml-auto text-xs text-default-400">{r.source_name}</span>
+            <span className="ml-auto text-xs text-muted-foreground/70">{r.source_name}</span>
           </div>
           {/* 最新章节 + 更新时间 */}
           {(r.latest_chapter || r.last_update_time) && (
-            <div className="flex items-center gap-3 text-xs text-default-500 min-w-0">
+            <div className="flex min-w-0 items-center gap-3 text-xs text-muted-foreground">
               {r.latest_chapter && (
-                <span className="truncate min-w-0">
-                  <span className="text-default-400">{t('search.card.latestChapter')}: </span>
+                <span className="min-w-0 truncate">
+                  <span className="text-muted-foreground/70">{t('search.card.latestChapter')}: </span>
                   {r.latest_chapter}
                 </span>
               )}
               {r.last_update_time && (
-                <span className="ml-auto flex-shrink-0 text-default-400">{r.last_update_time}</span>
+                <span className="ml-auto flex-shrink-0 text-muted-foreground/70">{r.last_update_time}</span>
               )}
             </div>
           )}
-        </div>
+        </CardContent>
       </Card>
     </button>
   )
