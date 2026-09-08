@@ -1,11 +1,13 @@
 // 书源管理页面。顶部「全部测速」一键测试所有书源；每行右侧 Switch 管理启停。
 
-import { Thunderbolt } from '@gravity-ui/icons'
-import { Card, Button, Chip, Spinner } from '@heroui/react'
+import { Loader2, Zap } from 'lucide-react'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent } from '@/components/ui/card'
+import { Switch } from '@/components/ui/switch'
 import { useSources, useToggleSource, useTestSource } from '@/hooks/use-sources'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import AppSwitch from '@/components/app-switch'
 
 type TestResult = { ok: boolean; latency_ms: number } | 'testing'
 
@@ -40,55 +42,53 @@ export default function SourcesPage() {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between gap-3">
-        {/* 左侧：启用 / 未启用 chip（颜色对照 tasks 页的 STATUS_CHIP_BG，
-            enabled=绿 / disabled=灰，跟"行"启用状态视觉一致）。零计数不渲染
-            —— 跟 tasks 页同样的「少即是多」策略。 */}
-        <div className="flex items-center gap-2 flex-wrap">
+        {/* 左侧：启用 / 未启用计数 badge */}
+        <div className="flex flex-wrap items-center gap-2">
           {(() => {
             const enabled = sources.filter(s => s.enabled).length
             const disabled = sources.length - enabled
             return (
               <>
                 {enabled > 0 && (
-                  <Chip size="md" variant="soft" className="text-green-500 bg-green-500/15">
+                  <Badge className="bg-green-500/15 text-green-500">
                     {t('sources.enabledLabel')} · {enabled}
-                  </Chip>
+                  </Badge>
                 )}
                 {disabled > 0 && (
-                  <Chip size="md" variant="soft" className="text-gray-400 bg-gray-500/15">
+                  <Badge className="bg-gray-500/15 text-gray-400">
                     {t('sources.disabledLabel')} · {disabled}
-                  </Chip>
+                  </Badge>
                 )}
               </>
             )
           })()}
         </div>
-        <Button variant="primary" size="sm" isDisabled={testingAll || sources.length === 0} onPress={testAll}>
-          {testingAll ? <Spinner size="sm" /> : <Thunderbolt />}
+        <Button size="sm" disabled={testingAll || sources.length === 0} onClick={testAll}>
+          {testingAll ? <Loader2 className="animate-spin" /> : <Zap data-icon="inline-start" />}
           {testingAll ? t('sources.testingAll', { done: testedCount, total: sources.length }) : t('sources.testAll')}
         </Button>
       </div>
-      <div className="space-y-2">
+      <div className="flex flex-col gap-2">
         {sources.map(s => {
           const result = results[s.id]
           return (
-            <Card key={s.id} className={`px-5 py-3.5 transition-opacity ${!s.enabled ? 'opacity-60' : ''}`}>
-              <div className="flex items-center gap-4">
-                <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${s.enabled ? 'bg-green-500' : 'bg-default'}`} />
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium truncate">{s.name}</p>
-                  <p className="text-xs text-default-500 truncate">{s.url}</p>
+            <Card key={s.id} className={`transition-opacity ${!s.enabled ? 'opacity-60' : ''}`}>
+              <CardContent className="flex items-center gap-4 p-4">
+                <div className={`size-2.5 flex-shrink-0 rounded-full ${s.enabled ? 'bg-green-500' : 'bg-muted-foreground/40'}`} />
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium">{s.name}</p>
+                  <p className="truncate text-xs text-muted-foreground">{s.url}</p>
                 </div>
-                {result === 'testing' && <Spinner size="sm" />}
+                {result === 'testing' && <Loader2 className="size-4 animate-spin text-muted-foreground" />}
                 {result && result !== 'testing' && (
-                  <Chip size="sm" variant="soft" className={result.ok ? 'text-success' : 'text-danger'}>
+                  <Badge variant="secondary" className={result.ok ? 'text-green-600' : 'text-destructive'}>
                     {result.ok ? `${result.latency_ms}ms` : t('sources.timeout')}
-                  </Chip>
+                  </Badge>
                 )}
-                <AppSwitch isSelected={s.enabled} onChange={() => toggle(s.id)} aria-label={s.name} />
-              </div>
+                <Switch checked={s.enabled} onCheckedChange={() => toggle(s.id)} aria-label={s.name} />
+              </CardContent>
             </Card>
           )
         })}
