@@ -1,57 +1,63 @@
 // 书库页面。按扩展名过滤（前端过滤，后端暂不支持 ?ext=）。
-// 提供下载链接（GET /api/files/:filename）+ 删除（带确认对话框）+ 分页（HeroUI Pagination）。
-// 过滤 tab 右侧挂 Badge 显示每种类型文件数，替代之前的「共 N 个文件」页头文本 ——
-// 视觉重心下移到 tab 本身，扫一眼就知道「EPUB 8 个、PDF 0 个」该不该换 tab。
+// 提供下载链接（GET /api/files/:filename）+ 删除（带确认对话框）+ 分页。
+// 过滤 Tab 右侧挂 Badge 显示每种类型文件数。
 
-import { Book, ArrowDown, TrashBin } from "@gravity-ui/icons";
-import { Card, Button, Tabs, Skeleton, Pagination, Badge } from "@heroui/react";
-import { toast } from "sonner";
-import { useState, useEffect, useCallback, useMemo } from "react";
-import { useLibrary, useDeleteFile } from "@/hooks/use-library";
-import { formatBytes, formatUnixDate } from "@/lib/utils";
-import { useTranslation } from "react-i18next";
-import ConfirmDialog from "@/components/confirm-dialog";
-import type { LibraryFile } from "@/lib/types";
+import { Book, ArrowDown, Trash2 } from 'lucide-react'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent } from '@/components/ui/card'
+import { Skeleton } from '@/components/ui/skeleton'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import {
+  Pagination,
+  PaginationContent,
+  PaginationEllipsis,
+  PaginationItem,
+  PaginationLink,
+  PaginationNext,
+  PaginationPrevious,
+} from '@/components/ui/pagination'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
+import { toast } from 'sonner'
+import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useLibrary, useDeleteFile } from '@/hooks/use-library'
+import { formatBytes, formatUnixDate } from '@/lib/utils'
+import { useTranslation } from 'react-i18next'
+import type { LibraryFile } from '@/lib/types'
 
 const EXT_COLOR: Record<string, string> = {
-  epub: "bg-green-500",
-  pdf: "bg-red-500",
-  txt: "bg-blue-500",
-  html: "bg-orange-500",
-  md: "bg-purple-500",
-};
+  epub: 'bg-green-500',
+  pdf: 'bg-red-500',
+  txt: 'bg-blue-500',
+  html: 'bg-orange-500',
+  md: 'bg-purple-500',
+}
 
-// tab Badge 颜色：epub/pdf/txt/html/md 映射 HeroUI 语义色（success / danger /
-// accent / warning / default），跟卡片左侧 EXT_COLOR 颜色块视觉对齐；all 用中性 default。
-// md 没有专属语义色，沿用 default（neutral）—— 5 种格式已占满 success/danger/accent/warning。
-// HeroUI v3 Badge 单独使用时是 inline 元素（不像 v2 那样 absolute 角标），
-// 因此可以直接挂在 tab label 后面作为内联数字徽章。
-const TAB_BADGE_COLOR: Record<string, "default" | "success" | "danger" | "accent" | "warning"> = {
-  all: "default",
-  epub: "success",
-  pdf: "danger",
-  txt: "accent",
-  html: "warning",
-  md: "default",
-};
-
-const PAGE_SIZE = 12;
+const PAGE_SIZE = 12
 
 export default function LibraryPage() {
-  const [ext, setExt] = useState<string>("all");
-  const [page, setPage] = useState(1);
-  const [pending, setPending] = useState<LibraryFile | null>(null); // 待删除文件（打开确认框）
-  const { data: allFiles = [], isLoading } = useLibrary();
-  const { mutate: del } = useDeleteFile();
-  const { t } = useTranslation();
+  const [ext, setExt] = useState<string>('all')
+  const [page, setPage] = useState(1)
+  const [pending, setPending] = useState<LibraryFile | null>(null) // 待删除文件（打开确认框）
+  const { data: allFiles = [], isLoading } = useLibrary()
+  const { mutate: del } = useDeleteFile()
+  const { t } = useTranslation()
 
   const files =
-    ext === "all" ? allFiles : allFiles.filter((f) => f.ext === ext);
-  const totalPages = Math.max(1, Math.ceil(files.length / PAGE_SIZE));
-  const paged = files.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+    ext === 'all' ? allFiles : allFiles.filter((f) => f.ext === ext)
+  const totalPages = Math.max(1, Math.ceil(files.length / PAGE_SIZE))
+  const paged = files.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
 
-  // 每种 ext 的文件数（含 0）—— 用在 Tabs.Tab 的 Badge 上。
-  // 一次 reduce 算 6 个数（O(n)）而不是每次 tab 渲染时 filter（O(n) × 6）。
+  // 每种 ext 的文件数（含 0）—— 一次 reduce 算 6 个数（O(n)）。
   const extCounts = useMemo(() => {
     const counts: Record<string, number> = { all: allFiles.length, epub: 0, txt: 0, pdf: 0, html: 0, md: 0 }
     for (const f of allFiles) {
@@ -62,107 +68,90 @@ export default function LibraryPage() {
 
   // 切换过滤或文件数变化时，把页码夹回合法范围。
   useEffect(() => {
-    setPage((p) => Math.min(p, totalPages));
-  }, [totalPages]);
+    setPage((p) => Math.min(p, totalPages))
+  }, [totalPages])
 
-  // 总页数多时折叠中间页：始终保留首页 / 末页 + 当前页前后各 1 页，中间用 … 代替。
-  const pageItems = useCallback((): ("ellipsis" | number)[] => {
-    if (totalPages <= 7)
-      return Array.from({ length: totalPages }, (_, i) => i + 1);
-    const items: ("ellipsis" | number)[] = [1];
-    if (page > 3) items.push("ellipsis");
-    const start = Math.max(2, page - 1);
-    const end = Math.min(totalPages - 1, page + 1);
-    for (let i = start; i <= end; i++) items.push(i);
-    if (page < totalPages - 2) items.push("ellipsis");
-    items.push(totalPages);
-    return items;
-  }, [page, totalPages]);
+  const pageItems = useCallback((): ('ellipsis' | number)[] => {
+    if (totalPages <= 7) return Array.from({ length: totalPages }, (_, i) => i + 1)
+    const items: ('ellipsis' | number)[] = [1]
+    if (page > 3) items.push('ellipsis')
+    const start = Math.max(2, page - 1)
+    const end = Math.min(totalPages - 1, page + 1)
+    for (let i = start; i <= end; i++) items.push(i)
+    if (page < totalPages - 2) items.push('ellipsis')
+    items.push(totalPages)
+    return items
+  }, [page, totalPages])
 
   const handleFilterChange = (key: string) => {
-    setExt(key);
-    setPage(1);
-  };
+    setExt(key)
+    setPage(1)
+  }
 
   const confirmDelete = () => {
-    if (!pending) return;
+    if (!pending) return
     del(pending.filename, {
-      onSuccess: () => toast.success(t("library.deleted")),
-    });
-    setPending(null);
-  };
+      onSuccess: () => toast.success(t('library.deleted')),
+    })
+    setPending(null)
+  }
 
   return (
-    <div className="space-y-4">
-      <Tabs
-        selectedKey={ext}
-        onSelectionChange={(key) => handleFilterChange(String(key))}
-      >
-        <Tabs.ListContainer>
-          <Tabs.List aria-label="library-filter">
-            {["all", "epub", "txt", "pdf", "html", "md"].map((tab) => (
-              <Tabs.Tab key={tab} id={tab}>
-                {t(`library.filter.${tab}`).toUpperCase()}
-                <Badge size="sm" color={TAB_BADGE_COLOR[tab]}>
-                  {extCounts[tab] ?? 0}
-                </Badge>
-                <Tabs.Indicator />
-              </Tabs.Tab>
-            ))}
-          </Tabs.List>
-        </Tabs.ListContainer>
+    <div className="flex flex-col gap-4">
+      <Tabs value={ext} onValueChange={handleFilterChange}>
+        <TabsList>
+          {['all', 'epub', 'txt', 'pdf', 'html', 'md'].map((tab) => (
+            <TabsTrigger key={tab} value={tab}>
+              {t(`library.filter.${tab}`).toUpperCase()}
+              <Badge variant="secondary" className="ml-1">{extCounts[tab] ?? 0}</Badge>
+            </TabsTrigger>
+          ))}
+        </TabsList>
       </Tabs>
 
       {isLoading && (
-        <div className="space-y-2">
+        <div className="flex flex-col gap-2">
           {Array.from({ length: 4 }).map((_, i) => (
-            <Skeleton key={i} className="h-16 rounded-xl" />
+            <Skeleton key={i} className="h-16 w-full" />
           ))}
         </div>
       )}
 
       {!isLoading && files.length === 0 && (
-        <div className="text-center py-16 text-default-500">
-          <Book className="w-12 h-12 mx-auto mb-3 opacity-40" />
-          <p>{t("library.empty")}</p>
+        <div className="py-16 text-center text-muted-foreground">
+          <Book className="mx-auto mb-3 size-12 opacity-40" />
+          <p>{t('library.empty')}</p>
         </div>
       )}
 
-      <div className="space-y-2">
+      <div className="flex flex-col gap-2">
         {paged.map((f) => (
-          <Card key={f.filename} className="px-5 py-3.5 group">
-            <div className="flex items-center gap-4">
+          <Card key={f.filename} className="group">
+            <CardContent className="flex items-center gap-4 p-4">
               <div
-                className={`w-10 h-10 rounded-lg ${EXT_COLOR[f.ext] ?? "bg-default"} flex items-center justify-center text-white text-xs font-bold`}
+                className={`flex size-10 flex-shrink-0 items-center justify-center rounded-lg text-xs font-bold text-white ${EXT_COLOR[f.ext] ?? 'bg-muted'}`}
               >
                 {f.ext.toUpperCase()}
               </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium truncate">{f.filename}</p>
-                <p className="text-xs text-default-500">
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-medium">{f.filename}</p>
+                <p className="text-xs text-muted-foreground">
                   {formatBytes(f.size)} · {formatUnixDate(f.modified)}
                 </p>
               </div>
               <div className="flex gap-2">
-                <a
-                  href={`/api/files/${encodeURIComponent(f.filename)}`}
-                  download
-                >
-                  <Button size="sm">
-                    <ArrowDown />
-                    {t("library.download")}
-                  </Button>
-                </a>
-                <Button
-                  variant="danger"
-                  size="sm"
-                  onPress={() => setPending(f)}
-                >
-                  <TrashBin />
-                  {t("library.delete")}
+                <Button asChild size="sm" variant="outline">
+                  <a href={`/api/files/${encodeURIComponent(f.filename)}`} download>
+                    <ArrowDown data-icon="inline-start" />
+                    {t('library.download')}
+                  </a>
+                </Button>
+                <Button variant="destructive" size="sm" onClick={() => setPending(f)}>
+                  <Trash2 data-icon="inline-start" />
+                  {t('library.delete')}
                 </Button>
               </div>
-            </div>
+            </CardContent>
           </Card>
         ))}
       </div>
@@ -171,58 +160,50 @@ export default function LibraryPage() {
       {!isLoading && totalPages > 1 && (
         <div className="pt-2">
           <Pagination className="justify-end">
-            <Pagination.Content>
-              <Pagination.Item>
-                <Pagination.Previous
-                  isDisabled={page === 1}
-                  onPress={() => setPage((p) => Math.max(1, p - 1))}
-                >
-                  <Pagination.PreviousIcon />
-                </Pagination.Previous>
-              </Pagination.Item>
-              {pageItems().map((n, i) =>
-                n === "ellipsis" ? (
-                  <Pagination.Item key={`e-${i}`}>
-                    <Pagination.Ellipsis />
-                  </Pagination.Item>
+            <PaginationContent>
+              <PaginationItem>
+                <PaginationPrevious
+                  isActive={false}
+                  aria-disabled={page === 1}
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                />
+              </PaginationItem>
+              {pageItems().map((n, i) => (
+                n === 'ellipsis' ? (
+                  <PaginationItem key={`e-${i}`}><PaginationEllipsis /></PaginationItem>
                 ) : (
-                  <Pagination.Item key={n}>
-                    <Pagination.Link
-                      isActive={n === page}
-                      onPress={() => setPage(n)}
-                    >
-                      {n}
-                    </Pagination.Link>
-                  </Pagination.Item>
-                ),
-              )}
-              <Pagination.Item>
-                <Pagination.Next
-                  isDisabled={page === totalPages}
-                  onPress={() => setPage((p) => Math.min(totalPages, p + 1))}
-                >
-                  <Pagination.NextIcon />
-                </Pagination.Next>
-              </Pagination.Item>
-            </Pagination.Content>
+                  <PaginationItem key={n}>
+                    <PaginationLink isActive={n === page} onClick={() => setPage(n)}>{n}</PaginationLink>
+                  </PaginationItem>
+                )
+              ))}
+              <PaginationItem>
+                <PaginationNext
+                  isActive={false}
+                  aria-disabled={page === totalPages}
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                />
+              </PaginationItem>
+            </PaginationContent>
           </Pagination>
         </div>
       )}
 
       {/* 删除确认 */}
-      <ConfirmDialog
-        isOpen={pending !== null}
-        onOpenChange={(open) => {
-          if (!open) setPending(null);
-        }}
-        title={t("library.deleteConfirm.title")}
-        message={t("library.deleteConfirm.message", {
-          name: pending?.filename ?? "",
-        })}
-        confirmLabel={t("library.deleteConfirm.confirm")}
-        cancelLabel={t("library.deleteConfirm.cancel")}
-        onConfirm={confirmDelete}
-      />
+      <AlertDialog open={pending !== null} onOpenChange={(open) => { if (!open) setPending(null) }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('library.deleteConfirm.title')}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t('library.deleteConfirm.message', { name: pending?.filename ?? '' })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t('library.deleteConfirm.cancel')}</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmDelete}>{t('library.deleteConfirm.confirm')}</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
-  );
+  )
 }
