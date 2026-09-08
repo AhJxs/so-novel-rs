@@ -1,28 +1,41 @@
-import { Button } from '@heroui/react'
-import { Moon, Sun, Display } from '@gravity-ui/icons'
+// 主题切换：DropdownMenu（浅色 / 深色 / 跟随系统）。用 next-themes 读写。
+
+import { Moon, Monitor, Sun } from 'lucide-react'
 import { useTheme } from 'next-themes'
-import { useEffect, useState } from 'react'
+import { Button } from '@/components/ui/button'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import { useTranslation } from 'react-i18next'
 
 export default function ThemeToggle() {
-  const { theme, setTheme } = useTheme()
-  const [mounted, setMounted] = useState(false)
-
-  useEffect(() => setMounted(true), [])
-
-  if (!mounted) return null
-
-  const cycleTheme = () => {
-    if (theme === 'light') setTheme('dark')
-    else if (theme === 'dark') setTheme('system')
-    else setTheme('light')
-  }
-
-  const Icon = theme === 'light' ? Sun : theme === 'dark' ? Moon : Display
-  const size = 18
-
+  const { setTheme } = useTheme()
+  const { t } = useTranslation()
   return (
-    <Button isIconOnly variant="ghost" onPress={cycleTheme} aria-label="Toggle theme">
-      <Icon width={size} height={size} />
-    </Button>
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="ghost" size="icon" aria-label={t('theme.label')}>
+          <Sun className="dark:hidden" />
+          <Moon className="hidden dark:block" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuItem onClick={() => setTheme('light')}>
+          <Sun />
+          {t('theme.light')}
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => setTheme('dark')}>
+          <Moon />
+          {t('theme.dark')}
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => setTheme('system')}>
+          <Monitor />
+          {t('theme.system')}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }

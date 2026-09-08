@@ -7,7 +7,8 @@
     "tasks": "Tasks",
     "library": "Library",
     "sources": "Sources",
-    "settings": "Settings"
+    "settings": "Settings",
+    "group": "Navigation"
   },
   "search": {
     "title": "Search Novels",
@@ -144,7 +145,8 @@
   "theme": {
     "light": "Light",
     "dark": "Dark",
-    "system": "System"
+    "system": "System",
+    "label": "Change theme"
   },
   "common": {
     "ok": "OK",

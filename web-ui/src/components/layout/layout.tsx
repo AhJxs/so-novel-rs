@@ -1,14 +1,21 @@
-import { Outlet } from 'react-router-dom'
-import Navbar from './navbar'
+// 根布局：侧边栏 + 内容区。侧边栏跨路由保持，内容区通过 <Outlet> 渲染子路由。
 
-/** 根布局：Navbar + 主内容区。通过 React Router 的 <Outlet> 渲染子路由。 */
+import { Outlet } from 'react-router-dom'
+import { SidebarInset, SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar'
+import { AppSidebar } from './sidebar'
+
 export default function Layout() {
   return (
-    <div className="min-h-screen bg-background text-foreground">
-      <Navbar />
-      <main className="max-w-5xl mx-auto px-4 sm:px-6 py-6">
-        <Outlet />
-      </main>
-    </div>
+    <SidebarProvider>
+      <AppSidebar />
+      <SidebarInset>
+        <header className="flex h-12 shrink-0 items-center gap-2 border-b px-4">
+          <SidebarTrigger />
+        </header>
+        <main className="mx-auto w-full max-w-6xl flex-1 p-4 lg:p-6">
+          <Outlet />
+        </main>
+      </SidebarInset>
+    </SidebarProvider>
   )
 }
