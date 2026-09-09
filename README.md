@@ -14,7 +14,7 @@
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey)](#-快速开始)
 [![GitHub stars](https://img.shields.io/github/stars/Ahjxs/so-novel-rs?style=flat)](https://github.com/Ahjxs/so-novel-rs/stargazers)
 
-[功能](#-功能) · [技术栈](#-技术栈) · [快速开始](#-快速开始) · [CLI](#-cli-用法) · [快捷键](#-快捷键) · [免责声明](./DISCLAIMER.md)
+[功能](#-功能) · [安装](#-安装) · [技术栈](#-技术栈) · [快速开始](#-快速开始) · [CLI](#-cli-用法) · [快捷键](#-快捷键) · [免责声明](./DISCLAIMER.md)
 
 </div>
 
@@ -68,7 +68,7 @@
 so-novel-rs/
 ├── assets/                # logo
 ├── bundle/rules/          # 默认书源 JSON + 模板（首次启动复制到 ~/.sonovel/rules/）
-├── bundle/web/            # Web 前端 build 产物
+├── bundle/web/            # 解析测试样例（章节页 / 封面 / JS）
 ├── docs/                  # CLI / 书源 / 部署等长文档
 ├── locales/app.yml        # i18n 翻译（zh-CN / zh-TW / en）
 ├── web-ui/                # Turborepo + Bun monorepo（apps/web + packages/ui，shadcn base-nova）
@@ -90,7 +90,28 @@ so-novel-rs/
 
 **分层**: `core/` 提供与 GUI / Web 解耦的业务逻辑,`desktop/` 是 GPUI 渲染层,`web/` 是 axum + 任务轮询 API 层（搜索 / 下载均「建任务 → 轮询」，无 SSE）,三端共享同一份核心代码。Web handler 通过 `Locale` extractor + `WebError::into_response_for_locale` 按 per-request locale 翻译错误,无全局 mutation。
 
+## 📥 安装
+
+无需安装 Rust，从 [GitHub Releases](https://github.com/AhJxs/so-novel-rs/releases) 下载对应平台的可运行文件，解压后即可运行（`<版本>` 为最新版本号）：
+
+| 平台 | 下载文件 | 运行 |
+|------|---------|------|
+| Windows x86_64 | `so-novel-rs-<版本>-windows-x86_64.zip` | 解压后双击 `so-novel-rs.exe` |
+| Linux x86_64 | `so-novel-rs-<版本>-linux-x86_64.tar.gz` | `tar -xzf` 解压后运行 `./so-novel-rs` |
+| Linux ARM64 | `so-novel-rs-<版本>-linux-aarch64.tar.gz` | 同上 |
+| macOS（Apple Silicon） | `so-novel-rs-<版本>-macos-aarch64.tar.gz` | 解压后运行 `./so-novel-rs` |
+
+> 发行包内含 `so-novel-rs` 可执行文件 + `rules/`（默认书源）。首次运行自动创建
+> `~/.sonovel/` 数据目录（配置 / 书源 / 任务 / 主题）。
+>
+> **Windows**：SmartScreen 提示时点「更多信息 → 仍要运行」；**macOS**：首次打开可能被
+> Gatekeeper 拦截，右键 →「打开」，或执行 `xattr -dr com.apple.quarantine ./so-novel-rs`。
+
 ## 🚀 快速开始
+
+**方式一：下载安装（推荐）** —— 见上方 [📥 安装](#-安装)，直接运行可执行文件，无需编译。
+
+**方式二：从源码编译：**
 
 ```sh
 # 克隆 & 编译
