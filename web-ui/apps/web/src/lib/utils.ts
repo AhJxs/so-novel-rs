@@ -1,10 +1,5 @@
-import { clsx, type ClassValue } from 'clsx'
-import { twMerge } from 'tailwind-merge'
-
-/** 合并 Tailwind class，去重冲突（基于 twMerge）。 */
-export function cn(...inputs: ClassValue[]) {
-  return twMerge(clsx(inputs))
-}
+// 前端格式化工具。`cn` helper 由 @workspace/ui 提供（packages/ui/lib/utils），
+// 此处只保留业务格式化函数。
 
 /** 字节数格式化为人类可读字符串（B / KB / MB / GB）。 */
 export function formatBytes(bytes: number): string {
