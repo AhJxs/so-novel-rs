@@ -1,6 +1,8 @@
 # So Novel 自己的 i18n 翻译表。
 #
-# 加载方式：编译期由 `rust_i18n::i18n!("locales", fallback = "en")` 嵌入二进制。
+# 加载方式：编译期由 crate root 的 `rust_i18n::i18n!("locales")`（见 `src/lib.rs`）
+# 嵌入二进制。刻意**不传** `fallback = "en"` —— rust-i18n 3.x 该参数触发生成代码的
+# E0716 编译错误（见 src/lib.rs 注释）；缺翻译时返回 key 本身，开发期可见漏翻译。
 # 与 gpui_kit::component 自带 `locales/ui.yml` 的实例**不共享**（各自 crate 独立 i18n 实例），
 # 但**全局 locale 是同一个**（`gpui_kit::component::set_locale` 写到全局），
 # 所以一次 set_locale 同时影响两边的翻译。

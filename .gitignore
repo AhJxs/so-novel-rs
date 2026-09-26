@@ -30,3 +30,6 @@ Thumbs.db
 *.swo
 *~
 .githooks.local
+
+# Playwright MCP 快照产物
+.playwright-mcp/

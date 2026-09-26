@@ -11,7 +11,9 @@
 //!    兜底 100ms tick —— 防止 producer 异常 hang 导致 UI 永远不刷新。
 //! 3. 拿到 `&mut AppModel` 后调 `drain`；任何 channel 有数据则 `ctx.notify()`
 //!    触发当前 view 重绘。
-//! 4. entity 已释放（app 退出）时 `update_entity` 返回 `Err`，`break` 出循环；
+//! 4. entity 已释放（app 退出）时 `WeakEntity::upgrade` 返回 `None`，`break` 出
+//!    循环（gpui-kit 0.6 起 `update_entity` 对已释放 entity 直接 panic，
+//!    `spawn_drain_loop` 因此持 `WeakEntity` 先 upgrade 再 update）；
 //! 5. task detached —— 进程退出时随 executor 终止，不暴露 Task handle。
 //!
 //! ## 为什么 100ms 兜底

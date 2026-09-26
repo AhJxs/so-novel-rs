@@ -41,7 +41,7 @@ use crate::web::SharedState;
 /// 我们接受的 3 个 locale tag（精确匹配）。
 ///
 /// 与 `crate::i18n::locale_for` 返回的 tag 一致（zh-CN / zh-TW / en）——
-/// 不接受 `zh-HK`（gpui_kit::component 内部用）因为前端 JSON 文件名是 `zh-TW`。
+/// 前端 JSON 文件名统一用 `zh-TW`（gpui-kit 0.6 的 ui.yml 同样支持 `zh-TW`）。
 const SUPPORTED_LOCALES: &[&str] = &["en", "zh-CN", "zh-TW"];
 
 /// Handler 入口拿到的 per-request locale。

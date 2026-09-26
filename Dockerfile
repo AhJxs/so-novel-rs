@@ -15,20 +15,20 @@
 FROM rust:1-slim AS builder
 WORKDIR /app
 
-# ── 安装 Node.js (Vite 前端构建) ──
+# ── 安装 Bun（前端 Turborepo monorepo 构建） ──
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    nodejs npm \
-    && rm -rf /var/lib/apt/lists/*
+    curl unzip \
+    && rm -rf /var/lib/apt/lists/* \
+    && curl -fsSL https://bun.sh/install | bash
+ENV PATH="/root/.bun/bin:${PATH}"
 
 # ── 前端依赖层（独立于 Rust 依赖，利用 Docker 缓存） ──
-#
-# `npm ci` 在 Windows host + Docker Desktop (WSL2/Hyper-V) + fuse-overlayfs
-# 组合下常见 `npm WARN tar TAR_ENTRY_ERROR EINVAL: invalid argument, fchown`
-COPY web-ui/package.json web-ui/package-lock.json ./web-ui/
-RUN /bin/bash -c 'set -o pipefail; \
-    npm ci --no-audit --no-fund --prefix web-ui 2>&1 \
-      | grep -v "TAR_ENTRY_ERROR EINVAL: invalid argument, fchown" \
-    ; [ "${PIPESTATUS[0]}" -eq 0 ]'
+# monorepo：先拷 root + 各 workspace 的 package.json，bun install 生成
+# hoisted node_modules + workspace 符号链接；bun.lock 锁版本。
+COPY web-ui/package.json web-ui/bun.lock web-ui/turbo.json ./web-ui/
+COPY web-ui/apps/web/package.json ./web-ui/apps/web/
+COPY web-ui/packages/ui/package.json ./web-ui/packages/ui/
+RUN cd web-ui && bun install --frozen-lockfile
 
 # ── Rust 依赖缓存层 ──
 COPY Cargo.toml Cargo.lock ./
@@ -39,10 +39,10 @@ COPY locales ./locales
 
 # ── 前端源码 + 构建 ──
 COPY web-ui ./web-ui
-RUN npm run build --prefix web-ui
+RUN cd web-ui && bun run build
 
 # ── Rust 构建 ──
-# build.rs 自动触发 npm run build（CARGO_FEATURE_WEB）；此处再跑一次确保无二次构建副作用。
+# build.rs 自动触发 bun run build（CARGO_FEATURE_WEB）；此处再跑一次确保无二次构建副作用。
 RUN cargo build --release --no-default-features --features web
 
 # ── 运行阶段 ──

@@ -464,9 +464,10 @@ fn subcommand_name_maps_variants() {
 /// 自己的 `app.yml` + 前端 JSON 文件名）。测试三种 enum 的输出 + 关键差异：
 /// `TraditionalChinese` 返回 `zh-TW` —— 跟 `Language::as_str()` 的 `"zh-TW"` 巧合一致。
 ///
-/// 注意：`gpui_kit::component::set_locale(...)` 不接受 `zh-TW`（gpui_kit::component
-/// 只有 en / zh-CN / zh-HK / it），桌面路径走 [`crate::i18n::locale_for_gpui`]
-/// 返回 `zh-HK` —— 见 `src/desktop/mod.rs::run`。
+/// 注意：gpui-kit 0.5 时代 `gpui_kit::component::set_locale(...)` 不接受 `zh-TW`
+/// （当时只有 en / zh-CN / zh-HK / it，桌面路径要靠 [`crate::i18n::locale_for_gpui`]
+/// 返回 `zh-HK` 兜底）；0.6 起其 ui.yml 已含 `zh-TW`，两套映射统一 —— 见
+/// `src/desktop/mod.rs::run`。
 #[test]
 fn locale_for_maps_to_rust_i18n_tags() {
     assert_eq!(

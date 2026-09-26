@@ -1,4 +1,4 @@
-//! `LibraryDelegate`: gpui_kit::component::list::List 的 delegate，持有 page handle + 当前页 (index, `LibraryEntry`)。
+//! `LibraryDelegate`: `gpui_kit::component::list::List` 的 delegate，持有 page handle + 当前页 (index, `LibraryEntry`)。
 
 use gpui_kit::component::list::{ListItem, ListState};
 use gpui_kit::component::{ActiveTheme as _, IndexPath, list::ListDelegate};

@@ -1,6 +1,7 @@
 //! Web 服务模块：axum HTTP 服务器 + 单页前端。
 //!
-//! 提供 REST API 和 SSE 推送，让用户通过浏览器搜索、下载小说。
+//! 提供 REST API + 任务轮询（搜索/下载均为「建任务 → 轮询状态」），
+//! 让用户通过浏览器搜索、下载小说。
 //! 与 CLI 模式同构，直接调用底层 crawler / parser / export 函数。
 
 mod error;
@@ -12,6 +13,7 @@ mod routes;
 #[cfg(test)]
 mod tests;
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, RwLock};
 
@@ -36,11 +38,11 @@ use axum::{
 #[cfg(feature = "web")]
 use rust_embed::RustEmbed;
 
-/// 编译期嵌入 `web-ui/dist/` 下所有静态文件。
+/// 编译期嵌入 `web-ui/apps/web/dist/` 下所有静态文件（monorepo 后产物路径）。
 /// `include-exclude` feature 会按 .gitignore 跳过 `node_modules/src`/ 等。
 #[cfg(feature = "web")]
 #[derive(RustEmbed)]
-#[folder = "web-ui/dist/"]
+#[folder = "web-ui/apps/web/dist/"]
 pub struct Assets;
 
 #[cfg(feature = "web")]
@@ -88,8 +90,8 @@ pub struct WebInitParams {
 /// - 持久化字段全在 record-like fields 上（id / origin / `started_at_unix` / ...）
 /// - 运行期字段 `rx` / `cancel` / `cancelling` 也只是这个 struct 的一部分
 /// - 每个下载一个 per-task drain tokio task 排空 mpsc rx（详见
-///   `crate::web::handlers::download::spawn_task_drain`），同时负责
-///   "drain 到的事件 → SSE `broadcast_tx"，把"状态更新"和"事件转发"合并到一处`。
+///   `crate::web::handlers::download::spawn_task_drain`），负责把事件
+///   应用到 `state.tasks`（单源真相），前端轮询 `GET /api/tasks` 读进度。
 ///
 /// `tasks_file` 只是磁盘路径，由调用方 inline 走 `crate::db::save_with_trim` 写盘。
 pub struct WebState {
@@ -101,6 +103,10 @@ pub struct WebState {
     /// 跟 `crate::desktop::model::AppModel::tasks` 同型 —— web 和 GUI 用的是同一个类型。
     pub tasks: Mutex<Vec<DownloadTask>>,
     pub next_task_id: Mutex<u64>,
+    /// 内存态搜索任务注册表（搜索是瞬态，不落盘）。
+    pub search_tasks: Mutex<HashMap<u64, SearchTask>>,
+    /// 搜索任务 id 计数器（与 `next_task_id` 独立）。
+    pub next_search_id: Mutex<u64>,
     /// 访问码（仅存内存，启动时为空，用户通过 Web UI 设置）。
     pub access_code: Mutex<String>,
     /// 书源配置（禁用列表等），toggle 时需要同步更新并持久化。
@@ -123,6 +129,34 @@ pub enum TaskStatus {
     Cancelled,
 }
 
+/// 搜索任务状态（API 返回用）。搜索是内存态，进程重启即失。
+#[derive(Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum SearchStatus {
+    Running,
+    Done,
+}
+
+/// 单源搜索失败信息（`GET /api/search/{id}` 的 `source_errors` 项）。
+#[derive(Clone, Serialize)]
+pub struct SourceSearchError {
+    pub source_id: i32,
+    pub source_name: String,
+    /// 按请求 locale 翻译的错误文案（不泄漏内部 cause）。
+    pub error: String,
+}
+
+/// 内存态搜索任务（**不持久化**）。
+pub struct SearchTask {
+    pub id: u64,
+    pub keyword: String,
+    pub created_at_unix: i64,
+    pub status: SearchStatus,
+    pub sources_total: usize,
+    pub sources_done: usize,
+    pub results: Vec<crate::models::SearchResult>,
+    pub source_errors: Vec<SourceSearchError>,
+}
+
 /// 所有 handler 共享的状态类型别名。
 pub type SharedState = Arc<WebState>;
 
@@ -141,6 +175,8 @@ impl WebState {
             download_path,
             tasks: Mutex::new(params.tasks),
             next_task_id: Mutex::new(params.next_task_id),
+            search_tasks: Mutex::new(HashMap::new()),
+            next_search_id: Mutex::new(1),
             access_code: Mutex::new(String::new()),
             sources_config: RwLock::new(params.sources_config),
             sources_config_path: params.sources_config_path,

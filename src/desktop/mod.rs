@@ -54,33 +54,30 @@ pub mod themes;
 pub use nav::{NavPage, register_key_bindings};
 pub use root::RootView;
 
-/// 把 `AppConfig.language`（应用语言）映射到 gpui_kit::component 接受的 locale 字符串。
+/// 把 `AppConfig.language`（应用语言）映射到 `gpui_kit::component` 接受的 locale 字符串。
 ///
-/// gpui_kit::component 用 `rust_i18n` 做内部国际化（`locales/ui.yml`），内置 4 种 locale：
-/// `en` / `zh-CN` / `zh-HK` / `it`（`fallback = "en"`，找不到 key 就退回英文）。
+/// `gpui_kit::component` 用 `rust_i18n` 做内部国际化（`locales/ui.yml`）。0.5 时代它只有
+/// `en` / `zh-CN` / `zh-HK` / `it`；**0.6 起已含 `zh-TW`**（`fallback = "en"`，找不到
+/// key 就退回英文），跟本项目 `app.yml` 的标签统一。
 ///
-/// 我们的 `Language` 3 个值映射：
+/// 我们的 `Language` 3 个值映射（与 [`crate::i18n::locale_for`] 完全一致）：
 /// - `SimplifiedChinese`  → `"zh-CN"` （精确匹配）
-/// - `TraditionalChinese` → `"zh-HK"` （传统中文；gpui_kit::component 没有 `zh-TW`，fallback 用 `zh-HK`）
+/// - `TraditionalChinese` → `"zh-TW"` （精确匹配）
 /// - `English`            → `"en"`   （精确匹配）
 ///
-/// 不在列表内的 locale `rust_i18n` 自动 fallback 到 `en`，所以传 `zh-TW` 也会显示英文
-/// —— 显式映射到 `zh-HK` 让传统中文用户能直接看到中文 UI（gpui_kit::component
-/// 内部 zh-CN/zh-HK 的简体/繁体翻译完全一样）。
-///
 /// 何时调用：
-/// 1. **启动时**（`desktop::run`）—— 把 `config.global.language` 同步给 gpui_kit::component，
+/// 1. **启动时**（`desktop::run`）—— 把 `config.global.language` 同步给 `gpui_kit::component`，
 ///    让 Sidebar 搜索框 placeholder / Select placeholder / Dialog OK|Cancel 等
 ///    内部文案立刻用对语言。
 /// 2. **用户改语言时**（settings page 的 `界面语言` setter）—— `set_locale` 立即生效 +
 ///    `cx.refresh_windows()` 触发整 app 重 render，所有 `t!("...")` 重新读取 locale。
 ///
 /// 注意：**只**对应"应用 UI 语言"（`Language`），跟"书源语言"（`LangType`）无关。
-/// `LangType` 是书源筛选用的 locale hint，不影响 gpui_kit::component 内部 i18n。
+/// `LangType` 是书源筛选用的 locale hint，不影响 `gpui_kit::component` 内部 i18n。
 ///
-/// **跟 `crate::i18n::locale_for` 的区别**：`locale_for` 返回 `zh-TW`（跟本项目
-/// `app.yml` + 前端 JSON 文件名统一），但 gpui_kit::component 不认 `zh-TW`，所以这里
-/// 用专门的 `locale_for_gpui` 返回 `zh-HK`。CLI / web 路径走 `locale_for` 即可。
+/// **跟 `crate::i18n::locale_for` 的关系**：两者映射现在完全一致，保留 `locale_for_gpui`
+/// 这个别名是为语义清晰（"给 gpui-kit 的 locale"），将来若上游 locale 表再变动
+/// 只需改这一处。CLI / web 路径走 `locale_for` 即可。
 use crate::i18n::locale_for_gpui;
 
 /// 启动 GPUI 应用。`main.rs` 在无参数分支调用。

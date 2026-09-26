@@ -1,79 +1,47 @@
-//! 搜索 API（SSE 流式）。
+//! 搜索 API（任务轮询模型）。
+//!
+//! `POST /api/search` 创建内存态搜索任务并立即返回 `task_id`；
+//! `GET /api/search/{task_id}` 轮询当前累计状态；`DELETE` 显式清理。
+//! 替代旧 SSE 流式实现。crawler 复用 `search_streaming` 的 mpsc 通道，仅消费端改为累计进 task。
 
-use std::convert::Infallible;
 use std::sync::Arc;
 
-use axum::extract::{Query, State};
-use axum::response::Sse;
-use futures::stream::Stream;
+use axum::Json;
+use axum::extract::{Path, State};
+use axum::http::StatusCode;
 use serde::{Deserialize, Serialize};
+use tokio::sync::mpsc;
 
 use crate::core::{config_helpers, search as core_search};
 use crate::i18n::ts_for_locale;
 use crate::models::SearchResult;
+use crate::utils::lock::{mutex_or, rw_read_or};
+use crate::utils::time::now_unix_secs;
+use crate::web::error::WebError;
+use crate::web::error::read_state_or_json;
 use crate::web::error_code::ErrorCode;
-
-use super::super::SharedState;
-use super::super::error::read_state_or_sse;
-use crate::utils::lock::rw_read_or;
 use crate::web::locale::Locale;
+use crate::web::{SearchStatus, SearchTask, SharedState, SourceSearchError};
 
-type BoxedSearchStream =
-    std::pin::Pin<Box<dyn Stream<Item = Result<axum::response::sse::Event, Infallible>> + Send>>;
+/// 搜索任务 TTL（秒）：超时后 `POST /api/search` 会 sweep 掉。
+/// `now_unix_secs()` 返回 i64，这里同型避免每次比较转类型。
+const SEARCH_TTL_SECS: i64 = 600;
 
-/// 在 SSE search handler 入口拿到 poisoned lock 时，把错误以 `result` event
-/// (error 字段) + `done` 形式给前端，避免连接哑断。
-///
-/// `error` 字段是按请求 locale 翻译的 [`ErrorCode::Internal`] 文案
-/// （`WebErrors.internal` —— "Internal server error" / "内部错误" / "內部錯誤"）。
-/// 原始 cause 字符串仅进 `tracing::warn!`，不外泄。
-fn lock_failure_stream(status: u16, msg: &str, locale: &str) -> Sse<BoxedSearchStream> {
-    let reason = ts_for_locale(locale, ErrorCode::Internal.key());
-    tracing::warn!(status, cause = msg, "search SSE state read failed");
-    let stream = async_stream::stream! {
-        let event = SearchEvent {
-            source_id: 0,
-            source_name: String::new(),
-            results: vec![],
-            error: Some(reason),
-        };
-        let data = serde_json::to_string(&event).unwrap_or_default();
-        yield Ok(axum::response::sse::Event::default()
-            .event("result")
-            .data(data));
-        let done = serde_json::to_string(&SearchDoneEvent { total: 0 }).unwrap_or_default();
-        yield Ok(axum::response::sse::Event::default()
-            .event("done")
-            .data(done));
-    };
-    Sse::new(Box::pin(stream))
-}
-
+/// `POST /api/search` 请求体。
 #[derive(Deserialize)]
-pub struct SearchParams {
+pub struct SearchCreateRequest {
     pub keyword: String,
     pub source_id: Option<i32>,
     pub limit: Option<i32>,
 }
 
+/// `POST /api/search` 响应体。
 #[derive(Serialize)]
-struct SearchEvent {
-    source_id: i32,
-    source_name: String,
-    results: Vec<SearchResult>,
-    error: Option<String>,
+pub struct SearchCreateResponse {
+    pub task_id: u64,
 }
 
-#[derive(Serialize)]
-struct SearchDoneEvent {
-    total: usize,
-}
-
-/// 把 [`crate::parser::SearchError`] 映射到稳定的 [`ErrorCode`]。
-///
-/// 与 [`crate::web::error::WebError::code`] 的 `Self::Search(_)` 分支同语义 ——
-/// 抽取出来供 SSE 路径用（不能直接构造 `WebError` + 拿 message，会走 `WebError`
-/// 渲染路径，跟 SSE event schema 不匹配；这里直接拿 key 翻译）。
+/// 把 [`crate::parser::SearchError`] 映射到稳定的 [`ErrorCode`]（沿用旧实现）。
 const fn search_err_code(e: &crate::parser::SearchError) -> ErrorCode {
     use crate::parser::SearchError;
     use ErrorCode as C;
@@ -86,89 +54,145 @@ const fn search_err_code(e: &crate::parser::SearchError) -> ErrorCode {
     }
 }
 
-pub async fn search(
+/// `POST /api/search` — 创建搜索任务。
+///
+/// 校验 keyword → sweep 过期任务 → mint id → 插入 `state.search_tasks` →
+/// spawn crawler（`search_streaming` 持有 tx，消费端循环累计进 task）→ 立即返回 `task_id`。
+pub async fn search_create(
     Locale(locale): Locale,
     State(state): State<SharedState>,
-    Query(params): Query<SearchParams>,
-) -> Sse<BoxedSearchStream> {
-    let keyword = params.keyword.trim().to_string();
-    // SSE handler 直接返 `Sse<...>` 而非 `Result<_, _>`, 不能用 `?` 早返;
-    // 这里用 `match ... { Err(sse) => return sse }` 模式 (跟原 match-IIFE 等价).
-    let config = match read_state_or_sse("search:cfg", locale, lock_failure_stream, || {
+    Json(req): Json<SearchCreateRequest>,
+) -> Result<(StatusCode, Json<SearchCreateResponse>), WebError> {
+    let keyword = req.keyword.trim().to_string();
+    if keyword.is_empty() {
+        return Err(WebError::BadRequest("search_keyword_empty"));
+    }
+    let config = read_state_or_json("search:cfg", || {
         Ok(rw_read_or("search:cfg", &state.config)?.clone())
-    }) {
-        Ok(v) => v,
-        Err(sse) => return sse,
-    };
-    let rules = match read_state_or_sse("search:rules", locale, lock_failure_stream, || {
+    })?;
+    let rules = read_state_or_json("search:rules", || {
         Ok(rw_read_or("search:rules", &state.rules)?.clone())
-    }) {
-        Ok(v) => v,
-        Err(sse) => return sse,
-    };
+    })?;
     let http = Arc::clone(&state.http);
 
-    let sources = core_search::select_sources(&rules, &config, params.source_id);
-
-    // 注意：web 这里只取 query param 的 limit，**不**自动 fallback 到
-    // cfg.source.search_limit —— 这是 web API 的契约（CLI / 桌面会走 fallback，
-    // 见 `core_search::effective_limit`）。保留原行为以免改动前端契约。
-    let limit = params.limit.map(|v| v.max(0) as usize).filter(|v| *v > 0);
-
+    let sources = core_search::select_sources(&rules, &config, req.source_id);
+    let limit = req.limit.map(|v| v.max(0) as usize).filter(|v| *v > 0);
     let cf_bypass = config_helpers::cf_bypass(&config);
 
-    let (tx, rx) =
-        tokio::sync::mpsc::unbounded_channel::<crate::crawler::search::SourceSearchOutcome>();
-
-    let http_clone = Arc::clone(&http);
-    tokio::spawn(async move {
-        crate::crawler::search::search_streaming(
-            http_clone, sources, keyword, limit, cf_bypass, tx,
-        )
-        .await;
-    });
-
-    let stream = async_stream::stream! {
-        let mut rx = rx;
-        let mut total = 0usize;
-        while let Some(outcome) = rx.recv().await {
-            total += 1;
-            let event = match outcome.result {
-                Ok(list) => SearchEvent {
-                    source_id: outcome.source_id,
-                    source_name: outcome.source_name,
-                    results: list,
-                    error: None,
-                },
-                Err(e) => {
-                    // per-source 错误：原 `format!("{e:#}")` 泄漏内部 cause 给前端
-                    // （"HTTP error: 502 Bad Gateway: upstream connect error..."）。
-                    // 改成 ErrorCode → 按 locale 翻译成稳定文案，cause 进日志。
-                    let code = search_err_code(&e);
-                    tracing::warn!(
-                        source_id = outcome.source_id,
-                        cause = %format!("{e:#}"),
-                        key = code.key(),
-                        "search source error"
-                    );
-                    SearchEvent {
-                        source_id: outcome.source_id,
-                        source_name: outcome.source_name,
-                        results: vec![],
-                        error: Some(ts_for_locale(locale, code.key())),
-                    }
-                }
-            };
-            let data = serde_json::to_string(&event).unwrap_or_default();
-            yield Ok(axum::response::sse::Event::default()
-                .event("result")
-                .data(data));
-        }
-        let done = serde_json::to_string(&SearchDoneEvent { total }).unwrap_or_default();
-        yield Ok(axum::response::sse::Event::default()
-            .event("done")
-            .data(done));
+    // sweep 过期 + mint id + 插入
+    let task_id = {
+        let mut tasks = mutex_or("search:sweep", &state.search_tasks)?;
+        let now = now_unix_secs();
+        tasks.retain(|_, t| now.saturating_sub(t.created_at_unix) < SEARCH_TTL_SECS);
+        let mut next = mutex_or("search:next_id", &state.next_search_id)?;
+        let id = *next;
+        *next += 1;
+        drop(next);
+        tasks.insert(
+            id,
+            SearchTask {
+                id,
+                keyword: keyword.clone(),
+                created_at_unix: now,
+                status: SearchStatus::Running,
+                sources_total: sources.len(),
+                sources_done: 0,
+                results: Vec::new(),
+                source_errors: Vec::new(),
+            },
+        );
+        id
     };
 
-    Sse::new(Box::pin(stream))
+    // spawn：crawler 独立子任务持有 tx；外层循环消费 rx 累计进 task。
+    let (tx, rx) = mpsc::unbounded_channel::<crate::crawler::search::SourceSearchOutcome>();
+    let http_for_crawler = Arc::clone(&http);
+    let state_for_spawn = Arc::clone(&state);
+    tokio::spawn(async move {
+        tokio::spawn(async move {
+            crate::crawler::search::search_streaming(
+                http_for_crawler,
+                sources,
+                keyword,
+                limit,
+                cf_bypass,
+                tx,
+            )
+            .await;
+        });
+        let mut rx = rx;
+        while let Some(outcome) = rx.recv().await {
+            let err_msg = match &outcome.result {
+                Ok(_) => None,
+                Err(e) => Some(ts_for_locale(locale, search_err_code(e).key())),
+            };
+            if let Ok(mut tasks) = state_for_spawn.search_tasks.lock() {
+                if let Some(task) = tasks.get_mut(&task_id) {
+                    task.sources_done += 1;
+                    if let Ok(list) = &outcome.result {
+                        task.results.extend(list.iter().cloned());
+                    }
+                    if let Some(msg) = err_msg {
+                        task.source_errors.push(SourceSearchError {
+                            source_id: outcome.source_id,
+                            source_name: outcome.source_name.clone(),
+                            error: msg,
+                        });
+                    }
+                    if task.sources_done >= task.sources_total {
+                        task.status = SearchStatus::Done;
+                    }
+                }
+            }
+        }
+        // crawler 退出（tx drop）→ rx 关闭 → 0 源场景兜底标 done。
+        if let Ok(mut tasks) = state_for_spawn.search_tasks.lock() {
+            if let Some(task) = tasks.get_mut(&task_id)
+                && task.status == SearchStatus::Running
+                && task.sources_total == 0
+            {
+                task.status = SearchStatus::Done;
+            }
+        }
+    });
+
+    Ok((StatusCode::CREATED, Json(SearchCreateResponse { task_id })))
+}
+
+/// `GET /api/search/{task_id}` 响应体（每轮轮询返回当前累计）。
+#[derive(Serialize)]
+pub struct SearchStatusResponse {
+    pub status: SearchStatus,
+    pub total_sources: usize,
+    pub done_sources: usize,
+    pub results: Vec<SearchResult>,
+    pub source_errors: Vec<SourceSearchError>,
+}
+
+/// `GET /api/search/{task_id}` — 轮询当前累计状态。
+pub async fn search_status(
+    State(state): State<SharedState>,
+    Path(task_id): Path<u64>,
+) -> Result<Json<SearchStatusResponse>, WebError> {
+    let tasks =
+        read_state_or_json("search:status", || mutex_or("search:status", &state.search_tasks))?;
+    let Some(task) = tasks.get(&task_id) else {
+        return Err(WebError::NotFound("search_task"));
+    };
+    Ok(Json(SearchStatusResponse {
+        status: task.status,
+        total_sources: task.sources_total,
+        done_sources: task.sources_done,
+        results: task.results.clone(),
+        source_errors: task.source_errors.clone(),
+    }))
+}
+
+/// `DELETE /api/search/{task_id}` — 丢弃搜索任务（幂等，不存在也 204）。
+pub async fn search_delete(
+    State(state): State<SharedState>,
+    Path(task_id): Path<u64>,
+) -> Result<StatusCode, WebError> {
+    mutex_or("search:delete", &state.search_tasks)?.remove(&task_id);
+    Ok(StatusCode::NO_CONTENT)
 }

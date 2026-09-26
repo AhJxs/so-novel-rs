@@ -24,7 +24,7 @@ use std::sync::Arc;
 use axum::Json;
 use axum::extract::{Path, State};
 use serde::Serialize;
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::mpsc;
 
 use crate::core::DownloadTask;
 use crate::crawler::Progress;
@@ -218,10 +218,10 @@ pub async fn task_delete(
 
 /// 单个下载任务的 per-task drain。
 ///
-/// 三件事合一:
+/// 两件事合一:
 /// 1. 单一 mpsc consumer (`crawler_rx`) —— 没人能 race
 /// 2. 状态更新者: lock `state.tasks` → 找对应 id → `task.apply_progress(ev)`
-/// 3. broadcast producer: 把同一事件转发给 SSE subscribers
+///    （任务状态即单源真相，前端轮询 `GET /api/tasks` 读取）
 ///
 /// 退出条件: `crawler_rx.recv()` 返回 `None` (crawler 退出发送端被 drop)。
 /// 退出前若 `finished.is_none()` 标 `AppRestarted` (对齐 GPUI `DownloadTask::drain`
@@ -231,16 +231,15 @@ pub(super) fn spawn_task_drain(
     state: Arc<WebState>,
     task_id: u64,
     mut crawler_rx: mpsc::UnboundedReceiver<Progress>,
-    sse_tx: broadcast::Sender<Progress>,
 ) {
     tokio::spawn(async move {
         while let Some(progress) = crawler_rx.recv().await {
-            // 1. 锁 + 更新 in-memory task; poison 状态跳过 (drain 里没法返 500,
-            //    也不应让 worker panic —— 标记 lost-progress 后继续 SSE 转发)
+            // 锁 + 更新 in-memory task; poison 状态跳过 (drain 里没法返 500,
+            //    也不应让 worker panic —— 丢弃该条 progress)
             match state.tasks.lock() {
                 Ok(mut tasks) => {
                     if let Some(task) = tasks.iter_mut().find(|t| t.id == task_id) {
-                        task.apply_progress(progress.clone());
+                        task.apply_progress(progress);
                     }
                 }
                 Err(e) => {
@@ -249,8 +248,6 @@ pub(super) fn spawn_task_drain(
                     );
                 }
             }
-            // 2. 转发给 SSE subscribers (多 client 并发各自 lagging 互不干扰)
-            let _ = sse_tx.send(progress);
         }
 
         // mpsc 断开: crawler 已退出。若任务还没走到 finished 态, 补 AppRestarted

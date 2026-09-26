@@ -86,22 +86,30 @@ Web 进程会读写以下文件，**全部在 `~/.sonovel/` 下**（用 `ConfigP
 
 ### 搜索 / 书
 
+搜索为**任务轮询**模型：`POST /api/search` 创建内存态搜索任务并立即返回
+`task_id`，前端每 ~800ms 轮询 `GET /api/search/{task_id}` 拿累计结果，
+结束后 `DELETE` 清理（服务端 TTL 10 分钟兜底）。
+
 | Method | Path | 说明 |
 |---|---|---|
 | GET | `/` | 单页前端（HTML） |
-| GET | `/api/search?keyword=&source=&limit=` | 搜索书源 |
+| POST | `/api/search` | 创建搜索任务（body: `{keyword, source_id?, limit?}` → `{task_id}`） |
+| GET | `/api/search/{task_id}` | 轮询搜索状态（`{status, total_sources, done_sources, results, source_errors}`） |
+| DELETE | `/api/search/{task_id}` | 丢弃搜索任务（幂等 204） |
 | GET | `/api/book/detail?url=&source=` | 抓详情页（书名 / 作者 / 简介 / 封面） |
 | GET | `/api/book/toc?url=&source=` | 抓目录（章节列表） |
 
 ### 下载 / 任务
 
+下载同样是任务模型：`POST /api/download` 立即返回 `{task_id}`，进度由
+前端轮询 `GET /api/tasks` 读取（任务持久化在 `tasks.json`）。
+
 | Method | Path | 说明 |
 |---|---|---|
-| POST | `/api/download` | 启动下载任务（body: `{url, source, output, format, from, to}`） |
+| POST | `/api/download` | 启动下载任务（body: `{url, source_id, book_name?, format?, chapter_start?, chapter_end?}` → `{task_id}`） |
 | GET | `/api/tasks` | 列出所有任务（含历史） |
 | POST | `/api/tasks/{id}/cancel` | 取消任务（按 CancelToken） |
-
-下载进度通过 **SSE**（`/api/download` 返回 `text/event-stream`）实时推送。
+| DELETE | `/api/tasks/{id}` | 删除任务**记录**（磁盘文件保留） |
 
 ### 书库
 
@@ -129,7 +137,7 @@ Web 进程会读写以下文件，**全部在 `~/.sonovel/` 下**（用 `ConfigP
 | POST | `/api/auth` | 提交访问码（返回 cookie / session） |
 | POST | `/api/access-code` | 设置访问码（空字符串 = 关闭） |
 
-> 所有 `/api/*` 返回 JSON（除 SSE 端点外）。Session 由 `axum-session` 内存
+> 所有 `/api/*` 返回 JSON。Session 由 `axum-session` 内存
 > 维护（重启 = 重新登录），不持久化。
 
 ---
@@ -284,19 +292,6 @@ server {
     # 推荐：限制上传大小（下载章节请求体不大）
     client_max_body_size 1m;
 
-    # SSE：禁用 proxy buffering 防止进度事件被缓冲
-    location /api/download {
-        proxy_pass http://127.0.0.1:8080;
-        proxy_http_version 1.1;
-        proxy_buffering off;
-        proxy_cache off;
-        proxy_read_timeout 1h;  # 长任务不死连接
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-
     location / {
         proxy_pass http://127.0.0.1:8080;
         proxy_http_version 1.1;
@@ -309,9 +304,9 @@ server {
 ```
 
 关键点：
-- **`/api/download` 关掉 `proxy_buffering`**：SSE 推送必须实时，nginx 默认会
-  缓冲 4KB 才会发给客户端，体感就是"几秒后才看到一批进度"。
-- **`proxy_read_timeout 1h`**：长下载 / 长 session 不被 nginx 主动断。
+- **无 SSE 长连接**：搜索 / 下载都是「建任务 → 轮询 JSON」，无需任何
+  `proxy_buffering` 特殊配置，普通反代即可。
+- **`proxy_read_timeout` 用默认值**（轮询是短请求，不存在长连接被断问题）。
 - **`client_max_body_size 1m`**：限制上传（防滥用）。
 
 ### Caddy
@@ -319,10 +314,7 @@ server {
 ```caddy
 # /etc/caddy/Caddyfile
 sonovel.example.com {
-    reverse_proxy 127.0.0.1:8080 {
-        # SSE 兼容
-        flush_interval -1
-    }
+    reverse_proxy 127.0.0.1:8080
 }
 ```
 
@@ -406,8 +398,8 @@ CORS（反代和 backend 同源），可关。
 
 ### 速率限制 / 滥用
 
-当前**没有**rate-limit。SSE 长连接 + 重复 `/api/search` 都没有限流。
-公网暴露前**自己**在反代层加（如 nginx `limit_req`）。
+当前**没有**rate-limit。搜索任务有 10 分钟 TTL 兜底，但重复 `POST /api/search`
+不会主动限流。公网暴露前**自己**在反代层加（如 nginx `limit_req`）。
 
 ---
 
@@ -417,7 +409,7 @@ CORS（反代和 backend 同源），可关。
 |---|---|---|
 | 容器 `docker logs` 看到 `Bind: address already in use` | 主机端口已被占 | `netstat -tnlp | grep 8080` 改 `--port` 或停冲突进程 |
 | 浏览器 `connection refused` | 容器没起来 / 端口没 publish | `docker ps -a` 看状态 / `docker logs so-novel` |
-| SSE 进度"卡住"几秒才动 | nginx 缓冲了 | `proxy_buffering off` |
+| 搜索一直 `Running` 不结束 | 某书源爬取超时（源级失败会进 `source_errors`） | 等 crawler 超时重试结束，或 `DELETE /api/search/{id}` 丢弃 |
 | 启动报 `config.toml parse failed` | 文件损坏（半截写） | `docker exec -it so-novel rm /home/so-novel/.sonovel/config.toml` 让容器重启时重新生成（**会丢配置**） |
 | 启动报 `permission denied` 在 `/home/so-novel/.sonovel/` | volume 挂载权限不对 | `chown -R 1000:1000 /path/on/host/.sonovel`（uid 1000 = 容器内 so-novel 用户） |
 | 反向代理后 502 Bad Gateway | backend 没起来 / host 错 | `curl http://127.0.0.1:8080` 直连测 |
@@ -450,11 +442,11 @@ docker exec -it so-novel tail -f /home/so-novel/.sonovel/logs/sonovel.$(date +%F
 - Web 实现入口：[`src/web/mod.rs`](../src/web/mod.rs)（`run()` 函数 + `WebState` + 路由）
 - Web 路由：[`src/web/routes.rs`](../src/web/routes.rs)
 - Web 处理器（按文件拆）：[`src/web/handlers/`](../src/web/handlers/)
-  - `search.rs` / `book.rs` — 搜索 / 详情
-  - `download.rs` — 下载任务（SSE 进度）
+  - `search.rs` / `book.rs` — 搜索（任务轮询）/ 详情
+  - `download.rs` — 下载任务（JSON task_id，进度走任务轮询）
   - `library.rs` — 书库（成品文件管理）
   - `misc.rs` — 认证 / 设置 / 书源开关
-- 前端单页（无构建步骤）：[`src/web/static/`](../src/web/static/)
+- 前端单页（React + Vite + shadcn/ui，独立构建）：[`web-ui/`](../web-ui/)
 - CLI 入口 / 模式分发：[`src/main.rs`](../src/main.rs)（`run_web` 函数）
 - Docker：[`Dockerfile`](../Dockerfile)
 - Linux 打包脚本：[`scripts/package-linux.sh`](../scripts/package-linux.sh)

@@ -360,7 +360,189 @@ async fn task_cancel_404_on_unknown_id() {
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 }
 
+// ── /api/download (JSON task_id) ───────────────────────────────────────
+
+#[tokio::test]
+async fn download_returns_task_id_json_and_pushes_task() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let dir = tmp.path();
+    let rules = vec![make_rule(7, "src", "https://example.com", false)];
+    let state = build_test_state_with_rules(dir, rules);
+    let app = build_test_router(Arc::clone(&state)).await;
+
+    let body = serde_json::json!({ "url": "https://example.com/book/1", "source_id": 7 });
+    let resp = dispatch(
+        app,
+        Request::builder()
+            .method("POST")
+            .uri("/api/download")
+            .header("content-type", "application/json")
+            .body(Body::from(serde_json::to_vec(&body).unwrap()))
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(resp.status(), StatusCode::OK);
+    let json = read_json(resp).await;
+    let task_id = json["task_id"].as_u64().expect("task_id present");
+
+    // 任务已入 state.tasks：GET /api/tasks 应能看到该 id
+    let app2 = build_test_router(state).await;
+    let resp = dispatch(
+        app2,
+        Request::builder()
+            .uri("/api/tasks")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    let arr = read_json(resp).await;
+    let ids: Vec<u64> = arr
+        .as_array()
+        .expect("array")
+        .iter()
+        .filter_map(|t| t["id"].as_u64())
+        .collect();
+    assert!(ids.contains(&task_id), "task {task_id} should be listed, got {ids:?}");
+}
+
 // ── /api/library ─────────────────────────────────────────────────────────
+
+// ── /api/search (任务轮询) ────────────────────────────────────────────
+
+#[tokio::test]
+async fn search_create_returns_task_id_then_done_with_zero_sources() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let state = build_test_state_with(tmp.path()); // 空 rules
+    let app = build_test_router(state).await;
+
+    let body = serde_json::json!({ "keyword": "三体" });
+    // dispatch 按值消费 router，后续轮询都传 app.clone()
+    let resp = dispatch(
+        app.clone(),
+        Request::builder()
+            .method("POST")
+            .uri("/api/search")
+            .header("content-type", "application/json")
+            .body(Body::from(serde_json::to_vec(&body).unwrap()))
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    let json = read_json(resp).await;
+    let task_id = json["task_id"].as_u64().expect("task_id present");
+
+    // 空 rules → 0 源 → 后台 spawn 很快标 done。轮询几次等 done。
+    for _ in 0..50 {
+        let resp = dispatch(
+            app.clone(),
+            Request::builder()
+                .uri(format!("/api/search/{task_id}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        let st = read_json(resp).await;
+        assert_eq!(st["total_sources"], 0);
+        if st["status"] == "Done" {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    panic!("search task did not reach Done");
+}
+
+#[tokio::test]
+async fn search_create_rejects_empty_keyword() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let state = build_test_state_with(tmp.path());
+    let app = build_test_router(state).await;
+
+    let body = serde_json::json!({ "keyword": "   " });
+    let resp = dispatch(
+        app,
+        Request::builder()
+            .method("POST")
+            .uri("/api/search")
+            .header("content-type", "application/json")
+            .body(Body::from(serde_json::to_vec(&body).unwrap()))
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn search_status_404_on_unknown_task() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let state = build_test_state_with(tmp.path());
+    let app = build_test_router(state).await;
+    let resp = dispatch(
+        app,
+        Request::builder()
+            .uri("/api/search/99999")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn search_delete_is_idempotent_204() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let state = build_test_state_with(tmp.path());
+    let app = build_test_router(state).await;
+
+    // 先建一个任务
+    let body = serde_json::json!({ "keyword": "test" });
+    let resp = dispatch(
+        app.clone(),
+        Request::builder()
+            .method("POST")
+            .uri("/api/search")
+            .header("content-type", "application/json")
+            .body(Body::from(serde_json::to_vec(&body).unwrap()))
+            .unwrap(),
+    )
+    .await;
+    let task_id = read_json(resp).await["task_id"].as_u64().expect("task_id");
+
+    // 删除 → 204
+    let resp = dispatch(
+        app.clone(),
+        Request::builder()
+            .method("DELETE")
+            .uri(format!("/api/search/{task_id}"))
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+
+    // 再删同一 id → 仍 204（幂等）
+    let resp = dispatch(
+        app.clone(),
+        Request::builder()
+            .method("DELETE")
+            .uri(format!("/api/search/{task_id}"))
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+
+    // 删后 GET → 404
+    let resp = dispatch(
+        app,
+        Request::builder()
+            .uri(format!("/api/search/{task_id}"))
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+}
 
 #[tokio::test]
 async fn library_list_handles_missing_dir_gracefully() {
