@@ -5,7 +5,7 @@
 //! - Cookie：起点 Cookie（**多行 textarea + placeholder** —— 详见 page 注释）
 
 use gpui_kit::component::{
-    AxisExt,
+    AxisExt, Sizable as _,
     input::Textarea,
     setting::{NumberFieldOptions, SettingField, SettingGroup, SettingItem, SettingPage},
 };
@@ -76,8 +76,11 @@ pub(super) fn build(ctx: &PageCtx<'_>, _cx: &App) -> SettingPage {
                             let qidian_cookie_input = ctx.qidian_cookie_input.clone();
                             move |options, _window, _cx| {
                                 let mut el = Textarea::new(&qidian_cookie_input)
-                                    // Textarea 无 `Sizable::with_size`（gpui-kit 0.6）——
-                                    // 高度已由 `.h(px(80.))` 固定，宽度走下方 w_64/w_full。
+                                    // gpui-kit 0.7：`Textarea` 补上了 `Sizable` impl（0.6 没有），
+                                    // 传 `options.size()` 让它跟同页其它设置项的字号 / 内边距对齐。
+                                    // 高度仍由 `.h(px(80.))` 固定（`Textarea` 内部在 `with_size`
+                                    // 之后才 apply `height`，所以 `.h()` 一定生效）。
+                                    .with_size(options.size())
                                     .h(px(80.));
                                 // horizontal layout → 固定 256px；其它 → 占满整行。
                                 // 宽度逻辑和 download_path 保持一致 —— 见 page_general.rs

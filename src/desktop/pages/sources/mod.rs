@@ -370,17 +370,15 @@ impl Render for SourcesPage {
                     .into_any_element()
             })
             // ---- 分页页脚（仅在列表非空时渲染 —— 空态不显示，避免无意义的"第 1 页 / 共 0 条"）----
-            // Sources 通常 < 30 条，page_count=1，prev/next disabled，
-            // 单个数字按钮 "1" 高亮，给用户"完整列表已展示"的视觉锚点。
-            .when(total > 0, |this| {
-                this.child(Pagination::new(
-                    self.current_page,
-                    w.page_count,
-                    cx.listener(|this, &new_page, _window, cx| {
-                        this.current_page = new_page;
-                        cx.notify();
-                    }),
-                ))
-            })
+            // 分页页脚：可见性由 `Pagination` 自己判（不足一页 → `Empty`）。
+            // Sources 通常 < 30 条 → `page_count == 1` → 页脚直接不渲染。
+            .child(Pagination::new(
+                self.current_page,
+                w.page_count,
+                cx.listener(|this, &new_page, _window, cx| {
+                    this.current_page = new_page;
+                    cx.notify();
+                }),
+            ))
     }
 }

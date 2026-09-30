@@ -15,20 +15,22 @@ use super::embedded::{FONT_SIZE_MAX, FONT_SIZE_MIN};
 
 /// 把字号写进全局 `Theme.font_size` 并刷新所有窗口。
 ///
-/// `Root::render` 每帧用 `window.set_rem_size(cx.theme().font_size)` 把主题字号设成
-/// rem 基准, 组件全用 `rems(...)` 缩放, 所以改这一个字段 = 全局等比缩放。
+/// `Root` 的 `WindowState` plugin 每帧 `prepare` 里用
+/// `window.set_rem_size(cx.theme().font_size)` 把主题字号设成 rem 基准,
+/// 组件全用 `rems(...)` 缩放, 所以改这一个字段 = 全局等比缩放。
 ///
-/// `Theme::global_mut` 返回的是 `&mut Theme` 原地改, **不会**触发
-/// `observe_global::<Theme>` observer, 所以必须显式 `cx.refresh_windows()` 让
-/// `Root::render` 重跑拿到新 `rem_size`.
+/// **走 `Theme::update`（0.7.0 新增）而不是 `Theme::global_mut` + `refresh_windows`**:
+/// `update` 是唯一的「事务写」入口 —— 它会把 tokens 与 colors 重新 `reconcile`,
+/// `sync_base` 把改动投影到 gpui-base 层（base 组件读的是投影后的主题）,
+/// 最后 `refresh_windows` 触发整 app 重 render。0.6 时代手动 `global_mut` 不经过
+/// `sync_base`, base 层投影会停留在旧值。
 ///
 /// `size` 会被钳到 `[FONT_SIZE_MIN, FONT_SIZE_MAX]`, 防止配置被手改成越界值后 UI 失控。
 #[tracing::instrument(name = "themes::apply_font_size", skip_all, fields(size))]
 pub fn apply_font_size(size: f32, cx: &mut App) {
     let size = size.clamp(FONT_SIZE_MIN, FONT_SIZE_MAX);
     tracing::Span::current().record("size", size);
-    Theme::global_mut(cx).font_size = px(size);
-    cx.refresh_windows();
+    Theme::update(cx, |theme| theme.font_size = px(size));
 }
 
 /// 解析主题名 → `ThemeConfig`。空串 / 找不到时返回 `None`。
@@ -47,8 +49,21 @@ fn lookup_theme(name: &str, cx: &App) -> Option<Rc<ThemeConfig>> {
 /// - **Dynamic**: `dyn_light` / `dyn_dark` 分别装进两槽 (找不到/空 → registry 默认),
 ///   再按 `dyn_mode` 调 `Theme::change` 选激活槽; `system` 走 `sync_system_appearance` 跟 OS。
 ///
-/// **关键: 双槽都装 + `Theme::change`**, 不能只 `apply_config` 单槽 —— 否则 `Theme::change`
-/// 读的是槽引用, 没装就 fallback 默认主题, 且残留另一槽引用。
+/// **关键: 双槽都装**, 不能只 `apply_config` 单槽 —— 否则 `Theme::change` 读的是槽引用,
+/// 没装就 fallback 默认主题, 且残留另一槽引用。
+///
+/// **写路径必须走 `Theme::update`（gpui-kit 0.7 新增）而不是 `Theme::global_mut`**:
+/// `update` 在闭包执行**前**快照旧 theme, 闭包后再做三件事 ——
+/// 1. `tokens.reconcile(colors, colors_before, tokens_before)` 把 token 与 color 收敛到
+///    同一个值 (主题文件里的 gradient token 会保留: 配置文件同时写了 color + token);
+/// 2. `fonts_changed` 比对**闭包前**的 font 家族, 变了才 `resolve_default_font` ——
+///    0.6 时代先 `global_mut` 再 `Theme::change`, `edit` 快照的是**已经改过**的字号/字体,
+///    于是 `fonts_changed` 恒为 false, 主题自带的字体永远不会被 resolve;
+/// 3. `sync_base` 把改动投影到 gpui-base 层 + `refresh_windows`。
+///
+/// 三件事都只发生在 `Theme::update` / `Theme::change` 的事务写里, 手写 `global_mut`
+/// 会全部跳过。Static 分支因此不再需要额外调一次 `Theme::change` —— `apply_config`
+/// 自己就把 `mode` 切成主题的 mode, 剩下的收尾 `update` 已经做了。
 ///
 /// `window`: 启动 `on_load` 拿不到 → 传 `None` (`cx.window_appearance()` 兜底);
 /// 设置页实时改时传 `Some(window)` 拿到精确 appearance.
@@ -80,13 +95,13 @@ pub fn apply_theme_pref(pref: &ThemePref, window: Option<&mut Window>, cx: &mut 
             });
 
             // 双槽同塞: Static 不区分明暗 —— 切到 Static 后不会被残留槽影响 (之前 Dynamic
-            // 选过的另一 mode 主题残留不会再回来)。
-            let theme = Theme::global_mut(cx);
-            theme.light_theme = cfg.clone();
-            theme.dark_theme = cfg.clone();
-            theme.apply_config(&cfg);
-            // apply_config 已把 mode 设成主题自身 mode; 显式同步一次保证 Theme.mode 一致。
-            Theme::change(cfg.mode, None, cx);
+            // 选过的另一 mode 主题残留不会再回来)。`apply_config` 会把 mode 切成
+            // `cfg.mode`、装载 colors / tokens / 字体 / 圆角。
+            Theme::update(cx, |theme| {
+                theme.light_theme = cfg.clone();
+                theme.dark_theme = cfg.clone();
+                theme.apply_config(&cfg);
+            });
         }
         ThemeKind::Dynamic => {
             let registry = ThemeRegistry::global(cx);
@@ -122,12 +137,12 @@ pub fn apply_theme_pref(pref: &ThemePref, window: Option<&mut Window>, cx: &mut 
                     default_dark
                 });
 
-            // 双槽装好 → Theme::change 内部 apply_config 对应槽。
-            {
-                let theme = Theme::global_mut(cx);
+            // 双槽装好 → 下面的 `Theme::change` / `sync_system_appearance` 内部
+            // `edit(reload_mode = true)` 会 `apply_config` 当前 mode 的那一槽。
+            Theme::update(cx, |theme| {
                 theme.light_theme = light_cfg;
                 theme.dark_theme = dark_cfg;
-            }
+            });
 
             match pref.dyn_mode {
                 ThemeDynMode::System => Theme::sync_system_appearance(window, cx),
@@ -136,10 +151,9 @@ pub fn apply_theme_pref(pref: &ThemePref, window: Option<&mut Window>, cx: &mut 
             }
         }
     }
-
-    // Theme::change / apply_config 都触发窗口刷新, 但 global_mut 改槽引用不触发 observer,
-    // 显式 refresh 兜底。
-    cx.refresh_windows();
+    // 不需要额外的 `cx.refresh_windows()` 兜底: 上面每条路径都以
+    // `Theme::update` / `Theme::change` / `sync_system_appearance` 收尾,
+    // 它们内部都会 `sync_base` + `refresh_windows`。
 }
 
 /// 列出当前可用的所有主题变体名 (按 name 字典序)。

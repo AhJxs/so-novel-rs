@@ -6,8 +6,11 @@
 //! - 右侧内容区: 按 `current_page` 渲染对应 page (`SettingsPage` 用 gpui-kit 组件
 //!   `Settings` 搭)。
 //! - GPUI actions + keybindings: `cmd-1`~`cmd-5` 直接跳, `F6`/`Shift+F6` 循环翻页,
-//!   `cmd-b` 折叠 sidebar; `Escape` 由 `gpui_kit::component::Root` 自动处理顶层覆盖层关闭。
-//! - 顶层覆盖层走 `Root::render_dialog_layer / sheet_layer / notification_layer`。
+//!   `cmd-b` 折叠 sidebar; `Escape` 由 `gpui_kit::base::Root` 自动处理顶层覆盖层关闭。
+//! - 顶层覆盖层 (dialog / sheet / notification / tooltip / menu) 由 `gpui_kit::base::Root`
+//!   上挂载的 `RootPlugin` 自己渲染 (**0.7.0 起不再由应用 view 手动拼 layer** ——
+//!   0.6 的 `Root::render_dialog_layer / render_sheet_layer / render_notification_layer`
+//!   已删除)。所以本 view 只渲染内容, 覆盖层由外层 Root 叠加。
 //!
 //! 子模块:
 //! - [`super::logo`] — sidebar logo 解码 + 渲染
@@ -15,7 +18,7 @@
 //! - [`super::notifications`] — `UIEvent → Notification` 翻译层
 
 use gpui_kit::component::{
-    ActiveTheme as _, Icon, Root, TitleBar, WindowExt as _,
+    ActiveTheme as _, Icon, TitleBar, WindowExt as _,
     sidebar::{Sidebar, SidebarMenu, SidebarMenuItem, SidebarToggleButton},
 };
 use gpui_kit::prelude::FluentBuilder;
@@ -57,7 +60,8 @@ pub struct RootView {
 impl RootView {
     pub fn new(model: Entity<AppModel>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let focus = cx.focus_handle();
-        // gpui-kit 0.6 的 `Window::focus` 签名带 `&mut App`，传 `cx`（Context 自动 deref）。
+        // `Window::focus` 签名是 `(&mut self, &FocusHandle, &mut App)`（0.6 起，
+        // 0.7 未变），传 `cx`（Context 自动 deref 成 `&mut App`）。
         window.focus(&focus, cx);
 
         let library_page = cx.new(|cx| LibraryPage::new(model.clone(), window, cx));
@@ -139,6 +143,10 @@ impl RootView {
             SidebarMenuItem::new(page.label())
                 .icon(Icon::new(page.icon()))
                 .active(active)
+                // gpui-kit 0.7 新增 `accessibility_label`。必须显式设：折叠态
+                // (`Collapsible`) 下菜单项把文字 child 整个摘掉、只剩 icon，
+                // 不显式给标签的话屏幕阅读器读不出这是哪个页面。
+                .accessibility_label(page.label())
                 .on_click(cx.listener(move |this, _: &ClickEvent, _window, cx| {
                     this.navigate(page, cx);
                 }))
@@ -291,9 +299,5 @@ impl Render for RootView {
                     .child(self.render_title_bar(cx))
                     .child(self.render_content(cx)),
             )
-            // Root 的覆盖层: dialog / sheet / notification。
-            .children(Root::render_dialog_layer(window, cx))
-            .children(Root::render_sheet_layer(window, cx))
-            .children(Root::render_notification_layer(window, cx))
     }
 }

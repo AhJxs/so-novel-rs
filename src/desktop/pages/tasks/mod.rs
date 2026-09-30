@@ -25,12 +25,11 @@ mod toolbar;
 use gpui_kit::component::{
     ActiveTheme as _, IconName, WindowExt,
     button::ButtonVariant,
-    dialog::{AlertDialog, Dialog, DialogButtonProps},
+    dialog::{AlertDialog, Dialog},
     list::{List, ListState},
     scroll::ScrollableElement as _,
     v_flex,
 };
-use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     App, AppContext, ClickEvent, Context, Entity, IntoElement, ParentElement, Render, Styled,
     Window, div, px,
@@ -127,12 +126,11 @@ impl TasksPage {
                     "Tasks.delete_dialog.message",
                     &[("book_name", &name_for_ok)],
                 ))
-                .button_props(
-                    DialogButtonProps::default()
-                        .ok_text(ts("Tasks.delete_dialog.confirm_button"))
-                        .cancel_text(ts("Tasks.delete_dialog.cancel_button"))
-                        .ok_variant(ButtonVariant::Danger),
-                )
+                // gpui-kit 0.7：单项 builder 取代整包 `DialogButtonProps`（见
+                // `library/mod.rs` 同处注释，两者上游有等价性测试）。
+                .ok_text(ts("Tasks.delete_dialog.confirm_button"))
+                .cancel_text(ts("Tasks.delete_dialog.cancel_button"))
+                .ok_variant(ButtonVariant::Danger)
                 .confirm()
                 .on_ok(move |_ev: &ClickEvent, _window, cx| {
                     model_for_ok.update(cx, |m, _cx| match m.delete_task(task_id) {
@@ -296,16 +294,14 @@ impl Render for TasksPage {
                     .child(List::new(&self.list_state).p(px(12.)).size_full())
                     .into_any_element()
             })
-            // 分页页脚（仅在列表非空时渲染 —— 空态不显示，避免无意义的"第 1 页 / 共 0 条"）。
-            .when(total > 0, |this| {
-                this.child(Pagination::new(
-                    self.current_page,
-                    w.page_count,
-                    cx.listener(|this, &new_page, _window, cx| {
-                        this.current_page = new_page;
-                        cx.notify();
-                    }),
-                ))
-            })
+            // 分页页脚：可见性由 `Pagination` 自己判（不足一页 → `Empty`）。
+            .child(Pagination::new(
+                self.current_page,
+                w.page_count,
+                cx.listener(|this, &new_page, _window, cx| {
+                    this.current_page = new_page;
+                    cx.notify();
+                }),
+            ))
     }
 }

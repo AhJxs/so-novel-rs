@@ -3,9 +3,22 @@
 # 加载方式：编译期由 crate root 的 `rust_i18n::i18n!("locales")`（见 `src/lib.rs`）
 # 嵌入二进制。刻意**不传** `fallback = "en"` —— rust-i18n 3.x 该参数触发生成代码的
 # E0716 编译错误（见 src/lib.rs 注释）；缺翻译时返回 key 本身，开发期可见漏翻译。
-# 与 gpui_kit::component 自带 `locales/ui.yml` 的实例**不共享**（各自 crate 独立 i18n 实例），
-# 但**全局 locale 是同一个**（`gpui_kit::component::set_locale` 写到全局），
-# 所以一次 set_locale 同时影响两边的翻译。
+# 与 gpui_kit::component 自带 `locales/ui.yml` 的实例**各管各的 key 表**，但两点相连：
+# 1. **全局 locale 是同一个**（`gpui_kit::component::set_locale` 写到全局），
+#    所以一次 set_locale 同时影响两边的翻译；
+# 2. `desktop::run` 在 `component::init` 前调了 `rust_i18n::extend!(gpui_component)`
+#    （gpui-kit i18n 文档要求的顺序），于是**组件查自己的 key 时会先查本文件**的
+#    `gpui_component:` 段，查不到才回落 ui.yml。想在应用侧覆盖/补一条组件文案
+#    （例如某 key 在 zh-TW 缺失），就在下面加：
+#      gpui_component:
+#        Pagination:
+#          previous:
+#            zh-TW: 上一頁
+#    目前没有该段 —— 组件文案全走内置 ui.yml，三种语言都由它自带。
+#    注意方向是单向的：我们自己的 `ts()` / `t!` **不会**读到组件内置翻译。
+#
+# 占位符用**单花括号** `{name}`（本文件 116 处），由 `crate::i18n::ts_fmt` 手动替换；
+# rust-i18n `t!` 的 args 形式（`t!("k", name = v)`）要求 `%{name}`，本项目没用那套。
 #
 # 格式参考 gpui-kit 组件库的 `locales/ui.yml`：
 # - `_version: 2` 顶层

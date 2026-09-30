@@ -13,7 +13,7 @@
 use gpui_kit::component::{
     ActiveTheme as _, AxisExt as _, IconName, Sizable as _, WindowExt as _,
     button::{Button, ButtonVariants as _},
-    dialog::{AlertDialog, DialogButtonProps},
+    dialog::AlertDialog,
     input::Input,
     select::Select,
     setting::{SettingField, SettingGroup, SettingItem, SettingPage},
@@ -445,11 +445,9 @@ fn after_language(_m: &Entity<AppModel>, cx: &mut App) {
                     alert
                         .title(ts("Settings.language_restart_dialog.title"))
                         .description(ts("Settings.language_restart_dialog.message"))
-                        .button_props(
-                            DialogButtonProps::default()
-                                .ok_text(ts("Settings.language_restart_dialog.restart_button"))
-                                .cancel_text(ts("Settings.language_restart_dialog.later_button")),
-                        )
+                        // gpui-kit 0.7：单项 builder 取代整包 `DialogButtonProps`。
+                        .ok_text(ts("Settings.language_restart_dialog.restart_button"))
+                        .cancel_text(ts("Settings.language_restart_dialog.later_button"))
                         .confirm()
                         .on_ok(|_ev, _window, cx| {
                             cx.restart();

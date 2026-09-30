@@ -1,4 +1,4 @@
-//! so-novel-rs — Rust 桌面客户端（gpui-kit 0.6，egui 已完全移除）。
+//! so-novel-rs — Rust 桌面客户端（gpui-kit 0.7，egui 已完全移除）。
 //!
 //! 模块划分：
 //! - `desktop` — 新 GPUI GUI 入口（Stage 1+）,内含 `desktop::model`（业务层，
@@ -52,9 +52,12 @@
 )]
 
 // `rust_i18n::i18n!` 必须在 crate root 调一次 —— 它在 crate root 生成 `_rust_i18n_t`
-// 函数 + locale 表，`t!` 宏和 `rust_i18n::set_locale` 都依赖它。
+// 宏 + `_rust_i18n_try_translate` 查表函数 + locale 表，官方 `t!` 宏和
+// `rust_i18n::set_locale` 都依赖它（`crate::i18n::ts()` 就是包了一层 `t!`）。
 // 组件库（gpui_kit::component）内部也调了一次（加载它自带的 `locales/ui.yml`），两套 i18n
 // 实例各管各的 key 表，但**全局 locale 共享**（同一 `CURRENT_LOCALE`）。
+// `desktop::run` 启动时还会 `rust_i18n::extend!(gpui_component)` 把我们的表接到组件后端上
+// （方向：组件 → 先查 app.yml 的 `gpui_component:` 段 → 再回落 ui.yml）。
 rust_i18n::i18n!("locales");
 
 pub mod cli;

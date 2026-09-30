@@ -26,7 +26,7 @@ const COVER_IMAGES_CAPACITY: NonZeroUsize = match NonZeroUsize::new(32) {
 use gpui_kit::component::{
     ActiveTheme as _, Icon, IconName, Sizable, WindowExt,
     button::{Button, ButtonVariants as _},
-    dialog::{AlertDialog, DialogButtonProps},
+    dialog::AlertDialog,
     h_flex,
     input::{Input, InputEvent, InputState, NumberInputEvent, StepAction},
     list::{List, ListState},
@@ -453,11 +453,8 @@ impl SearchPage {
                 .title(ts("Search.url_download.dialog_title"))
                 .width(px(520.))
                 .child(body)
-                .button_props(
-                    DialogButtonProps::default()
-                        .ok_text(ts("Search.url_download.confirm"))
-                        .cancel_text(ts("Search.url_download.cancel")),
-                )
+                .ok_text(ts("Search.url_download.confirm"))
+                .cancel_text(ts("Search.url_download.cancel"))
                 .confirm()
                 .on_ok(move |_ev, _window, cx| {
                     // OK 后：读 URL → 匹配书源 → 成功则构造 SearchResult 调
@@ -556,11 +553,9 @@ impl SearchPage {
                 .width(px(520.))
                 .child(body)
                 // confirm 模式：OK + Cancel 两按钮。OK 文案"下载"。
-                .button_props(
-                    DialogButtonProps::default()
-                        .ok_text(ts("Search.range.confirm"))
-                        .cancel_text(ts("Search.range.cancel")),
-                )
+                // gpui-kit 0.7：单项 builder 取代整包 `DialogButtonProps`。
+                .ok_text(ts("Search.range.confirm"))
+                .cancel_text(ts("Search.range.cancel"))
                 .confirm()
                 // on_ok 在 Dialog 上（gpui-kit 组件的 DialogButtonProps 无 on_ok 方法）。
                 // 签名 `Fn(&ClickEvent, &mut Window, &mut App) -> bool` —— window 在这层，
@@ -794,16 +789,14 @@ impl Render for SearchPage {
                     .child(List::new(&self.list_state).p(px(12.)).size_full())
                     .into_any_element()
             })
-            .when(total > 0, |this| {
-                // 空态不挂分页（避免"第 1 页 / 共 0 条"无意义提示）。
-                this.child(Pagination::new(
-                    self.current_page,
-                    w.page_count,
-                    cx.listener(|this, &new_page, _window, cx| {
-                        this.current_page = new_page;
-                        cx.notify();
-                    }),
-                ))
-            })
+            // 分页页脚：可见性由 `Pagination` 自己判（不足一页 → `Empty`）。
+            .child(Pagination::new(
+                self.current_page,
+                w.page_count,
+                cx.listener(|this, &new_page, _window, cx| {
+                    this.current_page = new_page;
+                    cx.notify();
+                }),
+            ))
     }
 }

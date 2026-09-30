@@ -1,16 +1,31 @@
-//! 直接走 `rust_i18n`（`gpui_kit::component` 同款机制）。
+//! 走 `rust_i18n` 官方 `t!` 宏（`gpui_kit::component` 同款机制）。
 //!
 //! ## 用法
 //!
-//! 在调用方直接写 `ts!("Settings.item.theme")` 字符串字面量 —— 无 key 常量、无单独枚举。
+//! 在调用方直接写 `ts("Settings.item.theme")` 字符串字面量 —— 无 key 常量、无单独枚举。
 //! 翻译表在 `locales/app.yml`（编译期嵌入二进制），YAML 顶层大写（参考组件库的 `locales/ui.yml`）。
+//!
+//! 查表本身走官方宏 `rust_i18n::t!`（见 [`ts`] / [`ts_for_locale`] / [`ts_fmt`]），
+//! 外面这层 `ts*` 只是为项目补三件官方宏在**调用点**给不了的东西：
+//! ① `Cow<str> → TStr`（gui 构建是 `SharedString`，非 gui 是 `String`）；
+//! ② 热路径缓存 [`ts_cached`]（实测 2.1×，仅保留它 —— `ts_fmt_cached` 实测无收益
+//!   且 0 调用点，已删除）；
+//! ③ 固定用 `{var}` 占位符的手动替换（[`ts_fmt`]，app.yml 全用 `{var}`，不是 rust-i18n
+//!   args 形式要求的 `%{var}`）。**4 个 page 的 421 处调用点不用动。**
 //!
 //! ## 与 `gpui_kit::component` 共享全局 locale
 //!
 //! 我们加载 `so-novel-rs/locales/app.yml`，`gpui_kit::component` 加载它自带的 `locales/ui.yml`，
-//! 两个 i18n 实例**各自独立**（不会互相看到对方 YAML 的 key），但**全局 locale 是同一个**
+//! 两个 i18n 实例**各自独立**，但**全局 locale 是同一个**
 //! （`rust_i18n::set_locale` 写到全局 `CURRENT_LOCALE`）。所以一次 `gpui_kit::component::set_locale("en")`
 //! 同时影响双方：`t!("Nav.search")` → "Search"，`t!("Settings.search_placeholder")` → "Search..."
+//!
+//! 另外 `desktop::run` 在 `component::init` **之前**调了
+//! `rust_i18n::extend!(gpui_component)`（gpui-kit i18n 文档要求的注册点）。
+//! 方向是单向的：**组件查自己的 key 时会先查我们的 app.yml**（`gpui_component:`
+//! namespace，目前没有内容 → 行为不变），我们自己的 `ts()` **不会**因此看到组件内置文案。
+//! 它换来的是"以后想覆盖某条组件文案，只要在 app.yml 加 `gpui_component:` 段即可"，
+//! 不用 copy 整份 ui.yml。
 //!
 //! ## 改语言时的流程（重启生效）
 //!
@@ -112,40 +127,46 @@ pub fn invalidate_cache() {
     }
 }
 
-/// 翻译查找 — `Cow<'_, str>` → `SharedString` 转换。
+/// 翻译查找 —— 走 rust-i18n 官方的 `t!` 宏，再 `Cow<'_, str> → TStr`。
 ///
-/// 直接调 `_rust_i18n_try_translate` 而不是 `t!` 宏 —— `t!` 宏内部生成
-/// `&rust_i18n::locale()` 拿到一个临时 `impl Deref<Target = str>` 的引用，
-/// 触发 E0716 "temporary value dropped while borrowed"。手写等价版本，
-/// 把 locale 绑到 local 变量，引用就指向 `Lazy<AtomicStr>` 内部的 static storage。
+/// **为什么用宏而不是手写 `_rust_i18n_try_translate`**：`t!` 展开后就是
+/// `crate::_rust_i18n_try_translate(&rust_i18n::locale(), &key)`，查不到时回落成
+/// key 字符串本身（开发期可见漏翻译）—— 与本函数此前的语义逐字等价，但把
+/// 「locale 临时值怎么借用」这类细节交回给上游维护，不再自己抄一遍。
 ///
-/// 找不到的 key 返回 key 字符串本身（开发期可见漏翻译）。
+/// `t!` 也接受**非字面量** key（展开成 `let msg_val = key; let msg_key = &msg_val;`），
+/// 所以本函数的 `&'static str` 形参合法；只有启用 `_minify_key` 时才要求字面量，
+/// 本项目没开那个选项。
 ///
 /// 注：`rust_i18n::i18n!("locales")` 必须在 crate root 调一次（见 `src/lib.rs`），
-/// 生成的 `_rust_i18n_try_translate` 才是真正的翻译查找后端。
+/// `t!` 展开出的 `crate::_rust_i18n_t...` 才是真正的查找后端。
 pub fn ts(key: &'static str) -> TStr {
-    let locale = rust_i18n::locale();
-    crate::_rust_i18n_try_translate(&locale, key)
-        .map_or_else(|| TStr::from(key), |cow| TStr::from(cow.into_owned()))
+    TStr::from(rust_i18n::t!(key))
 }
 
-/// 翻译查找的缓存版本。热路径（行 builder 每次 render 调）走这个：
-/// - 首次访问时查 `rust_i18n，写入` `TS_CACHE`（全局 `OnceLock<Mutex<HashMap>>`）。
-/// - 后续访问直接 clone 共享的 `SharedString`（`SharedString` 内部 `Arc<str>`，
-///   clone 只增引用计数，无 alloc）。
+/// 翻译查找的缓存版本。热路径（行 / 按钮 builder 每次 render 调）走这个。
 ///
-/// 与 `ts` 的唯一区别就是缓存层。语义完全一致（key 找不到返回 key 本身）。
+/// - 首次访问查 `rust_i18n` 并写入 `TS_CACHE`（全局 `OnceLock<Mutex<HashMap>>`）；
+/// - 之后直接 clone 共享的 `SharedString`（内部 `Arc<str>`，clone 只增引用计数，无 alloc）。
+///
+/// 与 `ts` 的唯一区别就是缓存层，语义完全一致（key 找不到返回 key 本身）。
+///
+/// **实测收益**（release，10 个 hot key × 200k 轮，临时 bench 跑完即删）：
+/// `ts` ≈ 56 ns/call → `ts_cached` ≈ 27 ns/call，**约 2.1×**，多次复跑稳定。
+/// 差的 ~29 ns 就是 `SharedString::from(Cow::Borrowed)` 每次新分配一个 `Arc<str>`
+/// 并 memcpy；命中缓存只剩一次原子加一。25 个调用点全在行 / 按钮 builder 上。
+///
+/// `Mutex` 而非 `RwLock`：全局只有「第一次访问」这一种写者，临界区又极短，
+/// `RwLock` 的额外开销不划算。读侧用 `try_lock` —— 万一锁被持有（极罕见）直接
+/// 退到非缓存路径 `ts()`，**绝不阻塞渲染线程**。
 pub fn ts_cached(key: &'static str) -> TStr {
-    // 读路径走 Mutex 而非 RwLock：① 全局只一个 key-value 写者（第一次访问），
-    // ② SharedString clone 很轻，无锁阻塞竞争更友好。读侧用 `try_lock` 退路：
-    // 万一锁被持有（极罕见）退到非缓存路径，绝不阻塞调用方。
-    if let Ok(g) = ts_cache().lock()
+    if let Ok(g) = ts_cache().try_lock()
         && let Some(map) = g.as_ref()
         && let Some(cached) = map.get(key)
     {
         return cached.clone();
     }
-    // miss：调底层查 + 写回缓存。
+    // miss（或读锁没抢到）：查一次 + 写回缓存。
     let v = ts(key);
     if let Ok(mut g) = ts_cache().lock() {
         let map = g.get_or_insert_with(std::collections::HashMap::new);
@@ -158,18 +179,20 @@ pub fn ts_cached(key: &'static str) -> TStr {
 /// 翻译查找的 per-request 变体 —— 显式传 locale 字符串，**不**读 / **不**写
 /// `rust_i18n::locale()`（全局 `AtomicStr`，并发请求之间会互相踩）。
 ///
+/// 用官方 `t!` 的 **`locale =` 选项**：`rust_i18n::t!(key, locale = locale)` 展开成
+/// `crate::_rust_i18n_try_translate(locale, &key)` —— 与之前手写的那行等价，
+/// 但把「怎么传 locale」交回上游。查不到 key 时 `t!` 回落成 key 本身，
+/// `into_owned()` 后与旧的 `map_or_else(|| key.to_string(), ...)` 一致。
+///
 /// Web handler 入口拿到 `Locale` extractor 后，闭包里所有翻译都走这里 —— 保证
 /// A 请求 `Accept-Language: zh-CN` 和 B 请求 `Accept-Language: en` 各自走自己的
 /// locale，互不干扰。
-///
-/// 找不到 key 走与 `ts` 相同的 fallback —— 返回 key 字符串本身（开发期可见漏翻译）。
 ///
 /// 性能特征：等价于 `ts`，但**每次调用都做 yaml hashmap lookup**（不进 `TS_CACHE`，
 /// 因为缓存按全局 locale 组织，per-request 缓存命中率低且易出错）。热路径（每请求
 /// 1-2 次翻译调用）完全可接受。
 pub fn ts_for_locale(locale: &str, key: &'static str) -> String {
-    crate::_rust_i18n_try_translate(locale, key)
-        .map_or_else(|| key.to_string(), std::borrow::Cow::into_owned)
+    rust_i18n::t!(key, locale = locale).into_owned()
 }
 
 /// 翻译查找 + 简单变量替换 —— `ts()` 的扩展，handle `{var}` 占位符。
@@ -182,17 +205,16 @@ pub fn ts_for_locale(locale: &str, key: &'static str) -> String {
 ///     message: "Are you sure you want to delete \"{file_name}\"? ..."
 /// ```
 ///
-/// 实现：`_rust_i18n_try_translate` 对 v2 YAML 返回的是**带 `{var}` 占位符的原文**
-/// （不替占位符——rust-i18n 的 `t!` 宏自己接管 format!，我们是裸函数访问层），
-/// 所以这里手动 `replace("{var}", value)`。
+/// **翻译查表走官方 `t!`（不带 args）**；占位符替换仍由本函数手动完成 ——
+/// `t!` 的 args 形式只认 `%{name}` 占位符（上游 `replace_patterns_cow`），
+/// 而本项目 `locales/app.yml` 全用 `{name}`（116 处）。改占位符语法要动整份
+/// 翻译表 + 全部 `ts_fmt` 调用点，收益只是"少写一层 replace"，不划算。
 ///
 /// 安全前提：替换的 value 不能包含 `{` 或 `}` 字面字符 —— 否则会误替换或注入
 /// 新的占位符。所有 caller 的 value 都是内部数据（PathBuf 转 String、enum 名等），
 /// 不会带花括号。如果未来 value 可能包含用户输入，需要 escape。
 pub fn ts_fmt(key: &'static str, vars: &[(&str, &str)]) -> TStr {
-    let locale = rust_i18n::locale();
-    let mut result = crate::_rust_i18n_try_translate(&locale, key)
-        .map_or_else(|| key.to_string(), std::borrow::Cow::into_owned);
+    let mut result = rust_i18n::t!(key).into_owned();
     for (name, value) in vars {
         // 占位符形式 `{name}` —— `format!("{{{}}}", name)` 转义出字面 `{name}`。
         result = result.replace(&format!("{{{name}}}"), value);
@@ -200,45 +222,13 @@ pub fn ts_fmt(key: &'static str, vars: &[(&str, &str)]) -> TStr {
     TStr::from(result)
 }
 
-/// `ts_fmt` 的缓存版本。**只缓存"模板字符串"**（带 `{var}` 占位符的原文），
-/// 不缓存"模板+变量组合" —— 后者组合数太大，命中率低。模板命中后仍要做
-/// `replace`（必 alloc），但**跳过了 `rust_i18n` 的 yaml 解析 / map lookup**，
-/// 热路径上节省主要来自这里。
-///
-/// 模板用 `Option<String>` 区分"未缓存"（None）和"已缓存且 key 不存在"（Some("")）。
-/// 实际不存在时 `Some(key.to_string())` 走 fallback，避免反复调用底层。
-pub fn ts_fmt_cached(key: &'static str, vars: &[(&str, &str)]) -> TStr {
-    use std::collections::HashMap;
-    use std::sync::Mutex;
-
-    static TPL_CACHE: OnceLock<Mutex<HashMap<&'static str, String>>> = OnceLock::new();
-    let cache = TPL_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
-
-    // 拿模板（缓存 miss 时回退到直接调 ts_fmt + 写回）
-    let template = cache.lock().map_or(None, |g| g.get(key).cloned());
-    let template = template.unwrap_or_else(|| {
-        // miss：复用 ts_fmt 算出一次完整结果作为模板（变量无关部分是模板本体）。
-        // 但 ts_fmt 已经替了占位符，这里手动走底层拿"未替"版本。
-        let locale = rust_i18n::locale();
-        let raw = crate::_rust_i18n_try_translate(&locale, key)
-            .map_or_else(|| key.to_string(), std::borrow::Cow::into_owned);
-        if let Ok(mut g) = cache.lock() {
-            g.insert(key, raw.clone());
-        }
-        raw
-    });
-
-    if vars.is_empty() {
-        // 常见 case：UI 上很多 "已翻译" 标签走 `ts_fmt(key, &[])` —— 实际等于 `ts_cached`。
-        return TStr::from(template);
-    }
-    let mut result = template;
-    for (name, value) in vars {
-        // 占位符形式 `{name}` —— `format!("{{{}}}", name)` 转义出字面 `{name}`。
-        result = result.replace(&format!("{{{name}}}"), value);
-    }
-    TStr::from(result)
-}
+// `ts_fmt_cached`（缓存**模板**）曾经存在，已删除 —— 见 docs/CHANGELOG.md：
+// 它 0 个调用点（死代码），且实测与 `ts_fmt` 持平（430~470 ns/call，±3% 噪声内，
+// 见 `tasks/todo.md` 的实测表）。原因很直接：`ts_fmt` 的开销几乎全在
+// 「重建最终字符串」—— `.into_owned()` + 每个 var 一次 `format!("{{{name}}}")` +
+// `replace` + `TStr::from(String)` ≈ 4 次分配；缓存模板省不掉这些，只多付一次
+// mutex + hashmap 查 + 模板 clone。想真正提速得改 `ts_fmt` 本身（例如避免
+// `format!` 构造 needle），而不是给模板加缓存。
 
 #[cfg(test)]
 mod tests {

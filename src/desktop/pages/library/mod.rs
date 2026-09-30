@@ -5,7 +5,10 @@
 //! - 工具栏：文件名过滤输入 + 文件类型按钮组（不在 State 里实现 —— 切语言即时更新）。
 //! - 列表：`gpui_kit::component::list::List`（虚拟滚动）+ `LibraryDelegate`，每页 30 条（5 列：文件名 /
 //!   格式 / 大小 / 修改时间 / 3 动作）。
-//! - 分页页脚自写（gpui-kit 组件库当时没有 Pagination 组件），≤1 页时整段隐藏。
+//! - 分页页脚走 `components::Pagination`（薄封装 gpui-kit 组件库的
+//!   `component::pagination::Pagination`）。**可见性由组件自己判**：不足一页
+//!   （条目 ≤ `PAGE_SIZE`）渲染 `Empty` 隐藏；超过一页则按组件库默认样式
+//!   渲染页码 + 省略号下拉。
 //! - **没有文件 watcher** —— 列表只在「首次进入 / 下载目录变化」时自动扫一次，
 //!   其余情况靠 `PageHeader` 右上角「刷新」按钮手动触发。
 //! - 删除走 `WindowExt::open_dialog` 二次确认 → `model.delete_library_entry` → `entries_version`
@@ -21,7 +24,6 @@ use gpui_kit::component::{
     ActiveTheme as _, Disableable as _, Icon, IconName, WindowExt,
     button::{Button, ButtonVariant},
     dialog::AlertDialog,
-    dialog::DialogButtonProps,
     input::{InputEvent, InputState},
     list::List,
     list::ListState,
@@ -144,13 +146,16 @@ impl LibraryPage {
                     "Library.delete_dialog.message",
                     &[("file_name", &file_name)],
                 ))
-                .button_props(
-                    DialogButtonProps::default()
-                        .ok_text(ts("Library.delete_dialog.confirm_button"))
-                        .cancel_text(ts("Library.delete_dialog.cancel_button"))
-                        .ok_variant(ButtonVariant::Danger),
-                )
-                // gpui-kit 0.6：`.confirm()` 是 AlertDialog 的方法（show_cancel=true）。
+                // gpui-kit 0.7：按钮文案 / variant 直接用 AlertDialog 上的
+                // `ok_text` / `cancel_text` / `ok_variant` 单项 builder —— 0.6 时代
+                // 只能整包传 `DialogButtonProps::default().xxx(...)`（0.7 里
+                // `.button_props()` 仍可编译，但单项 builder 更清晰，且上游测试
+                // `the_direct_builders_match_button_props` 保证两者等价）。
+                // 调用顺序无关：`confirm()` 只写 show_cancel，不会覆盖已设的文案。
+                .ok_text(ts("Library.delete_dialog.confirm_button"))
+                .cancel_text(ts("Library.delete_dialog.cancel_button"))
+                .ok_variant(ButtonVariant::Danger)
+                // `.confirm()` 是 AlertDialog 的方法（show_cancel=true）。
                 .confirm()
                 .on_ok(move |_ev: &ClickEvent, _window, cx| {
                     model_for_ok.update(cx, |m, _cx| {
@@ -318,16 +323,15 @@ impl Render for LibraryPage {
                     .child(List::new(&self.list_state).p(px(12.)).size_full())
                     .into_any_element()
             })
-            .when(total > 0, |this| {
-                // 空态不挂分页（避免"第 1 页 / 共 0 条"无意义提示）。
-                this.child(Pagination::new(
-                    self.current_page,
-                    w.page_count,
-                    cx.listener(|this, &new_page, _window, cx| {
-                        this.current_page = new_page;
-                        cx.notify();
-                    }),
-                ))
-            })
+            // 分页页脚：可见性由 `Pagination` 自己判（列表条目 ≤ `PAGE_SIZE`
+            // 即不足一页 → 渲染 `Empty`），caller 不用再 `when`。
+            .child(Pagination::new(
+                self.current_page,
+                w.page_count,
+                cx.listener(|this, &new_page, _window, cx| {
+                    this.current_page = new_page;
+                    cx.notify();
+                }),
+            ))
     }
 }

@@ -50,7 +50,7 @@
 
 | 领域 | 选型 |
 |------|------|
-| 🎨 GUI | [gpui-kit 0.6](https://crates.io/crates/gpui-kit)（底层 [GPUI](https://gpui.rs) + 组件库 [gpui-component](https://github.com/longbridge/gpui-component)） |
+| 🎨 GUI | [gpui-kit 0.7](https://crates.io/crates/gpui-kit)（底层 [GPUI](https://gpui.rs) ） |
 | ⚡ 异步 | [tokio 1](https://tokio.rs) (rt-multi-thread) |
 | 🌐 HTTP | [reqwest 0.13](https://docs.rs/reqwest) (rustls，无 OpenSSL) |
 | 🔍 HTML 解析 | scraper 0.27 + regex |
