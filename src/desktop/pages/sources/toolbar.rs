@@ -1,11 +1,8 @@
 //! Sources 页工具栏：名字过滤 Input + 活跃书源文件下拉 + 3-Button 状态过滤组。
 //!
-//! 状态过滤（全部 / 启用 / 禁用）：不走 SelectState（持有 options 翻译字段，切语言失效）。
-//! 改用 3 个 Button，label 在 render 里现取 `ts(...)`，切语言自动同步。
-//! 状态用 `selected` style 标记，存的是 enum 不带翻译。
-//!
-//! 名字过滤：placeholder 在 `InputState` 上（gpui-kit 组件 API 限制），
-//! 切语言靠 `mod.rs` 顶部的 sentinel + `set_placeholder` 实时刷新。
+//! 状态过滤不走 SelectState（options 的翻译字段冻在 state 里，切语言失效），改用
+//! 3 个 Button：label 在 render 里现取 `ts(...)`，`selected` style 标记当前项。
+//! 名字过滤的 placeholder 只能设在 `InputState` 上，见 `mod.rs` 里的 sentinel 刷新。
 
 use gpui_kit::component::{
     ActiveTheme as _, Icon, IconName, Selectable, Sizable,
@@ -38,7 +35,6 @@ pub(super) fn render(
                     .text_color(cx.theme().muted_foreground),
             ),
         )
-        // 活跃书源文件下拉框
         .child(
             h_flex()
                 .gap_2()

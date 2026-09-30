@@ -1,4 +1,4 @@
-//! `SearchDelegate`: `gpui_kit::component::list::List` 的 delegate，持有 page handle + 当前页 (index, `SearchResult`)。
+//! `SearchDelegate`: `gpui_kit::component::list::List` 的 delegate，持有 page handle + 当前页条目。
 
 use gpui_kit::component::list::{ListItem, ListState};
 use gpui_kit::component::{ActiveTheme as _, IndexPath, list::ListDelegate};
@@ -9,20 +9,16 @@ use crate::models::SearchResult;
 use super::SearchPage;
 use super::result_row;
 
-/// `gpui_kit::component::list::List` 的 delegate —— 把当前过滤下的 (index, `SearchResult`) 列表渲染成行。
+/// `List` 的 delegate —— 把当前页的 (index, `SearchResult`) 渲染成行。
 ///
-/// 完全对齐 `library::LibraryDelegate` / `tasks::TasksDelegate` / `sources::SourcesDelegate` 模式：
-/// - `page_items` 由 `SearchPage::render` 在每帧 render 前写入；`render_item` 直接取。
-/// - 持有 `Entity<SearchPage>` handle 以便 row 内的详情/选章/全本按钮 → page 转发。
-/// - 选中态交给 `ListItem::selected(...)` + `set_selected_index` 配对管理。
+/// 与 library / tasks / sources 的 delegate 同模式：`page_items` 由 `SearchPage::render`
+/// 每帧写入，`render_item` 直接取；选中态由 `ListItem::selected` + `set_selected_index` 配对管。
 pub(super) struct SearchDelegate {
-    /// 当前页要展示的条目，每条带"全局序号"（在完整 results 列表里的 0-based 位置）。
-    /// 跨分页连续：page 0 → 0..29，page 1 → 30..59，等等。显示时 +1 变 1-based。
+    /// 当前页条目，每条带全局 0-based 序号（跨分页连续）。显示时 +1。
     pub(super) page_items: Vec<(usize, SearchResult)>,
-    /// 当前选中项。`None` = 未选中。`set_selected_index` 写入，`render_item` 读出来
-    /// 给 `ListItem::selected(...)` 用。
+    /// 当前选中项，`None` = 未选中。
     pub(super) selected_index: Option<IndexPath>,
-    /// 拿 `SearchPage` handle 用于按钮 `on_click` → 转发回 page。
+    /// 给按钮 `on_click` 转发回 page 用。
     pub(super) page: Entity<SearchPage>,
 }
 

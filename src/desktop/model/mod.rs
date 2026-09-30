@@ -1,13 +1,7 @@
 //! 应用状态、状态结构体、业务方法集合。
 //!
-//! 拆分子模块：
-//! - `search_state` / `library_state` / `sources_state` / `update_state` — 4 个页面状态结构体
-//! - `cover` — UI 辅助（封面字节解码 + URI 生成）
-//! - `runtime` — 自由辅助
-//! - `crate::desktop::model::ops::download` / `crate::desktop::model::ops::search` / `crate::desktop::model::ops::sources` / `crate::desktop::model::ops::library` / `crate::desktop::model::ops::update` / `crate::desktop::model::ops::settings` — 业务方法
-//!
-//! 入口：`AppModel` 持有所有状态 struct 实例，UI 中立（不依赖任何 GUI 框架）。
-//! 后台通道排空 + UI 重绘触发由 `crate::desktop::model::events` 负责。
+//! - `*_state` — 各页面状态结构体; `ops/*` — 跨状态业务方法; `events` — 后台通道排空。
+//! - 入口 `AppModel` 持有所有状态 struct 实例, **UI 中立**（不依赖任何 GUI 框架）。
 
 mod cover;
 mod download;
@@ -59,7 +53,7 @@ use crate::models::Rule;
 use events::{WakeupHandle, WakeupReceiver};
 use ops::OpsCtx;
 
-/// 应用整体状态。UI 中立结构 —— 不依赖任何 GUI 框架，由 `desktop` 层渲染。
+/// 应用整体状态。UI 中立 —— 不依赖任何 GUI 框架, 由 `desktop` 层渲染。
 pub struct AppModel {
     pub paths: ConfigPaths,
     pub config: AppConfig,
@@ -69,79 +63,42 @@ pub struct AppModel {
 
     /// 书源配置：活跃文件选择 + 禁用列表。
     pub sources_config: SourcesConfig,
-
-    /// 后台任务运行时。所有 spawn 都走它。
-    /// 通过 `Box::leak` 得到 `&'static Runtime`，永不 drop ——
-    /// 见 `build_shared_runtime` 注释，规避 Runtime drop panic。
     pub runtime: &'static Runtime,
 
-    /// 共享 HTTP client 集合。一次性构造，跨所有爬取任务复用
-    /// 连接池 + TLS session cache —— 改 proxy / `unsafe_ssl` 时
-    /// `HttpClients::rebuild_proxy` 会整体替换实例。
+    /// 共享 HTTP client 集合。复用连接池 + TLS session cache; 改 proxy / `unsafe_ssl` 时
+    /// `HttpClients::rebuild_proxy` 整体替换实例。
     pub http: Arc<HttpClients>,
 
-    /// 搜索下载页状态。
     pub search: SearchState,
 
     /// 活动 / 已完成的下载任务。最新加在末尾。
     pub tasks: Vec<DownloadTask>,
     next_task_id: u64,
 
-    /// 本地书库状态（首次进入 Library 页时延迟扫描）。
     pub library: LibraryState,
 
     /// 书源管理页状态（连通性检测结果）。
     pub sources_state: SourcesState,
-
-    /// 版本更新检查状态。
     pub update_state: UpdateState,
 
-    /// 业务层 → UI 层的 [`UIEvent`] 队列（notification toast + 可点击 `OpenLink`）。
-    ///
-    /// `events::drain` 跑在 `AsyncApp::update_entity` 闭包里，**拿不到 `&mut Window`**；
-    /// 而 `WindowExt::push_notification` 必须 `&mut Window` + `&mut App`。
-    /// 解法：drain 把构造好的 [`UIEvent`] 推到这个 Vec，由 `RootView::render`（拿得到
-    /// `&mut Window`）排空 + 翻译成 `gpui_kit::component::notification::Notification` 再
-    /// 真正 push 到 UI。
-    ///
-    /// 为什么用 plain enum：`app/` 想保持 UI 框架解耦（CLAUDE.md 明确要求）；`UIEvent`
-    /// 是业务层 → UI 层的事件桥，零 GUI 依赖（不 import `gpui_kit`）。
+    /// 业务层 → UI 层的 [`UIEvent`] 队列, 由 `RootView::render` 排空并翻译成 notification。
     pub(crate) pending_ui_events: Vec<UIEvent>,
 
-    /// 列表渲染缓存（Library / Search / Tasks 三页共用）。
-    /// 详见 `crate::desktop::model::list_cache`。
     pub list_cache: ListCache,
-
-    /// 后台 → `drain_loop` 的唤醒信号 sender。后台 producer 写入新数据时
-    /// `notify()` 一下，让 `drain_loop` 立刻醒过来排空 + notify()，不必等
-    /// 100ms 兜底。详见 `crate::desktop::model::events::WakeupHandle`。
     pub wakeup: WakeupHandle,
 }
 
 impl AppModel {
-    /// UI 中立的构造函数。返回 `Result`：初始化失败时（极少见），调用方应
-    /// 捕获并向用户展示致命错误（如 `rfd::MessageDialog`），不要 panic。
-    ///
-    /// 内部走 [`Self::new_with_wakeup`] 并丢弃 receiver ——
-    /// 无主动唤醒通路，纯 100ms 兜底 tick。需要 wakeup 的调用方请直接用
-    /// `new_with_wakeup`。
+    /// 构造函数。失败时调用方应向用户展示致命错误, 不要 panic。
     pub fn new() -> Result<Self> {
         Ok(Self::new_with_wakeup()?.0)
     }
 
-    /// 构造 `AppModel` + 配套的 `WakeupReceiver`（主构造函数）。
-    ///
-    /// 调用方（`desktop::run`）拿到 `WakeupReceiver` 后传给 `drain_loop`，
-    /// wakeup 通路才生效：后台 producer 写入新数据时 `notify()`，`drain_loop`
-    /// 立刻醒来排空，不必等 100ms 兜底。
+    /// 构造 `AppModel` + 配套的 `WakeupReceiver`。
     pub fn new_with_wakeup() -> Result<(Self, WakeupReceiver)> {
-        // Phase 3.3：启动期公共资源（paths / config / sources_config / rules / http）
-        // 统一收敛到 `core::bootstrap::load_context`，三端共享同一套兜底矩阵。
-        // 加载失败 `load_context` 已 `tracing::warn!` + 兜底默认；desktop 的
-        // `config_load_error` / `rule_load_error` 字段保留为 `None`，因为
-        // load_context 不再向上抛错误（旧版用 Option<String> 是为了在 UI 上
-        // 弹错误条 —— 现在 swallow + log 已经能覆盖同样诊断目的，且不污染
-        // web/cli 简单调用）。
+        // 启动期公共资源 (paths / config / sources_config / rules / http) 统一走
+        // `core::bootstrap::load_context`; 它加载失败时只 `tracing::warn!` + 兜底默认,
+        // 所以 `config_load_error` / `rule_load_error` 保持 `None`。
         let ctx = load_context();
         let paths = ctx.paths;
         let config = ctx.config;
@@ -178,36 +135,28 @@ impl AppModel {
         Ok((model, rx))
     }
 
-    /// 内部：把一条 [`UIEvent`] 推入待处理队列。语义见 [`Self::pending_ui_events`]。
+    /// 内部：把一条 [`UIEvent`] 推入待处理队列。
     fn push_event(&mut self, ev: UIEvent) {
         self.pending_ui_events.push(ev);
     }
 
-    /// 推一条 info 级通知。语义见 [`Self::pending_ui_events`]。
     pub fn push_info(&mut self, msg: impl Into<String>) {
         self.push_event(UIEvent::Info(msg.into()));
     }
 
-    /// 推一条 success 级通知。语义见 [`Self::pending_ui_events`]。
     pub fn push_success(&mut self, msg: impl Into<String>) {
         self.push_event(UIEvent::Success(msg.into()));
     }
 
-    /// 推一条 warning 级通知。语义见 [`Self::pending_ui_events`]。
     pub fn push_warning(&mut self, msg: impl Into<String>) {
         self.push_event(UIEvent::Warning(msg.into()));
     }
 
-    /// 推一条 error 级通知。语义见 [`Self::pending_ui_events`]。
     pub fn push_error(&mut self, msg: impl Into<String>) {
         self.push_event(UIEvent::Error(msg.into()));
     }
 
-    /// 推一条**可点击**通知 —— 用户点 toast 时调 `cx.open_url(url)`（浏览器开链接）。
-    ///
-    /// 例：版本检查"有新版本"toast，message 显示 "有新版本 v0.3.0"，点击 → 跳
-    /// `https://github.com/AhJxs/so-novel-rs/releases/latest`。`on_click` 在
-    /// `desktop::root::ui_event_to_notification` 翻译层挂上。
+    /// 推一条**可点击**通知 —— 用户点 toast 时调 `cx.open_url(url)`。
     pub fn push_open_link(&mut self, msg: impl Into<String>, url: impl Into<String>) {
         self.push_event(UIEvent::OpenLink {
             message: msg.into(),
@@ -222,8 +171,6 @@ impl AppModel {
             config: &self.config,
             http: Arc::clone(&self.http),
             runtime: self.runtime,
-            // 共享 `&self.wakeup` —— `WakeupHandle::Clone` 是 cheap 的 Sender
-            // 克隆，prod ucer 拿到的 sender 写入会直接唤醒 drain_loop。
             wakeup: &self.wakeup,
         }
     }

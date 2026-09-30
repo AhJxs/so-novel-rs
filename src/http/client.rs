@@ -1,12 +1,8 @@
 //! reqwest 客户端工厂。对应 Java `core.OkHttpClientFactory`。
 //!
-//! 设计：
-//! - **rustls** 替代 OpenSSL，避免在 Windows/CI 上引入 C 依赖；
-//! - 默认跟随重定向、复用连接池、给所有请求加 `Accept-Language: zh-CN,zh;q=0.9,en;q=0.8`
-//!   （等价 Java 端 `OkHttpClientFactory` 的拦截器行为）；
-//! - 代理与 SSL 跳过通过 `ClientOptions` 控制；
-//! - 仅提供 **async** client（`build_async_client`），blocking 路径已移除
-//!   （reqwest blocking 在 tokio `spawn_blocking` 里 drop 会 panic）。
+//! - **rustls** 替代 OpenSSL，避免 Windows/CI 上引入 C 依赖；
+//! - 默认跟随重定向、复用连接池、加 `Accept-Language: zh-CN,zh;q=0.9,en;q=0.8`；
+//! - 只提供 async client：blocking 版在 tokio `spawn_blocking` 里 drop 会 panic。
 
 use std::time::Duration;
 
@@ -16,21 +12,18 @@ use crate::config::AppConfig;
 #[cfg(test)]
 use crate::config::ProxyCfg;
 
-/// 控制 client 行为的小结构。
-///
-/// 与 Java 端 `OkHttpClientFactory.create(AppConfig, unsafe)` 等价：
-/// - `unsafe_ssl`：关闭 SSL 校验，针对老书源（rate-limit.json 里 `0xs.net`
-///   的 `ignoreSsl: true`）。
+/// 控制 client 行为的小参数。`unsafe_ssl` 用于关闭 SSL 校验的老书源
+/// （rate-limit.json 里 `0xs.net` 的 `ignoreSsl: true`）。
 #[derive(Debug, Clone, Default)]
 pub struct ClientOptions {
     pub unsafe_ssl: bool,
 }
 
-/// 默认连接/读写超时（秒）。Java 端 `OkHttpClientFactory.TIMEOUT = 10`。
+/// 默认连接/读写超时（秒）。
 const DEFAULT_TIMEOUT_SECS: u64 = 10;
 
-/// 构造一个 async reqwest Client。共用 tokio runtime，**不**创建嵌套 runtime，
-/// 适合在 `tokio::spawn` 内部直接 `.await`。
+/// 构造 async reqwest Client。共用当前 tokio runtime，**不**创建嵌套 runtime，
+/// 可在 `tokio::spawn` 内部直接 `.await`。
 pub fn build_async_client(cfg: &AppConfig, opts: &ClientOptions) -> Result<reqwest::Client> {
     let mut builder = reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(DEFAULT_TIMEOUT_SECS))
@@ -95,21 +88,15 @@ mod tests {
         let _client = build_async_client(&cfg, &opts).unwrap();
     }
 
-    /// 端到端：开本地 TCP listener 当 mock proxy，跑 `build_async_client`
-    /// 走一次真实 HTTP GET，断言：
-    /// 1) 客户端成功拿到 200；
-    /// 2) **请求确实打到了 mock proxy**（HTTP 代理模式下 reqwest 把完整 URL
-    ///    写进请求行，如 `GET http://example.com/ HTTP/1.1`，不打到目标主机，
-    ///    直接打到 proxy）。
-    /// 这才能证明 `cfg.proxy.proxy_enabled=true` 不只是"URL 解析没报错"，而是真的把
-    /// 流量走了代理。
+    /// 端到端：开本地 TCP listener 当 mock proxy，断言请求**确实打到 proxy**
+    /// （HTTP 代理模式下 reqwest 把完整 URL 写进请求行，不打到目标主机）。
+    /// 这才能证明 `proxy_enabled=true` 不是只"URL 解析没报错"。
     #[tokio::test]
     async fn proxy_enabled_actually_routes_traffic_through_proxy() {
         use std::sync::{Arc, Mutex};
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
         use tokio::net::TcpListener;
 
-        // 1) 起 mock proxy
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let proxy_port = listener.local_addr().unwrap().port();
         let received: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
@@ -130,7 +117,6 @@ mod tests {
             }
         });
 
-        // 2) 走工厂构造 client，proxy_enabled=true
         let cfg = AppConfig {
             proxy: ProxyCfg {
                 proxy_enabled: true,
@@ -141,8 +127,7 @@ mod tests {
         };
         let client = build_async_client(&cfg, &ClientOptions::default()).unwrap();
 
-        // 3) 真实 GET —— URL 故意选 `example.com` 但 mock proxy 永远不连它，
-        //    走代理就一定命中本 listener。
+        // 3) 真实 GET —— URL 故意选 example.com，proxy 不会去连它，走代理才命中本 listener。
         let resp = client
             .get("http://example.com/proxy-check")
             .send()
@@ -154,7 +139,6 @@ mod tests {
             resp.status()
         );
 
-        // 4) mock proxy 那边要收到"代理形态"的请求行（完整 URL 写在 request line）
         let _ = proxy_task.await;
         let req_line = received
             .lock()

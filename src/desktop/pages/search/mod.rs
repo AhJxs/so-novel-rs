@@ -1,23 +1,13 @@
 //! Search 页面：关键词搜索 + 书源过滤 + 结果列表 + 选章下载 Dialog。
 //!
-//! 子模块（跟 library / sources / tasks 同款骨架）：
-//! - `source_select` — 选书源下拉的 `SelectItem`。
-//! - `toolbar` — Input + Select + Button + 源状态行。
-//! - `result_row` — 结果行（6 列：序号 / 书名 / 作者 / 源 / 详情 / 选章 / 全本）。
-//! - `detail_dialog` — 详情 Dialog body + 封面解码 / 渲染。
-//! - `range_dialog` — 选章 Dialog body + 起止输入框 clamp helper。
-//! - `delegate` — `SearchDelegate` + `ListDelegate` impl（虚拟滚动）。
-//!
-//! 布局：PageHeader（无 action）→ Toolbar → `SourceStatusBar` → `ResultList` → Pagination。
+//! 两个大坑：书源下拉靠 render 差量同步；Dialog 的 OK 回调里不能直接开新 Dialog。
 
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 
 use lru::LruCache;
 
-/// 详情面板"已解码封面"缓存最大条目数。
-///
-/// 32 条够当前详情面板浏览；超额 LRU 自动驱逐最久未访问。
+/// 详情面板"已解码封面"缓存最大条目数；超额 LRU 驱逐最久未访问。
 const COVER_IMAGES_CAPACITY: NonZeroUsize = match NonZeroUsize::new(32) {
     Some(n) => n,
     None => unreachable!(),
@@ -62,9 +52,7 @@ mod toolbar;
 pub struct SearchPage {
     model: Entity<AppModel>,
 
-    /// struct 字段持有（InputState / `SelectState` / `ListState`）—— owner 持有避免
-    /// click / focus 丢失。placeholder 在 `new()` 一次性设好，language setter 走
-    /// "重启进程"路径，新进程重建时自然拿新 locale。
+    /// `InputState` / `SelectState` / `ListState` 由 owner 持有，否则 click / focus 丢失。
     keyword: Entity<InputState>,
     source_state: Entity<SelectState<SearchableVec<SourceSelectItem>>>,
     list_state: Entity<ListState<SearchDelegate>>,
@@ -72,51 +60,28 @@ pub struct SearchPage {
     /// UI-only，每次关键词或过滤变化时重置为 0。
     current_page: usize,
 
-    /// 书源下拉 items 的上一次快照（值为 "all" / "rule:{id}"），用来 render 差量
-    /// 检测。SourcesPage 改禁用 / 删除 / 重命名书源后 `model.rules` 变化但 `SelectState`
-    /// 不会自动重读 —— render 检测到快照不一致就重建 items 并 `set_items` / 调整选中。
-    /// 与 `SettingsPage::sync_theme_items` 同套路（observer 拿不到 Window，差量
-    /// 更新走 render）。
+    /// 书源下拉 items 的上一次快照（值为 "all" / "rule:{id}"）。`SelectState` 不会自动
+    /// 重读 `model.rules`，所以由 render 比对快照重建 items；observer 拿不到 Window。
     last_source_items: Vec<SharedString>,
 
-    /// 封面解码缓存：`cover://` URI → 解码后的 `RenderImage`。
-    ///
-    /// `CoverEntry` 只存原始字节（UI 中立，见 `app/cover.rs`），解码放 UI 层。
-    /// 按 `uri`（稳定去重 key）缓存 `Arc<RenderImage>` —— Dialog 每帧重渲时
-    /// 避免重复解码 + 重传纹理（`RenderImage::new` 每次新 id，不缓存让 gpui 每帧
-    /// 重传）。`None` = 解码失败，缓存负面结果避免反复重试。
-    ///
-    /// **LRU 上限 `COVER_IMAGES_CAPACITY`（32）**：旧 `HashMap` 无界，长会话
-    /// 累积所有查看过的封面（`Arc<RenderImage>` 含完整像素）。32 条足够覆盖
-    /// 当前详情面板的常规浏览；超额自动驱逐最久未访问。
+    /// 封面解码缓存：`cover://` URI → `RenderImage`；缓存才能避免每帧重解码 + 重传纹理
+    /// （`RenderImage::new` 每次新 id）。`None` = 解码失败也存；必须限容（含完整像素）。
     cover_images: LruCache<String, Option<Arc<RenderImage>>>,
 
-    /// 选章下载 Dialog 的状态（起止输入框 + 当前 target + 初始化标志）。
-    ///
-    /// 流程：点"选章" → `spawn_resolve_toc` 拉章节列表（写 `toc_cache`）→ 弹 confirm
-    /// Dialog 反应式读 `toc_cache，TOC` 回来后初始化起止输入框（1 / N）+ 显示预览。
-    /// 用户改输入框 / 按 +/- → 本页订阅 `InputEvent::Change` + `NumberInputEvent::Step`，
-    /// clamp 到 [1, N] 后 `set_value` 写回。
+    /// 选章 Dialog 的起止输入框。TOC 回来后 Dialog 才初始化 1 / N；用户改值或按 +/-
+    /// 由本页订阅事件 clamp 到 [1, N] 后写回。
     range_start_input: Entity<InputState>,
     range_end_input: Entity<InputState>,
-    /// Dialog 当前为哪条搜索结果服务（None = 没开）。点击不同结果时更新；
-    /// TOC 用 `(source_id, url)` 在 `toc_cache` 里查。
+    /// Dialog 当前服务的搜索结果（None = 没开）；TOC 用 `(source_id, url)` 查 `toc_cache`。
     range_target: Option<SearchResult>,
-    /// 是否已为当前 target `初始化过输入框（set_value` 1 / N）。
-    /// 防 TOC 每帧重渲时反复 `set_value` 覆盖用户输入。
+    /// 是否已为当前 target 初始化过输入框。防 TOC 重渲时反复 `set_value` 覆盖用户输入。
     range_initialized: bool,
 
-    /// URL 输入 Dialog 的输入框 —— PageHeader「下载链接」按钮弹 Dialog 时承载 URL 输入。
-    /// 同 `keyword` / `range_start_input` 同款 owner 持有（Entity 在 owner 里缓存，
-    /// render 闭包只复用），避免 `InputState` 失活。placeholder 在 `new()` 一次性设好。
+    /// URL 输入 Dialog（PageHeader「下载链接」）的输入框，同 `keyword` 由 owner 持有。
     url_input: Entity<InputState>,
-    /// URL Dialog 点「解析」成功后，由 `open_url_dialog` 的 `on_ok` 写入。
-    /// **不在 `on_ok` 里直接调 `open_range_dialog`**，因为 `on_ok` 返回 true
-    /// 后 gpui-kit 组件库的 button click handler 会调 `window.close_dialog`，
-    /// `close_dialog` 是 `active_dialogs.pop()` —— 此刻新 push 的 range Dialog
-    /// 反而被 pop 掉。改为 set flag + `cx.notify()`，`render()` 在下一帧
-    /// 检测到 flag 后再调 `open_range_dialog`，这时 URL Dialog 已经被
-    /// 关闭 / 栈空，push 的 range Dialog 不会被 pop。
+    /// URL 输入 Dialog 点「解析」成功后写入，由 `render()` 下一帧 drain 掉。
+    /// **不能在 `on_ok` 里直接开 range Dialog**：返回 true 后组件库会 `close_dialog`
+    /// （`active_dialogs.pop()`），刚 push 的 Dialog 会被自己弹掉。
     pending_range_dialog: Option<SearchResult>,
 }
 
@@ -125,23 +90,17 @@ impl SearchPage {
         let keyword = cx.new(|cx| {
             InputState::new(window, cx).placeholder(ts("Search.filter.placeholder").to_string())
         });
-        cx.subscribe_in(&keyword, window, |this, _state, ev, w, cx| {
-            match ev {
-                InputEvent::Change => {
-                    let v = this.keyword.read(cx).value().to_string();
-                    this.model.update(cx, |m, _cx| m.search.keyword = v);
-                }
-                // Enter 直接触发搜索（关键词空 / 已在跑时 run_search 自身兜底）。
-                InputEvent::PressEnter { .. } => this.run_search(w, cx),
-                _ => {}
+        cx.subscribe_in(&keyword, window, |this, _state, ev, w, cx| match ev {
+            InputEvent::Change => {
+                let v = this.keyword.read(cx).value().to_string();
+                this.model.update(cx, |m, _cx| m.search.keyword = v);
             }
+            InputEvent::PressEnter { .. } => this.run_search(w, cx),
+            _ => {}
         })
         .detach();
 
-        // 选书源 SelectState。items 首次为空：render 第一次跑时 `sync_source_items`
-        // 会从 `model.rules` 重建并 set_items。这条路径处理 SourcesPage 改禁用 / 删除
-        // / 重命名后下拉不刷新的问题 —— observer 拿不到 Window，差量更新走 render，
-        // 与 `SettingsPage::sync_theme_items` 同套路。
+        // 选书源 SelectState。items 首次为空，由 render 里的 `sync_source_items` 重建。
         let items: SearchableVec<SourceSelectItem> = Vec::<SourceSelectItem>::new().into();
         let source_state = cx.new(|cx| SelectState::new(items, None, window, cx).searchable(true));
         cx.subscribe_in(&source_state, window, |this, _state, ev, _w, cx| {
@@ -164,29 +123,20 @@ impl SearchPage {
         let delegate = SearchDelegate::new(page_handle);
         let list_state = cx.new(|cx| ListState::new(delegate, window, cx));
 
-        // 选章 Dialog 的起止输入框。两个 InputState 各绑一个 NumberInput。
-        // 订阅两类事件：
-        // - `InputEvent::Change`：用户键入数字 → clamp 后 set_value 写回 + 刷新预览。
-        // - `NumberInputEvent::Step`：用户按 +/- → ±1 后 set_value。
-        //   NumberInput 的 +/- 只发 Step 事件、不改值（见 组件库 number_input.rs
-        //   L106-112），必须自己处理。
-        // clamp 范围 [1, N]：N 取 toc_cache Loaded 章节数；TOC 没回来按 [1, u32::MAX]。
+        // 起止输入框：Change 事件 clamp 后写回，Step 事件（+/-）由自己算值 —— NumberInput
+        // 的 +/- 只发事件不改值。clamp 范围 [1, N]，N 取不到时按 [1, u32::MAX]。
         let range_start_input =
             cx.new(|cx| InputState::new(window, cx).placeholder("1".to_string()));
         let range_end_input = cx.new(|cx| InputState::new(window, cx).placeholder("1".to_string()));
 
         // URL 输入 Dialog 的 InputState —— PageHeader「下载链接」按钮唤起。
-        // placeholder 设好后不变（locale 切换走重启进程路径）。
         let url_input = cx.new(|cx| {
             InputState::new(window, cx)
                 .placeholder(ts("Search.url_download.placeholder").to_string())
         });
 
-        // Change 订阅：只在值不同时 set_value —— 无条件写回触发 Change→set_value→
-        // Change 死循环，几轮把 Windows 句柄配额耗尽崩溃（0x80070718）。set_value 写回
-        // 的值已是规整值，二次 Change want==cur 直接跳过，循环终止。
-        // set_value 要 `&mut Window`（三参签名），用回调自带的 window —— update
-        // 只借 cx，window 是独立可变借用，不冲突。
+        // 只在值不同时 set_value：无条件写回会 Change→set_value→Change 死循环，几轮耗尽
+        // Windows 句柄配额崩溃（0x80070718）。写回值已是规整值，二次 Change 直接跳过。
         cx.subscribe_in(
             &range_start_input,
             window,
@@ -230,7 +180,7 @@ impl SearchPage {
         )
         .detach();
 
-        // Step 订阅（+/-）。
+        // Step 订阅（+/-）：NumberInput 只发事件不改值，这里自己算并写回。
         cx.subscribe_in(
             &range_start_input,
             window,
@@ -289,8 +239,8 @@ impl SearchPage {
         }
     }
 
-    /// 点"搜索"按钮 → 把当前 keyword 同步到 model，调 `spawn_search`。
-    /// 关键词空 / 已在跑 时按钮已 disabled，理论上不会进；保留 `last_error` 防御。
+    /// 点"搜索"按钮 → 同步 keyword 到 model，调 `spawn_search`。关键词空 / 已在跑时
+    /// 按钮已 disabled，`!started` 只是防御。
     fn run_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let kw = self.keyword.read(cx).value().to_string();
         self.model.update(cx, |m, _cx| m.search.keyword = kw);
@@ -319,24 +269,12 @@ impl SearchPage {
         }
     }
 
-    /// 书源下拉 items 差量同步。
+    /// 书源下拉 items 差量同步：快照（只有 `value` = "all" / "rule:{id}"）没变就直接返回，
+    /// 变了才重建 items、按 `model.search.source_id` 重算选中并推给 `SelectState`。
     ///
-    /// 每次 render 拍一次快照（仅保留 `value` 字符串 = "all" / "rule:{id}"），与
-    /// `last_source_items` 对比；无变化 → 0 开销返回；变化 → 重建 items、
-    /// 按当前 `model.search.source_id` 重新计算选中位置、`set_items` + `set_selected_index`
-    /// 推到 `SelectState`。
-    ///
-    /// 覆盖的触发场景：
-    /// - `SourcesPage` 切换某条规则的 `disabled`
-    /// - `SourcesPage` 删除 / 导入一条规则
-    /// - 规则重命名（item.title 变了）
-    ///
-    /// 复用 `Rule::is_search_enabled()` 谓词，与 `spawn_search` 派发时的 `target_sources`
-    /// 列表保持一致 —— 下拉里看到的 = 实际会发请求的。
-    ///
-    /// 选中位置在选中的源被禁用 / 删除后会回到 `None`（`position()` 找不到），让
-    /// `SelectState` 落到默认项；`spawn_search` 那边 `source_id` 仍是 stale 值，但会
-    /// 因为 id 不匹配任一规则而派发空列表——用户改下拉时 Confirm 处理器会写回 None。
+    /// 复用 `Rule::is_search_enabled()`，与 `spawn_search` 的 `target_sources` 一致。注意：
+    /// 选中的源被禁用 / 删除后 `position()` 找不到会回落默认项，而 `spawn_search` 侧的
+    /// stale `source_id` 会派发空列表。
     fn sync_source_items(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let aggregate_title = ts("Search.source.aggregate");
         let mut items: Vec<SourceSelectItem> = vec![SourceSelectItem {
@@ -361,7 +299,7 @@ impl SearchPage {
                 title: name_disp,
             });
         }
-        // 用规则 id 升序排，确保顺序稳定。
+        // 用规则 id 升序排，保证顺序稳定。
         items.sort_by(|a, b| a.value.cmp(&b.value));
         let snapshot: Vec<SharedString> = items.iter().map(|it| it.value.clone()).collect();
 
@@ -386,17 +324,10 @@ impl SearchPage {
         });
     }
 
-    /// PageHeader「下载链接」按钮回调：弹 URL 输入 Dialog（自动粘贴剪贴板）→
-    /// 匹配书源 → 复用 `open_range_dialog` 走选章下载流程。
-    ///
-    /// 与 `open_range_dialog` 的关系：URL 输入 + 匹配后，构造一个最小 `SearchResult`
-    /// （`book_name` 空 / 元信息全 None —— `range_dialog` 不依赖这些，TOC 解析时会从
-    /// 详情页拿完整数据）→ 走 `open_range_dialog` 同样的 `spawn_resolve_toc` +
-    /// `range_dialog::content` 反应式渲染路径。零结构改动。
+    /// PageHeader「下载链接」回调：弹 URL 输入 Dialog（自动粘贴剪贴板）→ 匹配书源 →
+    /// 构造最小 `SearchResult` 后复用 `open_range_dialog`。
     fn open_url_dialog(&self, window: &mut Window, cx: &mut Context<Self>) {
-        // 自动粘贴：Dialog 打开时把剪贴板里的 URL 填进去（http(s) 才填）。
-        // `read_from_clipboard` 返回 `Option<ClipboardItem>`（gpui 层），
-        // `.text()` 把所有 String entry 拼起来返回 Option<String>。
+        // 自动粘贴：Dialog 打开时填入剪贴板的 URL（只认 http(s)）。
         if let Some(s) = cx.read_from_clipboard().and_then(|item| item.text()) {
             let trimmed = s.trim();
             if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
@@ -408,9 +339,7 @@ impl SearchPage {
 
         let page = cx.entity();
         window.open_alert_dialog(cx, move |alert: AlertDialog, _window, cx| {
-            // builder 是 Fn（每帧重调）→ 每帧 clone page 进当帧闭包。
             let page = page.clone();
-            // 渲染 body：TextInput + 「粘贴」兜底按钮 + 自动粘贴提示行。
             let url_input = page.read(cx).url_input.clone();
             let body = v_flex()
                 .gap_2()
@@ -447,8 +376,7 @@ impl SearchPage {
                                 .child(ts("Search.url_download.auto_pasted")),
                         ),
                 );
-            // 复杂 body 走 `.child(body)`（AlertDialog 的 ParentElement 渲染在标题下方）；
-            // 宽用 AlertDialog 的 `.width()`（旧 Dialog 的 `.w()` 是 props 宽度方法）。
+            // 复杂 body 走 `.child(body)`；宽用 AlertDialog 的 `.width()`。
             alert
                 .title(ts("Search.url_download.dialog_title"))
                 .width(px(520.))
@@ -457,8 +385,6 @@ impl SearchPage {
                 .cancel_text(ts("Search.url_download.cancel"))
                 .confirm()
                 .on_ok(move |_ev, _window, cx| {
-                    // OK 后：读 URL → 匹配书源 → 成功则构造 SearchResult 调
-                    // open_range_dialog 接管；失败则 push_warning 并关 URL Dialog。
                     let url = page.read(cx).url_input.read(cx).value().to_string();
                     let url = url.trim().to_string();
                     if url.is_empty() {
@@ -470,9 +396,7 @@ impl SearchPage {
                         });
                         return true;
                     }
-                    // 一次性借用 model：rules + config 都拿到 owned 副本，避免在
-                    // find_map 闭包里反复 `page.read(cx).model.read(cx)` 触发
-                    // borrow-checker 冲突。
+                    // rules + config 先取 owned 副本，避免闭包里反复 read 触发借用冲突。
                     let (rules, config) = {
                         let m = page.read(cx).model.read(cx);
                         (m.rules.clone(), m.config.clone())
@@ -491,7 +415,7 @@ impl SearchPage {
                         });
                         return true;
                     };
-                    // 匹配成功：构造最小 SearchResult + 复用现有 open_range_dialog。
+                    // 复用 open_range_dialog：它只用到 source_id / source_name / url。
                     let target = SearchResult {
                         source_id: source.id,
                         source_name: source.name.clone(),
@@ -512,10 +436,8 @@ impl SearchPage {
                                 &[("name", &source.name)],
                             ));
                         });
-                        // 不在此处直接调 `open_range_dialog`：on_ok 返回 true 后
-                        // gpui-kit 组件库会调 `window.close_dialog` (pop 栈顶)，
-                        // 此刻栈顶是我们刚 push 的 range Dialog，反而被 pop 掉。
-                        // 改为 set flag → `cx.notify()` → render() 下一帧 drain。
+                        // 不能直接开 range Dialog：on_ok 返回 true 后组件库会 pop 栈顶，
+                        // 刚 push 的 Dialog 会被弹掉。改为置 flag，render 下一帧接手。
                         p.pending_range_dialog = Some(target);
                         cx.notify();
                     });
@@ -526,11 +448,8 @@ impl SearchPage {
 
     /// 点"选章"按钮 → 拉 TOC + 弹 confirm Dialog。
     ///
-    /// - `spawn_resolve_toc` `幂等（toc_cache` 命中直接返回，见 `app/ops/download.rs`）。
-    /// - 记 `range_target`，重置 `range_initialized=false`（让 Dialog 渲染时等 TOC 回来
-    ///   再 `set_value` 1 / N 初始化，避免覆盖用户输入）。
-    /// - 弹反应式 confirm Dialog：builder 每帧读 `toc_cache，TOC` 回来后自动出现输入框 +
-    ///   章节名预览；`on_ok` 校验范围后 `spawn_download_range` 派下载。
+    /// `spawn_resolve_toc` 幂等；`range_initialized=false` 让 Dialog 等 TOC 回来才初始化，
+    /// 避免覆盖用户已输入的值。
     fn open_range_dialog(
         &mut self,
         target: SearchResult,
@@ -544,28 +463,21 @@ impl SearchPage {
 
         let page = cx.entity();
         window.open_alert_dialog(cx, move |alert: AlertDialog, window, cx| {
-            // builder 是 Fn（每帧重调）→ 每帧 clone page 进当帧闭包。
             let page = page.clone();
             let body = range_dialog::content(&page, window, cx);
-            // 复杂 body 走 `.child(body)`；宽用 AlertDialog 的 `.width()`。
             alert
                 .title(ts("Search.range.title"))
                 .width(px(520.))
                 .child(body)
-                // confirm 模式：OK + Cancel 两按钮。OK 文案"下载"。
-                // gpui-kit 0.7：单项 builder 取代整包 `DialogButtonProps`。
                 .ok_text(ts("Search.range.confirm"))
                 .cancel_text(ts("Search.range.cancel"))
                 .confirm()
-                // on_ok 在 Dialog 上（gpui-kit 组件的 DialogButtonProps 无 on_ok 方法）。
-                // 签名 `Fn(&ClickEvent, &mut Window, &mut App) -> bool` —— window 在这层，
-                // page.update 内部拿不到 Window（只有 Context），所以下载派发放 update 里、
-                // 通知用 window 在这层发，用 RangeOutcome 枚举传结果出来。
+                // on_ok 挂 Dialog 上（带 `&mut Window`）；page.update 内部只有 Context，
+                // 所以下载在 update 里派发、通知在这层发，结果用 RangeOutcome 传出。
                 .on_ok(move |_, window, cx| {
                     let outcome = page.update(cx, Self::confirm_range_download);
                     match outcome {
                         RangeOutcome::Done { book_name, count } => {
-                            // 提示带书名 + 章节数（不用任务 id）。truncate 防超长书名撑爆 toast。
                             window.push_notification(
                                 Notification::new()
                                     .title(ts("Search.action.download_started"))
@@ -598,10 +510,8 @@ impl SearchPage {
         });
     }
 
-    /// confirm Dialog 的 OK 回调：校验起止范围 → 切片章节 → `spawn_download_range`。
-    /// 返回 `RangeOutcome`，`由调用方（on_ok` 闭包，持有 Window）据此发通知 + 决定是否关 Dialog。
-    /// 不接 `&mut Window`：`page.update` 内部只有 `Context<SearchPage>` 拿不到 Window，
-    /// 通知统一在 update 外、用 `on_ok` 自带的 window 发。
+    /// confirm Dialog 的 OK 回调：校验范围 → 切片章节 → `spawn_download_range`。
+    /// 收 `Context` 而非 Window，通知由持有 Window 的调用方发。
     fn confirm_range_download(&mut self, cx: &mut Context<Self>) -> RangeOutcome {
         let Some(target) = self.range_target.clone() else {
             return RangeOutcome::Pending;
@@ -610,13 +520,12 @@ impl SearchPage {
         let Some(TocState::Loaded(book, chapters)) =
             self.model.read(cx).search.toc_cache.get(&key).cloned()
         else {
-            // TOC 还没回来 —— 留着 Dialog，等 drain loop 刷新。
+            // TOC 还没回来 —— 留着 Dialog 等 drain loop 刷新。
             return RangeOutcome::Pending;
         };
 
         let n = chapters.len();
-        // 空值/无效值 → start 默认 1，end 默认 n。这样用户删空 start=从头开始，
-        // 删空 end=下载到末尾，无需先选中数字再覆盖。
+        // 空值 / 无效值 → start 取 1、end 取 n：删空 start 表示从头，删空 end 表示到末尾。
         let start = self
             .range_start_input
             .read(cx)
@@ -635,16 +544,15 @@ impl SearchPage {
             .ok()
             .filter(|&v| v >= 1 && v <= n)
             .unwrap_or(n);
-        // 即使有默认值兜底，start > end 仍然不可能（end 至少等于 n ≥ start），
-        // 但保留防御性检查。
+        // 兜底之下 start > end 已不可能，仍保留防御性检查。
         if start > end {
             return RangeOutcome::Invalid;
         }
 
-        // 切片：章节序号从 1 开始，转 0-based 下标。
+        // 章节序号 1-based → 0-based 下标。
         let selected: Vec<_> = chapters[(start - 1)..end].to_vec();
         let count = selected.len();
-        // 书名：优先详情 Book（完整），否则用搜索结果的 book_name。
+        // 书名优先用详情 Book，缺失时退回搜索结果的 book_name。
         let book_name = if book.book_name.trim().is_empty() {
             target.book_name.clone()
         } else {
@@ -661,7 +569,7 @@ impl SearchPage {
     }
 }
 
-/// `confirm_range_download` `的返回：on_ok` 闭包据此发通知 + 决定是否关 Dialog。
+/// `confirm_range_download` 的返回：调用方据此发通知 + 决定是否关 Dialog。
 enum RangeOutcome {
     /// 下载已派发（书名 + 章节数）。关 Dialog。
     Done { book_name: String, count: usize },
@@ -673,21 +581,17 @@ enum RangeOutcome {
 
 impl Render for SearchPage {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        // 排空「URL Dialog 解析成功 → 弹 range Dialog」的挂起请求。
-        // 必须在最前面：URL Dialog 的 on_ok 返回 true 后 close_dialog 已经把
-        // URL Dialog pop 掉，栈空，此时 push range Dialog 不会被覆盖。
+        // 排空「URL Dialog 解析成功 → 弹 range Dialog」的挂起请求。必须在最前面：此时
+        // URL Dialog 已被 close_dialog pop 掉、栈空，push 的新 Dialog 才不会被覆盖。
         if let Some(target) = self.pending_range_dialog.take() {
             self.open_range_dialog(target, window, cx);
         }
 
-        // 差量同步书源下拉：先于其他读 model 的代码，因为这里要 &mut Window。
+        // 差量同步书源下拉：这里要 `&mut Window`，所以先做。
         self.sync_source_items(window, cx);
 
-        // 走 list_cache：search.results 经常被 drain 更新，filter_sort 也
-        // 会原地替换 results。data_version 字段保证 search.drain 末尾版本号
-        // +1，下次 render 立即 miss → 重算 + 写回。
-        // filter signature 此处只有 `last_keyword` 一项（搜索页无文本/扩
-        // 展名过滤控件）；切 keyword 时旧 key 失效。
+        // 走 list_cache：drain / filter_sort 会原地替换 search.results，靠 results_version
+        // 递增让旧 key 立即失效并重算。filter_sig 目前只有 `last_keyword`（本页无其它过滤控件）。
         let (results, running, expected, received, source_status) =
             self.model.update(cx, |model, _cx| {
                 let filter_sig = crate::desktop::model::filter_signature(&[model
@@ -699,7 +603,7 @@ impl Render for SearchPage {
                     page: crate::desktop::model::PageKind::Search,
                     data_version: model.search.results_version,
                     filter_sig,
-                    page_index: 0, // 缓存"全表 results"；分页在 Render 末尾 slice
+                    page_index: 0, // 缓存全表 results，分页在 render 末尾 slice
                     elem_type: std::any::TypeId::of::<SearchResult>(),
                 };
                 let results = if let Some(arc) = model.list_cache.get::<SearchResult>(key) {
@@ -777,8 +681,7 @@ impl Render for SearchPage {
                     )
                     .into_any_element()
             } else {
-                // List 容器边框 + 12px padding：让选中边框不被滚动条遮挡
-                // （跟 library / sources 同款，详见 list_story.rs:594-602）。
+                // 列表容器边框 + 12px padding：选中边框不被滚动条遮挡。
                 div()
                     .flex_1()
                     .w_full()
@@ -789,7 +692,7 @@ impl Render for SearchPage {
                     .child(List::new(&self.list_state).p(px(12.)).size_full())
                     .into_any_element()
             })
-            // 分页页脚：可见性由 `Pagination` 自己判（不足一页 → `Empty`）。
+            // 页脚可见性由 `Pagination` 自己判。
             .child(Pagination::new(
                 self.current_page,
                 w.page_count,

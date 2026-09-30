@@ -1,13 +1,9 @@
 //! 选章下载 Dialog body 渲染 + 起止输入框 clamp 工具。
 //!
-//! 反应式读 `toc_cache[(source_id, url)]`：
-//! - `Pending` / 未拉到 → loading 占位（drain loop 100ms 后刷新）
-//! - `Loaded(book, chapters)` → 首次 `set_value` 初始化 1 / N，显示「共 N 章」+ 起止
-//!   `NumberInput` + 选中范围首尾章节名预览
-//! - `Failed` → 错误占位
-//!
-//! 就绪与否由 `on_ok` 通过 `confirm_range_download` 返回的 `RangeOutcome::Pending` 判定，
-//! 这里只负责渲染。
+//! 反应式读 `toc_cache[(source_id, url)]`：`Pending` 显示 loading、`Loaded` 显示
+//! 「共 N 章」+ 起止 `NumberInput` + 首尾章名预览、`Failed` 显示错误占位，
+//! 都由 drain loop 每 100ms 重 render 自动推进。就绪判定在 `confirm_range_download`
+//! 那边，这里只渲染。
 
 use gpui_kit::component::{
     ActiveTheme as _, Sizable, h_flex, input::NumberInput, spinner::Spinner, v_flex,
@@ -60,8 +56,7 @@ pub(super) fn content(
             .into_any_element(),
         Some(TocState::Loaded(_book, chapters)) => {
             let n = chapters.len();
-            // 首次进来初始化起止输入框：1 / N。range_initialized 防止每帧覆盖用户输入。
-            // set_value 要 `&mut Window`，update 只借 cx，window 独立借用不冲突。
+            // 首次进来把输入框初始化成 1 / N；`range_initialized` 防止每帧覆盖用户输入。
             page.update(cx, |p, cx| {
                 if !p.range_initialized {
                     p.range_start_input
@@ -105,14 +100,12 @@ pub(super) fn content(
             // 布局：共 N 章 → 起止 NumberInput（label + 输入框）→ 选中预览（首尾章名各一行）。
             v_flex()
                 .gap_3()
-                // 共 N 章
                 .child(
                     div()
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
                         .child(ts_fmt("Search.range.total", &[("n", &n.to_string())])),
                 )
-                // 起止输入行
                 .child(
                     h_flex()
                         .gap_4()
@@ -127,10 +120,9 @@ pub(super) fn content(
                                         .text_color(cx.theme().muted_foreground)
                                         .child(ts("Search.range.start")),
                                 )
-                                // 加宽到 160px（minus/plus 按钮各占 ~28px，留 ~100px 给数字）。
-                                // 注：gpui-kit 组件的 Input/NumberInput 不支持文本水平
-                                // 居中——数字由自定义 element 固定左对齐绘制，无对齐 API，
-                                // 外层 styled 的 text_align 也不会被内部 Input 继承。接受左对齐。
+                                // 宽 160px：minus/plus 各 ~28px，留 ~100px 给数字。
+                                // 数字左对齐是组件限制（Input/NumberInput 无水平居中 API，
+                                // 外层 text_align 也不会被内部 Input 继承），不要再试着居中。
                                 .child(NumberInput::new(&page.read(cx).range_start_input).w(px(160.0))),
                         )
                         .child(
@@ -146,7 +138,7 @@ pub(super) fn content(
                                 .child(NumberInput::new(&page.read(cx).range_end_input).w(px(160.0))),
                         ),
                 )
-                // 选中预览：首尾章名各一行（避免长章名挤一行被换行成两段）。
+                // 首尾章名各占一行，避免长章名被挤成两段。
                 .child(
                     v_flex()
                         .gap_1()
@@ -161,7 +153,6 @@ pub(super) fn content(
                                     ts("Search.source_status.format")
                                 )),
                         )
-                        // 起始章名：truncate 防超长。
                         .child(
                             div().text_sm().text_color(cx.theme().foreground).child(
                                 div()
@@ -171,7 +162,6 @@ pub(super) fn content(
                                     .child(format!("{start_title}")),
                             ),
                         )
-                        // 结束章名：truncate 防超长。
                         .child(
                             div().text_sm().text_color(cx.theme().foreground).child(
                                 div()
@@ -197,11 +187,10 @@ fn chapter_title_display(chapters: &[Chapter], n: usize) -> SharedString {
     }
 }
 
-/// 把输入框原始值规整到 `[1, N]`：N 取当前选章 Dialog 的 `toc_cache` Loaded 章节数。
-/// 非数字 / 越界 → 1。N 取不到（TOC 没回来）时按 `[1, u32::MAX]`（任意正整数）。
+/// 把输入框原始值规整到 `[1, N]`；N = 当前选章 target 在 `toc_cache` 的 Loaded 章节数，
+/// 取不到按 `[1, u32::MAX]`。非数字 / 越界 → 1。
 ///
-/// **空字符串返回 0**（sentinel，Change handler 据此识别"用户正在清空输入框，不要重置"）。
-/// free fn —— 4 个订阅共用它无需 clone。
+/// **空字符串返回 0**：sentinel，Change handler 据此识别"用户正在清空输入框，不要重置"。
 pub(super) fn clamp_range_value(this: &SearchPage, raw: &SharedString, cx: &App) -> u32 {
     let trimmed = raw.trim();
     if trimmed.is_empty() {

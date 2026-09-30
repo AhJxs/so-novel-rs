@@ -3,14 +3,13 @@
 /dist
 *.lock.bak
 
-# 根目录运行时文件（首次启动生成；仅本地使用）
+# 根目录运行时文件（首次启动生成）
 /config.toml
 /sonovel.db
 /sonovel.db-journal
 /sonovel.db-wal
 /sonovel.db-shm
 
-# 运行时生成的 SQLite DB（下载任务持久化），仅本地使用
 /bundle/*.db
 /bundle/*.db-journal
 /bundle/*.db-wal
@@ -21,7 +20,7 @@
 /.codegraph/
 /tasks/
 
-# OS / IDE 临时文件（macOS / Windows / VSCode / IntelliJ / 任意编辑器）
+# OS / IDE 临时文件
 .DS_Store
 Thumbs.db
 .vscode/

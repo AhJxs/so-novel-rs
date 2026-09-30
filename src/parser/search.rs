@@ -1,21 +1,11 @@
 //! 搜索解析。对应 Java `parse.SearchParser`。
 //!
-//! 阶段 2b 实现的能力（与 Java 端等价的子集）：
-//! - GET / POST 两种搜索请求；
-//! - POST 时把规则中的 hutool 风格 `data` 模板里的 `%s` 换成关键词，
-//!   构造 form body；
-//! - 给请求注入规则里的 `cookies` 头；
-//! - 选 `result` 列表，每条提取 bookName / author / category /
-//!   latestChapter / lastUpdateTime / status / wordCount；
-//! - bookName 的 href 用 `abs_url` 解析为绝对 URL；
-//! - 检测 Cloudflare 真人验证页；命中则返回 `SearchError::Cloudflare`，
-//!   不在本阶段实现旁路调用（属阶段 2c）。
+//! GET / POST 两种请求; POST 时把 hutool 风格 `data` 模板里的 `%s` 换成关键词构造
+//! form body, 并注入规则里的 `cookies` 头。选 `result` 列表后每条提取 bookName /
+//! author / category / latestChapter / lastUpdateTime / status / wordCount, bookName
+//! 的 href 用 `abs_url` 转绝对。CF 验证页返回 `SearchError::Cloudflare`。
 //!
-//! **未实现**（属阶段 2c / 后续）：
-//! - 搜索结果分页（`pagination = true`）合并；
-//! - "完全匹配跳详情页"的 fallback 路径；
-//! - 简繁转换（属阶段 5）；
-//! - 聚合搜索（属阶段 4 UI 接入）。
+//! 未实现: 搜索分页合并、完全匹配跳详情页 fallback、简繁转换、聚合搜索。
 
 use anyhow::Result;
 use reqwest::Client;
@@ -54,11 +44,8 @@ pub enum SearchError {
 
 /// 搜索单个书源。
 ///
-/// `keyword` 是用户输入的原始关键词；`limit` 控制返回上限
-/// （`None` 表示不限，对应 Java 端 -1）。
-/// `cf_bypass_base` 是 `[global] cf-bypass` 配置：若命中 CF 真人验证页
-/// 且该值非空，则自动重试外部 bypass 服务（详见 `http::cf::fetch_via_cf_bypass`）；
-/// 为空时直接返回 `SearchError::Cloudflare`。
+/// `limit` 为 `None` 表示不限（对应 Java 端 -1）。`cf_bypass_base` 非空时，
+/// 命中 CF 验证页会自动重试外部 bypass 服务，否则直接返回 `SearchError::Cloudflare`。
 #[tracing::instrument(
     name = "parser_search_one",
     skip_all,
@@ -85,9 +72,7 @@ pub async fn search_one(
         return Err(SearchError::SearchDisabled);
     }
 
-    // 1. 构造请求
-    // 若 url 含 @js:，则 JS 接收 keyword 返回完整 URL（与 Java SearchParser 一致）；
-    // 否则直接格式化（%s → keyword）。
+    // url 含 @js: 时 JS 接收 keyword 返回完整 URL，否则按 `%s` 格式化
     let url_with_keyword = {
         let (_, js_body) = split_js(&s.url);
         if let Some(body) = js_body {
@@ -140,7 +125,6 @@ pub async fn search_one(
         .map_err(|e| SearchError::Http(format!("{e:#}")))?,
     };
 
-    // CF 命中 → 优先尝试 bypass 服务；不可用时返回类型化错误。
     let html_after_cf = if has_cloudflare(&response.html) {
         match cf_bypass_base.filter(|s| !s.trim().is_empty()) {
             Some(base) => fetch_via_cf_bypass(client, base, &url_with_keyword)
@@ -152,13 +136,11 @@ pub async fn search_one(
         response.html
     };
 
-    // 2. 解析（解析逻辑独立成函数便于离线测试直接喂 HTML）。
+    // 解析逻辑独立成函数, 便于离线测试直接喂 HTML
     parse_search_results(&html_after_cf, &response.final_url, rule, limit)
 }
 
 /// 把已经下载好的 HTML 解析为搜索结果列表。
-///
-/// 抽离这一函数是为了让测试不依赖网络：直接喂离线 HTML 即可。
 /// `base_url` 用来解析 href 相对路径（相当于 jsoup `Element.absUrl(...)`）。
 pub fn parse_search_results(
     html: &str,
@@ -168,9 +150,8 @@ pub fn parse_search_results(
 ) -> Result<Vec<SearchResult>, SearchError> {
     let s = rule.search.as_ref().ok_or(SearchError::SearchDisabled)?;
 
-    // result 字段可能含 @js: 后处理（如 quanben5 的 JSONP 解析）。
-    // 有 @js: 时：把整个响应体传给 JS 返回转换后的 HTML，再用 CSS 选择器选元素；
-    // 无 @js: 时：直接用 CSS 选择器从原始文档迭代元素。
+    // result 字段可能含 @js:（如 quanben5 的 JSONP 解析）: 有则把整个响应体交给
+    // JS 换成 HTML 再选元素, 无则直接用 CSS 选择器迭代原始文档。
     let (css_selector, result_doc);
     let (sel_part, js_body) = split_js(&s.result);
     if let Some(body) = js_body {
@@ -227,7 +208,7 @@ fn push_search_result(
         return;
     }
 
-    // href 走 attr_href；如果是相对路径，用 base_url 拼绝对。
+    // href 走 attr_href，相对路径用 base_url 拼绝对
     let raw_href =
         select_and_invoke_js_within(el, &s.book_name, ContentType::AttrHref).unwrap_or_default();
     let url = crate::http::abs_url(base_url, &raw_href).unwrap_or_default();
@@ -306,8 +287,7 @@ mod tests {
         r
     }
 
-    /// 仿制一段 22biqu 真实搜索响应的极简骨架。结构与现网一致：
-    /// `body > div.container > div > div > ul > li`。
+    /// 仿制一段 22biqu 真实搜索响应的极简骨架，结构同现网。
     fn fake_22biqu_search_html() -> String {
         r#"<!doctype html>
 <html><head><title>搜索结果</title></head><body>
@@ -351,7 +331,6 @@ mod tests {
 
         let r0 = &results[0];
         assert_eq!(r0.book_name, "第一本书");
-        // 相对路径已被 base_url 拼成绝对
         assert_eq!(r0.url, "https://www.22biqu.com/biquge1/");
         assert_eq!(r0.author.as_deref(), Some("作者甲"));
         assert_eq!(r0.category.as_deref(), Some("玄幻"));
@@ -361,7 +340,6 @@ mod tests {
         assert_eq!(r0.source_name, "笔趣阁22");
 
         let r1 = &results[1];
-        // 已经是绝对 URL，应该原样
         assert_eq!(r1.url, "https://www.22biqu.com/biquge2/");
     }
 
@@ -377,7 +355,6 @@ mod tests {
 
     #[test]
     fn empty_book_name_entries_are_skipped() {
-        // 第三条 li 没有 a，bookName 抽出来是空字符串，必须被跳过
         let rule = rule_22biqu();
         let html = fake_22biqu_search_html();
         let results =
@@ -400,8 +377,6 @@ mod tests {
 
     #[test]
     fn handles_js_post_processing_in_search_field() {
-        // 仿一条规则：搜索页 author 字段需要去掉"作者："前缀
-        // （来自 main.json 鸟书网的真实规则模式）
         let mut rule: Rule = serde_json::from_str(
             r#"{
                 "url": "https://demo.test/",
@@ -432,15 +407,11 @@ mod tests {
         assert_eq!(results[0].author.as_deref(), Some("某人"));
     }
 
-    /// 端到端：跑 `search_one` 走真实网络（offline mock 不可行 —— `search_one` 把
-    /// fetch + parse 绑死），断言 span 字段里出现 `url=` / `method=` / `final_url=`，
-    /// 且 keyword 替换 %s 后出现在 URL 里。
+    /// 端到端：跑 `search_one` 走真实网络，断言 span 字段里出现 `url=` / `method=` /
+    /// `final_url=`，且 keyword 替换 %s 后出现在 URL 里。
     ///
     /// 默认 ignore（依赖网络），本机用 `cargo test -- --ignored` 跑。
     /// 网络失败时 soft-skip：行内打印错误就 return，不让 CI 红。
-    ///
-    /// 实现：用 `MakeWriter` 把 fmt layer 的输出全部 capture 起来，
-    /// 然后断言"url= / method= / `final_url="三个字段都出现过`。
     #[tokio::test]
     #[ignore = "live network: depends on 22biqu availability"]
     async fn search_one_span_records_url_method_final_url() {
@@ -466,11 +437,7 @@ mod tests {
         }
         let cap = Capture::default();
 
-        // (items must stay before any later statement)
-
-        // 关键：开 span events = active（默认是 full）—— 没有事件触发，
-        // fmt layer 就不会调 writer，capture 永远空。
-        // active = 仅 enter/exit。full = enter/exit+字段变化。我们选 full。
+        // span events 必须是 full/active: 否则没有事件触发, fmt layer 就不会调 writer。
         let subscriber = tracing_subscriber::fmt()
             .with_writer(cap.clone())
             .with_ansi(false)
@@ -484,7 +451,6 @@ mod tests {
             .finish();
         let _g = tracing::subscriber::set_default(subscriber);
 
-        // (rest of tests below)
         let cfg = AppConfig::default();
         let client = build_async_client(&cfg, &ClientOptions::default()).unwrap();
         let rule = rule_22biqu();
@@ -498,15 +464,12 @@ mod tests {
             let buf = cap.0.lock().unwrap();
             String::from_utf8_lossy(&buf).into_owned()
         };
-        // 断言三个动态字段都被记上了
         assert!(s.contains("url="), "missing url= in: {s}");
         assert!(s.contains("method="), "missing method= in: {s}");
         assert!(s.contains("final_url="), "missing final_url= in: {s}");
     }
 
     /// **真实联网测试**：默认 ignore，本机用 `cargo test -- --ignored` 跑。
-    /// 无法保证书源稳定可用（被限流 / 维护时会失败），所以**不能**作为
-    /// 阻塞性测试。本测试只断言"能联通且返回非零结果"。
     #[tokio::test]
     #[ignore = "live network: depends on 22biqu availability"]
     async fn live_22biqu_search_returns_non_empty() {
@@ -517,7 +480,6 @@ mod tests {
         let client = build_async_client(&cfg, &ClientOptions::default()).unwrap();
         let rule = rule_22biqu();
 
-        // 用一个常见的关键词；具体能否搜到与书源数据相关。
         let results = match search_one(&client, &rule, "诡秘之主", Some(5), None).await {
             Ok(v) => v,
             Err(e) => {

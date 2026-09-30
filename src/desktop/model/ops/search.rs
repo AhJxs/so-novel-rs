@@ -1,4 +1,4 @@
-//! `搜索相关业务方法：spawn_search` / `select_search_result`。
+//! 搜索相关业务方法: `spawn_search` / `select_search_result`。
 
 use std::sync::Arc;
 
@@ -65,8 +65,7 @@ pub fn spawn_search(
     let cf_bypass = config_helpers::cf_bypass(config);
     let limit = core_search::effective_limit(None, config);
 
-    // 顶层 trace_id：在所有 spawn 之前 mint；通过 `info_span!` 跨 .await 传播。
-    // 之后所有 `tracing::info!/warn!`（含 crawler 内部）都会自动带 trace_id 字段。
+    // 顶层 trace_id: 在所有 spawn 之前 mint, 经 `info_span!` 跨 .await 传播。
     let wakeup = wakeup.clone();
 
     let trace_id = TraceId::mint();
@@ -85,20 +84,16 @@ pub fn spawn_search(
             let (inner_tx, mut inner_rx) =
                 mpsc::unbounded_channel::<crate::crawler::search::SourceSearchOutcome>();
 
-            // 把搜索放在独立的 tokio task 里，与下面的桥接循环并发运行。
-            // 在 target_sources move 进 search_streaming 前，建好 id→name 映射，
-            // 用于桥接循环结束后给"未出结果的源"补失败事件。
+            // 搜索跑在独立 tokio task 里, 与下面的桥接循环并发。在 target_sources 被
+            // move 走之前建好 id→name 映射, 供桥接循环结束后补失败事件。
             let source_names: std::collections::HashMap<i32, String> = target_sources
                 .iter()
                 .map(|s| (s.rule.id, s.rule.name.clone()))
                 .collect();
 
             let http = Arc::clone(&http);
-            // search_streaming 必须运行在 search span 的子上下文里 ——
-            // 否则 crawler 内部的 `tracing::info!` 拿不到 trace_id。
-            // `tracing::Span` 本身 !Send，但 `.instrument(span)` 包装出来的 future
-            // 是 Send 的（Instrumented<F, F::Output> 的 Send 是这样实现的），
-            // 所以 span 可以安全穿过 tokio::spawn 边界。
+            // 必须 `.instrument(span)` 让 search_streaming 跑在 search span 的子上下文里,
+            // 否则 crawler 内部的 `tracing::*!` 拿不到 trace_id。
             let search_handle = tokio::spawn(
                 async move {
                     crate::crawler::search::search_streaming(
@@ -114,9 +109,8 @@ pub fn spawn_search(
                 .instrument(span),
             );
 
-            // 桥接循环：每收到一源结果就立即转发给 UI，与搜索并发。
-            // 这里 .instrument(span) 已经在 runtime.spawn 上挂上了，所以内部
-            // 的 tracing::*! 自动带 trace_id。
+            // 桥接循环: 每收到一源结果立即转发给 UI, 与搜索并发
+            // （`runtime.spawn` 上已挂 span, 内部 tracing 自动带 trace_id）。
             let mut seen_ids: std::collections::HashSet<i32> = std::collections::HashSet::new();
             while let Some(o) = inner_rx.recv().await {
                 seen_ids.insert(o.source_id);
@@ -136,9 +130,8 @@ pub fn spawn_search(
                 }
             }
 
-            // 通道关闭后，仍有源未出结果（task panic / 提前退出）→ 给它们补一条失败事件，
-            // 否则该源在 UI 永远停在 Pending，且 received 永远到不了 expected（搜索卡死）。
-            // source_names 在 target_sources move 进 search_streaming 前已建好，这里直接用它。
+            // 通道关闭后仍有源未出结果（task panic / 提前退出）→ 补一条失败事件,
+            // 否则该源停在 Pending, `received` 到不了 `expected`, 搜索卡死。
             let mut missing = 0usize;
             if !tx.is_closed() {
                 for (id, name) in &source_names {
@@ -157,8 +150,7 @@ pub fn spawn_search(
             if let Err(e) = search_handle.await {
                 tracing::warn!("search task panicked: {e}");
             }
-            // 终止日志：每次搜索恰好一行 trace_id=N 的尾记录。
-            // success/failure 在 per-source 行（`sub=source:N`）已记录；这里只做"聚合完毕"信号。
+            // 终止日志: 每次搜索恰好一行 trace_id=N 的尾记录。
             tracing::info!(received = seen_ids.len(), missing = missing, "搜索聚合完毕");
         }
         .instrument(span_for_spawn),
@@ -206,8 +198,8 @@ pub fn select_search_result(
     let cf_bypass = config_helpers::cf_bypass(config);
     let qidian_cookie = config_helpers::qidian_cookie(config);
 
-    // 详情拉取 mint 一个新 trace_id —— 它是一次独立的"动作"（不与搜索本身
-    // 共享 trace_id，方便 grep `trace_id=N` 时只看一次详情拉取）。
+    // 详情拉取单独 mint 一个 trace_id —— 它是一次独立动作, 不与搜索共享,
+    // 方便 grep `trace_id=N` 时只看这一次详情拉取。
     let wakeup = wakeup.clone();
 
     let trace_id = TraceId::mint();
@@ -217,11 +209,8 @@ pub fn select_search_result(
         source_id = source_id,
         %url,
     );
-    // 模式：外层用 `.instrument(span)` 包住整个 future，spawn 进去。
-    // 内部 `tracing::*!` 通过 `Span::current()` 隐式拿到 span 字段（trace_id 等）。
-    // `tracing::Span` 是 `!Send` 的，但 `.instrument(...)` 包装后的 future 仍是
-    // `Send` 的（Instrumented 实现里处理了 Send-ness），所以 spawn 没问题。
-
+    // 用 `.instrument(span)` 包住整个 future 再 spawn: `tracing::Span` 是 `!Send`,
+    // 但 Instrumented future 仍是 `Send`, 可以穿过 spawn 边界。
     let span_for_task = span;
     let task = async move {
         let url_for_event = url.clone();

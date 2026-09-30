@@ -1,9 +1,6 @@
-//! Markdown 导出。对应单文件 `.md` 合并。
+//! Markdown 导出: 合并 `chapters_dir` 下每章 `.md` 为单文件 (与 TXT 同形态)。
 //!
-//! 与 TXT 同形态：合并 `chapters_dir` 下每章 `.md` → 单文件。
-//! 多出两点：
-//! - YAML front matter（Hugo/Jekyll 风格）
-//! - 章节锚点 TOC（`- [标题](#chapter-N)`）
+//! 多出两点: YAML front matter (Hugo/Jekyll 风格) 与章节锚点 TOC (`- [标题](#chapter-N)`)。
 
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
@@ -44,8 +41,7 @@ impl Exporter for MdExporter {
             return Err(ExportError::EmptyChaptersDir(chapters_dir.to_path_buf()));
         }
 
-        // 单遍预读 (title, body)：避免后面写 TOC + 正文时两次 IO 打开同一文件。
-        // 章节文件本身已驻留在磁盘，Vec 持有也算可接受（典型每章几 KB ~ 几百 KB）。
+        // 单遍预读 (title, body): 避免写 TOC + 正文时两次打开同一文件。
         let mut chapters: Vec<(String, String)> = Vec::with_capacity(files.len());
         for path in &files {
             let title = chapter_title_from_path(path);
@@ -57,16 +53,12 @@ impl Exporter for MdExporter {
         let out_name = sanitize_filename(&format!("{}({}).md", book.book_name, book.author));
         let out_path = unique_path(out_dir, &out_name);
 
-        // BufWriter 流式写入：避免一次性把整本书拼成大 String 占用堆。
-        // Markdown 是纯 UTF-8，无编码转换需求。
-        // 注：用 `write_all(format!(...).as_bytes())?` 而非 `writeln!(w, ...)`，因为
-        // `writeln!` 返回 `fmt::Result` 而函数签名要 `Result<_, ExportError>`，而
-        // `ExportError` 只 derive 了 `From<std::io::Error>`，没 `From<fmt::Error>`。
-        // `write_all` 返回 `io::Result`，`?` 自动走 `ExportError::Io(#[from])`。
+        // BufWriter 流式写入, 避免把整本书拼成一个大 String (Markdown 是纯 UTF-8, 无需编码转换)。
+        // 用 `write_all(format!(...).as_bytes())` 而非 `writeln!`: 后者返回 `fmt::Result`,
+        // 而 `ExportError` 只 `From<io::Error>`; `write_all` 的 `io::Result` 能直接 `?`。
         let file = std::fs::File::create(&out_path)?;
         let mut w = BufWriter::new(file);
 
-        // 1) YAML front matter（Hugo/Jekyll 风格）
         w.write_all(b"---\n")?;
         w.write_all(format!("title: {}\n", book.book_name).as_bytes())?;
         w.write_all(format!("author: {}\n", book.author).as_bytes())?;
@@ -81,19 +73,17 @@ impl Exporter for MdExporter {
         }
         w.write_all(b"---\n\n")?;
 
-        // 2) 顶部 H1（书标题，与 front matter title 一致）
+        // 顶部 H1: 与 front matter 的 title 保持一致。
         w.write_all(format!("# {}\n\n", book.book_name).as_bytes())?;
 
-        // 3) 章节锚点 TOC
         w.write_all("## 目录\n\n".as_bytes())?;
         for (idx, (title, _)) in chapters.iter().enumerate() {
             w.write_all(format!("- [{title}](#chapter-{})\n", idx + 1).as_bytes())?;
         }
         w.write_all(b"\n")?;
 
-        // 4) 每章正文（前置一个 HTML 锚点以兼容 GFM / Obsidian / Hugo）
+        // 每章正文前置内联 HTML 锚点 (GFM / Obsidian / Hugo 均识别); `## 标题` 行由渲染自带。
         for (idx, (_title, body)) in chapters.iter().enumerate() {
-            // 章节渲染时已自带 `## 标题` 行；锚点用内联 HTML，GFM/CM 均识别。
             w.write_all(format!("<a id=\"chapter-{}\"></a>\n\n", idx + 1).as_bytes())?;
             w.write_all(body.trim_end().as_bytes())?;
             w.write_all(b"\n\n")?;
@@ -112,9 +102,6 @@ pub(crate) fn chapter_title_from_path(path: &Path) -> String {
         .map(|s| s.split_once('_').map_or(s, |(_, t)| t).to_string())
         .unwrap_or_default()
 }
-
-// 注：`#[cfg(test)] mod tests { ... }` 由 Task 4 Step 1 创建并已包含全部 7 个测试。
-// 本步骤不要修改或重写测试块。Step 5 跑 `cargo test --lib export::md::tests` 校验。
 
 #[cfg(test)]
 mod tests {
@@ -166,14 +153,12 @@ mod tests {
         (dir, p)
     }
 
-    /// 工厂函数能找到 `MdExporter`（通过 `Exporter::ext()` 区分）。
     #[test]
     fn exporter_for_markdown_returns_md_exporter() {
         let exp = exporter_for(ExportFormat::Markdown, "UTF-8");
         assert_eq!(exp.ext(), "md");
     }
 
-    /// 输出文件名 `<book_name>(<author>).md`，且包含 front matter 三件套。
     #[test]
     fn merge_writes_yaml_front_matter() {
         let (_dir, p) = write_and_merge();
@@ -195,7 +180,6 @@ mod tests {
         assert!(header.contains("  这是简介"));
     }
 
-    /// 空 intro 时 front matter 不含 `description:`。
     #[test]
     fn merge_omits_description_when_intro_empty() {
         let dir = tempfile::tempdir().unwrap();
@@ -217,7 +201,6 @@ mod tests {
         assert!(!header.contains("description:"));
     }
 
-    /// 顶部 H1 + 目录区段 + 每行 `- [标题](#chapter-N)`。
     #[test]
     fn merge_writes_h1_toc_and_anchor_links() {
         let (_dir, p) = write_and_merge();
@@ -228,7 +211,6 @@ mod tests {
         assert!(s.contains("- [第2章 启程](#chapter-2)"));
     }
 
-    /// 每章正文前嵌入 `<a id="chapter-N"></a>` HTML 锚点。
     #[test]
     fn merge_embeds_html_anchor_before_each_chapter() {
         let (_dir, p) = write_and_merge();
@@ -237,7 +219,6 @@ mod tests {
         assert!(s.contains("<a id=\"chapter-2\"></a>"));
     }
 
-    /// `chapter_title_from_path` 从 `001_第1章 起航.md` 抽 `第1章 起航`。
     #[test]
     fn chapter_title_from_path_strips_order_prefix() {
         use super::super::md::chapter_title_from_path;
@@ -248,7 +229,6 @@ mod tests {
         assert_eq!(s2, "无名");
     }
 
-    /// 章节目录为空 → `EmptyChaptersDir` 错误（与 TXT 一致）。
     #[test]
     fn empty_chapters_dir_returns_typed_error() {
         let dir = tempfile::tempdir().unwrap();
@@ -284,8 +264,7 @@ mod tests {
 
     #[test]
     fn merge_dedup_output_filename_on_collision() {
-        // 同一本书二次导出到同 out_dir：第一次得到 `<book>(<author>).md`，
-        // 第二次因 `unique_path` 加 ` (1)` 后缀，不应覆盖前一次。
+        // 二次导出到同 out_dir: 因 `unique_path` 加 ` (1)` 后缀, 不应覆盖前一次。
         let dir = tempfile::tempdir().unwrap();
         let chapters = dir.path().join("chapters");
         let out = dir.path().join("out");

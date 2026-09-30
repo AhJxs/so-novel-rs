@@ -1,6 +1,4 @@
-//! `AppModel` 本地书库方法
-//!
-//! 3 个方法: `refresh_library` / `refresh_library_async` / `delete_library_entry`.
+//! `AppModel` 本地书库方法。
 
 use std::path::{Path, PathBuf};
 
@@ -14,9 +12,8 @@ impl AppModel {
 
     /// 异步扫描下载目录。
     ///
-    /// 阻塞的 `read_dir` / `metadata` 跑在 `tokio::task::spawn_blocking` (共享 tokio
-    /// runtime), 结果通过 smol channel 回到主线程, 由 `events::drain` 排空。
-    /// 重复触发会被 `scan_in_flight` 拦截。`scanned_dir` 路径解析在主线程做 (轻量)。
+    /// 阻塞的 `read_dir` / `metadata` 跑在 `spawn_blocking`, 结果经 smol channel 回来
+    /// 由 `events::drain` 排空; 重复触发被 `scan_in_flight` 拦截。
     pub fn refresh_library_async(&mut self) {
         if self.library.scan_in_flight {
             return;
@@ -49,11 +46,8 @@ impl AppModel {
         self.library.scan_rx = Some(rx);
         self.library.scan_in_flight = true;
 
-        // 借用 self.runtime 启动 spawn_blocking, 调用阻塞的 std::fs — 共享 tokio
-        // runtime (已 leaked), 进程结束才 drop。
         let runtime = self.runtime;
         runtime.spawn(async move {
-            // tokio 的 spawn_blocking 隔离阻塞 IO, 不阻塞 reactor。
             let result = tokio::task::spawn_blocking(move || {
                 crate::desktop::model::library_state::scan_library_dir(&abs)
             })
@@ -72,8 +66,7 @@ impl AppModel {
                     "scan task join failed: {join_err}"
                 ))),
             };
-            // receiver 可能已被 drop (AppModel 销毁) — send 在 channel 关闭时
-            // 静默失败, 符合"没人听就不发"原则。
+            // receiver 可能已被 drop (AppModel 销毁) — channel 关闭时 send 静默失败。
             let _ = tx.send(event).await;
         });
     }

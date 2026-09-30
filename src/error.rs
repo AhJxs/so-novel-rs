@@ -1,38 +1,12 @@
-//! 全局错误根类型
+//! 全局错误根类型。
 //!
-//! # 设计原则
+//! 设计：各业务域错误 (`ExportError` / `WebError` / `SearchError` / ...) 保留在自己模块里，
+//! 变体携带具体业务上下文；业务层编排函数统一返回 [`AppResult<T>`]，领域错误经 `From`
+//! 自动归一，调用方一个 `?` 即可透传；边界层 (`main.rs` / CLI 顶层 / HTTP handler)
+//! 仍可保留或转回自己的边界错误类型 (e.g. `WebError` 的 `IntoResponse`)。
 //!
-//! 1. **领域错误保留**: 各业务域 (`ExportError`、`WebError`、`BookError`/...) 继续
-//!    在自己的模块里定义, 不强行合并。它们的变体携带具体业务上下文 (e.g.
-//!    `ExportError::EmptyChaptersDir(PathBuf)`), 抹平会丢信息。
-//!
-//! 2. **统一归一**: 业务层编排函数返回 [`AppResult<T>`] (即 [`Result<T, AppError>`])。
-//!    领域错误通过 `From` 自动归一, 调用方一个 `?` 就能传透。
-//!
-//! 3. **边界翻译**: 进程入口 (`main.rs`、CLI 顶层、HTTP handler) 仍可保留或转回
-//!    自己的边界错误类型 (e.g. `WebError` 的 `IntoResponse` impl), 不强制
-//!    全部用 `AppError` 渲染给用户。
-//!
-//! # 迁移策略
-//!
-//! - 本 PR (#2): 新建 `AppError` + 公共 `From` (原始错误 + `ExportError`)。
-//! - PR #7~#9: 逐模块把 `Result<T, String>` / 散乱 `anyhow::Result` 改成
-//!   `AppResult<T>`。每批一个模块, 编译期 + 测试期双重验证。
-//! - main.rs / 测试 setup 保留 `anyhow::Result`, 不强求替换 —
-//!   `AppError: From<anyhow::Error>` 已支持从 anyhow 反归一。
-//!
-//! # 错误码语义
-//!
-//! - `Config` / `Http` / `Parse` / `Export` / `Db`: 子领域错误, 携带 `#[from]` 链路
-//! - `Business` / `InvalidArgument` / `NotFound` / `Conflict`: 业务侧明确错误
-//! - `Internal`: 兜底, 应该是真正的"不该发生"场景, 出现需排查
-//! - `Js`: boa 引擎错误, 业务上属"书源规则运行失败"
-//!
-//! # 错误日志分级
-//!
-//! 配合 `tracing`: 业务层编排函数遇到错误时, 用 `?` 向上传; 边界函数决定
-//! 是否 `tracing::error!` (持久性错误) 或 `tracing::warn!` (可恢复错误)。
-//! `AppError` 不自动打日志 — 那是决策不是机械动作。
+//! `Internal` 是兜底分支，属于「不该发生」场景，出现需排查。`AppError` 不自动打日志 ——
+//! 那是决策不是机械动作，由边界函数决定 `tracing::error!`（持久性）还是 `warn!`（可恢复）。
 
 use std::io;
 
@@ -96,9 +70,8 @@ pub enum AppError {
     Internal(String),
 }
 
-// 手写 `PartialEq`：跨域类型（`ExportError` / `io::Error` / `serde_json::Error` /
-// `toml_edit::TomlError`）未实现 `PartialEq`，所以 `derive` 不能用。
-// 比较策略：消息文本相同即视为相等 —— 消息是稳定可观测的输出。
+// 手写 `PartialEq`：`ExportError` / `io::Error` / `serde_json::Error` / `toml_edit::TomlError`
+// 都没实现 `PartialEq`，`derive` 不可用。比较策略：消息文本相同即视为相等。
 impl PartialEq for AppError {
     fn eq(&self, other: &Self) -> bool {
         self.message() == other.message()
@@ -108,62 +81,49 @@ impl PartialEq for AppError {
 /// 业务层标准 `Result` 别名。所有 service/dao 编排函数应返回 `AppResult<T>`。
 pub type AppResult<T> = Result<T, AppError>;
 
-// -------------------------------------------------------------------------------------
-// 构造函数 — 比直接写 `AppError::Xxx(s.to_string())` 干净
-// -------------------------------------------------------------------------------------
+// 构造函数 —— 比直接写 `AppError::Xxx(s.to_string())` 干净。
 impl AppError {
-    /// 构造 `Config` 错误。
     pub fn config(msg: impl Into<String>) -> Self {
         Self::Config(msg.into())
     }
 
-    /// 构造 `Http` 错误。
     pub fn http(msg: impl Into<String>) -> Self {
         Self::Http(msg.into())
     }
 
-    /// 构造 `Parse` 错误。
     pub fn parse(msg: impl Into<String>) -> Self {
         Self::Parse(msg.into())
     }
 
-    /// 构造 `Db` 错误。
     pub fn db(msg: impl Into<String>) -> Self {
         Self::Db(msg.into())
     }
 
-    /// 构造 `Js` 错误。
     pub fn js(msg: impl Into<String>) -> Self {
         Self::Js(msg.into())
     }
 
-    /// 构造 `Business` 错误。
     pub fn business(msg: impl Into<String>) -> Self {
         Self::Business(msg.into())
     }
 
-    /// 构造 `InvalidArgument` 错误。
     pub fn invalid(msg: impl Into<String>) -> Self {
         Self::InvalidArgument(msg.into())
     }
 
-    /// 构造 `NotFound` 错误。
     pub fn not_found(msg: impl Into<String>) -> Self {
         Self::NotFound(msg.into())
     }
 
-    /// 构造 `Conflict` 错误。
     pub fn conflict(msg: impl Into<String>) -> Self {
         Self::Conflict(msg.into())
     }
 
-    /// 构造 `Internal` 错误。
     pub fn internal(msg: impl Into<String>) -> Self {
         Self::Internal(msg.into())
     }
 
-    /// IO 错误加业务前缀。`std::io::Error` 已 `#[from]`, 但业务侧常需要
-    /// "读取文件失败: No such file" 这种带前缀的字符串, 一次性收口。
+    /// IO 错误加业务前缀 —— 业务侧常要「读取文件失败: No such file」这种带前缀的字符串。
     pub fn io_msg(e: &std::io::Error, prefix: impl AsRef<str>) -> Self {
         Self::Internal(format!("{}: {e}", prefix.as_ref()))
     }
@@ -189,33 +149,22 @@ impl AppError {
     }
 }
 
-// -------------------------------------------------------------------------------------
-// anyhow 反归一 — main.rs / 测试 setup 用, `?` 一步到位
-// -------------------------------------------------------------------------------------
-//
-// 注意: 这个 From 是 **有损** 的 — anyhow 的 chain context 全部丢成字符串。
-// 仅在 main.rs / 测试 setup / 跨 crate 边界用, 业务层不推荐。
+// anyhow 反归一 —— main.rs / 测试 setup 用。**有损**：anyhow 的 chain context 全丢成字符串，
+// 仅在 main.rs / 测试 setup / 跨 crate 边界用，业务层不推荐。
 impl From<anyhow::Error> for AppError {
     fn from(e: anyhow::Error) -> Self {
         Self::Internal(format!("{e:#}"))
     }
 }
 
-// -------------------------------------------------------------------------------------
-// 领域错误归一 — 让 `?` 在跨域时自动透传
-// -------------------------------------------------------------------------------------
-//
-// SearchError 是爬虫编排错误, 内含 Book/Toc/Chapter 等子域; 业务层用 `?` 透传
-// 时自动归一为 AppError::Internal, 边界层决定怎么渲染 (toast / log / HTTP status)。
+// 领域错误归一 —— 让 `?` 跨域自动透传。`SearchError` 内含 Book/Toc/Chapter 子域错误，
+// 统一归一为 `AppError::Internal`，由边界层决定怎么渲染 (toast / log / HTTP status)。
 impl From<crate::parser::SearchError> for AppError {
     fn from(e: crate::parser::SearchError) -> Self {
         Self::Internal(format!("{e:#}"))
     }
 }
 
-// -------------------------------------------------------------------------------------
-// 单元测试
-// -------------------------------------------------------------------------------------
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -257,7 +206,7 @@ mod tests {
     #[test]
     fn app_result_alias_works() {
         let ok: AppResult<u32> = Ok(42);
-        // 构造时已经是 Ok, 解包只是断言 identity, 不会被 clippy 误判成可失败解包。
+        // 已是 Ok, 这里只是断言 identity —— 免被 clippy 误判成可失败解包。
         assert!(matches!(ok, Ok(42)));
 
         let err: AppResult<u32> = Err(AppError::invalid("bad"));

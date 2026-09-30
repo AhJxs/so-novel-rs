@@ -1,25 +1,10 @@
-//! 详情页解析  对应 Java `parse.BookParser`.
+//! 详情页解析，对应 Java `parse.BookParser`。
 //!
-//! # 能力 (与 Java 端等价子集)
+//! GET 详情页（编码兜底由 fetch 层完成）；命中 Cloudflare 返回 `BookError::Cloudflare`，
+//! 旁路需外部配置；bookName / author 必填；字段查询串以 `meta[` 开头按 `ATTR_CONTENT` 抽，
+//! 否则按 `TEXT` 抽；coverUrl 相对路径用 `abs_url` 拼绝对。
 //!
-//! - GET 详情页 (编码兜底已由 fetch 层完成);
-//! - 检测 Cloudflare (命中返回 `BookError::Cloudflare`, 不在本阶段做旁路);
-//! - bookName / author 必填, 否则报错;
-//! - 其余字段 (intro / category / coverUrl / latestChapter / lastUpdateTime /
-//!   status) 的字段查询字符串如果以 `meta[` 开头, 按 `ATTR_CONTENT` 抽, 否则按 `TEXT` 抽,
-//!   与 Java `BookParser#getContentType` 等价;
-//! - 选 coverUrl 时 `attr_content` 是相对路径的话, 用 `abs_url` 拼绝对 (Java 用 `absUrl`)。
-//!
-//! # 不在本模块 (后续阶段)
-//!
-//! - `CoverUpdater` (起点 cookie 取最新封面), 属阶段 4 / 阶段 5;
-//! - 简繁转换 (属阶段 5);
-//! - CF bypass 旁路 (属阶段 2c)。
-//!
-//! # 子模块
-//!
-//! - [`meta`] — `BookError` + `parse_book_detail` (主入口) + `parse_book_html` (离线测试)
-//! - [`cover`] — 封面 URL 抽取 + `CoverUpdater` 集成
+//! [`meta`] 是主入口 + 离线解析; [`cover`] 管封面 URL 抽取与 `CoverUpdater` 集成。
 
 pub mod cover;
 pub mod meta;

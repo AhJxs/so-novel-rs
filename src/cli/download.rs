@@ -1,12 +1,8 @@
-//! `download` 子命令：单本书下载，stderr 实时打印进度。
+//! `download` 子命令: 单本书下载, stderr 实时打印进度。
 //!
-//! UX 细节：
-//! - TTY 下用 `\r\x1b[K` 原地刷新"已完成 N/T 章 (P%)  最新:《X》"单行；
-//! - 管道 / 重定向（`!is_terminal()`）退回逐行打印，行为可 grep；
-//! - `--quiet` 完全抑制逐章 / 逐源日志，仅留终态汇总（BookResolved + 终态事件）；
-//! - SIGINT 接到 `CancelToken`，让 crawler 干净退出而非硬杀；
-//! - `--from` / `--to` 走 `resolve_book` + 切片 + `download_chapters` 路径，
-//!   范围外的章节不下载；不传则走 `download_book` 全本路径（与历史行为一致）。
+//! TTY 下用 `\r\x1b[K` 原地刷新单行进度; 管道 / 重定向退回逐行打印 (可 grep);
+//! `--quiet` 只留终态汇总。SIGINT 接到 `CancelToken`, 让 crawler 干净退出而非硬杀。
+//! 带 `--from` / `--to` 走 `resolve_book` + 切片 + `download_chapters`, 否则走全本路径。
 
 use std::io::{IsTerminal, stderr};
 
@@ -25,11 +21,9 @@ use super::print_progress_line;
 /// 单行进度模板里最多保留多少字符的章节标题（防止刷屏）。
 const TITLE_DISPLAY_MAX: usize = 24;
 
-// ponytail: 9 个参数全部由 clap 子命令字段 1:1 透传而来（`mod.rs` 的 match 分支
-// 也按字段顺序解构）。把 9 个参数塞进 `DownloadArgs` 结构只是把列表从签名挪到结构
-// 字段，调用方和被调用方都要改 — 当前没有第三个调用点，重构纯增加 diff。`#[allow]`
-// + 注释留说明；后续若 CLI 子命令数再涨或共享调用方出现，再抽 struct（与 GUI 侧
-// `spawn_download_range` 加 `#[allow(clippy::too_many_arguments)]` 同款取舍）。
+// 9 个参数全部由 clap 子命令字段 1:1 透传 (`mod.rs` 的 match 分支也按字段顺序解构),
+// 抽成 `DownloadArgs` 只是把列表从签名挪到字段、纯增加 diff; 目前没有第三个调用点。
+// 与 GUI 侧 `spawn_download_range` 同款取舍。
 #[allow(clippy::too_many_arguments)]
 pub fn run_download(
     cfg: &AppConfig,
@@ -53,11 +47,8 @@ pub fn run_download(
             .next()
             .with_context(|| format!("找不到 ID={id} 的书源"))?
     } else {
-        // 按 URL origin 自动匹配：核心 URL→Source 匹配逻辑收敛到
-        // core::sources::match_source_by_url（与 web/桌面未来复用同款）。
-        // 这里临时构造 `Vec<Source>`（N 个 Rule 的 clone + EffectiveCrawl derive）——
-        // CLI 启动一次，N 通常 ≤ 20，开销可忽略；好处是消除了 inline origin
-        // 解析 + 健壮性逻辑（畸形 rule URL 静默跳过）。
+        // 按 URL origin 自动匹配 (匹配逻辑收敛在 `core::sources::match_source_by_url`, 与
+        // web / 桌面复用)。这里临时 clone 成 `Vec<Source>`: CLI 启动一次、N ≤ 20, 开销可忽略。
         let sources: Vec<Source> = rules
             .iter()
             .cloned()
@@ -69,8 +60,6 @@ pub fn run_download(
         }
     };
 
-    // cfg.global.cf_bypass 由 crawler 内部读取；这里不重复计算。
-
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<Progress>();
     let cancel = CancelToken::new();
     let opts = crawler::DownloadOptions {
@@ -79,18 +68,16 @@ pub fn run_download(
         notify: None,
     };
 
-    // 是否走范围下载路径（让 consumer 在 BookResolved 时跳过"共 N 章"那行，
-    // 因为 range producer 会自己打印全本 + 范围信息）。
+    // 是否走范围下载路径: range producer 自己会打印全本 + 范围, consumer 据此跳过"共 N 章"。
     let is_range = from.is_some() || to.is_some();
 
-    // 后台跑下载，主线程排空进度打印到 stderr。
     let cfg_for_task = cfg;
     let url_for_task = url;
     let source_for_task = chosen;
     let rt = build_cli_runtime()?;
 
-    // CLI 临时构造共享 HTTP client 集合（与 search 子命令同款），由
-    // download_book 内部按 source.rule.ignore_ssl 选 safe/unsafe_ssl 通道。
+    // 共享 HTTP client 集合 (与 search 子命令同款); `download_book` 内部按
+    // `source.rule.ignore_ssl` 选 safe / unsafe_ssl 通道。
     let http_for_task = std::sync::Arc::new(crate::http::HttpClients::new(&cfg_for_task)?);
 
     let download_task = if is_range {
@@ -125,12 +112,11 @@ pub fn run_download(
         })
     };
 
-    // TTY 探测一次性做：Ctrl-C 注册 + in_place 进度都依赖它。
-    // 管道 / 重定向 / 静默模式都退回逐行。
+    // TTY 探测一次性做: Ctrl-C 注册与 in_place 进度都依赖它 (管道 / 重定向退回逐行)。
     let stderr_is_tty = stderr().is_terminal();
 
-    // Ctrl-C → cancel：让 crawler 走 Cancelled 事件干净退出，而非硬杀进程。
-    // 仅在 TTY 下注册（管道 / 后台跑时 Ctrl-C 通常是给父 shell 的）。
+    // Ctrl-C → cancel: 让 crawler 走 Cancelled 干净退出而非硬杀; 仅在 TTY 下注册
+    // (管道 / 后台运行时 Ctrl-C 通常发给父 shell)。
     if stderr_is_tty {
         let cancel_for_signal = cancel;
         rt.spawn(async move {
@@ -153,8 +139,7 @@ pub fn run_download(
                 total_chapters: total,
             } => {
                 total_chapters = total;
-                // range 路径：producer 已经打印"📖 《X》by Y — 全 M 章，下载 A-B..."
-                // 这里跳过避免重复行；全本路径保留原行为。
+                // range 路径 producer 已打印过全本 + 范围, 这里跳过避免重复行。
                 if !is_range {
                     eprintln!(
                         "《{}》by {} — 共 {total_chapters} 章",
@@ -163,8 +148,7 @@ pub fn run_download(
                 }
             }
             Progress::ChapterDone { index, title } => {
-                // 非 in-place 模式去重（crawler 重试同一章会重发事件）；
-                // in-place 模式总是刷新最新值，无重复视觉问题。
+                // 非 in-place 去重 (crawler 重试同一章会重发事件)。
                 let is_new = index != last_completed;
                 last_completed = index;
                 if in_place {
@@ -180,8 +164,7 @@ pub fn run_download(
             } => {
                 if !quiet {
                     if in_place {
-                        // 失败行直接换行打印（不抢进度行），随后下一次 ChapterDone
-                        // 会重写进度行。\n 让光标落到新行。
+                        // 失败行换行打印 (不抢进度行), 下一次 ChapterDone 会重写进度行。
                         eprintln!("\r  ✗ 第 {index} 章 《{title}》 — {reason}\x1b[K");
                     } else {
                         eprintln!("  ✗ 第 {index} 章 《{title}》 — {reason}");
@@ -226,12 +209,10 @@ pub fn run_download(
     Ok(())
 }
 
-/// 范围下载：先 `resolve_book` 拿全 TOC，按 from/to 切片，再走 `download_chapters`。
+/// 范围下载: 先 `resolve_book` 拿全 TOC, 按 from/to 切片, 再走 `download_chapters`。
 ///
-/// 与 `crawler::download_book`（全本）的区别：
-/// 1. 这里多走一次切片；
-/// 2. `BookResolved` 事件携带的是**切片后**的章数（让 progress 百分比准确）；
-/// 3. 切片前先打一行"📖 全 M 章，下载 A-B（共 C 章）"让用户看到全本规模 + 范围。
+/// 与 `crawler::download_book` (全本) 的区别: 多一次切片; `BookResolved` 带的是**切片后**
+/// 章数 (让百分比准确); 切片前先打印"全 M 章, 下载 A-B"让用户看到全本规模。
 async fn run_range_download(
     cfg: &AppConfig,
     client: &reqwest::Client,

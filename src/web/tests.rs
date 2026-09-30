@@ -402,7 +402,10 @@ async fn download_returns_task_id_json_and_pushes_task() {
         .iter()
         .filter_map(|t| t["id"].as_u64())
         .collect();
-    assert!(ids.contains(&task_id), "task {task_id} should be listed, got {ids:?}");
+    assert!(
+        ids.contains(&task_id),
+        "task {task_id} should be listed, got {ids:?}"
+    );
 }
 
 // ── /api/library ─────────────────────────────────────────────────────────

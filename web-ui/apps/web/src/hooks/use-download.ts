@@ -8,10 +8,7 @@ import type { DownloadOptions } from '@/lib/api'
 import type { StartDownloadResult } from '@/lib/types'
 
 export interface UseDownloadReturn {
-  /**
-   * 启动下载并返回 { task_id }。resolve 时后端已 push 任务到 state.tasks，
-   * 并已 invalidate ['tasks']，调用方跳转 /tasks 后列表 refetch 可见新任务。
-   */
+  /** 启动下载并返回 { task_id }；resolve 时已 invalidate ['tasks']，跳转 /tasks 即可见。 */
   start: (opts: DownloadOptions) => Promise<StartDownloadResult>
 }
 

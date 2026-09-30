@@ -1,10 +1,6 @@
-//! 搜索页工具栏：关键词 Input + 书源 Select + 搜索 Button + 源状态 Tag + Spinner。
-//!
-//! 拆出来的 2 个子区域：
-//! - `toolbar_row`：输入行（Input / Select / Button）
-//! - `source_status_row`：源状态行（每个源的 status badge + 进度 spinner）
-//!
-//! `mod.rs::impl Render` 依次 `.child(toolbar_row(...))` + `.child(source_status_row(...))`。
+//! 搜索页工具栏，拆成两个子区域：`toolbar_row`（关键词 Input + 书源 Select + 搜索 Button）
+//! 和 `source_status_row`（每个源的 status badge + 进度 spinner），由 `mod.rs::impl Render`
+//! 依次挂上。
 
 use gpui_kit::component::{
     ActiveTheme as _, Disableable, Icon, IconName, Sizable,
@@ -44,7 +40,6 @@ pub(super) fn toolbar_row(
         )
         .child(
             // 书源下拉："书源" label + Select。
-            // Select 显示当前选中项的 title（聚合搜索 / 书源名称）。
             h_flex()
                 .gap_2()
                 .items_center()
@@ -61,7 +56,7 @@ pub(super) fn toolbar_row(
                 .icon(Icon::new(IconName::Search))
                 .label(ts("Search.action.search"))
                 .loading(running)
-                // 关键词空 OR 正在跑时禁用 —— 跟加载状态绑定
+                // 关键词空或正在跑时禁用。
                 .disabled(keyword_empty || running)
                 .on_click(cx.listener(|this, _, window, cx| {
                     this.run_search(window, cx);
@@ -84,9 +79,8 @@ pub(super) fn source_status_row(
         .items_center()
         .flex_wrap()
         .children(source_status.iter().map(|(_, name, status)| {
-            // 源状态：name + 状态文案全部塞进一个 Tag（语义色），
-            // 跟 sources.rs 统计行同款。
-            // Neutral→secondary、Success→success、Error→danger。
+            // 源状态塞进一个 Tag，颜色跟状态语义走（Pending→secondary / Ok→success /
+            // Err→danger）。
             match status {
                 SourceStatus::Pending => Tag::secondary()
                     .outline()

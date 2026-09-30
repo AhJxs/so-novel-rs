@@ -1,12 +1,10 @@
 //! 封面字节解码 + URI 生成。
 //!
-//! `CoverEntry` 是 UI 中立结构：只存原始图片字节 + 源 / URL 元信息，
-//! 解码成可显示格式由 UI 层负责（GPUI 端用 `image::ImageReader` 解码 RGBA）。
+//! `CoverEntry` 是 UI 中立结构: 只存原始图片字节 + 源 / URL 元信息,
+//! 解码成可显示格式由 UI 层负责。
 
-/// 封面缓存条目。`Ready` 持有 `Vec<u8>`（已校验为有效图片的原始字节）；
-/// `Failed` 保留错误文案以便 UI 给出可见反馈而非静默。
-///
-/// UI 层负责把字节解码为可显示格式。
+/// 封面缓存条目。`Ready` 持有 `Vec<u8>` (已校验为有效图片的原始字节);
+/// `Failed` 保留错误文案, 以便 UI 给出可见反馈而非静默。
 pub enum CoverEntry {
     Ready {
         /// 原始图片字节（PNG / JPEG / WebP 等）。
@@ -17,8 +15,8 @@ pub enum CoverEntry {
     Failed(String),
 }
 
-/// 把后台下载的字节构造为 `CoverEntry`。
-/// 失败（空 body / 解码错误）时给出中文短文案，UI 仍会显示一行小字提示。
+/// 把后台下载的字节构造为 `CoverEntry`。失败 (空 body / 解码错误) 时给出中文短文案,
+/// UI 仍会显示一行小字提示。
 pub fn cover_entry_from_bytes(
     source_id: i32,
     cover_url: &str,
@@ -30,7 +28,7 @@ pub fn cover_entry_from_bytes(
             CoverEntry::Failed("下载为空或失败".to_string())
         },
         |b| {
-            // 提前用 image::ImageReader 验证字节是真的图片（避免 lazy 解码时 ui.add 失败）。
+            // 提前用 image::ImageReader 验证字节是真的图片 (避免 lazy 解码时 ui.add 失败)。
             let probe = image::ImageReader::new(std::io::Cursor::new(&b))
                 .with_guessed_format()
                 .ok()
@@ -46,7 +44,7 @@ pub fn cover_entry_from_bytes(
     )
 }
 
-/// 短哈希（fnv-like 64-bit → 16 hex），仅用于 URI 去重 key，**不是**密码学用途。
+/// 短哈希 (fnv-like 64-bit → 16 hex), 仅用于 URI 去重 key, **不是**密码学用途。
 pub fn hash_short(s: &str) -> String {
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
     for b in s.as_bytes() {
@@ -65,7 +63,7 @@ mod cover_tests {
     fn make_png_bytes() -> Vec<u8> {
         let img = image::RgbaImage::from_pixel(2, 2, image::Rgba([255, 0, 0, 255]));
         let mut buf = Vec::new();
-        // 小图写入内存 cursor 不会失败; 失败时仍返回空 buf 让测试失败
+        // 小图写入内存 cursor 不会失败; 失败时仍返回空 buf 让测试失败。
         let _ = img.write_to(&mut Cursor::new(&mut buf), image::ImageFormat::Png);
         buf
     }

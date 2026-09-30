@@ -1,8 +1,7 @@
-// 搜索状态 Context —— 把 useSearch 的状态提到应用根，跨路由切换保留结果。
-// 数据层：POST /api/search 建任务 → 每 800ms 轮询 GET /api/search/{id} 累计结果。
-// 之前状态在 SearchPage 内部 useState，组件卸载即清空；切到其他路由再回来结果就没了。
-// 现在用一个 Provider 包裹整个 App，状态活在 Provider 树里，路由切换只换页面不卸载 Provider。
-// useSearch hook 单独放 hooks/use-search.ts，满足 react-refresh "一个文件只导出组件" 的要求。
+// 搜索状态 Context：把 useSearch 的状态提到应用根，跨路由切换保留结果
+// （状态在 Provider 内部 useState 会随页面卸载清空，故必须放这里）。
+// 数据层：POST /api/search 建任务 → 每 800ms 轮询 GET /api/search/{id}。
+// useSearch hook 单独放 hooks/use-search.ts，满足 react-refresh 一个文件只导出组件。
 
 import { createContext, useCallback, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
@@ -18,7 +17,7 @@ export interface UseSearchReturn {
   searched: boolean
   /** 已完成的源数量（含出错源，对应后端 done_sources）。 */
   sourceCount: number
-  /** 流级或源级错误信息（取首个非空）。 */
+  /** 取首个非空错误。 */
   error: string | null
   /** 发起搜索；自动取消上一轮轮询并清理旧任务。 */
   search: (keyword: string, sourceId?: number) => Promise<void>
@@ -31,7 +30,7 @@ export const SearchContext = createContext<UseSearchReturn | null>(null)
 
 const POLL_INTERVAL_MS = 800
 
-/** sleep 且可被 signal 提前中断（abort 时立即 resolve，不抛错）。 */
+/** sleep，可被 signal 提前中断（abort 时立即 resolve）。 */
 function sleep(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
     if (signal.aborted) return resolve()

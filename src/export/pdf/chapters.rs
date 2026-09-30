@@ -1,13 +1,8 @@
-//! PDF HTML → 结构化内容
+//! 章节 HTML → 结构化内容 (标题 + 段落纯文本), 供 `document.rs` 的 `Paginator` 排版使用。
 //!
-//! 负责把章节 HTML 抽成 `(title, Vec<paragraph>)` 元组, 给 `document.rs` 的
-//! `Paginator` 喂纯文本。包含 5 个 fn:
-//! - [`extract_chapter_content`]: 主入口, 抽 h1 + p
-//! - [`html_to_text`]: HTML 片段 → 纯文本
-//! - [`decode_entities`]: HTML 实体解码
-//! - [`extract_body`]: 剥外层 html/head, 取 body
-//! - [`strip_nav_bar`][]: 删翻页按钮栏
-//! - [`wrap_text`][]: 中文字符友好换行 (Paginator 复用)
+//! 主入口 [`extract_chapter_content`] (抽 `<h1>` + `<p>`); 另有 [`html_to_text`] /
+//! [`decode_entities`] / [`extract_body`] / [`strip_nav_bar`] / [`wrap_text`]
+//! (中文字符友好换行, Paginator 复用)。
 
 use std::sync::LazyLock;
 
@@ -15,8 +10,8 @@ use regex::Regex;
 
 use super::fonts::Measurer;
 
-/// 编译期确定的正则：用 match 走 panic 路径以避免 `clippy::expect_used`。
-/// panic IS the design：源码字面量写错就是程序员错误。
+/// 编译期确定的正则: 用 match 走 panic 路径, 避免 `clippy::expect_used`。
+/// panic 即设计 —— 字面量写错属程序员错误。
 #[allow(
     clippy::panic,
     reason = "static regex literal must compile; failure = programmer error"
@@ -80,7 +75,6 @@ pub fn decode_entities(s: &str) -> String {
         LazyLock::new(|| compile_static_re(r"&#(x?)([0-9a-fA-F]+);|&([a-zA-Z]+);"));
     ENT_RE
         .replace_all(s, |caps: &regex::Captures| {
-            // 数字实体 &#NN; / &#xHH;
             if let (Some(hex), Some(num)) = (caps.get(1), caps.get(2)) {
                 let radix = if hex.as_str().eq_ignore_ascii_case("x") {
                     16
@@ -93,7 +87,6 @@ pub fn decode_entities(s: &str) -> String {
                     .map(|c| c.to_string())
                     .unwrap_or_default();
             }
-            // 命名实体
             if let Some(name) = caps.get(3) {
                 return match name.as_str() {
                     "amp" => "&",
@@ -132,8 +125,8 @@ pub fn strip_nav_bar(body_html: &str) -> String {
     NAV_RE.replace_all(body_html, "").into_owned()
 }
 
-/// 中文换行: 逐字累加宽度, 超 `max_w` 断行。ASCII 连续字母数字作为整体词不拆
-/// (过长单词硬拆)。返回的每行都保证宽度 ≤ `max_w`。
+/// 中文换行: 逐字累加宽度, 超 `max_w` 断行。ASCII 连续字母数字作为整体词不拆 (过长词硬拆);
+/// 返回的每行宽度都 ≤ `max_w`。
 pub fn wrap_text(s: &str, max_w: f32, size: f32, m: &Measurer) -> Vec<String> {
     let mut lines: Vec<String> = Vec::new();
     let mut cur = String::new();
@@ -154,13 +147,11 @@ pub fn wrap_text(s: &str, max_w: f32, size: f32, m: &Measurer) -> Vec<String> {
                 }
             }
             let w = m.text_w(&word, size);
-            // 当前行放不下 → 先收行
             if !cur.is_empty() && cur_w + w > max_w {
                 lines.push(std::mem::take(&mut cur));
                 cur_w = 0.0;
             }
             if w > max_w {
-                // 单词比一行还长 → 硬拆
                 if !cur.is_empty() {
                     lines.push(std::mem::take(&mut cur));
                 }
@@ -287,18 +278,15 @@ mod tests {
         );
         assert_eq!(html_to_text("第一<br>第二"), "第一 第二");
         assert_eq!(html_to_text("  多   余  空白  "), "多 余 空白");
-        // 数字实体
         assert_eq!(html_to_text("&#65;&#x4e2d;"), "A中");
     }
 
     #[test]
     fn wrap_text_breaks_long_cjk_line() {
         let m = Measurer::Heuristic;
-        // 一行容不下时必须断成多行
         let long = "字".repeat(100);
         let lines = wrap_text(&long, 50.0, 12.0, &m);
         assert!(lines.len() > 1, "should wrap: {} lines", lines.len());
-        // 每行（除可能末行）宽度 ≤ max_w
         for ln in &lines {
             let w: f32 = ln.chars().map(|c| m.char_w(c, 12.0)).sum();
             assert!(w <= 50.0 + 0.01, "line too wide: {w} ({ln})");
@@ -308,7 +296,6 @@ mod tests {
     #[test]
     fn wrap_text_keeps_ascii_word_intact() {
         let m = Measurer::Heuristic;
-        // English word 不会被拆到两行
         let text = "中文EnglishWord中文";
         let lines = wrap_text(text, 30.0, 12.0, &m);
         let rejoined: String = lines.concat();

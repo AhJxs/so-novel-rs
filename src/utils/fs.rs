@@ -2,8 +2,8 @@
 
 use std::path::Path;
 
-/// 替换文件名中的非法字符，仅适用于"文件名"，不要传入路径分隔符。
-/// Windows 与 Java 端的处理保持一致（详见 `util.FileUtils#sanitizeFileName`）。
+/// 替换文件名中的非法字符；仅适用于"文件名"，不要传入路径分隔符。
+/// 与 Java 端 `util.FileUtils#sanitizeFileName` 保持一致。
 pub fn sanitize_filename(name: &str) -> String {
     if cfg!(target_os = "windows") {
         let mut out = String::with_capacity(name.len());
@@ -24,9 +24,8 @@ pub fn sanitize_filename(name: &str) -> String {
     } else if cfg!(any(target_os = "linux", target_os = "macos")) {
         let mut out = String::with_capacity(name.len());
         for c in name.chars() {
-            // Unix 只禁 `/`（路径分隔符）和 `\0`；`\` 不是分隔符但与 Windows
-            // 跨平台一致地清掉，避免同名文件在不同平台行为不一。
-            // **不替换 `.`** —— 扩展名点（如 `.pdf`/`.epub`）必须保留，否则
+            // Unix 只禁 `/` 和 `\0`；`\` 不是分隔符但为跨平台一致也清掉。
+            // **不替换 `.`** —— 扩展名点（`.pdf`/`.epub`）必须保留，否则
             // `书名(作者).pdf` 会被洗成 `书名(作者)。pdf` 导致找不到文件。
             let replaced = match c {
                 '/' | '\\' | '\0' => '_',
@@ -41,9 +40,7 @@ pub fn sanitize_filename(name: &str) -> String {
 }
 
 /// 日志字段脱敏：超过 `max_chars` 的字符串截断并加 `***` 后缀。
-///
-/// 用于搜索关键词等用户输入字段，避免完整查询词写入日志文件。
-/// 短于阈值的字符串原样返回，零开销。
+/// 用于搜索关键词等用户输入，避免完整查询词写入日志；短于阈值时原样返回。
 pub fn truncate_log(s: &str, max_chars: usize) -> String {
     let chars: Vec<char> = s.chars().collect();
     if chars.len() <= max_chars {
@@ -63,9 +60,6 @@ pub fn to_absolute(p: impl AsRef<Path>) -> std::path::PathBuf {
 }
 
 /// 把字节数格式化为人类可读的文件大小（"1.5 MB" / "0 B"）。
-///
-/// 复用旧 `src/ui/pages/library.rs` 的实现 — Stage 5 把它移到 `util::fs`，
-/// 旧 UI / 新 GPUI 都能直接调。旧 UI 的本地副本 Stage 11 一起删。
 pub fn format_size(bytes: u64) -> String {
     const KB: u64 = 1024;
     const MB: u64 = KB * 1024;
@@ -81,10 +75,8 @@ pub fn format_size(bytes: u64) -> String {
     }
 }
 
-/// `u64` → `f64` 的转换（分解为两个 u32 避免 `cast_precision_loss`）。
-/// 仅用于 UI 显示这一类"结果给人看、精度损失可接受"的场景。
-/// u32 → f64 是精确的（53 bits mantissa 能覆盖全部 32 bits），
-/// 先分解再合并不会损失精度；不要在算术管线里复用。
+/// `u64` → `f64`（分解为两个 u32 避免 `cast_precision_loss`）：u32 → f64 精确，
+/// 故先分解再合并不丢精度。仅用于 UI 显示，**不要**在算术管线里复用。
 #[inline]
 const fn u64_to_f64(v: u64) -> f64 {
     let lo = (v as u32) as f64;

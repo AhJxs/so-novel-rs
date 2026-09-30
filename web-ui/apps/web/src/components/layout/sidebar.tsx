@@ -32,7 +32,7 @@ export function AppSidebar() {
   const { t } = useTranslation()
   const { pathname } = useLocation()
   const active = tasks.filter((x) => x.status === "Downloading").length
-  // 顶层路径：/search/:bookUrl 这类详情路由也归到 /search 项高亮。
+  // 顶层路径：/search/:bookUrl 这类详情路由也归到 /search 高亮
   const activePath = "/" + (pathname.split("/").filter(Boolean)[0] ?? "search")
 
   return (

@@ -1,6 +1,4 @@
-//! 书源配置管理：活跃书源文件选择 + 禁用书源列表。
-//!
-//! 配置文件路径：`~/.sonovel/sources_config.json`
+//! 书源配置管理: 活跃书源文件选择 + 禁用书源列表。配置文件 `~/.sonovel/sources_config.json`。
 
 use std::collections::HashSet;
 use std::path::Path;
@@ -9,7 +7,6 @@ use serde::{Deserialize, Serialize};
 
 use super::write_atomically;
 
-/// 书源配置。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SourcesConfig {
     /// 当前选中的书源 JSON 文件名（相对于 `~/.sonovel/rules/`）。
@@ -77,7 +74,6 @@ mod tests {
     #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
     use super::*;
 
-    /// 测试辅助：检查书源是否被禁用。
     fn is_disabled(cfg: &SourcesConfig, url: &str) -> bool {
         let key = url.trim().to_lowercase();
         cfg.disabled_urls.contains(&key)

@@ -1,9 +1,7 @@
-//! 关于页（gpui-kit 组件库的 `Settings` 左侧 sidebar 第 4 项）。
+//! 关于页（`Settings` 左侧 sidebar 第 4 项）：版本 / 检查更新 / 项目主页。
 //!
-//! 1 个 group：版本（静态文本）/ 检查更新 / 项目主页。
-//!
-//! 3 个 item 全部 `SettingField::render` —— 形态各异（裸 div / 带 loading state
-//! 切换的 Button / 跳外链的 Button），不抽 helper，详见 plan「不抽的项」。
+//! 3 个 item 形态各异（裸 div / 带 loading 的 Button / 跳外链的 Button），全部手写
+//! `SettingField::render`，不抽 helper。
 
 use gpui_kit::component::{
     ActiveTheme as _, Disableable, Icon, IconName, Sizable as _,
@@ -26,7 +24,7 @@ pub(super) fn build(ctx: &PageCtx<'_>, _cx: &App) -> SettingPage {
             SettingGroup::new()
                 .title(ts("Settings.group.info"))
                 .items(vec![
-                    // -- 版本（静态文本）--
+                    // 版本（静态文本）
                     SettingItem::new(
                         ts("Settings.item.version"),
                         SettingField::render(|_opts, _window, cx| {
@@ -37,15 +35,13 @@ pub(super) fn build(ctx: &PageCtx<'_>, _cx: &App) -> SettingPage {
                         }),
                     )
                     .description(ts("Settings.desc.version")),
-                    // -- 检查更新 / 下载新版 --
+                    // 检查更新 / 下载新版
                     SettingItem::new(
                         ts("Settings.item.check_update"),
                         SettingField::render({
                             let m = m;
                             move |_opts, _window, cx| {
-                                // 网络请求在跑时 → Button::loading(true) 自动显示
-                                // spinner + 屏蔽 click（组件库 button.rs:365：
-                                // `!(self.disabled || self.loading) && self.on_click.is_some()`）。
+                                // loading 时 Button 显示 spinner + 屏蔽 click。
                                 let state = m.read(cx);
                                 let checking = state.update_state.checking;
                                 // 检查完成后若有新版本 → 按钮变"下载新版"跳浏览器。
@@ -91,7 +87,7 @@ pub(super) fn build(ctx: &PageCtx<'_>, _cx: &App) -> SettingPage {
                         }),
                     )
                     .description(ts("Settings.desc.check_update")),
-                    // -- 项目主页 --
+                    // 项目主页
                     SettingItem::new(
                         ts("Settings.item.open_github"),
                         SettingField::render(|_opts, _window, _cx| {

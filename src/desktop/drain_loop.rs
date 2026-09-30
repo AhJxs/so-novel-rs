@@ -1,33 +1,13 @@
-//! 100ms 兜底 + 事件驱动唤醒的 GPUI 排空循环。
+//! GPUI 排空循环：100ms 兜底 + 事件驱动唤醒。
 //!
-//! 从 `crate::desktop::model::events` 搬过来 —— 它 100% 是 GPUI 桥（`gpui_kit::AsyncApp` /
-//! `cx.spawn().detach()` / `background_executor().timer()` / `update_entity`），
-//! 不属于"业务层与 UI 框架解耦"的 `crate::desktop::model`。原 `events.rs` 现在只保留
-//! 纯排空逻辑（drain channels + push `UIEvent`）。
+//! `desktop::run` 启动时调一次；每轮等 wakeup 信号或 100ms 兜底 tick（防 producer
+//! hang 导致 UI 永不刷新），拿到 `&mut AppModel` 后 `drain`，有数据则 `ctx.notify()`。
 //!
-//! 流程：
-//! 1. `desktop::run` 启动时调一次（见 `crate::desktop::run`）；
-//! 2. 循环里 `select!` 风格：要么被 `wakeup` 信号唤醒（`smol::channel`），要么
-//!    兜底 100ms tick —— 防止 producer 异常 hang 导致 UI 永远不刷新。
-//! 3. 拿到 `&mut AppModel` 后调 `drain`；任何 channel 有数据则 `ctx.notify()`
-//!    触发当前 view 重绘。
-//! 4. entity 已释放（app 退出）时 `WeakEntity::upgrade` 返回 `None`，`break` 出
-//!    循环（gpui-kit 0.6 起 `update_entity` 对已释放 entity 直接 panic，
-//!    `spawn_drain_loop` 因此持 `WeakEntity` 先 upgrade 再 update）；
-//! 5. task detached —— 进程退出时随 executor 终止，不暴露 Task handle。
-//!
-//! ## 为什么 100ms 兜底
-//!
-//! 搜索/详情/封面/TOC/下载进度/书源健康检查/更新检查 7 条后台通道都走这个
-//! 循环统一推动 UI 重绘。100ms 粒度用户感知不到延迟，**而且**作为兜底防止
-//! wakeup 通道丢失信号（比如外部代码忘了 `try_send）时` UI 永远不刷新。
-//!
-//! ## wakeup 通道类型
-//!
-//! 用 `smol::channel::bounded(1)` —— `gpui` 的 `cx.spawn` 跑在 smol executor
-//! 上，所有 send/recv 都在 smol 上下文，**不**触碰 tokio runtime（避免跨
-//! executor 复杂度）。`bounded(1)` 容量让"已有一发未读"时第二次 send 直接
-//! 覆盖而不是堆积。
+//! - entity 已释放（app 退出）时 `WeakEntity::upgrade` 返回 `None` 并 `break`；
+//!   必须持 `WeakEntity` 先 upgrade 再 update —— `update_entity` 对已释放 entity 直接 panic。
+//! - wakeup 用 `smol::channel::bounded(1)`：`cx.spawn` 跑在 smol executor 上，send/recv
+//!   全在 smol 上下文，不触碰 tokio runtime；容量 1 让新信号覆盖旧信号而非堆积。
+//! - task detached，不暴露 Task handle。
 
 use std::time::Duration;
 
@@ -39,33 +19,23 @@ use crate::desktop::model::events::{WakeupReceiver, drain};
 /// 在 GPUI app 启动时调一次：`spawn` 一个循环任务，按 100ms tick + wakeup 信号
 /// 排空 `AppModel`。
 ///
-/// 调用上下文：必须在 `Application::run(|cx: &mut App| { ... })` 的闭包内，
-/// 在 `open_window` 前后调都可以。
-///
-/// 任务 detached：返回 `()`，不暴露 Task handle，进程退出时随 executor 终止。
+/// 调用上下文：必须在 `Application::run(|cx: &mut App| { ... })` 的闭包内。
 pub fn spawn_drain_loop(model: &Entity<AppModel>, wakeup: WakeupReceiver, cx: &App) {
-    // 只持弱引用：强 `Entity` 留在循环里会保证 entity 永不释放，app 退出时
-    // `upgrade` 也就永远不失败、循环没法感知退出。gpui-kit 0.6 的
-    // `update_entity` 返回闭包结果 `R`（不再是旧的 `Result<R>`），entity
-    // 已释放时直接 panic —— 所以改用 `WeakEntity::upgrade` 探测退出。
+    // 只持弱引用：强引用会让 entity 永不释放，循环也就无法感知退出。
     let weak_model = model.downgrade();
     cx.spawn(async move |async_cx: &mut gpui_kit::AsyncApp| {
         loop {
-            // 等待：要么被 wakeup 唤醒，要么兜底 100ms tick。
-            // 简化做法：先 try_recv（非阻塞），拿不到就 100ms 兜底。
-            // 这样比 `or` 组合两个 future 更可读，且 100ms 兜底本身就是
-            // 必需的（防 producer hang）。
+            // 非阻塞 try_recv；拿不到就 100ms 兜底（既保证延迟感知不到，也防 producer hang）。
             if wakeup.try_recv().is_none() {
                 async_cx
                     .background_executor()
                     .timer(Duration::from_millis(100))
                     .await;
-                // timer 醒来后再 try_recv 一次，把上一次 timer 期间的
-                // 信号消耗掉（bounded 容量 1，避免堆积）。
+                // timer 期间到达的信号再消费一次，避免堆积。
                 let _ = wakeup.try_recv();
             }
 
-            // 排空一次；entity 已释放（app 退出）时 upgrade 返回 None，直接 break。
+            // entity 已释放时 upgrade 返回 None，直接 break。
             let Some(model) = weak_model.upgrade() else {
                 break;
             };

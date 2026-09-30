@@ -1,7 +1,5 @@
-//! `AppConfig` 的类型定义与 enum 解析。
-//!
-//! 拆出来是为了让 `toml_io.rs` / `defaults.rs` 集中处理"如何读写 TOML"，
-//! 类型本身（结构、serde 派生、enum 解析、默认值）放在这里。
+//! `AppConfig` 类型定义与 enum 解析：结构 / serde 派生 / 默认值 / 校验。
+//! TOML 读写流程在 `toml_io.rs`，默认路径与模板在 `defaults.rs`。
 
 use serde::{Deserialize, Serialize};
 
@@ -12,8 +10,7 @@ pub enum ExportFormat {
     Epub,
     Txt,
     Html,
-    /// 阶段一不实现 PDF 导出，仅保留枚举以便兼容旧配置，
-    /// UI 选择 PDF 时会显示提示并降级。详见 audit §6.4。
+    /// 暂不实现 PDF 导出，仅保留枚举以兼容旧配置；UI 选择 PDF 时会提示并降级。
     Pdf,
     /// Markdown 单文件输出（`.md`），UTF-8 only。详见 docs/superpowers/specs/2026-07-11-markdown-export-design.md。
     Markdown,
@@ -41,14 +38,12 @@ impl ExportFormat {
     }
 }
 
-/// zhconv 用的目标语言变体（影响下载章节正文的简繁转换目标）。
+/// zhconv 用的目标语言变体（影响下载章节正文的简繁转换目标）：
+/// `ZhCn` 简体中文 / `ZhTw` 繁體中文（台灣）/ `ZhHant` 繁體中文（通用 / Hant）。
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub enum LangType {
-    /// 简体中文
     ZhCn,
-    /// 繁體中文（台灣）
     ZhTw,
-    /// 繁體中文（通用 / Hant）
     ZhHant,
 }
 
@@ -71,23 +66,17 @@ impl LangType {
     }
 }
 
-/// **应用语言**。
+/// **应用语言**：简体中文 / 繁體中文 / English。存 TOML `[global].language`
+/// （旧名 `[global].app-lang` 仍可加载，仅做向后兼容）。
 ///
-/// 与 `LangType` 区分：`LangType` 是 zhconv 用的目标语言变体；`Language` 是
-/// **应用**语言，决定 Sidebar placeholder / Select placeholder / Dialog OK|Cancel
-/// 等所有 `gpui_kit::component` 内部 `t!("...")` 调用的文案，同时也决定下载章节正文的目标语言
-/// —— 见 `Language::to_book_target_lang`。
-///
-/// 三种：简体中文 / 繁體中文 / English。存到 TOML `[global].language`
-/// （旧名 `[global].app-lang` 仍可加载 —— 仅做向后兼容）。
+/// 与 [`LangType`] 区分：`LangType` 是 zhconv 的目标语言变体；`Language` 是**应用**
+/// 语言，决定 Sidebar placeholder / Dialog OK|Cancel 等所有 `gpui_kit::component`
+/// 内部 `t!("...")` 文案，同时也决定下载章节正文的目标语言（见 [`Self::to_book_target_lang`]）。
 #[derive(Debug, Copy, Clone, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub enum Language {
-    /// 简体中文
     #[default]
     SimplifiedChinese,
-    /// 繁體中文
     TraditionalChinese,
-    /// English
     English,
 }
 
@@ -109,15 +98,11 @@ impl Language {
         }
     }
 
-    /// 把界面语言映射到下载书籍的目标语言（zhconv 用的 `LangType`）。
+    /// 把界面语言映射到下载书籍的目标语言（zhconv 用的 [`LangType`]）：简体 / 英文 → `ZhCn`，
+    /// 繁體 → `ZhTw`。
     ///
-    /// 合并设置后，**用户只设一个 `Language`**，下载时的简繁转换目标语言从这里推：
-    /// - 简体中文界面 → `下载正文用简体中文（LangType::ZhCn`）
-    /// - 繁體中文界面 → `下载正文用繁體中文（LangType::ZhTw，台湾用词`）
-    /// - 英文 / 其它  → `回落简体中文（LangType::ZhCn`）
-    ///
-    /// 注意：`LangType::ZhHant`（通用繁体）不再从 UI 暴露 —— 之前的 Source language
-    /// 下拉被合并掉了。如果用户想要"通用繁体"输出，得改用其它工具后处理。
+    /// `LangType::ZhHant`（通用繁体）不再从 UI 暴露 —— 原来的 Source language 下拉已被合并掉，
+    /// 需要"通用繁体"输出得用其它工具后处理。
     pub const fn to_book_target_lang(self) -> LangType {
         match self {
             Self::SimplifiedChinese | Self::English => LangType::ZhCn,
@@ -126,13 +111,12 @@ impl Language {
     }
 }
 
-/// 主题模式：静态（固定一个主题）或动态（浅/深色各选一个，按明暗模式切换）。
+/// 主题模式：`Dynamic` 按明暗各选一个主题、跟随 [`ThemeDynMode`] 切换（默认）；
+/// `Static` 固定用 `static_name` 一个主题，不跟随系统明暗。
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize, Deserialize, Default)]
 pub enum ThemeKind {
-    /// 动态：分别指定浅色 / 深色主题，按 [`ThemeDynMode`] 切换。默认。
     #[default]
     Dynamic,
-    /// 静态：固定使用 `static_name` 这一个主题，不跟随系统明暗。
     Static,
 }
 
@@ -152,15 +136,12 @@ impl ThemeKind {
     }
 }
 
-/// 动态主题的明暗切换方式（仅 [`ThemeKind::Dynamic`] 生效）。
+/// 动态主题的明暗切换方式：跟随系统 / 强制浅色 / 强制深色（仅 [`ThemeKind::Dynamic`] 生效）。
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize, Deserialize, Default)]
 pub enum ThemeDynMode {
-    /// 跟随系统明暗。
     #[default]
     System,
-    /// 强制浅色。
     Light,
-    /// 强制深色。
     Dark,
 }
 
@@ -182,18 +163,12 @@ impl ThemeDynMode {
     }
 }
 
-/// 主题偏好。
+/// 主题偏好。两种模式共用一个 struct（而非 enum）—— 切换 [`ThemeKind`] 时**保留**另一模式
+/// 的选项，用户在静态 / 动态间来回切不会丢失已选主题名（空串 = 用组件库 / registry 默认）。
 ///
-/// 两种模式共用一个 struct（而非 enum）—— 切换 [`ThemeKind`] 时**保留**另一模式的
-/// 选项，用户在静态/动态间来回切不会丢失已选的浅/深主题名。
-///
-/// - [`ThemeKind::Static`] → 用 `static_name`（空串 = gpui-kit 组件库默认主题）。
-/// - [`ThemeKind::Dynamic`] → `dyn_light` / `dyn_dark` 各指定一个主题名（空串 = 用
-///   registry 默认浅/深主题），`dyn_mode` 决定按系统 / 强制浅 / 强制深切换。
-///
-/// 主题名来自 `src/desktop/themes/*.json`（每个文件含 light + dark 变体，变体名如
-/// `"Catppuccin Latte"` / `"Catppuccin Mocha"`）。设置页选浅/深主题时会按变体的
-/// `mode` 过滤，避免把深色主题选进浅色槽。
+/// 主题名来自 `src/desktop/themes/*.json`（每个文件含 light + dark 变体，名如
+/// `"Catppuccin Latte"` / `"Catppuccin Mocha"`）；设置页按变体 `mode` 过滤，避免
+/// 把深色主题选进浅色槽。
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ThemePref {
     pub kind: ThemeKind,
@@ -207,58 +182,39 @@ pub struct ThemePref {
     pub dyn_dark: String,
 }
 
-/// 主配置结构。`version` 字段用于将来 in-place 升级时做迁移判断。
+/// 主配置结构。字段按 TOML 章节分组，每个章节一个 sub-struct（序列化成嵌套表）；
+/// `version` 用于将来 in-place 升级时做迁移判断。
 ///
-/// 字段按 TOML 章节分组, 每个章节一个 sub-struct, 序列化时是嵌套表:
-///
-/// ```toml
-/// [global]
-/// theme-kind = "dynamic"
-/// font-size = 16.0
-///
-/// [download]
-/// download-path = "..."
-/// ```
-///
-/// 读取流程 (`toml_io::load_config`) 按章节用 `toml_edit` 解析, 不直接走 serde
-/// 反序列化 (要做旧键迁移、字段夹值、i18n 兜底等); 这里只声明结构与默认值。
+/// 读取走 `toml_io::load_config`（`toml_edit` 逐字段解析，做旧键迁移 / 夹值 / i18n 兜底），
+/// 不直接走 serde 反序列化；这里只声明结构与默认值。模板见 `defaults::default_template_doc`。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
     /// 配置 schema 版本。`env!("CARGO_PKG_VERSION")` 在 `with_defaults` 时填。
     pub version: String,
 
-    /// `[global]` 章节: 主题偏好 / 语言 / 代理 / 字号。
     #[serde(default)]
     pub global: GlobalCfg,
 
-    /// `[download]` 章节: 下载路径 / 导出格式 / 编码 / 章节缓存策略。
     #[serde(default)]
     pub download: DownloadCfg,
 
-    /// `[source]` 章节: 书源搜索限制 / 过滤开关。
     #[serde(default)]
     pub source: SourceCfg,
 
-    /// `[crawl]` 章节: 并发数 / 间隔 / 重试参数。
     #[serde(default)]
     pub crawl: CrawlCfg,
 
-    /// `[cookie]` 章节: 站点专用 cookie (目前只起点中文)。
     #[serde(default)]
     pub cookie: CookieCfg,
 
-    /// `[proxy]` 章节: HTTP 代理配置。
     #[serde(default)]
     pub proxy: ProxyCfg,
 }
 
-/// `[global]` 章节。主题偏好 / 应用语言 / GitHub 代理 / Cloudflare bypass /
-/// 侧栏折叠状态 / 全局字号。
+/// `[global]` 章节。主题偏好 / 应用语言 / GitHub 代理 / Cloudflare bypass / 侧栏折叠 / 字号。
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct GlobalCfg {
-    /// 主题偏好 (静态 / 动态)。
     pub theme_pref: ThemePref,
-    /// 应用语言 (zh-CN / zh-TW / en)。
     pub language: Language,
     /// GitHub raw 代理前缀 (留空 = 直连)。
     pub gh_proxy: String,
@@ -266,9 +222,8 @@ pub struct GlobalCfg {
     pub cf_bypass: String,
     /// 左侧 Sidebar 是否折叠。重启后保持上次状态。
     pub sidebar_collapsed: bool,
-    /// UI 字号 (px)。gpui-kit 组件库默认 16; `Root::render` 每帧用它设 rem 基准,
-    /// 组件全用 `rems(...)` 缩放, 改这一个字段 = 全局缩放。
-    /// 范围由 `validate()` 钳制到 [12, 24], 渲染层还会再夹一次防越界。
+    /// UI 字号 (px)。组件全用 `rems(...)`，`Root::render` 每帧用它设 rem 基准，
+    /// 改这一个字段 = 全局缩放。范围由 `validate()` 钳到 [12, 24]，渲染层再夹一次。
     pub font_size: f32,
 }
 
@@ -277,7 +232,7 @@ pub struct GlobalCfg {
 pub struct DownloadCfg {
     /// 默认下载目录 (由 `defaults::default_download_path` 决定)。
     pub download_path: String,
-    /// 导出文件格式 (EPUB / TXT / HTML / PDF)。
+    /// 导出文件格式。
     pub ext_name: ExportFormat,
     /// TXT 导出编码 (UTF-8 / GBK / Big5 ...)。
     pub txt_encoding: String,
@@ -303,7 +258,6 @@ pub struct CrawlCfg {
     pub min_interval: u32,
     /// 两次抓取的最大间隔 (ms)。运行时在 [min, max] 间随机。
     pub max_interval: u32,
-    /// 是否启用失败重试。
     pub enable_retry: bool,
     /// 单个书源的最大重试次数。
     pub max_retries: u32,
@@ -323,7 +277,6 @@ pub struct CookieCfg {
 /// `[proxy]` 章节。HTTP 代理配置。
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ProxyCfg {
-    /// 是否启用 HTTP 代理。
     pub proxy_enabled: bool,
     /// 代理主机地址。
     pub proxy_host: String,
@@ -376,16 +329,10 @@ impl AppConfig {
         }
     }
 
-    /// 校验配置合法性。启动时调一次, 失败让用户改 config.toml 重启。
-    ///
-    /// 当前校验:
-    /// - `font_size` ∈ [12.0, 24.0] (与 `desktop::themes::FONT_SIZE_MIN/MAX` 一致)
-    /// - `min_interval <= max_interval` (爬虫间隔合法性)
-    /// - `retry_min_interval <= retry_max_interval` (重试间隔合法性)
-    /// - `proxy_port != 0` (启用代理时端口必须非零; 实际上 u16 不会为 0 但显式校验可读)
-    /// - `download_path` 非空
+    /// 校验配置合法性（启动时调一次，失败让用户改 config.toml 重启）：
+    /// `font_size` ∈ [12.0, 24.0]（与 `desktop::themes::FONT_SIZE_MIN/MAX` 一致）、
+    /// `min_interval <= max_interval`、`retry_min_interval <= retry_max_interval`、`download_path` 非空。
     pub fn validate(&self) -> Result<(), ConfigError> {
-        // 字号
         const FONT_MIN: f32 = 12.0;
         const FONT_MAX: f32 = 24.0;
         if !(FONT_MIN..=FONT_MAX).contains(&self.global.font_size) {
@@ -397,7 +344,6 @@ impl AppConfig {
             });
         }
 
-        // 爬虫间隔
         if self.crawl.min_interval > self.crawl.max_interval {
             return Err(ConfigError::InvalidRange {
                 field: "crawl.min_interval/max_interval",
@@ -406,7 +352,6 @@ impl AppConfig {
             });
         }
 
-        // 重试间隔
         if self.crawl.retry_min_interval > self.crawl.retry_max_interval {
             return Err(ConfigError::InvalidRange {
                 field: "crawl.retry_min_interval/retry_max_interval",
@@ -415,7 +360,6 @@ impl AppConfig {
             });
         }
 
-        // 下载路径
         if self.download.download_path.trim().is_empty() {
             return Err(ConfigError::Empty {
                 field: "download.download_path",
@@ -429,7 +373,6 @@ impl AppConfig {
 /// 配置校验错误
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
-    /// 字段值超出合法范围。
     #[error("配置字段 `{field}` = {value} 超出合法范围 [{min}, {max}]")]
     OutOfRange {
         field: &'static str,
@@ -438,7 +381,6 @@ pub enum ConfigError {
         max: f64,
     },
 
-    /// 字段范围非法 (min > max)。
     #[error("配置字段 `{field}` 范围非法: min={min} > max={max}")]
     InvalidRange {
         field: &'static str,
@@ -446,7 +388,6 @@ pub enum ConfigError {
         max: u64,
     },
 
-    /// 必填字段为空。
     #[error("配置字段 `{field}` 不能为空")]
     Empty { field: &'static str },
 }

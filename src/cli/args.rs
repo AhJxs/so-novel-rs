@@ -4,18 +4,12 @@ use clap::{Arg, ArgAction, Command, Parser, Subcommand};
 
 use crate::config::Language;
 
-/// 主入口元信息：`name` / `version` 由 `--version` 自动注入。
 pub const PKG_NAME: &str = "so-novel-rs";
 
 /// 顶层 `so-novel-rs` 描述（短）。clap 在 usage 行尾 / 简略模式用。
 const ABOUT_SHORT: &str = "So Novel — 简繁小说批量下载（CLI / GUI / WEB 三模）";
 
 /// 顶层 `so-novel-rs` 描述（长）。`--help` 全文模式用。
-///
-/// 关键信息：
-/// 1. 不传子命令 → 启动 GPUI GUI（`main.rs` 的分发逻辑）；
-/// 2. 子命令走 CLI 模式，各自独立；
-/// 3. 全局 flag（`-v` / `-q`）所有子命令生效。
 const ABOUT_LONG: &str = "\
 So Novel — 简繁小说批量下载（CLI / GUI / WEB 三模）
 
@@ -27,31 +21,24 @@ So Novel — 简繁小说批量下载（CLI / GUI / WEB 三模）
   -v, --verbose  打开内部 tracing 日志（默认静默）
   -q, --quiet    抑制逐章进度与失败源 dump，脚本管道友好";
 
-/// `--version` 输出格式：clap 默认在版本号前自动加二进制名（"so-novel-rs 0.3.2"），
-/// 这里只传版本号本身即可，不要重复写包名。
+/// `--version` 输出格式：clap 会自动在版本号前加二进制名，故这里只传版本号。
 pub const VERSION_STRING: &str = env!("CARGO_PKG_VERSION");
 
-/// so-novel-rs — 小说下载器（CLI）。
 #[derive(Debug, Parser)]
 #[command(
     name = PKG_NAME,
     about = ABOUT_SHORT,
     long_about = ABOUT_LONG,
     version = VERSION_STRING,
-    // 关闭 clap 默认生成的 -h / --help / -V / --version / help 子命令 —— 默认都
-    // 是英文 "Print help" / "Print version" / "Print this message..."。我们手动
-    // 加回 -h / --help / -V / --version 并写中文 help 文本；help 子命令不需要
-    // 单独开（-h / --help 已覆盖）。--help / --version 用 SetTrue 在 `mod.rs::run`
-    // 里手动分发，避开 `ArgAction::Help`/`ArgAction::Version` 在子命令解析时的
-    // required assert。
+    // 关闭 clap 自动生成的 -h / --help / -V / --version / help 子命令（默认文案是英文），
+    // 改为在 `mod.rs::run` 用 SetTrue 手动分发 —— 避开 `ArgAction::Help`/`Version`
+    // 在子命令解析时的 required assert，同时能写中文 help。
     disable_help_flag = true,
     disable_version_flag = true,
     disable_help_subcommand = true,
-    // 让 `so-novel-rs --help` / `--version` 不带子命令也能用（手动分发需要
-    // 走到 mod.rs::run 才能 print），同时让 mod.rs::run 能区分"没传子命令"
-    // 和"传了子命令"。
+    // 让 `--help` / `--version` 不带子命令也能用，并让 `mod.rs::run` 能区分"没传子命令"。
     subcommand_required = false,
-    // 放在 Options 区之后：常用调用样例，新用户最需要的"先抄哪个"
+    // 放在 Options 区之后：新用户最需要的"先抄哪个"样例
     after_help = "Examples:\n  \
         启动 GUI（无子命令）:                                so-novel-rs\n  \
         搜索书源（聚合）:                                    so-novel-rs search 凡人修仙传\n  \
@@ -71,19 +58,16 @@ pub struct Cli {
     #[arg(long, short = 'q', global = true)]
     pub quiet: bool,
 
-    // ponytail: 用 `SetTrue` + 在 `mod.rs::run` 里手动调 `Cli::command().print_help()`
-    // —— clap 的 `ArgAction::Help` 会自动 exit，把 `bool` 字段当成 required 在子命令
-    // 解析时 assert 失败。手动分发避免 assert，又能把帮助文本写成中文。
-    /// 打印帮助信息
+    // 用 `SetTrue` + `mod.rs::run` 手动分发: clap 的 `ArgAction::Help` 会自动 exit,
+    // 并把 `bool` 字段当成 required 在子命令解析时 assert 失败。
     #[arg(short = 'h', long = "help", action = clap::ArgAction::SetTrue, global = true)]
     pub help: bool,
 
-    /// 打印版本号
     #[arg(short = 'V', long = "version", action = clap::ArgAction::SetTrue, global = true)]
     pub version_flag: bool,
 
-    /// 子命令。`Option<Cmd>` 因为我们要让 `so-novel-rs --help` / `--version`
-    /// 不带子命令也能用（默认 `subcommand_required = true` 会卡住这两个 flag）。
+    /// 子命令。`Option<Cmd>` 以支持 `--help` / `--version` 不带子命令使用
+    /// （默认 `subcommand_required = true` 会卡住这两个 flag）。
     #[command(subcommand)]
     pub command: Option<Cmd>,
 }
@@ -104,7 +88,6 @@ pub enum Cmd {
         /// 每源最多返回条数（覆盖 config.toml 的 search-limit）
         #[arg(long, value_name = "N")]
         limit: Option<usize>,
-        /// 输出 JSON 到 stdout（机器可读，禁用人类可读格式）
         #[arg(long)]
         json: bool,
     },
@@ -135,7 +118,6 @@ pub enum Cmd {
     },
     /// 书源管理：list / enable / disable
     ///
-    /// 不带子命令（裸 `sources`）等价于 `sources list`。
     #[command(after_help = "Examples:\n  \
         列出所有书源（人类可读）:                           so-novel-rs sources list\n  \
         列出所有书源（JSON）:                               so-novel-rs sources list --json\n  \
@@ -152,21 +134,17 @@ pub enum Cmd {
 
 #[derive(Debug, Subcommand)]
 pub enum SourcesAction {
-    /// 列出当前书源
     List {
-        /// 输出 JSON 到 stdout（机器可读，禁用人类可读格式）
         #[arg(long)]
         json: bool,
     },
     /// 启用指定 ID 的书源（写回 `sources_config.json`）
     Enable {
-        /// 书源 ID
         #[arg(value_name = "ID")]
         id: i32,
     },
     /// 禁用指定 ID 的书源（写回 `sources_config.json`）
     Disable {
-        /// 书源 ID
         #[arg(value_name = "ID")]
         id: i32,
     },
@@ -174,38 +152,22 @@ pub enum SourcesAction {
 
 /// 手搓一个**本地化的 `clap::Command`** 用于 help 打印。
 ///
-/// ## 为什么不用 derive-built `Cli::command()`
+/// 不能复用 derive 的 `Cli::command()`：clap 4 顶层的 `about` / `long_about` /
+/// `after_help` 是构造期 builder 设的 `String`、**没有 public setter**，derive 之后改不动；
+/// 而这些文案要按 `config.toml [global].language`（zh-CN / zh-TW / en）运行时切换，
+/// 只能整棵 `Command` 手搓。
 ///
-/// clap 4 顶层 `about` / `long_about` / `after_help` 是构造期 builder 设置的
-/// `String`，**没有 public setter** —— derive 之后只能 mutate `Arg` / 子命令
-/// 字段，顶层 help 文案改不动。我们的 help 是 `config.toml [global].language`
-/// 决定的（zh-CN / zh-TW / en），必须在运行时切换 —— 只能整棵 `Command` 手搓。
-///
-/// ## 结构与 derive 一一对应
-///
-/// - 顶层：4 个 global arg（`-v` / `-q` / `-h` / `-V`）
-/// - 3 个 subcommand：`search` / `download` / `sources`
-/// - `sources` 下 3 个 sub-subcommand：`list` / `enable` / `disable`
-///
-/// 与 `Cli` derive 结构上的差异（仅行为等价 / parse 兼容）：
-/// - derive 的 `Cmd::Sources { action: Option<SourcesAction>, json }` 里 `action`
-///   走 `#[command(subcommand)]`，手搓版 `sources` 自身不显式定义 `action` 参数
-///   —— sub-subcommand 由 clap 自动从 `find_subcommand` 树里识别。
-/// - `--json` 在 derive 里是 `Cmd::Sources` 的字段（同时支持 `sources --json`
-///   和 `sources list --json`）；手搓版在 `sources` 顶层和 `sources list` 各放
-///   一个同名 flag，clap 都识别。
-///
-/// **测试守住正确性**：`src/cli/tests.rs::localized_command_matches_derive_structure`
-/// 断言 `build_localized_command(en)` 的 arg IDs / subcommand 名称集合与
-/// `Cli::command()` 相等；任何结构偏离都会被该测试抓住。
+/// 结构与 derive 一一对应：顶层 4 个 global arg (`-v`/`-q`/`-h`/`-V`) + `search`/`download`/
+/// `sources` 三个子命令 + `sources` 下 `list`/`enable`/`disable`。`sources --json` 与
+/// `sources list --json` 各放一个同名 flag（derive 里是 `Cmd::Sources.json` 一个字段）。
+/// 任何结构偏离都会被 `src/cli/tests.rs::localized_command_matches_derive_structure` 抓住。
 pub fn build_localized_command(lang: Language) -> Command {
     // 切到目标 locale，并清空 `ts()` 缓存（缓存里的旧 locale 翻译要失效）。
     rust_i18n::set_locale(crate::i18n::locale_for(lang));
     crate::i18n::invalidate_cache();
 
-    // 一次性把 `ts(key)` 转 String —— clap 的 `help` / `about` / `long_about` 都
-    // 接 `&'static str` / `String`，TStr 在 gui feature 下是 SharedString、
-    // web-only 下是 String，统一 `.to_string()`。
+    // clap 的 help / about / long_about 接 `&'static str` / `String`，而 TStr 在 gui 下是
+    // SharedString、web-only 下是 String，故统一 `.to_string()`。
     let ts = |key: &'static str| crate::i18n::ts(key).to_string();
 
     Command::new(PKG_NAME)
@@ -213,9 +175,8 @@ pub fn build_localized_command(lang: Language) -> Command {
         .long_about(ts("Cli.about_long"))
         .after_help(ts("Cli.after_help"))
         .version(VERSION_STRING)
-        // 关闭 clap 自动注入的 --help / -V / help 子命令：与 derive `Cli` 的
-        // `disable_help_flag = true` / `disable_version_flag = true` /
-        // `disable_help_subcommand = true` 对齐。我们手搓同名 arg 自己处理。
+        // 关闭 clap 自动注入的 --help / -V / help 子命令, 与 derive `Cli` 的三个
+        // `disable_*` 开关对齐 —— 我们手搓同名 arg 自己处理。
         .disable_help_flag(true)
         .disable_version_flag(true)
         .disable_help_subcommand(true)
@@ -325,15 +286,13 @@ pub fn build_localized_command(lang: Language) -> Command {
             Command::new("sources")
                 .about(ts("Cli.sources_about"))
                 .after_help(ts("Cli.sources_after_help"))
-                // 顶层 --json（与 derive 里 `Cmd::Sources.json` 等价 —— 兼容旧版
-                // 裸 `sources --json` 调用）。
+                // 顶层 --json: 兼容旧版裸 `sources --json` 调用 (derive 里是 `Cmd::Sources.json`)。
                 .arg(
                     Arg::new("json")
                         .long("json")
                         .action(ArgAction::SetTrue)
                         .help(ts("Cli.sources_json_help")),
                 )
-                // 三个 sub-subcommand：list / enable / disable。
                 .subcommand(
                     Command::new("list")
                         .about(ts("Cli.sources_list_about"))
@@ -367,9 +326,8 @@ pub fn build_localized_command(lang: Language) -> Command {
         )
 }
 
-/// 把 `cli.command` 映射到子命令名（用于 `build_localized_command` 之后的
-/// `find_subcommand_mut(name).print_long_help()`）。派生 derive `Cmd` 的
-/// variant 与子命令名一一对应。
+/// 把 `cli.command` 映射到子命令名 (供 `find_subcommand_mut(name).print_long_help()`),
+/// 与 derive `Cmd` 的 variant 一一对应。
 pub const fn subcommand_name(cmd: &Cmd) -> &'static str {
     match cmd {
         Cmd::Search { .. } => "search",

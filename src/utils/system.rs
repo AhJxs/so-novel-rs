@@ -1,12 +1,8 @@
 //! 跨平台"用系统默认程序打开文件 / 打开所在目录"。
 //!
-//! 不引入 `opener` crate：直接调系统命令足够。功能就这两个，封装成本远低于
-//! 多拉一个依赖。
-//!
-//! 行为：
-//! - `open_path`：Windows 用 `start ""`、macOS 用 `open`、Linux 用 `xdg-open`；
-//! - `reveal_in_folder`：Windows 用 `explorer /select,<file>` 高亮选中；
-//!   macOS 用 `open -R <file>`；Linux 没有标准命令，回退到打开父目录。
+//! 不引入 `opener` crate：功能就两个，直接调系统命令，封装成本低于多拉一个依赖。
+//! `open_path` 用 `start` / `open` / `xdg-open`；`reveal_in_folder` 用
+//! `explorer /select,` / `open -R`，Linux 无标准命令故退回打开父目录。
 
 use std::path::Path;
 use std::process::Command;
@@ -24,8 +20,7 @@ pub fn open_path(path: &Path) -> Result<()> {
 
     #[cfg(target_os = "windows")]
     {
-        // `cmd /C start "" "<path>"` —— 第一个 "" 是 start 的窗口标题，必须有，
-        // 否则带空格的路径会被当作标题。
+        // `start` 的第一个 "" 是窗口标题，必须有，否则带空格的路径会被当作标题。
         Command::new("cmd")
             .args(["/C", "start", "", path_str])
             .spawn()
@@ -58,8 +53,7 @@ pub fn open_path(path: &Path) -> Result<()> {
     }
 }
 
-/// 在文件管理器中显示文件 — Windows / macOS 高亮选中文件，
-/// Linux 退回为打开父目录。
+/// 在文件管理器中显示文件 — Windows / macOS 高亮选中，Linux 退回打开父目录。
 pub fn reveal_in_folder(path: &Path) -> Result<()> {
     if !path.exists() {
         return Err(anyhow!("path does not exist: {}", path.display()));
@@ -70,7 +64,6 @@ pub fn reveal_in_folder(path: &Path) -> Result<()> {
         let path_str = path
             .to_str()
             .ok_or_else(|| anyhow!("path not valid UTF-8: {}", path.display()))?;
-        // explorer 的特殊语法：/select, 后面接绝对路径。
         Command::new("explorer")
             .arg(format!("/select,{path_str}"))
             .spawn()

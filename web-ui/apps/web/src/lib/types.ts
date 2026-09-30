@@ -1,7 +1,5 @@
-// API types — 与 Rust 后端 (src/models, src/web/handlers) 的 serde 序列化结构对齐。
-// 后端结构体未启用 camelCase rename，字段名一律 snake_case，故前端保持一致。
-// 凡后端 #[serde(skip_serializing_if = "Option::is_none")] 或 Option<T> 的字段，
-// 此处均标为 T | null（serde 默认把 None 序列化为 null）。
+// API types — 与 Rust 后端 (src/models, src/web/handlers) 的 serde 结构对齐。
+// 字段名一律 snake_case（后端未启用 camelCase rename）；后端 Option<T> 字段标为 T | null。
 
 /** 单条搜索结果。对应后端 `models::SearchResult`。 */
 export interface SearchResult {
@@ -53,7 +51,7 @@ export interface Book {
   language: string
 }
 
-/** 单章数据（目录/进度用）。对应后端 `models::Chapter`，但 content 在 TOC 接口常被省略。 */
+/** 单章数据。对应后端 `models::Chapter`；content 在 TOC 接口常被省略。 */
 export interface Chapter {
   url: string
   title: string
@@ -62,10 +60,7 @@ export interface Chapter {
   content?: string
 }
 
-/**
- * 任务状态。对应后端 `web::TaskStatus` 枚举（serde 默认 PascalCase 序列化为
- * "Downloading" | "Finished" | "Failed" | "Cancelled"）。
- */
+/** 任务状态。对应后端 `web::TaskStatus`（serde 默认 PascalCase）。 */
 export type TaskStatus = 'Downloading' | 'Finished' | 'Failed' | 'Cancelled'
 
 /** 下载任务信息。对应后端 `handlers::download::TaskInfo`。 */
@@ -75,7 +70,7 @@ export interface Task {
   book_name: string | null
   /** 总章节数（book_resolved 后从 0 填到 N）。 */
   total_chapters: number
-  /** 已完成的章节数（count，不是 index；并发场景下单调递增，progress bar 平滑）。 */
+  /** 已完成的章节数（count，不是 index）。 */
   current_chapter: number
   /** 已失败章节数（与 GPUI DownloadTask.failed 同语义）。 */
   failed: number
@@ -108,12 +103,10 @@ export interface SourceTestResult {
 }
 
 /**
- * 设置。对应后端 `config::AppConfig` 的可编辑子集。
- * GET /api/settings 返回完整 AppConfig；PUT /api/settings 接受部分字段（SettingsUpdate）。
- * 这里只列前端会读写的字段；只读字段（version/theme_pref 等）由后端持有。
+ * 设置。对应后端 `config::AppConfig` 的可编辑子集；
+ * 只读字段（version / theme_pref 等）由后端持有。
  */
 export interface Settings {
-  /** 应用语言。对应后端 config::Language。 */
   language?: 'SimplifiedChinese' | 'TraditionalChinese' | 'English'
   proxy_enabled: boolean
   proxy_host: string
@@ -137,7 +130,3 @@ export type ExportFormat = 'epub' | 'txt' | 'html' | 'pdf' | 'markdown'
 export interface StartDownloadResult {
   task_id: number
 }
-
-// ─── 搜索/下载均为任务轮询模型 ──────────────────────────────────
-// 搜索：POST /api/search 建任务 → GET /api/search/{id} 轮询累计结果。
-// 下载：POST /api/download 返回 { task_id } → 进度走 GET /api/tasks 轮询。

@@ -1,7 +1,5 @@
-//! 21 个主题 JSON 编译期嵌入 + 列表助手。
-//!
-//! `include_str!` 必须在静态上下文使用字面量路径, 所以每个主题一个 const。
-//! 主题内容走 [`embedded_themes`] 返回 `(文件名, JSON 字符串)` 列表, 由
+//! 21 个主题 JSON 编译期嵌入 + 列表助手。`include_str!` 要求字面量路径, 所以每个主题一个 const;
+//! 内容走 [`embedded_themes`] 的 `(文件名, JSON 字符串)` 列表, 由
 //! [`super::user_dir::ensure_user_themes_dir`] 同步到 `~/.sonovel/themes/`。
 
 /// 字号范围 (px)。gpui-kit 组件库默认 16; 设置页 slider 的 min/max 复用这两个常量。
@@ -9,10 +7,7 @@ pub const FONT_SIZE_MIN: f32 = 12.0;
 pub const FONT_SIZE_MAX: f32 = 24.0;
 pub const FONT_SIZE_DEFAULT: f32 = 16.0;
 
-// ----- 21 个主题 JSON embed (编译期嵌入; `include_str!` 路径必须字面量) -----
-//
-// JSON 文件统一放在 [`data/`] 子目录, 与 .rs 源文件分离 — 主题资产 vs 代码
-// 各司其职, 升级主题不影响 Rust 编译产物。
+// ----- 21 个主题 JSON embed (`include_str!` 路径必须字面量) -----
 
 pub const THEME_ADVENTURE: &str = include_str!("data/adventure.json");
 pub const THEME_ALDUIN: &str = include_str!("data/alduin.json");

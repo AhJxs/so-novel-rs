@@ -1,22 +1,10 @@
-//! 书源规则: 目录初始化 + 文件解析 + 默认值填充 + 活跃规则加载
+//! 书源规则: 目录初始化 + 文件解析 + 默认值填充 + 活跃规则加载, 一切围绕 `Rule`
+//! (定义在 `crate::models::rule`)。
 //!
-//! 一切围绕 `Rule` (定义在 `crate::models::rule`) 这个结构:
-//!
-//! - **常量** (`META_*` / `BUNDLED_RULES`) — 模板字符串和编译期嵌入的规则文件
-//! - **解析** (`load_rules_from_path` / `load_active_rules`) — 从 `.json` / `.json5`
-//!   文件或目录读出 `Vec<Rule>`, 分配自增 ID
-//! - **默认值** (`apply_default_rule`) — 给空字段回填 `baseUri` / `timeout` /
-//!   `book.*` 的 meta 后备查询 (与 Java 端 `util.SourceUtils#applyDefaultRule` 等价)
-//! - **目录初始化** (`init_rules_dir` / `list_rule_files`) — 首次启动把编译期
-//!   嵌入的规则文件落到 `~/.sonovel/rules/`, 并按 `.json` / `.json5` 枚举现有文件
-//!
-//! # 子模块
-//!
-//! - [`constants`] — `META_*` + `BUNDLED_RULES`
-//! - [`error`] — `RulesError` 枚举
-//! - [`loader`] — 公共 `load_rules_from_path` / `load_active_rules` + 私有 `walk` / `parse` / `apply_disabled_urls`
-//! - [`apply_default`] — 公共 `apply_default_rule`
-//! - [`init`] — 公共 `init_rules_dir` / `list_rule_files`
+//! [`apply_default_rule`] 给空字段回填 `baseUri` / `timeout` / `book.*` 的 meta 后备查询
+//! (与 Java 端 `util.SourceUtils#applyDefaultRule` 等价); [`init_rules_dir`] 首次启动把
+//! 编译期嵌入的规则文件落到 `~/.sonovel/rules/`; 解析走 `load_rules_from_path` /
+//! `load_active_rules` 并分配自增 ID。各子模块职责见其模块头。
 
 pub mod apply_default;
 pub mod constants;

@@ -1,13 +1,8 @@
-//! GUI 栈：gpui-kit 0.7。
+//! GUI 栈（gpui-kit）。
 //!
-//! 架构：
-//! - `RootView` 是应用内容视图，含 `TitleBar` + 可折叠 Sidebar + 内容区。
-//!   覆盖层（dialog / sheet / notification）**不在这里拼** —— 0.7 起由
-//!   `gpui_kit::open_window` 包出来的 `gpui_base::Root` 上挂的 `RootPlugin`
-//!   （`gpui_component::root::WindowState`）统一渲染。
-//! - 5 个一级页面（Library / Sources / Tasks / Settings / Search）在 `pages/`，各自持有 `Entity<AppModel>`。
-//! - 共享组件（EmptyState / `PageHeader` / `StatusBadge` / Pagination）在 `components/`。
-//! - 后台通道 → UI 重绘由 `drain_loop::spawn_drain_loop` 每 100ms 排空 + `cx.notify()` 驱动。
+//! - `RootView` 是应用内容视图（`TitleBar` + Sidebar + 内容区）; dialog / sheet /
+//!   notification 覆盖层由 `gpui_kit::open_window` 包出的 `Root` 上挂的 `RootPlugin` 渲染。
+//! - 页面在 `pages/`, 共享组件在 `components/`, 后台通道 → UI 重绘走 `drain_loop`。
 //!
 //! 本模块仅依赖 gpui-kit + 业务模块（`crate::desktop::model`）。
 
@@ -20,8 +15,7 @@ use gpui_kit::{
 
 use crate::desktop::model::AppModel;
 
-// 8 个全局导航 / 翻页 / 折叠 action。`actions!` 宏生成的类型放在调用点
-// (即 `desktop::*`), 让 root.rs / nav.rs 都能 `use crate::desktop::{ShowSearch, ...}`。
+// `actions!` 生成的类型落在调用点 (即 `desktop::*`), 供 root.rs / nav.rs 引用。
 actions!(
     desktop,
     [
@@ -59,75 +53,33 @@ pub use root::RootView;
 
 /// 把 `AppConfig.language`（应用语言）映射到 `gpui_kit::component` 接受的 locale 字符串。
 ///
-/// `gpui_kit::component` 用 `rust_i18n` 做内部国际化（`locales/ui.yml`）。0.5 时代它只有
-/// `en` / `zh-CN` / `zh-HK` / `it`；**0.6 起已含 `zh-TW`**（`fallback = "en"`，找不到
-/// key 就退回英文），跟本项目 `app.yml` 的标签统一。
+/// 映射与 [`crate::i18n::locale_for`] 完全一致；`_gpui` 别名只为语义清晰（CLI / web 走 `locale_for`）。
 ///
-/// 我们的 `Language` 3 个值映射（与 [`crate::i18n::locale_for`] 完全一致）：
-/// - `SimplifiedChinese`  → `"zh-CN"` （精确匹配）
-/// - `TraditionalChinese` → `"zh-TW"` （精确匹配）
-/// - `English`            → `"en"`   （精确匹配）
-///
-/// 何时调用：
-/// 1. **启动时**（`desktop::run`）—— 把 `config.global.language` 同步给 `gpui_kit::component`，
-///    让 Sidebar 搜索框 placeholder / Select placeholder / Dialog OK|Cancel 等
-///    内部文案立刻用对语言。
-/// 2. **用户改语言时**（settings page 的 `界面语言` setter）—— `set_locale` 立即生效 +
-///    `cx.refresh_windows()` 触发整 app 重 render，所有 `t!("...")` 重新读取 locale。
-///
-/// 注意：**只**对应"应用 UI 语言"（`Language`），跟"书源语言"（`LangType`）无关。
-/// `LangType` 是书源筛选用的 locale hint，不影响 `gpui_kit::component` 内部 i18n。
-///
-/// **跟 `crate::i18n::locale_for` 的关系**：两者映射现在完全一致，保留 `locale_for_gpui`
-/// 这个别名是为语义清晰（"给 gpui-kit 的 locale"），将来若上游 locale 表再变动
-/// 只需改这一处。CLI / web 路径走 `locale_for` 即可。
+/// **只**对应"应用 UI 语言"（`Language`），跟"书源语言"（`LangType`）无关。
 use crate::i18n::locale_for_gpui;
 
 /// 启动 GPUI 应用。`main.rs` 在无参数分支调用。
 ///
-/// 启动顺序：
-/// 1. `gpui_kit::component::init(cx)` — 主题 / 内置组件 / 资源；
-/// 2. 创建 `Entity<AppModel>` — UI 中立的领域状态；
-/// 3. `root::register_key_bindings(cx)` — 绑定 cmd-1..5 + Tab 切页快捷键；
-/// 4. 启动 [`events::spawn_drain_loop`] — 每 100ms 排空后台通道 + `cx.notify()`；
-/// 5. 打开窗口（**自定义 `TitleBar`** + native 拖拽 + 3 按钮）：
-///    root 是 `Root`（包裹 [`RootView`]，持有 `AppModel` + sidebar + `TitleBar` + actions）。
+/// 启动顺序：`component::init` → 创建 `Entity<AppModel>` → 注册快捷键 →
+/// 启动 drain 循环 → 加载 themes → `set_locale` → 开窗。
 ///
-/// 参考官方 gpui-kit 组件库 example — 用 `TitleBar::title_bar_options()`
-/// 配置 `WindowOptions.titlebar`：
-/// - `title: None` — OS 任务栏仍会显示 "So Novel"（由 `RootView` 内的 `TitleBar` child 渲染标题）
-/// - `appears_transparent: true` — 告诉 OS 不画原生 chrome；GPUI 接管所有视觉和事件
-///   （关键：触发 `hide_title_bar = true`，让 Windows 平台响应 `WM_NCHITTEST`
-///   返回 HTCLOSE / HTMINBUTTON / HTMAXBUTTON，从而触发 3 个按钮的点击处理）
+/// `title: None` — OS 任务栏标题仍由 `RootView` 内的 `TitleBar` 渲染。
+/// `appears_transparent: true` — 让 OS 不画原生 chrome（触发 `hide_title_bar = true`，
+/// Windows 平台据此响应 `WM_NCHITTEST`，3 个按钮才有点击处理）。
 ///
-/// 注意：不要同时设 `window_decorations: Some(WindowDecorations::Client)` — 与
-/// `appears_transparent: true` 组合会破坏 Windows 平台的事件处理。GPUI 通过
-/// `titlebar.appears_transparent` 已经能正确处理所有平台（macOS / Windows / Linux）。
+/// 注意：不要同时设 `window_decorations: Some(WindowDecorations::Client)` —— 与
+/// `appears_transparent: true` 组合会破坏 Windows 平台的事件处理。
 ///
 /// # Panics
 ///
-/// `cx.open_window` 失败时（极少见，仅在 `WindowOptions` 非法或 GPU 已满载时），
-/// 内部会通过 `rfd::MessageDialog` 弹错误对话框后直接 `return` 退出 GPUI 启动流程，
-/// 不会 panic。gpui 层在初始化失败的窗口上几乎不会 `Err`，但保留显式处理
-/// 防止无声失败（避免用户看到空白窗口以为还在加载）。
+/// `cx.open_window` 失败时（仅在 `WindowOptions` 非法或 GPU 已满载时）弹错误对话框后
+/// 直接 `return`, 不会 panic; 显式处理是为了避免用户看到空白窗口以为还在加载。
 pub fn run() -> Result<()> {
     let app = gpui_kit::application().with_assets(gpui_kit::assets::Assets);
     app.run(move |cx: &mut App| {
-        // 0. rust-i18n 扩展注册 —— **必须在 `component::init` 之前**，且启动期间只调一次。
-        //
-        // `extend!(gpui_component)` 把本 crate 的翻译表接到 gpui-component 自己的
-        // rust-i18n 后端上，方向是「**组件查 key 时先查我们的 `locales/app.yml`**，
-        // 查不到再回落组件内置的 `locales/ui.yml`」。所以它让 app.yml 可以按
-        // `gpui_component:` namespace 覆盖组件文案（例如某个 key 在 zh-TW 缺失、
-        // 或者想改 `Pagination.previous` 的措辞），**不用** copy 整份内置文件。
-        //
-        // 注意方向：这**不会**让我们自己的 `t!` / `ts()` 读到组件内置翻译 ——
-        // 应用文案仍然只查 app.yml（gpui-kit i18n 文档「命名空间只对组件内部的
-        // 查找生效」）。当前 app.yml 没有 `gpui_component:` 段，所以这一步现在是
-        // 零行为变化，只是把上游要求的注册点先补上。
-        //
-        // 别名 + 顺序都照官方示例（`crates/story/src/lib.rs` 同样写法）：
-        // `extend!` 收的是 `ident`，所以必须先 `use ... as gpui_component`。
+        // rust-i18n 扩展注册 —— **必须在 `component::init` 之前**, 且只调一次。
+        // 方向: 组件查 key 时先查我们的 `app.yml`, 查不到再回落组件内置 `ui.yml`（反向不成立）。
+        // `extend!` 收 ident, 所以必须先 `use ... as gpui_component`。
         {
             use gpui_kit::component as gpui_component;
             rust_i18n::extend!(gpui_component);
@@ -136,13 +88,7 @@ pub fn run() -> Result<()> {
         // 必须在第一个窗口前调用。
         gpui_kit::component::init(cx);
 
-        // 1. 创建 AppModel。
-        //    启动期致命错误（如持久化数据库磁盘 + 内存都打不开）→ 弹原生
-        //    错误对话框后直接退出 GPUI 循环，不开任何窗口。
-        //
-        //    用 `new_with_wakeup` 而非 `new` —— drain_loop 需要 receiver
-        //    才能接收后台 sender 发来的主动唤醒信号，下载/搜索进度到达
-        //    时不必等 100ms 兜底就能立即排空。
+        // 1. 创建 AppModel。启动期致命错误 → 弹原生对话框后退出 GPUI 循环, 不开窗口。
         let (model, wakeup_rx) = match AppModel::new_with_wakeup() {
             Ok((m, rx)) => (cx.new(|_cx| m), rx),
             Err(e) => {
@@ -158,15 +104,11 @@ pub fn run() -> Result<()> {
             }
         };
 
-        // 2. 注册快捷键。
         register_key_bindings(cx);
 
-        // 3. 启动 drain 循环（内部 detach），100ms 兜底 + wakeup 主动唤醒。
         drain_loop::spawn_drain_loop(&model, wakeup_rx, cx);
 
         // 4. 加载 themes/*.json 到 ThemeRegistry（on_load 里 apply + refresh）。
-        //    themes 目录 = `~/.sonovel/themes/`（首次启动写入 21 个 embed，
-        //    之后用户可手动放自定义 *.json 进去热加载）。
         let (app_paths, theme_pref, font_size) = {
             let s = model.read(cx);
             (
@@ -177,13 +119,10 @@ pub fn run() -> Result<()> {
         };
         themes::init(cx, &app_paths, &theme_pref, font_size);
 
-        // 5. 把 `AppConfig.language`（应用语言）同步给 gpui_kit::component —— 影响内部
-        //    Sidebar 搜索 placeholder / Select placeholder / Dialog OK|Cancel 等所有
-        //    `t!()` 调用的文案。必须在开任何带 Sidebar / Select / Dialog 的窗口前调用，
-        //    否则首次 render 就会用错误的 fallback locale。
+        // 5. 把 `AppConfig.language` 同步给 gpui_kit::component, 必须在开窗**前**调,
+        //    否则首帧用错 fallback locale。
         gpui_kit::component::set_locale(locale_for_gpui(model.read(cx).config.global.language));
 
-        // 6. 居中开窗 + 最小尺寸 + 自定义 TitleBar 配置。
         let window_size = size(px(1200.0), px(800.0));
         let min_size = size(px(900.0), px(600.0));
         #[allow(unused_mut)] // mut 仅 Linux cfg 块使用
@@ -198,25 +137,16 @@ pub fn run() -> Result<()> {
             titlebar: Some(TitleBar::title_bar_options()),
             ..Default::default()
         };
-        // Linux WM 不会因 appears_transparent 自动隐藏原生标题栏，
-        // 需要 Client decorations 抑制；Windows 上此组合会破坏事件。
-        // 同时切 Transparent 背景，让 GPU shader 渲染的 CSD 圆角 alpha 能穿透
-        // （X11 仅在 background != Opaque 时启用 alpha blending）。
+        // Linux WM 不会因 appears_transparent 自动隐藏原生标题栏，需要 Client
+        // decorations 抑制；Windows 上此组合会破坏事件。同时切 Transparent 背景，
+        // 让 GPU shader 渲染的 CSD 圆角 alpha 能穿透。
         #[cfg(target_os = "linux")]
         {
             opts.window_decorations = Some(gpui_kit::WindowDecorations::Client);
         }
 
-        // 7. 开窗：`gpui_kit::open_window` 内部 `cx.new(|cx| base::Root::new(view, window, cx))`
-        //    —— 应用内容 view 直接返回 `RootView`，**不要**自己再包一层 `Root`
-        //    （0.7.0 起会嵌套 Root / 覆盖层挂错层）。
-        //    覆盖层（dialog / sheet / notification）由 `Root` 上注册的 `RootPlugin`
-        //    （`gpui_component::root::WindowState`，由 `component::init` 注册）渲染，
-        //    应用侧无需手动拼 layer。
-        //
-        //    gpui 层在初始化失败的窗口上几乎不会 `Err`，但万一出错（如 `WindowOptions`
-        //    非法 / GPU 已满载）显式弹错误对话框退出，而不是无声返回 → 用户看到空白
-        //    窗口还以为在加载。
+        // 7. 开窗：应用内容 view 直接返回 `RootView`, **不要**自己再包一层 `Root`
+        //    （会嵌套 Root / 覆盖层挂错层）。
         if let Err(e) = gpui_kit::open_window(opts, cx, |window, cx| {
             cx.new(|cx| RootView::new(model.clone(), window, cx))
         }) {

@@ -1,10 +1,7 @@
-//! 默认值填充
+//! 默认值填充: 给一条 `Rule` 填默认值, 等价 Java `util.SourceUtils#applyDefaultRule`。
 //!
-//! 给一条 `Rule` 填默认值。等价于 Java `util.SourceUtils#applyDefaultRule`:
-//! - `language` 空 → 用系统检测到的 locale;
-//! - `search/book/toc/chapter.base_uri` 空 → 用 `rule.url`;
-//! - 各 section 的 `timeout` 空 → 15s (toc 60s);
-//! - `book.*` 字段空 → 用 `META_*` 常量 (让 scraper 走浏览器 meta 解析)。
+//! 回填 `language` (系统 locale) / 各 section 的 `base_uri` (= `rule.url`) 与 `timeout`
+//! (15s, toc 60s) / `book.*` (= `META_*`, 让 scraper 走浏览器 meta 解析)。
 
 use crate::config::LangType;
 use crate::models::Rule;
@@ -14,7 +11,7 @@ use super::constants::{
     META_LATEST_CHAPTER, META_LATEST_CHAPTER_URL, META_STATUS,
 };
 
-/// 给一条 `Rule` 填默认值。
+/// 给一条 `Rule` 填默认值, 具体回填规则见模块头。
 ///
 /// # Examples
 ///
@@ -47,7 +44,7 @@ pub fn apply_default_rule(rule: &mut Rule, system_lang: LangType) {
         if b.timeout.is_none() {
             b.timeout = Some(15);
         }
-        // book 字段缺失时回落到 meta 查询 (与 Java 端 `StrUtil.emptyToDefault` 等价)。
+        // book 字段缺失时回落到 meta 查询 (让 scraper 走浏览器 meta 解析)。
         if b.book_name.is_empty() {
             b.book_name = META_BOOK_NAME.to_string();
         }

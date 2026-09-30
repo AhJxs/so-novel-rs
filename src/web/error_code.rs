@@ -1,27 +1,10 @@
 //! 错误码表
 //!
-//! # 设计
-//!
-//! 业务层错误的稳定编号 + i18n key，单点维护。原本散落在
-//! `web::WebError::message()` 的 60+ 个 `match` 字符串，现在统一进这张表 +
-//! `locales/app.yml` 的 `WebErrors` 段。
-//!
-//! 与 `web::WebErrorKind` 是**正交**关系：
-//!
-//! | 维度 | 类型 | 用途 |
-//! |---|---|---|
-//! | 是什么错误 | [`ErrorCode`] (数字) | 业务侧唯一标识，日志检索，前端按码分流 |
-//! | HTTP 怎么渲染 | `WebErrorKind` (枚举) | HTTP 状态码 + `snake_case` 短码 |
-//!
-//! # 编号规则
-//!
-//! - `1xxx` — 业务规则 (规则缺失/字段为空/书源禁用/任务取消)
-//! - `2xxx` — 解析/网络 (HTTP/CF/解析失败/IO 聚合)
-//! - `3xxx` — 资源 (NotFound/Conflict/BadRequest + settings/task 具体子类型)
-//! - `4xxx` — 内部 (Internal/IoError 兜底)
-//! - `5xxx` — 导出 (EPUB/PDF/ZIP/编码)
-//!
-//! 编号**稳定不变** — 短码变更属 breaking change，需同步前端。
+//! 业务层错误的稳定编号 + i18n key 单点维护，翻译在 `locales/app.yml` 的
+//! `WebErrors` 段。与 `web::WebErrorKind`（HTTP 状态码 + snake_case 短码）正交：
+//! [`ErrorCode`] 回答「是什么错误」，`WebErrorKind` 回答「HTTP 怎么渲染」。
+//! 编号段：1xxx 业务规则 / 2xxx 解析网络 / 3xxx 资源 / 4xxx 内部 / 5xxx 导出。
+//! 数字码**稳定不变**，变更属 breaking change，需同步前端。
 
 use std::fmt;
 
@@ -31,95 +14,54 @@ use std::fmt;
 #[allow(dead_code)] // 部分变体仅经 [`ErrorCode::code_str`] / `code` API 间接暴露
 pub enum ErrorCode {
     // ─────────── 1xxx 业务规则 ───────────
-    /// 1001: 详情页书源没有 `book` 规则。
     BookRuleMissing = 1001,
-    /// 1002: 详情页书名或作者解析为空。
     MissingTitleOrAuthor = 1002,
-    /// 1003: 目录页书源没有 `toc` 规则。
     TocRuleMissing = 1003,
-    /// 1004: 章节页书源没有 `chapter` 规则。
     ChapterRuleMissing = 1004,
-    /// 1005: 章节正文为空 (被规则过滤掉了或源页就是空)。
     EmptyContent = 1005,
-    /// 1006: 书源未启用搜索功能。
     SearchDisabled = 1006,
-    /// 1007: 书源已被用户禁用。
     SourceDisabled = 1007,
-    /// 1008: 目录解析后 0 章。
     EmptyToc = 1008,
-    /// 1009: 章节范围非法 (起始 > 结束 或超出总章节数)。
     InvalidRange = 1009,
-    /// 1010: 任务被用户取消。
     Cancelled = 1010,
 
     // ─────────── 2xxx 解析/网络 ───────────
-    /// 2001: 详情页 HTTP 请求失败。
     BookHttp = 2001,
-    /// 2002: 详情页命中 Cloudflare 验证。
     BookCloudflare = 2002,
-    /// 2003: 详情页 HTML 解析失败。
     BookParse = 2003,
-    /// 2004: 目录页 HTTP 请求失败。
     TocHttp = 2004,
-    /// 2005: 目录页命中 Cloudflare 验证。
     TocCloudflare = 2005,
-    /// 2006: 目录页 HTML 解析失败。
     TocParse = 2006,
-    /// 2007: 章节页 HTTP 请求失败。
     ChapterHttp = 2007,
-    /// 2008: 章节页命中 Cloudflare 验证。
     ChapterCloudflare = 2008,
-    /// 2009: 章节页 HTML 解析失败。
     ChapterParse = 2009,
-    /// 2010: 搜索 HTTP 请求失败。
     SearchHttp = 2010,
-    /// 2011: 搜索页命中 Cloudflare 验证。
     SearchCloudflare = 2011,
-    /// 2012: 搜索结果 HTML 解析失败。
     SearchParse = 2012,
-    /// 2013: HTTP 客户端构造失败。
     CrawlerClient = 2013,
-    /// 2014: 任务文件 IO 失败。
     CrawlerIo = 2014,
-    /// 2015: 导出失败 (聚合自 `ExportError`)。
     CrawlerExport = 2015,
-    /// 2016: 书源解析失败 (聚合自 `BookError`, 嵌套源不展开)。
     CrawlerBookAggregate = 2016,
-    /// 2017: 目录解析失败 (聚合自 `TocError`, 嵌套源不展开)。
     CrawlerTocAggregate = 2017,
 
     // ─────────── 3xxx 资源 ───────────
-    /// 3001: 资源未找到 (书源/任务/文件)。
     NotFound = 3001,
-    /// 3002: 资源状态冲突 (重复添加/操作与状态不符)。
     Conflict = 3002,
-    /// 3003: 请求参数错误。
     BadRequest = 3003,
-    /// 3004: `download_path` 是空串 (settings PUT 校验)。
     DownloadPathEmpty = 3004,
-    /// 3005: `download_path` 不是已存在的目录 (settings PUT 校验)。
     DownloadPathNotDir = 3005,
-    /// 3006: 任务已结束，无法取消 (`task_cancel` 校验)。
     TaskAlreadyFinished = 3006,
 
     // ─────────── 4xxx 内部 ───────────
-    /// 4001: 内部错误，不应发生。
     Internal = 4001,
-    /// 4002: IO 错误兜底 (避免泄漏内部路径)。
     IoError = 4002,
 
     // ─────────── 5xxx 导出 ───────────
-    /// 5001: 章节缓存目录为空。
     ExportEmptyChaptersDir = 5001,
-    /// 5002: 导出文件 IO 失败。
     ExportIo = 5002,
-    /// 5003: EPUB 生成失败。
     ExportEpub = 5003,
-    /// 5004: ZIP 打包失败。
     ExportZip = 5004,
-    /// 5005: 编码转换失败。
     ExportEncoding = 5005,
-    /// 5006: PDF 生成失败。
     ExportPdf = 5006,
 }
 
@@ -177,14 +119,11 @@ impl ErrorCode {
         }
     }
 
-    /// i18n key (e.g. `"WebErrors.book_rule_missing"`)。翻译文本在
+    /// i18n key (`"WebErrors.<variant 的 snake_case>"`)，翻译文本在
     /// `locales/app.yml` 的 `WebErrors` 段下。
     ///
-    /// **`key()` 与 `code_str()` 严格 1:1 一一对应**：
-    /// 同一个变体的 key 名前缀固定 `WebErrors.`，`snake_case` 名跟 enum variant
-    /// 一致（变体 `BookRuleMissing` → `WebErrors.book_rule_missing`）。
-    /// 加新变体必须同时加 `app.yml` 翻译 + 在 `i18n::tests::WEB_ERROR_KEYS`
-    /// 注册 —— 否则 `web_errors_translated_in_all_three_locales` 测试 fail。
+    /// 加新变体必须同时加 `app.yml` 翻译 + 在 `i18n::tests::WEB_ERROR_KEYS` 注册，
+    /// 否则 `web_errors_translated_in_all_three_locales` 测试 fail。
     pub const fn key(self) -> &'static str {
         match self {
             Self::BookRuleMissing => "WebErrors.book_rule_missing",
@@ -232,19 +171,15 @@ impl ErrorCode {
     }
 
     /// Per-locale 翻译查找 —— 不读 / 不写 `rust_i18n::locale()` 全局 atomic，
-    /// 并发请求互不干扰。Web handler 热路径专用。
-    ///
-    /// 返回 `String` 因为 locale 不可预测（编译期不可能知道运行时选哪个 locale），
-    /// 也意味着**每次调用都做 yaml hashmap lookup + alloc**。热路径（每请求
-    /// 1-2 次翻译）完全可接受。
+    /// 并发请求互不干扰。Web handler 热路径专用（每次 yaml lookup + alloc）。
     pub fn message_for(self, locale: &str) -> String {
         crate::i18n::ts_for_locale(locale, self.key())
     }
 
     /// 全局 locale 翻译查找（`rust_i18n::locale()` 当前值）。
     ///
-    /// **仅** `Display` impl / 测试 / 一次性日志场景用 —— web handler **必须**
-    /// 用 `message_for(locale)` 而不是这个，避免并发请求之间 locale 互相踩。
+    /// **仅** `Display` / 测试 / 一次性日志用 —— web handler **必须**用
+    /// `message_for(locale)`，否则并发请求之间 locale 互相踩。
     pub fn message(self) -> String {
         self.message_for(&rust_i18n::locale())
     }
@@ -280,9 +215,7 @@ pub enum ErrorCategory {
 
 impl fmt::Display for ErrorCode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // 日志里展示「code + 当前 locale 翻译」便于肉眼识别。
-        // 故意不走 message_for(locale) —— Display 没 locale 上下文，全局 locale
-        // 是这里的唯一选项。
+        // Display 没有 locale 上下文，全局 locale 是唯一选项。
         write!(f, "{}: {}", self.code_str(), self.message())
     }
 }
@@ -294,7 +227,7 @@ mod tests {
 
     #[test]
     fn code_str_matches_numeric_code() {
-        // 验证 code() 和 code_str() 同步 — 防加新变体时改数字忘了改字符串 (或反之)
+        // 防加新变体时改了数字忘改字符串（或反之）
         for variant in [
             ErrorCode::BookRuleMissing,
             ErrorCode::Cancelled,
@@ -319,7 +252,6 @@ mod tests {
         assert_eq!(ErrorCode::NotFound.category(), ErrorCategory::Resource);
         assert_eq!(ErrorCode::Internal.category(), ErrorCategory::Internal);
         assert_eq!(ErrorCode::ExportPdf.category(), ErrorCategory::Export);
-        // 3004/3005/3006 也在 Resource 段
         assert_eq!(
             ErrorCode::DownloadPathEmpty.category(),
             ErrorCategory::Resource
@@ -332,8 +264,7 @@ mod tests {
 
     #[test]
     fn key_matches_translation_table() {
-        // 关键不变量：`key()` 返回的 i18n key 必须在 3 locale 下都能拿到非空翻译。
-        // 复用 `i18n::tests::WEB_ERROR_KEYS` 的对照表 —— 加新变体必须同时加两边。
+        // 关键不变量：`key()` 返回的 i18n key 在 3 locale 下都必须有非空翻译。
         for variant in [
             ErrorCode::BookRuleMissing,
             ErrorCode::MissingTitleOrAuthor,
@@ -359,7 +290,6 @@ mod tests {
 
     #[test]
     fn display_format_uses_global_locale() {
-        // Display 走全局 locale。切到 zh-CN 验证。
         rust_i18n::set_locale("zh-CN");
         let s = ErrorCode::BookRuleMissing.to_string();
         assert_eq!(s, "1001: 书源没有 book 规则");

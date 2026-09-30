@@ -1,11 +1,8 @@
 //! 设置端点: 读取 (脱敏) / 写入 (部分字段)。
 //!
-//! ## 安全: GET 端点必须脱敏
-//!
-//! `qidian_cookie` 是 GPUI 桌面端专用的起点站 cookie, web 模式下不需要也**不应该**看到
-//! 明文 cookie —— 否则监听 `0.0.0.0:8080` 时任意能访问端口的客户端都能拉走用户的起点站
-//! cookie。`PublicSettings` 用 `has_qidian_cookie: bool` 替代, UI 仍能告知用户
-//! "已设置/未设置"。
+//! GET **必须**脱敏：`qidian_cookie` 明文一旦随 `/api/settings` 返回，监听
+//! `0.0.0.0:8080` 时任何能访问端口的客户端都能拉走它。故 `PublicSettings` 只暴露
+//! `has_qidian_cookie: bool`。
 
 use axum::Json;
 use axum::extract::State;
@@ -18,10 +15,8 @@ use crate::web::error::{WebError, read_state_or_json};
 
 /// `GET /api/settings` 返回的脱敏 DTO。
 ///
-/// 关键差异 vs `AppConfig`:
-/// - 不含 `qidian_cookie` 明文;
-/// - 用 `has_qidian_cookie: bool` 替代, 让 UI 仍能告知用户"已设置/未设置";
-/// - 字段顺序 / 命名与 `AppConfig` 完全一致, 前端按字段名取, 无破坏性变更。
+/// 与 `AppConfig` 相比：不含 `qidian_cookie` 明文，用 `has_qidian_cookie: bool` 替代；
+/// 字段顺序 / 命名保持一致，前端按字段名取，无破坏性变更。
 #[derive(Serialize)]
 pub struct PublicSettings {
     pub version: String,
@@ -112,13 +107,10 @@ pub async fn settings_get(
 
 /// `PUT /api/settings` — 部分字段写入 + 落盘 `config.toml` + 重建 HTTP proxy client。
 ///
-/// `download_path` 若被修改: 必须非空且为已存在的目录 (自动保存前端会先做非空校验,
-/// 目录存在性只能后端判断)。校验失败返回 400, 前端据此在字段下显示错误 —— 通过
-/// 错误 `code` 字段（`3004` / `3005`）区分两种 empty / `not_dir` 情况，比原来
-/// `msg.includes('download_path_empty')` 字符串匹配更稳。
-///
-/// 改 `proxy_*` 字段会触发 `state.http.rebuild_proxy(&cfg)` —— reqwest client 构造后
-/// 不能 in-place 改 proxy, `整体重建。gh_proxy` 客户端不受影响。
+/// `download_path` 若被改：必须非空且是已存在目录（前端只能校验非空，存在性只能后端
+/// 判断），校验失败返 400 并按 `code`（`3004` / `3005`）区分两种情况。
+/// 改 `proxy_*` 会触发 `state.http.rebuild_proxy(&cfg)` —— reqwest client 构造后不能
+/// in-place 改 proxy，只能整体重建（`gh_proxy` 客户端不受影响）。
 ///
 /// # Errors
 ///

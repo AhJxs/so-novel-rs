@@ -1,18 +1,11 @@
 //! URL 拼接工具。对应 Java jsoup 的 `Element.absUrl(attrName)`。
 //!
-//! 现有规则中：
-//! - 详情页 / 章节页的相对 href 占大多数；
-//! - 搜索结果 href 一般在响应里就是绝对 URL，但少数书源会给相对路径。
-//!
-//! 这一层调用方都是 parser，要拿到选中元素的 `href` 原始值后再问"以
-//! 当前页面的 baseUri 为基准，绝对路径是什么"。`url::Url::join` 会处理
-//! `/abs`、`./rel`、`../up`、`?query`、`#frag`、协议相对 `//host/...` 等情况。
+//! parser 拿到元素 `href` 原始值后，以当前页面 baseUri 为基准求绝对 URL
+//! （`Url::join` 已覆盖 `/abs`、`./rel`、`../up`、`?query`、`#frag`、协议相对 `//host/...`）。
 
 use url::Url;
 
-/// 把 `href` 解析为绝对 URL；返回 `None` 表示 href 为空或解析失败。
-///
-/// `base` 是当前页面的 URL（必须是绝对 URL）。
+/// 把 `href` 解析为绝对 URL（`base` 必须是绝对 URL）；空串或解析失败返回 `None`。
 pub fn abs_url(base: &str, href: &str) -> Option<String> {
     let trimmed = href.trim();
     if trimmed.is_empty() {
@@ -26,15 +19,14 @@ pub fn abs_url(base: &str, href: &str) -> Option<String> {
     base_url.join(trimmed).ok().map(|u| u.to_string())
 }
 
-/// 取一个 URL 的 origin（scheme://host[:port]/），用作 Referer 头。
-/// 解析失败时返回原串。
+/// 取 URL 的 origin（`scheme://host[:port]/`）用作 Referer 头；解析失败返回原串。
 pub fn origin_or_self(url: &str) -> String {
     Url::parse(url).map_or_else(
         |_| url.to_string(),
         |u| {
             let origin = u.origin();
-            // origin.unicode_serialization() 在 opaque origin 时返回 "null"；
-            // 我们在书源场景下一定是 http(s)，可以用 ascii_serialization。
+            // opaque origin 时 unicode_serialization() 会返回 "null"；书源一定是
+            // http(s)，所以用 ascii_serialization。
             origin.ascii_serialization()
         },
     )

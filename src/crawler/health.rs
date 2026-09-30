@@ -1,8 +1,7 @@
-//! 书源连通性检测。对应 Java
-//! `util.SourceUtils#getActivatedSourcesWithAvailabilityCheck`。
+//! 书源连通性检测。对应 Java `util.SourceUtils#getActivatedSourcesWithAvailabilityCheck`。
 //!
-//! 行为：每源发一个 `HEAD` 请求带 5s 超时；记录 (延迟 ms, `http_status`, error)；
-//! 通过 mpsc 把单源结果实时推回 UI（先返回的源先点亮）。
+//! 行为: 每源发一个 `HEAD` 请求带 5s 超时; 记录 (延迟 ms, `http_status`, error);
+//! 通过 mpsc 把单源结果实时推回 UI (先返回的源先点亮)。
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -20,25 +19,19 @@ use crate::models::Rule;
 pub struct SourceHealth {
     pub source_id: i32,
     pub source_name: String,
-    /// HTTP 响应状态码。请求失败时为 None。
     pub http_status: Option<u16>,
     /// 完整往返延迟（毫秒）。请求失败时仍记录已耗费时间。
     pub delay_ms: u64,
-    /// 错误信息（请求失败时填）。
     pub error: Option<String>,
 }
 
 /// 单源健康判定（domain-level，UI 自行映射到主题色 / `StatusKind`）。
-///
-/// 跟 GUI 层的 `desktop::components::StatusKind` 解耦——`crawler` 不应依赖 `desktop`。
-/// `sources` page 拿 `HealthStatus` 后再做 1 行 `match` 转成 `StatusKind`。
+/// `crawler` 不应依赖 `desktop`；`sources` page 拿到后做 1 行 match 转 `StatusKind`。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HealthStatus {
-    /// 2xx：探活成功。
     Ok,
     /// 3xx：源在跳转，浏览器能跟、爬虫可能不能跟。给用户一个"看似 OK 但要警惕"的状态。
     Redirect,
-    /// 4xx/5xx：源回了一个非成功状态码。
     BadResponse,
     /// 探活函数本身报告了 error（如 Client 构建失败）。
     ProbeError,
@@ -60,8 +53,7 @@ impl SourceHealth {
         }
     }
 
-    /// 本地化显示文本。延迟 2xx 只显示 ms；4xx/5xx 同时显示状态码 + 延迟；
-    /// 探活失败 / 无响应 各走独立 i18n key。
+    /// 本地化显示文本: 延迟 2xx 只显示 ms, 4xx/5xx 同时显示状态码 + 延迟, 失败 / 无响应各走独立 i18n key。
     pub fn label(&self) -> String {
         if self.error.is_some() {
             return crate::i18n::ts("Sources.health.error").to_string();
@@ -73,9 +65,8 @@ impl SourceHealth {
                 &[("ms", &self.delay_ms.to_string())],
             )
             .to_string(),
-            // 3xx/4xx/5xx —— 状态码 + 延迟并存，方便区分「慢但通（3xx 跳转）」和
-            // 「真的失败（4xx/5xx）」。`ts_fmt` 替换 2 个占位符（不能直接 `format!`
-            // 拼字符串，否则切语言后占位符翻译也跟着拼，顺序会乱）。
+            // 3xx/4xx/5xx: 状态码 + 延迟并存, 方便区分「慢但通(3xx 跳转)」和「真的失败(4xx/5xx)」;
+            // 必须走 `ts_fmt` 占位符替换, 直接 `format!` 拼接在切语言后顺序会乱。
             Some(s) => crate::i18n::ts_fmt(
                 "Sources.health.http_status",
                 &[
@@ -84,16 +75,14 @@ impl SourceHealth {
                 ],
             )
             .to_string(),
-            // 源错误但没 HTTP 响应（DNS 失败 / 超时 等）—— 调试输出太长塞不进 StatusBadge，
-            // 用一句"网络错误"代替。原来的 `format!("{:?}", h.error)` 会把 anyhow 内部
-            // chain 全部展开，超长且对用户没意义。
+            // 源错误但没 HTTP 响应 (DNS / 超时): 调试输出太长塞不进 StatusBadge, 用一句"网络错误"代替
+            // (`format!("{:?}", h.error)` 会把 anyhow 整条 chain 展开, 对用户没意义)。
             None => crate::i18n::ts("Sources.health.network_error").to_string(),
         }
     }
 }
 
 /// 并发探测一组规则；每源结果通过 `tx` 实时回推（顺序不保证，UI 用 `source_id` 关联）。
-///
 /// 完成后通道关闭（tx drop），UI 端 `try_recv` 看到 Disconnected 即知道全部跑完。
 ///
 /// # Examples
@@ -115,9 +104,8 @@ pub async fn check_sources_health(
         let http = Arc::clone(&http);
         let tx = tx.clone();
         set.spawn(async move {
-            // 直接在 tokio task 里 async 探测。不用 spawn_blocking + blocking client ——
-            // 后者会在工作线程 drop Client，触发 reqwest::blocking 已知 panic
-            // （见 http/client.rs 的反模式警告 + search_state.rs 的 ignore 回归测试）。
+            // 直接在 tokio task 里 async 探测: 不用 spawn_blocking + blocking client —— 后者会在
+            // 工作线程 drop Client, 触发 reqwest::blocking 已知 panic (见 http/client.rs 的反模式警告)。
             let result = probe_one(&http, &rule).await;
             let _ = tx.send(result);
         });
@@ -209,7 +197,6 @@ mod tests {
         // 任何超时 / 网络错误都行；只断言"有错误"
         assert!(h.error.is_some(), "expected error; got {h:?}");
         assert!(h.http_status.is_none());
-        // 通道关闭
         assert!(rx.try_recv().is_err());
     }
 
@@ -222,17 +209,13 @@ mod tests {
             delay_ms: 100,
             error: error.map(String::from),
         };
-        // 2xx → Ok
         assert_eq!(mk(Some(200), None).classify(), HealthStatus::Ok);
         assert_eq!(mk(Some(204), None).classify(), HealthStatus::Ok);
         assert_eq!(mk(Some(299), None).classify(), HealthStatus::Ok);
-        // 3xx → Redirect
         assert_eq!(mk(Some(301), None).classify(), HealthStatus::Redirect);
         assert_eq!(mk(Some(304), None).classify(), HealthStatus::Redirect);
-        // 4xx/5xx → BadResponse
         assert_eq!(mk(Some(404), None).classify(), HealthStatus::BadResponse);
         assert_eq!(mk(Some(500), None).classify(), HealthStatus::BadResponse);
-        // 没响应 → NetworkError
         assert_eq!(mk(None, None).classify(), HealthStatus::NetworkError);
         // 有 error（任何 status / 无 status）→ ProbeError 优先
         assert_eq!(
@@ -260,7 +243,6 @@ mod tests {
             ok_label.contains("123"),
             "2xx label should embed ms: {ok_label}"
         );
-        // 4xx/5xx → 状态码 + 延迟双占位符
         let bad_label = mk(Some(503), 456, None).label();
         assert!(
             bad_label.contains("503"),

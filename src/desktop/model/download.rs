@@ -1,7 +1,6 @@
 //! `AppModel` 下载相关方法
 //!
-//! 全部 thin delegator, 实际逻辑在 `crate::desktop::model::ops::download`.
-//! 拆这里只是按职责分类, 不重复实现。
+//! 全部 thin delegator, 实际逻辑在 `crate::desktop::model::ops::download`。
 
 use crate::models::{Book, Chapter, SearchResult};
 
@@ -21,7 +20,7 @@ impl AppModel {
         let (id, task) = ops::spawn_download(&ctx, self.next_task_id, target);
         self.next_task_id += 1;
         self.tasks.push(task);
-        // Fire-and-forget 落盘: UI 线程不能同步等 fsync, 派到 blocking pool。
+        // Fire-and-forget 落盘: UI 线程不能同步等 fsync, 派到 blocking pool;
         // 失败仅 warn (best-effort), 下次保存会覆盖。
         let path = self.paths.tasks_file.clone();
         let tasks = self.tasks.clone();
@@ -40,8 +39,7 @@ impl AppModel {
         self.search.toc_rx = Some(rx);
     }
 
-    /// 派一个指定章节范围的下载任务。跳过 resolve 阶段, 直接进入下载。
-    /// 返回新任务 id。
+    /// 派一个指定章节范围的下载任务, 跳过 resolve 阶段直接下载。返回新任务 id。
     #[allow(clippy::needless_pass_by_value)]
     pub fn spawn_download_range(
         &mut self,

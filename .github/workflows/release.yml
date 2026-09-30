@@ -1,23 +1,8 @@
-# 多平台打包 / 发布。
-#
-# 触发：
-# - 打 tag `v*`（如 v0.1.0）→ 三平台编译 release + 打包 + 发 GitHub Release。
-# - Actions 页手动 `workflow_dispatch` → 只构建 + 传 artifact，不发 Release。
-#
-# Matrix：
-# - windows-x86_64  → zip
-# - macos-aarch64   → tar.gz（arm64，Apple Silicon）
-# - macos-x86_64    → tar.gz（Intel，cross 到 x86_64-apple-darwin）
-# - linux-x86_64    → tar.gz（复用 scripts/package-linux.sh）
-# - linux-aarch64   → tar.gz（原生 arm64 runner）
-#
-# 产物命名：so-novel-rs-<version>-<os>-<arch>.<ext>，发 Release 时按名上传。
-#
-# Release notes：`docs/CHANGELOG.md` 作为 release 主体 + asset 一同上传。
-# 维护者打 tag 前把"\[Unreleased\]"段改名为"\[X.Y.Z\] - YYYY-MM-DD"即可。
-#
-# gpui 层 Linux 编译依赖（apt dev 包）：xkbcommon / xkbcommon-x11 / fontconfig /
-# xcb / wayland / gl / egl + Vulkan headers（blade-graphics）。
+# 多平台打包 / 发布：tag `v*` → 编译 + 打包 + 发 GitHub Release；workflow_dispatch → 只构建传 artifact。
+# Matrix：windows-x86_64 → zip；macos-aarch64 / linux-x86_64 / linux-aarch64 → tar.gz。
+# 产物命名 so-novel-rs-<version>-<os>-<arch>.<ext>；Release 主体取 `docs/CHANGELOG.md`，
+# 打 tag 前把 "\[Unreleased\]" 段改名为 "\[X.Y.Z\] - YYYY-MM-DD"。
+# Linux 编译需要 gpui 的 apt dev 包（xkbcommon / xcb / wayland / gl / egl + Vulkan headers）；
 # macOS / Windows 用系统 framework，无需额外包。
 
 name: release
@@ -45,25 +30,19 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Linux 走 GitHub ubuntu runner 原生 toolchain，rustup target 已装。
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             archive: tar.gz
-          # Linux aarch64 走 GitHub 原生 arm64 runner（ubuntu-24.04-arm），无需 cross/qemu。
           - os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
             archive: tar.gz
-          # macOS Apple Silicon 原生。
           - os: macos-latest
             target: aarch64-apple-darwin
             archive: tar.gz
-          # Windows x86_64 原生 MSVC。
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             archive: zip
-          # 注：去掉 `macos-latest / x86_64-apple-darwin / cross: true`：
-          # cross 装 macOS x86 toolchain 在 GitHub Actions 上经常卡 / 失败，
-      # 且 Intel Mac 用户少。如需加回来改用 `macos-13` runner 原生编译。
+          # 不提供 macos x86_64：cross 装该 toolchain 在 Actions 上常失败，要加回来请用 `macos-13` runner。
 
     steps:
       - uses: actions/checkout@v6
@@ -96,10 +75,8 @@ jobs:
           v=$(grep -E '^version\s*=' Cargo.toml | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
           echo "version=$v" >> "$GITHUB_OUTPUT"
 
-      # ---- 打包 ----
-      # HTML 模板 / logo 通过 include_*! 嵌入二进制；
-      # bundle/rules/ 随包携带，方便用户编辑或导入规则。
-      # Linux 复用 scripts/package-linux.sh（含 README + rules + tar.gz）。
+      # ---- 打包：Linux 复用 scripts/package-linux.sh（HTML 模板 / logo 已由 include_*! 嵌入二进制，
+      # bundle/rules/ 随包携带）；macOS / Windows 在此就地打 ----
       - name: Stage artifacts (Linux)
         if: runner.os == 'Linux'
         shell: bash
@@ -164,8 +141,7 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
         with:
-          # 把维护者写好的 CHANGELOG.md 作为 release 主体（替代 auto-generated notes）
-          # 同时作为 asset 附带在 release 里供下载。完整 git log 见 CHANGELOG_ALL.md。
+          # CHANGELOG.md 既是 release 主体（替代 auto-generated notes），也作为 asset 上传。
           body_path: docs/CHANGELOG.md
           files: |
             dist/*.tar.gz

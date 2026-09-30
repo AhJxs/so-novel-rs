@@ -1,18 +1,11 @@
 //! 章节渲染。对应 Java `core.ChapterRenderer`。
 //!
-//! 等价的处理流水线：
+//! 流水线: `parser::filter::filter_chapter` (不可见字符 / HTML 实体 / filterTxt / filterTag /
+//! 标题去重 / 空 tag) → `parser::formatter::format_chapter` (清属性 + 段落整形为 `<p>`) →
+//! 按目标格式渲染 (Txt 抽 `<p>` 加全角缩进; Html/Epub 套模板; Markdown 出 `## 标题` + 段落;
+//! Pdf 回落 Html 模板 + `tracing::warn`, 不让下载流程崩)。
 //!
-//! 1. **过滤**：`parser::filter::filter_chapter`（不可见字符 / HTML 实体 /
-//!    filterTxt / filterTag / 标题去重 / 空 tag）。
-//! 2. **整形**：`parser::formatter::format_chapter`（清属性 + 段落整形为 `<p>`）。
-//! 3. **按目标格式渲染**：
-//!    - `Txt`：从 `<p>...</p>` 抽出每段文字加全角缩进 + `\n`，标题在最上面（与 Java 一致）。
-//!    - `Html` / `Epub`：套对应模板。
-//!    - `Pdf`：阶段 1 锁定为不实现，调用方应在 UI 层禁用；本函数若被传入 Pdf
-//!      会回落到 Html 模板（与 Java 端 PDF 模板内容相似度高）+ `tracing::warn`，
-//!      不让用户的下载流程崩。
-//!
-//! 模板内嵌：避免拉 `FreeMarker` 等价物。仅 `${title}` / `${content}` 两个占位。
+//! 模板用 `include_str!` 内嵌, 避免引入 `FreeMarker` 等价物; 只有 `${title}` / `${content}` 两个占位符。
 
 use crate::config::{ExportFormat, LangType};
 use crate::models::{Chapter, RuleChapter};
@@ -44,14 +37,11 @@ impl From<ExportFormat> for RenderTarget {
 
 /// 把抓取到的原始章节渲染为目标格式的字符串。
 ///
-/// 入参 `chapter` 是 `ChapterParser` 拿到的 `(url, title, content=原 HTML, order)`；
-/// `rule_chapter` 提供 filterTxt / filterTag / paragraphTagClosed / paragraphTag。
-/// `source_lang_raw` 是 `Rule.language`（书源自带的语言标记，如 "`zh_CN`" / "`zh_TW`" /
-/// "`zh_Hant"），用于判断是否需要简繁转换`；`target_lang` 是用户在 Settings 选的目标
-/// 语言。source == target 或 source 解析失败 → 跳过转换。
+/// `rule_chapter` 提供 filterTxt / filterTag / paragraphTagClosed / paragraphTag;
+/// `source_lang_raw` 是 `Rule.language` (书源自带语言标记, 如 "`zh_CN`" / "`zh_TW`"), `target_lang`
+/// 是用户在 Settings 选的目标语言 —— 两者相同或 source 解析失败时跳过简繁转换。
 ///
-/// 返回 `(title, body)` — 调用方负责落盘（阶段 3b 导出层）。返回的 `title`
-/// 是经过"`1.章节名` → `第1章 章节名`"重写后的版本。
+/// 返回 `(title, body)`, 落盘由调用方负责; `title` 已按 "`1.章节名` → `第1章 章节名`" 重写。
 pub fn render_chapter(
     chapter: &Chapter,
     rule_chapter: &RuleChapter,
@@ -80,9 +70,8 @@ pub fn render_chapter(
     maybe_convert_chinese(filtered.title, body, target, source_lang_raw, target_lang)
 }
 
-/// 若源语言与目标语言不同，把章节标题 + body 简繁转换。
-/// TXT body 整串转；HTML/EPUB/PDF 走 `convert_html_body`（跳过 `<script>/<style>`，其它
-/// 原文走 zhconv —— zhconv 不会改 ASCII 字符，所以标签结构稳定）。
+/// 源语言 ≠ 目标语言时把标题 + body 简繁转换: TXT/Markdown 整串转, HTML/EPUB/PDF 走
+/// `convert_html_body` (跳过 `<script>`/`<style>`; zhconv 不改 ASCII, 故标签结构稳定)。
 fn maybe_convert_chinese(
     title: String,
     body: String,
@@ -107,14 +96,12 @@ fn maybe_convert_chinese(
     (new_title, new_body)
 }
 
-/// TXT：从 `<p>...</p>` 中抽段落文字，全角缩进 2 字符 + 换行。
-/// Java 端逻辑：`while matcher.find() { sb.append(indent).append(group(1)).append('\n'); }`
+/// TXT: 从 `<p>...</p>` 抽段落文字, 全角缩进 2 字符 + 换行 (与 Java 端一致); 无 `<p>` 时兜底一行。
 fn render_txt(title: &str, p_html: &str) -> String {
     use regex::Regex;
     use std::sync::LazyLock;
 
-    /// 编译期确定的正则：用 match 走 panic 路径以避免 `clippy::expect_used`。
-    /// panic IS the design：源码字面量写错就是程序员错误。
+    /// 编译期确定的正则: 用 match 走 panic 路径避免 `clippy::expect_used` (panic 即设计)。
     #[allow(
         clippy::panic,
         reason = "static regex literal must compile; failure = programmer error"
@@ -143,7 +130,6 @@ fn render_txt(title: &str, p_html: &str) -> String {
         sb.push('\n');
     }
     if !matched {
-        // 无 <p> 时直接把整段当一行（极端兜底）
         let s = p_html.trim();
         if !s.is_empty() {
             sb.push_str(indent);
@@ -154,9 +140,9 @@ fn render_txt(title: &str, p_html: &str) -> String {
     sb
 }
 
-/// Markdown：从 `<p>...</p>` 中抽段落文字，标题前缀 `##`，段落间双换行。
+/// Markdown: 从 `<p>...</p>` 抽段落文字, 标题前缀 `##`, 段落间双换行; 末尾保留一个 `\n`
+/// 便于与 TOC / 下一章拼接。
 ///
-/// 输出形态：
 /// ```text
 /// ## {title}
 ///
@@ -165,13 +151,11 @@ fn render_txt(title: &str, p_html: &str) -> String {
 /// 段二
 ///
 /// ```
-/// 末尾保留一个 `\n`，便于与 TOC / 下一章拼接。
 fn render_md(title: &str, p_html: &str) -> String {
     use regex::Regex;
     use std::sync::LazyLock;
 
-    /// 编译期确定的正则：用 match 走 panic 路径以避免 `clippy::expect_used`。
-    /// panic IS the design：源码字面量写错就是程序员错误。
+    /// 编译期确定的正则: 用 match 走 panic 路径避免 `clippy::expect_used` (panic 即设计)。
     #[allow(
         clippy::panic,
         reason = "static regex literal must compile; failure = programmer error"
@@ -204,22 +188,20 @@ fn render_md(title: &str, p_html: &str) -> String {
         sb.push_str("\n\n");
     }
     if !matched {
-        // 无 <p> 时直接把整段当一段（极端兜底）
         let s = p_html.trim();
         if !s.is_empty() {
             sb.push_str(s);
             sb.push_str("\n\n");
         }
     }
-    // 末尾保留一个尾随 \n（与 render_txt 一致）
     sb.push('\n');
     sb
 }
 
 /// 用给定模板渲染章节 HTML。两个模板（HTML / EPUB）仅文件不同，逻辑一致。
-// 占位符为 `$` + 标识符 形式；用 const 提出来避免 clippy::literal_string_with_formatting_args
-// 误认为 `${title}` 之类是 format! 的格式化参数。
-// const 必须先于函数体中所有 statement 声明, 避免 `items_after_statements`。
+// 占位符为 `${name}` 形式, 提成 const 有两个原因: const 须声明在函数体 statement 之前
+// (`items_after_statements`); 且避免 `literal_string_with_formatting_args` 把 `${title}`
+// 当成 format! 的格式化参数。
 const TITLE_PLACEHOLDER: &str = "${title}";
 const CONTENT_PLACEHOLDER: &str = "${content}";
 
@@ -260,8 +242,7 @@ mod tests {
         }
     }
 
-    /// 测试便利 wrapper：source="" 解析失败 → 跳过转换，行为与原签名等价。
-    /// 已有 6 个测试用 `render(...)` 调它，避免每个测试都传 lang。
+    /// 测试便利 wrapper: source="" 解析失败 → 跳过转换, 与原签名行为等价。
     fn render(
         chapter: &Chapter,
         rule_chapter: &RuleChapter,
@@ -278,8 +259,6 @@ mod tests {
             order: 1,
         }
     }
-
-    // ---------- TXT ----------
 
     #[test]
     fn render_txt_extracts_paragraphs_with_indent() {
@@ -319,19 +298,15 @@ mod tests {
         assert!(body.contains("段三"));
     }
 
-    // ---------- HTML ----------
-
     #[test]
     fn render_html_template_wraps_correctly() {
         let (_t, body) = render(&raw_chapter(), &rule_closed_with_ad(), RenderTarget::Html);
-        // 模板里有完整 HTML 文档结构
         assert!(body.contains("<html"), "missing <html: {body}");
         assert!(body.contains("<title>第1章 起航</title>"));
         assert!(body.contains("<h1>第1章 起航</h1>"));
         assert!(body.contains("<p>段一</p>"));
         assert!(body.contains("<p>段二</p>"));
         assert!(!body.contains("本章完"));
-        // 翻页 JS 应在模板里
         assert!(body.contains("turnPage"), "missing turnPage hook");
     }
 
@@ -354,8 +329,6 @@ mod tests {
         assert!(body.contains("&lt;脏 &amp; &quot;标题&quot;&gt;"));
     }
 
-    // ---------- EPUB ----------
-
     #[test]
     fn render_epub_template_uses_xhtml_doctype() {
         let (_t, body) = render(&raw_chapter(), &rule_closed_with_ad(), RenderTarget::Epub);
@@ -365,17 +338,12 @@ mod tests {
         assert!(body.contains("<p>段一</p>"));
     }
 
-    // ---------- PDF 降级 ----------
-
     #[test]
     fn render_pdf_degrades_to_html_template() {
         let (_t, body) = render(&raw_chapter(), &rule_closed_with_ad(), RenderTarget::Pdf);
-        // 与 Html 模板等同
         assert!(body.contains("<html"));
         assert!(body.contains("<h1>第1章 起航</h1>"));
     }
-
-    // ---------- ExportFormat → RenderTarget ----------
 
     #[test]
     fn export_format_maps_to_render_target() {
@@ -384,8 +352,6 @@ mod tests {
         assert_eq!(RenderTarget::from(ExportFormat::Epub), RenderTarget::Epub);
         assert_eq!(RenderTarget::from(ExportFormat::Pdf), RenderTarget::Pdf);
     }
-
-    // ---------- 标题 1.x → 第1章 x ----------
 
     #[test]
     fn render_rewrites_numeric_dot_title() {
@@ -407,9 +373,7 @@ mod tests {
         assert!(body.contains("<title>第5章 归航</title>"));
     }
 
-    // ---------- 简繁转换集成 ----------
-
-    /// 端到端：源 `zh_CN` + 目标 `zh_TW` → TXT body 简体转繁体（含台湾用词）。
+    /// 端到端: `zh_CN` → `zh_TW`, 含台湾用词 ("软件" → "軟體")。
     #[test]
     fn render_converts_simplified_to_traditional_tw_for_txt() {
         let raw = Chapter {
@@ -425,16 +389,13 @@ mod tests {
             "zh_CN",
             LangType::ZhTw,
         );
-        // 简体"软件" → 台湾繁体"軟體"
         assert_eq!(title, "軟體");
-        // 简体"头发" → "頭髮"；"颜色" → "顏色"
         assert!(body.contains("頭髮"), "got: {body}");
         assert!(body.contains("顏色"), "got: {body}");
     }
 
-    /// 端到端：源 `zh_TW` + 目标 `zh_CN` → HTML body 繁体转简体（标签保护）。
-    /// 注：zhconv 的 t2s 是字面繁→简（"軟體"→"软体"），不会反向做台湾用词→大陆用词
-    /// 的映射（这是 `OpenCC` 算法的限制，不算 bug —— 用户拿到"软体"在大陆可读）。
+    /// 端到端: `zh_TW` → `zh_CN`, HTML body 繁转简并保护标签。
+    /// zhconv 的 t2s 只做字面繁→简 ("軟體"→"软体"), 不反向做台湾用词→大陆用词映射 (非 bug)。
     #[test]
     fn render_converts_traditional_to_simplified_for_html() {
         let raw = Chapter {
@@ -451,20 +412,18 @@ mod tests {
             LangType::ZhCn,
         );
         assert_eq!(title, "软体");
-        // 标签外中文转简体（"<p class="c">..." 被模板再包一层 <p>，所以查子串）
+        // 模板会再包一层 <p>, 故用子串断言
         assert!(body.contains("头发颜色"), "text not converted: {body}");
         assert!(
             !body.contains("头髮") && !body.contains("顏色"),
             "traditional chars not converted: {body}"
         );
-        // script 块原样保留（不转）
         assert!(
             body.contains(r#"var x = "不转这里";"#),
             "script mutated: {body}"
         );
     }
 
-    /// source == target → 跳过转换（不引入 zhconv 错误风险）。
     #[test]
     fn render_skips_conversion_when_source_equals_target() {
         let raw = Chapter {
@@ -484,7 +443,6 @@ mod tests {
         assert!(body.contains("头发"), "should be unchanged: {body}");
     }
 
-    /// source 无法解析 → 跳过转换（保守，不误转）。
     #[test]
     fn render_skips_conversion_when_source_unparseable() {
         let raw = Chapter {
@@ -504,9 +462,6 @@ mod tests {
         assert!(body.contains("头发"), "should be unchanged: {body}");
     }
 
-    // ---------- Markdown ----------
-
-    /// 闭合 `<p>` 抽段 → 输出 `## 标题` + 段落 + `## 标题` 行单独。
     #[test]
     fn render_md_extracts_paragraphs_with_h2_heading() {
         let raw = Chapter {
@@ -517,17 +472,14 @@ mod tests {
         };
         let (title, body) = render(&raw, &rule_closed_with_ad(), RenderTarget::Markdown);
         assert_eq!(title, "第1章 起航");
-        // 首行是 H2 标题
         assert!(
             body.starts_with("## 第1章 起航\n\n"),
             "body should start with H2 title, got: {body}"
         );
-        // 段一、段二 各占段，段之间 `\n\n`
         assert!(body.contains("段一"));
         assert!(body.contains("段二"));
     }
 
-    /// 空 `<p>` 跳过（与 TXT 行为一致：matched=true 但 inner 为空时不 push）。
     #[test]
     fn render_md_skips_empty_paragraphs() {
         let raw = Chapter {
@@ -539,14 +491,12 @@ mod tests {
         let (_t, body) = render(&raw, &rule_closed_with_ad(), RenderTarget::Markdown);
         assert!(body.contains('a'));
         assert!(body.contains('b'));
-        // 空白段不应作为独立段落出现（H2 标题之外不应有连续空行）
         assert!(
             !body.contains("a\n\n\nb"),
             "空 <p> 被错留了一段空白: {body}"
         );
     }
 
-    /// 无 `<p>` 兜底：把整段 HTML trim 当一段。
     #[test]
     fn render_md_falls_back_to_whole_html_when_no_p_tags() {
         let raw = Chapter {
@@ -563,7 +513,6 @@ mod tests {
         );
     }
 
-    /// 末尾保留一个 `\n`（与 `render_txt` 风格一致，便于拼接 TOC / 下一章）。
     #[test]
     fn render_md_trailing_newline() {
         let raw = Chapter {

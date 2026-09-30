@@ -1,27 +1,10 @@
 //! 数据模型层  对应 Java 包 `com.pcdd.sonovel.model`.
 //!
-//! # 设计原则
-//!
-//! 本项目**不严格区分** DTO/PO/Param/Resp 四种类型。理由:
-//! - 业务侧只有一个持久化格式 (JSON), 字段命名在 web-ui 前端已经定型
-//! - 各结构体总规模 535 LOC, 强行拆 3-4 套类型会让"哪个是源"难追踪
-//! - 现有测试覆盖已经够, 拆 4 套会引入 N 个 `From<Po> for Dto` 转换代码,
-//!   而这些转换大部分是 `clone()` 字段, 没有真正的领域逻辑
-//!
-//! 实际做法:
-//! - **PO + DTO 同体** (`Book` / `Chapter` / `SearchResult` 等): 同时承担
-//!   持久化和传输角色, `#[serde(rename = "...")]` 控制 JSON 字段名
-//! - **领域枚举单点** (`FinishedReason` / `ContentType`):
-//!   在各自模块, `Display + FromStr + Serialize + Deserialize` 一起
-//! - **Rule 拆分**: `Rule` 是书源规则的根, 内部 5 个 sub-struct 拆 `search/
-//!   book/toc/chapter/crawl` 子节, 跟 JSON 实际结构对应
-//!
-//! # 后续可优化 (按需, 不抢跑)
-//!
-//! - 真要拆 DTO 时, 优先拆 `Book` (web 响应可能想隐藏 `cover_url_bytes` 这类
-//!   内部字段, 加 `BookResponse { book_name, author, ... }`)
-//! - `Rule` 在 web 写入时可能想校验 (e.g. `url` 必须 http(s)), 那是
-//!   `Rule::validate()` 的事, 不需要单独 DTO
+//! **不严格区分** DTO/PO/Param/Resp: 业务侧只有一种持久化格式 (JSON), 字段命名已由 web-ui 前端
+//! 定型。实际做法: PO + DTO 同体 (`Book` / `Chapter` / `SearchResult`, 用 `#[serde(rename)]`
+//! 控字段名); 领域枚举 (`FinishedReason` / `ContentType`) 各自模块内配 `Display + FromStr`;
+//! `Rule` 拆 `search/book/toc/chapter/crawl` 子节, 与 JSON 实际结构对应。
+//! 真要拆 DTO 时优先拆 `Book`, 属于按需优化, 不抢跑。
 
 pub mod book;
 pub mod chapter;

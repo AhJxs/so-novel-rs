@@ -1,4 +1,4 @@
-//! `LibraryDelegate`: `gpui_kit::component::list::List` 的 delegate，持有 page handle + 当前页 (index, `LibraryEntry`)。
+//! `LibraryDelegate`: `gpui_kit::component::list::List` 的 delegate，持有 page handle + 当前页条目。
 
 use gpui_kit::component::list::{ListItem, ListState};
 use gpui_kit::component::{ActiveTheme as _, IndexPath, list::ListDelegate};
@@ -9,9 +9,8 @@ use crate::desktop::model::LibraryEntry;
 use super::LibraryPage;
 use super::row;
 
-/// `gpui_kit::component::list::List` 的 delegate —— 把当前页的 `LibraryEntry` 切片渲染成行。
-/// 完全对齐 `tasks::TasksDelegate` / `sources::SourcesDelegate` / `search::SearchDelegate`
-/// 模式（PR6 抽出来后 4 个 page 共用一套 delegate 结构）。
+/// `List` 的 delegate —— 把当前页的 `LibraryEntry` 切片渲染成行，结构同 tasks / sources /
+/// search 的 delegate。
 pub(super) struct LibraryDelegate {
     pub(super) page: Entity<LibraryPage>,
     pub(super) page_items: Vec<(usize, LibraryEntry)>,

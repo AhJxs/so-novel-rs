@@ -1,23 +1,8 @@
-//! 下载任务管理端点 + per-task drain 基础设施
+//! 下载任务管理端点 + per-task drain 基础设施。
 //!
-//! ## 任务存储: 单源 `Vec<DownloadTask>` (跟 GPUI 一致)
-//!
-//! 旧实现是双 store (`HashMap<u64, ActiveDownload>` + `Vec<DownloadTaskRecord>` + 一个
-//! bridge task 来回同步), 反复出现 active 拿到 `(None, 0)` 把 history 修正过的元数据
-//! 盖回去、或者 `Finished` 状态被 `Downloading` 覆盖之类的 bug。根因是同一份数据
-//! 两边各持一份, 时序窗口不一致。
-//!
-//! 现在 web 跟 GPUI 一样只持一个 `Vec<DownloadTask>`, 所有字段 (持久化 + 运行期 +
-//! rx/cancel) 都在这个 struct 上。
-//!
-//! ## Drain 时序保证
-//!
-//! 1. 任务先 push 进 `state.tasks` (可见性), 再 spawn drain, 再 spawn crawler
-//!    —— `tasks_list` 在返回 SSE 之前已经能看到这个 id
-//! 2. drain 收到 mpsc 断开 (crawler 退出) 时, 若 `finished.is_none()` 则标
-//!    `AppRestarted` 并 save (与 GPUI `DownloadTask::drain` 同语义)
-//! 3. 用户 cancel: `task.cancelling = true` 立即反映到 `tasks_list`;
-//!    `Progress::Cancelled` 经 mpsc → drain → `apply_progress` 最终落 `UserCancelled`
+//! 任务存储是单源 `Vec<DownloadTask>`（跟 GPUI 一致）；双 store + bridge task 会因
+//! 时序窗口不一致互相覆盖（`Finished` 被 `Downloading` 盖回去），已废弃。
+//! 顺序不能变：先 push 进 `state.tasks`（可见性）→ 再 spawn drain → 再 spawn crawler。
 
 use std::sync::Arc;
 
@@ -53,8 +38,8 @@ pub struct TaskInfo {
     pub finished_at_unix: Option<i64>,
 }
 
-/// 从 `book.epub` / `book(作者).txt` 等文件名里粗略抽书名 —— 只作 fallback:
-/// 历史里 `book_meta` 缺失 (旧任务漏发过 `BookResolved`) 时, 至少让 UI 显示个名字。
+/// 从 `book(作者).txt` 等文件名粗略抽书名 —— 只作 fallback：历史任务可能漏发
+/// `BookResolved` 导致 `book_meta` 缺失，至少让 UI 有名字显示。
 /// 规则: 去掉扩展名, 再把尾部 `(...作者)` / `（...作者）` 整段砍掉。
 fn derive_book_name_from_filename(filename: &str) -> Option<String> {
     let stem = std::path::Path::new(filename)
@@ -74,9 +59,7 @@ fn derive_book_name_from_filename(filename: &str) -> Option<String> {
     }
 }
 
-/// `DownloadTask` → `TaskInfo`。
-///
-/// 关键点: 不再 merge 两个 store —— `state.tasks` 是唯一来源。
+/// `DownloadTask` → `TaskInfo`（`state.tasks` 是唯一数据来源，不 merge 别的 store）。
 fn task_to_info(task: &DownloadTask) -> TaskInfo {
     let status = match &task.finished {
         Some(Ok(_)) => TaskStatus::Finished,
@@ -95,8 +78,8 @@ fn task_to_info(task: &DownloadTask) -> TaskInfo {
                 .and_then(|n| n.to_str())
                 .map(std::string::ToString::to_string)
         });
-    // book_name 优先: book_meta (BookResolved 之后) > origin.book_name (请求里带的搜索书名)。
-    // 两者都为空时回退到 finished output filename 派生 (仅 Finished 任务有值)。
+    // book_name 优先 book_meta（BookResolved 之后）> origin.book_name（请求里的搜索书名），
+    // 两者都空才回退到 finished 文件名派生（仅 Finished 任务有值）。
     let book_name = {
         let direct = task.book_name();
         if direct.is_empty() {
@@ -128,16 +111,13 @@ pub async fn tasks_list(State(state): State<SharedState>) -> Result<Json<Vec<Tas
     let tasks = read_state_or_json("tasks_list", || mutex_or("tasks_list", &state.tasks))?;
     let mut result: Vec<TaskInfo> = tasks.iter().map(task_to_info).collect();
     drop(tasks);
-    // 按 id 降序 (最新任务在前)。
     result.sort_by_key(|b| std::cmp::Reverse(b.id));
     Ok(Json(result))
 }
 
 /// `POST /api/tasks/{id}/cancel` — 翻 `cancelling` 标记 + 触发 `CancelToken`。
 ///
-/// 任务已结束 (任何 `finished.is_some()`) → 409 提示前端"无法取消已结束任务",
-/// 避免 cancel 按钮无响应却显示 ok。错误文案走 [`crate::i18n::ts_for_locale`] 按
-/// 请求 locale 翻译（`WebError` 的 `IntoResponse` 路径）。
+/// 任务已结束（`finished.is_some()`）→ 409，避免前端 cancel 按钮无响应却显示 ok。
 ///
 /// # Errors
 ///
@@ -157,41 +137,31 @@ pub async fn task_cancel(
         let Some(task) = tasks.iter_mut().find(|t| t.id == id) else {
             return Err(WebError::NotFound(""));
         };
-        // 任务已结束: cancel 不会触发任何 crawler 状态变化 (crawler 已退出)。
-        // 返回 409 提示前端"无法取消已结束任务", 避免前端 cancel 按钮无响应却显示 ok。
+        // crawler 已退出，cancel 不会再产生状态变化 → 409（见函数文档）。
         if task.finished.is_some() {
             return Err(WebError::TaskAlreadyFinished);
         }
         let Some(c) = task.cancel.as_ref() else {
             return Err(WebError::NotFound(""));
         };
-        // 立即翻 cancelling 标记 (前端可显示"正在取消..."), cancel.cancel() 同步触发
-        // crawler 内部的 CancelToken; crawler 下一次 progress tick 看到 cancel 时会发
-        // Progress::Cancelled → drain → apply_progress 落 UserCancelled。
+        // 先翻 cancelling（前端显示"正在取消..."），cancel() 同步触发 crawler 的
+        // CancelToken；下一个 tick 发 Progress::Cancelled → drain 落 UserCancelled。
         task.cancelling = true;
         cancel = c.clone();
         drop(tasks);
     }
     cancel.cancel();
-    // Success body 是 plain text —— 前端 `apiFetch<void>` 不读 body, 但保留 localed
-    // 文案便于调试 (`curl -X POST` 直接看到中文/英文反馈)。
+    // plain text body：前端不读，但保留 localized 文案便于 `curl -X POST` 调试。
     Ok(ts_for_locale(locale, "WebErrors.task_cancelled"))
 }
 
 /// `DELETE /api/tasks/{id}` — 从 `state.tasks` 移除一条任务记录, **不动磁盘**。
 ///
-/// 跟 `task_cancel` 的语义区别:
-/// - `cancel`: 仅对 `Downloading` 任务有意义 (触发 crawler stop), 已结束任务是 409
-/// - `delete`: 纯 metadata 清理。任何 `finished.is_some()` 的任务都能删, 活跃任务也
-///   允许 —— 删后该任务的 in-flight crawler / drain 还在跑, 自然写入
-///   `state.tasks` 的旧下标位置已经不存在, 但 `apply_progress` 是按 `id` 查找的,
-///   find 会 no-op, drain 退出时 save 兜底空 vec 也写。简单粗暴地对
-///   tasks.json 做一次 trim —— 这是用户主动清理历史, 不算脏数据。
-///
-/// 跟 library delete 的语义区别: library delete 删的是磁盘文件; 这里删的是
-/// tasks.json 里的任务记录。两个端点分开是因为用途不同:
-///   - 在 /tasks 页面删 → 删记录 (保留文件)
-///   - 在 /library 页面删 → 删文件 (记录留着也无害)
+/// 与 `task_cancel` 不同：delete 是纯 metadata 清理，活跃任务也允许删 ——
+/// 在飞的 crawler / drain 仍会 `apply_progress`（按 `id` 查找，找不到就 no-op），
+/// 所以删完对 tasks.json 做一次 trim 是安全的。
+/// 与 library delete 也不同：那边删磁盘文件，这边只删记录（在 /tasks 页删记录，
+/// 在 /library 页删文件）。
 ///
 /// # Errors
 ///
@@ -216,17 +186,12 @@ pub async fn task_delete(
     Ok(ts_for_locale(locale, "WebErrors.task_deleted"))
 }
 
-/// 单个下载任务的 per-task drain。
+/// 单个下载任务的 per-task drain：既是唯一 mpsc consumer（没人能 race），
+/// 也是状态更新者（lock `state.tasks` → 按 id `apply_progress`）。
 ///
-/// 两件事合一:
-/// 1. 单一 mpsc consumer (`crawler_rx`) —— 没人能 race
-/// 2. 状态更新者: lock `state.tasks` → 找对应 id → `task.apply_progress(ev)`
-///    （任务状态即单源真相，前端轮询 `GET /api/tasks` 读取）
-///
-/// 退出条件: `crawler_rx.recv()` 返回 `None` (crawler 退出发送端被 drop)。
-/// 退出前若 `finished.is_none()` 标 `AppRestarted` (对齐 GPUI `DownloadTask::drain`
-/// 的 `TryRecvError::Disconnected` 分支), 并触发一次 `db::save_with_trim` 兜底
-/// 落盘 —— 不依赖中心 tick, drain 退出后所有变更都已经被保存。
+/// 退出条件：`crawler_rx.recv()` 返回 `None`（发送端被 drop）。退出前若
+/// `finished.is_none()` 标 `AppRestarted` 并 save 兜底 —— 不依赖中心 tick；
+/// 与 GPUI `DownloadTask::drain` 的 `Disconnected` 分支同语义。
 pub(super) fn spawn_task_drain(
     state: Arc<WebState>,
     task_id: u64,
@@ -234,8 +199,7 @@ pub(super) fn spawn_task_drain(
 ) {
     tokio::spawn(async move {
         while let Some(progress) = crawler_rx.recv().await {
-            // 锁 + 更新 in-memory task; poison 状态跳过 (drain 里没法返 500,
-            //    也不应让 worker panic —— 丢弃该条 progress)
+            // poison 时丢弃该条 progress（drain 里没法返 500，也不该 panic）
             match state.tasks.lock() {
                 Ok(mut tasks) => {
                     if let Some(task) = tasks.iter_mut().find(|t| t.id == task_id) {
@@ -250,8 +214,7 @@ pub(super) fn spawn_task_drain(
             }
         }
 
-        // mpsc 断开: crawler 已退出。若任务还没走到 finished 态, 补 AppRestarted
-        // + finished_at_unix, 然后 save。
+        // mpsc 断开（crawler 已退出）：若还没到 finished 态，补 AppRestarted + 落盘。
         let needs_save = match state.tasks.lock() {
             Ok(mut tasks) => {
                 let mut changed = false;

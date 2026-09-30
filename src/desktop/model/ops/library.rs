@@ -37,14 +37,11 @@ pub fn refresh_library(library: &mut LibraryState, download_path: &str) {
     }
 }
 
-/// 真正删除一个本地文件；**外科式**从 `entries` 中移除（不调用 `refresh_library`）。
+/// 真正删除一个本地文件；**外科式**从 `entries` 中移除（不调 `refresh_library`）。
 /// 返回 Ok(成功 toast 文案) / Err(错误 toast 文案)。
 ///
-/// **为什么不做 rescan**：`refresh_library` 会 `entries.clear()` 后再 fill，
-/// 中间会被 watcher 后续 fs 事件再次触发 → 用户看到 "empty → 重新加载" 的闪一下。
-/// 删除本身是可预测的（删哪个文件已知），直接 `retain` 掉对应 entry 即可：
-/// 瞬间、零空态。watcher 在 1s 内看到的 fs 事件由 `watcher_skip_until_unix_ms` 抑制，
-/// 避免 race。
+/// 不做 rescan: `refresh_library` 的 `clear()` + fill 会让用户看到 "empty → 重新加载"
+/// 闪一下, 而删除目标是确定的, 直接 `retain` 对应 entry 即可。
 pub fn delete_library_entry(
     library: &mut LibraryState,
     _download_path: &str,
@@ -73,11 +70,10 @@ pub fn delete_library_entry(
         }
     };
     library.pending_delete = None;
-    // 外科式移除：路径完全相等才删，避开 path 末尾不同但 basename 相同的边界情况。
-    // 即便文件已经成功删除（result=Ok），entry 仍在内存里 → 显式过滤。
+    // 路径完全相等才删, 避开末尾不同但 basename 相同的边界情况。
     library.entries.retain(|e| e.path != path);
-    // bump entries_version 让渲染端的 ListCache 失效 —— 不 bump 的话 cache key
-    // 不变，下次 render 命中旧 Arc，里面仍然含被删的 entry，UI 不刷新。
+    // bump `entries_version` 让渲染端 ListCache 失效 —— 不 bump 的话 cache key 不变,
+    // 下次 render 命中旧 Arc（仍含被删 entry), UI 不刷新。
     library.entries_version = library.entries_version.wrapping_add(1);
     result
 }

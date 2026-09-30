@@ -1,7 +1,4 @@
-//! 选择器封装 + @js: 后处理
-//!
-//! 来自原 `parser/dom.rs`, 关注"选元素 + 抽内容 + 可选 JS 后处理"。
-//! HTML 转换 (`clear_all_attributes` / `remove_tags`) 在 [`super::transform`]。
+//! 选择器封装 + @js: 后处理: 选元素 + 抽内容 + 可选 JS 后处理。HTML 转换在 [`super::transform`]。
 
 use std::fmt;
 
@@ -23,17 +20,13 @@ pub enum SelectError {
 /// 用于一次"选 + 抽 + 可选 JS 后处理"的统一入口。
 /// 等价 Java `JsoupUtils#selectAndInvokeJs(el, query, contentType)`。
 ///
-/// 返回值约定:
-/// - 选不到任何元素时返回空字符串 (与 Java 端一致);
-/// - 多个元素: 按 `ContentType` 聚合 (text 用空格连接、html 拼接、attr 取首个);
-/// - 含 `@js:` 时把抽取结果交给 JS 引擎处理后返回;
-/// - 含 `@href` / `@src` 后缀时自动切换到对应属性抽取模式。
+/// 返回值约定: 选不到元素返回空字符串; 多个元素按 `ContentType` 聚合
+/// (text 空格连接 / html 拼接 / attr 取首个); 含 `@js:` 交给 JS 引擎;
+/// 含 `@href` / `@src` 后缀则改抽对应属性。
 ///
 /// # Examples
 ///
 /// ```ignore
-/// use crate::parser::dom::select_and_invoke_js;
-/// use crate::models::ContentType;
 /// let html = scraper::Html::parse_document(r#"<div class="a">作者: 苹果</div>"#);
 /// let s = select_and_invoke_js(&html, r#".a@js:r=r.replace('作者: ','')"#, ContentType::Text).unwrap();
 /// assert_eq!(s, "苹果");
@@ -127,11 +120,9 @@ fn extract_from_elements(els: &[ElementRef<'_>], content_type: ContentType) -> S
             .map(scraper::ElementRef::inner_html)
             .collect::<String>(),
         ContentType::AttrSrc | ContentType::AttrHref => {
-            // 与 jsoup `absUrl(attrName)` 等价的实现需要文档 baseUri;
-            // 阶段 2a 这里只取原始 attr 值, 把"absUrl"工作交给 parser 层
-            // 自己做 (parser 拿到 baseUri 后再用 url::Url::join 解析)。
-            // 该 match 臂只覆盖 attr 类型 — `attr_name()` 对非 attr 变体返回 "",
-            // 在这里调用永远是合法的 src/href。
+            // 只取原始 attr 值; 与 jsoup `absUrl` 等价的拼绝对路径由 parser 层
+            // 拿到 baseUri 后用 `url::Url::join` 完成。该臂只覆盖 attr 类型,
+            // `attr_name()` 对非 attr 变体返回 "", 这里调用永远合法。
             let attr = content_type.attr_name();
             els.iter()
                 .find_map(|e| e.value().attr(attr))
@@ -149,9 +140,7 @@ fn extract_from_elements(els: &[ElementRef<'_>], content_type: ContentType) -> S
 }
 
 /// 剥离查询末尾的 `@href` / `@src` 后缀, 并据此覆盖 `content_type`。
-///
-/// Java 端 `JsoupUtils.stripAt()` + `BookParser.getContentType()` 的等价实现。
-/// 规则作者可以写 `#info > a@href` 来表示"取 href 属性而非文本"。
+/// 规则作者可以写 `#info > a@href` 表示"取 href 属性而非文本"。
 fn strip_at_suffix(query: &str, ct: ContentType) -> (&str, ContentType) {
     query.strip_suffix("@href").map_or_else(
         || {
@@ -174,25 +163,20 @@ fn is_xpath(s: &str) -> bool {
     s.starts_with('/') || s.starts_with("//") || s.starts_with("(/")
 }
 
-/// 极小 `XPath` → CSS 改写。覆盖现有规则中出现过的两类 `XPath`:
+/// 极小 `XPath` → CSS 改写。只覆盖现有规则出现过的两类:
 ///
 /// 1. `//*[@id="readbg"]/script[4]` → `#readbg > script:nth-of-type(4)`
-///    (cloudflare.json 96 读书唯一一条 id 索引 `XPath`)。
-/// 2. 纯绝对路径标签序列 `/html`、`/html/body`、`/html/body/div` …
-///    → `html`、`html > body`、`html > body > div`
-///    (main.json wxsy.net 的 `toc.list = "/html@js:..."`: 选中 `<html>` 根
-///    元素, 把整个文档 `inner_html` 喂给 @js 后处理)。每一段必须是纯标签名,
-///    不带 `*` / 属性 / 谓词 —— 出现任性片段就放弃, 交给上层报 typed error。
+///    (id 索引 `XPath`; id 允许单/双引号, 尾部 `[N]` 可选)。
+/// 2. 纯绝对路径标签序列 `/html/body/div` → `html > body > div`。
+///    每段必须是不带 `*` / 属性 / 谓词的纯标签名, 否则放弃改写。
 ///
-/// 引入完整 `XPath` 引擎 (libxml/sxd-xpath) 的成本远高于改写这几条规则,
-/// 因此只覆盖以上两种精确模式; 其它 `XPath` 一律返回 `None`。
+/// 引入完整 `XPath` 引擎的成本远高于改写这几条规则, 故其它 `XPath` 一律返回 `None`。
 fn xpath_to_css(s: &str) -> Option<String> {
     use regex::Regex;
     use std::sync::LazyLock;
 
     /// 编译期确定的正则：用 match + panic 避免 `clippy::expect_used`，与项目里
     /// 其它 `LazyLock` 静态正则统一风格。
-    /// panic IS the design：源码字面量写错就是程序员错误。
     #[allow(
         clippy::panic,
         reason = "static regex literal must compile; failure = programmer error"
@@ -205,8 +189,7 @@ fn xpath_to_css(s: &str) -> Option<String> {
     }
 
     static RE: LazyLock<Regex> = LazyLock::new(|| {
-        // //*[@id="readbg"]/script[4]
-        // 允许 id 用单或双引号; 尾部 [N] 可选 (无则不指定 nth-of-type)。
+        // //*[@id="readbg"]/script[4]; 尾部 [N] 可选 (无则不指定 nth-of-type)
         compile_static_re(
             r#"^//\*\[@id\s*=\s*["']([^"']+)["']\]\s*/\s*([A-Za-z][A-Za-z0-9_-]*)\s*(?:\[(\d+)\])?$"#,
         )
@@ -214,10 +197,8 @@ fn xpath_to_css(s: &str) -> Option<String> {
     let s = s.trim();
 
     if let Some(cap) = RE.captures(s) {
-        // 该 regex 是 `^...$` 锚定的字面量: match 成功时 group 1/2/3 一定存在。
-        // 静态 regex 模式不变时永远命中；这里把不可能的 miss 显式 panic，让未来
-        // 改动 regex 时定位明确。
-        // panic IS the design：regex 改变未同步更新下面的 group 访问时立即炸出来。
+        // regex 是 `^...$` 锚定的字面量: match 成功时 group 1/2/3 一定存在。
+        // 改 regex 时必须同步更新下面的 group 访问, 否则这里立刻 panic 定位。
         #[allow(
             clippy::panic,
             reason = "regex match success guarantees group exists; panic = programmer error on regex change"
@@ -241,7 +222,7 @@ fn xpath_to_css(s: &str) -> Option<String> {
         ));
     }
 
-    // 纯绝对路径: `/tag/tag/...`, 每段是合法标签名 (无 `*`/属性/谓词)。
+    // 纯绝对路径: 每段必须是纯标签名 (无 `*`/属性/谓词)
     if s.starts_with('/') && !s.starts_with("//") {
         let segments: Vec<&str> = s.split('/').filter(|seg| !seg.is_empty()).collect();
         if !segments.is_empty() && segments.iter().all(|seg| is_plain_tag_name(seg)) {
@@ -252,8 +233,7 @@ fn xpath_to_css(s: &str) -> Option<String> {
     None
 }
 
-/// 是否是纯标签名 (如 `html` / `body` / `div-1`)。带 `*`、属性、谓词 `[N]`
-/// 的不算 —— 那些需要更完整的 `XPath` 改写, 超出极小覆盖范围。
+/// 是否是纯标签名 (如 `html` / `body` / `div-1`)。带 `*`、属性、谓词 `[N]` 的不算。
 fn is_plain_tag_name(seg: &str) -> bool {
     !seg.is_empty()
         && seg
@@ -262,11 +242,8 @@ fn is_plain_tag_name(seg: &str) -> bool {
         && seg.as_bytes()[0].is_ascii_alphabetic()
 }
 
-/// 把 `selector_part` 标准化为 CSS 选择器:
-/// - 已经是 CSS: 原样返回;
-/// - 是已知极小 `XPath` 模式 (`//*[@id=...]` 或纯绝对路径 `/html`、`/html/body`…):
-///   改写为 CSS;
-/// - 其它 `XPath`: 返回 `Err` 让上层报 `XPathNotSupported`。
+/// 把 `selector_part` 标准化为 CSS: 已是 CSS 原样返回; 是已知极小 `XPath` 模式
+/// 则改写; 其它 `XPath` 返回 `Err` 让上层报 `XPathNotSupported`。
 fn normalize_selector(selector_part: &str) -> Result<String, SelectError> {
     if !is_xpath(selector_part) {
         return Ok(selector_part.to_string());
@@ -304,8 +281,6 @@ mod tests {
         Html::parse_document(html)
     }
 
-    // ---------- 基础 CSS 选择 ----------
-
     #[test]
     fn selects_text_content() {
         let h = doc(r#"<html><body><h1 class="t">第1章 标题</h1></body></html>"#);
@@ -340,8 +315,6 @@ mod tests {
         assert_eq!(s, "苹果");
     }
 
-    // ---------- @js: 后处理 ----------
-
     #[test]
     fn applies_js_after_select() {
         let h = doc(r#"<html><body><div class="a">作者：苹果</div></body></html>"#);
@@ -352,8 +325,6 @@ mod tests {
 
     #[test]
     fn applies_js_concat_pattern_from_real_rule() {
-        // 模拟 main.json mcxs 书源 coverUrl 规则:
-        //   meta[property="og:image"]@js:r='http://www.mcxs.info'+r
         let h =
             doc(r#"<html><head><meta property="og:image" content="/cover/1.jpg"></head></html>"#);
         let q = r#"meta[property="og:image"]@js:r='http://www.mcxs.info'+r"#;
@@ -372,9 +343,6 @@ mod tests {
 
     #[test]
     fn xpath_id_indexed_pattern_is_rewritten_to_css() {
-        // cloudflare.json `96读书` 唯一一条 XPath:
-        //   //*[@id="readbg"]/script[4]
-        // 应被改写为 #readbg > script:nth-of-type(4)。
         let h = doc(r#"<html><body>
                 <div id="readbg">
                     <script>var a = 1;</script>
@@ -383,7 +351,6 @@ mod tests {
                     <script>var nextpage = "/n/123/2.html";</script>
                 </div>
             </body></html>"#);
-        // 直接通过 select_and_invoke_js 端到端验证:
         let q = r#"//*[@id="readbg"]/script[4]"#;
         let s = select_and_invoke_js(&h, q, ContentType::Html).unwrap();
         assert!(s.contains("nextpage"), "got: {s}");
@@ -402,9 +369,6 @@ mod tests {
 
     #[test]
     fn xpath_absolute_html_root_rewrites_to_css() {
-        // main.json wxsy.net 的 toc.list = "/html@js:...": 选中 <html> 根元素,
-        // 取 inner_html ( ContentType::Html ) 后交给 @js 后处理。
-        // 这里端到端验证: /html 改写成 css `html`, 能取到文档 HTML。
         let h = doc(
             r#"<html><body><ul class="section-list ycxsid"><li>a</li><li>b</li></ul></body></html>"#,
         );
@@ -416,7 +380,6 @@ mod tests {
 
     #[test]
     fn xpath_absolute_html_root_with_js_postprocess() {
-        // 端到端: /html 选根 + @js 后处理 (模拟 wxsy.net 真实 list 规则的精简版)。
         let h = doc(
             r#"<html><body><ul class="section-list ycxsid"><li>a</li><li>b</li></ul></body></html>"#,
         );
@@ -433,8 +396,6 @@ mod tests {
         let s = select_and_invoke_js(&h, q, ContentType::Text).unwrap();
         assert_eq!(s, "text");
     }
-
-    // ---------- 嵌套选择 (搜索结果场景) ----------
 
     #[test]
     fn within_element_select() {
@@ -453,12 +414,9 @@ mod tests {
         assert_eq!(href, "/b/2");
     }
 
-    // ---------- 真实测试资源 ----------
-
     #[test]
     fn parses_real_chapter_html_resource() {
         use scraper::Selector;
-        // bundle/web/chapter.html 是一段真实章节页
         let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("bundle")
             .join("web")
@@ -469,7 +427,6 @@ mod tests {
         let title = dom_select_text(&h, "h1", ContentType::Text).unwrap();
         assert!(title.contains("穿越成皇"), "title: {title}");
 
-        // 段落数 ≥ 4 (资源里有多段 <p>)
         let p_sel = Selector::parse("p").unwrap();
         let count = h.select(&p_sel).count();
         assert!(count >= 4, "p count: {count}");

@@ -1,18 +1,11 @@
-//! 规则目录初始化
-//!
-//! 2 个公共 fn:
-//! - [`init_rules_dir`] — 首次启动创建目录 + 补齐内置规则文件 (不覆盖用户修改)
-//! - [`list_rule_files`] — 枚举目录下的规则文件名 (切活跃书源下拉用)
+//! 规则目录初始化: 首次启动创建目录 + 补齐内置规则文件 (不覆盖用户修改), 以及枚举目录下的规则文件名。
 
 use std::path::Path;
 
 use super::constants::BUNDLED_RULES;
 
-/// 初始化规则目录: 创建目录 + 补齐 [`BUNDLED_RULES`] 缺失的规则文件。
-///
-/// - 目录不存在时创建;
-/// - 已存在的文件**不覆盖** (尊重用户修改);
-/// - 返回新创建的文件数量。
+/// 初始化规则目录: 创建目录 + 补齐 [`BUNDLED_RULES`] 缺失的规则文件, 返回新创建的数量;
+/// 已存在的文件**不覆盖** (尊重用户修改)。
 ///
 /// # Examples
 ///
@@ -113,7 +106,6 @@ mod tests {
         let rules_dir = dir.path().join("rules");
         std::fs::create_dir_all(&rules_dir).unwrap();
 
-        // 写一个 user-customized main.json
         let user_content = r#"[{"url":"https://user-customized"}]"#;
         std::fs::write(rules_dir.join("main.json"), user_content).unwrap();
 

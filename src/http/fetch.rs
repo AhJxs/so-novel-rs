@@ -1,16 +1,11 @@
 //! 单次 HTTP 请求封装。对应 Java `util.CrawlUtils#request` + 编码兜底。
 //!
-//! **async 版本**（`fetch`）：用 `reqwest::Client`（非 blocking），配合
-//! `tokio::select!` 可以让外部 cancel 立刻中断 in-flight 请求。
-//! 之前用 `reqwest::blocking::Client` + `tokio::task::spawn_blocking` 那条
-//! 路线在 cancel 时只能等 HTTP 自己超时（最坏 10s），用户感知就是"没反应"。
+//! **必须是 async**：调用方在 `tokio::select!` 里 race future 与 cancel 信号，
+//! 取消时 reqwest 立刻 drop 底层连接。blocking 版只能等 HTTP 自己超时（最坏 10s），
+//! 用户感知就是"没反应"。
 //!
-//! 单次抓取的责任：
-//! 1. 加 UA / Referer / Cookie 头；
-//! 2. 区分 GET / POST，POST 时把 form 数据填进 body；
-//! 3. 用 `decode_response_bytes` 兜底解码；
-//! 4. 调用方按需检测 CF（`http::cf::has_cloudflare`）—— 不在本函数里
-//!    做 CF 旁路调用，旁路属阶段 2c 的 `cf-bypass` 服务集成。
+//! 单次抓取只负责：加 UA / Referer / Cookie 头；GET/POST 与 form body；用
+//! `decode_response_bytes` 兜底解码。**不做** CF 旁路调用（见 `fetch_with_cf_fallback`）。
 
 use std::time::Duration;
 
@@ -46,10 +41,7 @@ pub struct FetchResponse {
     pub status: u16,
 }
 
-/// 执行一次抓取。
-///
-/// Async：调用方在 `tokio::select!` 里 race 这个 future 和 cancel 信号，
-/// 取消时 in-flight HTTP 立刻被 drop（reqwest 关闭底层连接），无超时等待。
+/// 执行一次抓取。取消语义见模块头（in-flight 请求会被立刻 drop，无超时等待）。
 ///
 /// # Examples
 ///
@@ -141,14 +133,12 @@ mod tests {
     use crate::config::AppConfig;
     use crate::http::client::{ClientOptions, build_async_client};
 
-    /// 这条测试只验证 fetch 函数能编译、能用 builder 模式调用；
-    /// 不真发请求。真实联网测试在 search/book 模块下用 `#[ignore]` 标记。
+    /// 只验证构造与 builder 形状，不真发请求（联网测试在 search/book 模块用 `#[ignore]`）。
     #[tokio::test]
     async fn fetch_request_struct_compiles() {
         let cfg = AppConfig::default();
         let _client = build_async_client(&cfg, &ClientOptions::default()).unwrap();
-        // 构造 FetchRequest（不调用 send），确保 builder 字段类型稳定。
-        // 用 `req` 命名 —— `_req` 触 `clippy::no_effect_underscore_binding`。
+        // 用 `req` 命名 —— `_req` 会触 `clippy::no_effect_underscore_binding`。
         let req = FetchRequest {
             url: "https://example.com/",
             method: HttpMethod::Get,
@@ -164,7 +154,7 @@ mod tests {
     fn post_form_compiles() {
         let form: Vec<(String, String)> =
             vec![("k".into(), "v".into()), ("submit".into(), "Search".into())];
-        // 同上：构造即验证 builder 形状；用 `req` 命名避开 no_effect_underscore_binding。
+        // 同上：构造即验证 builder 形状。
         let req = FetchRequest {
             url: "https://example.com/s/",
             method: HttpMethod::Post(&form),
@@ -176,19 +166,15 @@ mod tests {
     }
 }
 
-/// 带 CF 真人验证旁路的 GET 请求。
+/// 带 CF 真人验证旁路的 GET 请求：先发普通请求，命中 Cloudflare 验证页且
+/// `cf_bypass_base` 非空时改走外部 bypass 服务，返回最终 HTML。
 ///
-/// 先发普通请求；若命中 Cloudflare 验证页且 `cf_bypass_base` 非空，
-/// 则通过外部 bypass 服务重试。返回最终 HTML。
-///
-/// `chapter.rs` / `toc.rs` 各有一份几乎相同的实现；这里统一为
-/// `Result<String, CfFallbackError>`，调用方 `.map_err()` 转为自己的错误类型。
+/// 统一错误类型为 `CfFallbackError`，调用方 `.map_err()` 转成自己的错误类型。
 ///
 /// # Examples
 ///
-/// ```ignore
-/// let html = fetch_with_cf_fallback(&client, "https://x.com/", Some(10), None).await?;
-/// ```
+/// 调用点在 `parser::toc` / `parser::chapter`：
+/// `fetch_with_cf_fallback(client, url, rule.timeout, cf_bypass_base)`。
 ///
 /// # Errors
 ///

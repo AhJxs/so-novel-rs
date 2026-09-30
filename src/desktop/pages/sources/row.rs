@@ -1,6 +1,4 @@
-//! 单条书源行渲染（4 列：序号 / name + lang tag / URL / 健康状态 / Switch）。
-//!
-//! 跟 `library.rs::render_row` 同模式：固定宽 + `flex_1` 撑满剩余的列布局。
+//! 单条书源行渲染（5 列：序号 / name + lang tag / URL / 健康状态 / Switch）。
 
 use gpui_kit::component::{
     ActiveTheme as _, Sizable, StyledExt, h_flex, link::Link, switch::Switch, tag::Tag,
@@ -15,7 +13,6 @@ use crate::models::Rule;
 
 use super::SourcesPage;
 
-/// 渲染一条书源行（5 列：序号 / name + lang tag / url / 健康状态 Badge / Switch / Delete）。
 pub(super) fn render(
     index: usize,
     rule: &Rule,
@@ -29,7 +26,6 @@ pub(super) fn render(
     } else {
         SharedString::from(rule.language.to_uppercase())
     };
-    // 是否需要代理
     let need_proxy = rule.need_proxy;
 
     h_flex()
@@ -76,9 +72,8 @@ pub(super) fn render(
                 ),
         )
         .child(
-            // URL 列：可点击 Link，点击 → 浏览器打开对应书源首页。
-            // `Link::new().href(...)` 内置 on_click 调 cx.open_url，跟 detail_dialog.rs 同模式。
-            // Link 不实现 Sizable，按项目惯例把字号挂在**外层 div** 上（text_xs 等价于"small"）。
+            // URL 列：`Link` 点击由内置 on_click 走 `cx.open_url`。
+            // Link 不实现 Sizable，按项目惯例把字号挂在**外层 div** 上。
             div()
                 .w(px(250.))
                 .text_xs()
@@ -121,7 +116,7 @@ pub(super) fn render(
 
 /// `HealthStatus` (domain) → `StatusKind` (UI theme) 映射。
 ///
-/// `crawler::health` 不依赖 `desktop`（layering 解耦），所以这层映射留在 UI 侧。
+/// `crawler::health` 不依赖 `desktop`（layering 解耦），映射留在 UI 侧。
 const fn health_status_kind_from(status: HealthStatus) -> StatusKind {
     use HealthStatus as H;
     match status {

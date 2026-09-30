@@ -1,15 +1,11 @@
 //! 书源规则。对应 Java `model.Rule` 及其内部静态类。
 //!
-//! 字段名沿用规则文件原有的驼峰命名（`bookName`、`lastUpdateTime` 等），
-//! 通过 `#[serde(rename_all = "camelCase")]` 与现有 `bundle/rules/*.json` 兼容。
+//! 字段名沿用规则文件原有的驼峰命名 (`bookName` 等), 靠 `#[serde(rename_all = "camelCase")]` 与
+//! `bundle/rules/*.json` 兼容。Java 端 `Rule.Book` 既当"详情规则"又当"详情数据", Rust 端拆开:
+//! `RuleBook` 仅是规则, `crate::models::book::Book` 是数据。
 //!
-//! 注意 Java 端 `Rule.Book` 既被用作"详情规则"也被用作"详情数据"。Rust 端
-//! 拆分：本文件中的 `RuleBook` 仅是规则；`crate::models::book::Book` 是数据。
-//!
-//! Java/hutool 反序列化布尔时容忍字符串（`"paragraphTagClosed": "true"` 在
-//! `bundle/rules/no-search.json` 中真实存在）。Rust serde 严格，所以本模块
-//! 为所有 bool 字段统一用 `lenient_bool` 的 `deserialize_with，接受` `true/false`
-//! 与 `"true"/"false"/"1"/"0"`。
+//! 所有 bool 字段统一走 [`lenient_bool`]: Java/hutool 容忍字符串 (`no-search.json` 里真实存在
+//! `"paragraphTagClosed": "true"`), 而 serde 严格, 不宽松会直接解析失败。
 
 use serde::{Deserialize, Deserializer, Serialize};
 
@@ -66,8 +62,7 @@ pub struct Rule {
     pub need_proxy: bool,
     #[serde(default, deserialize_with = "lenient_bool")]
     pub disabled: bool,
-    /// rate-limit.json 中 0xs 书源出现，旧 Java 模型未声明但 JSON 中存在。
-    /// 保留字段以避免反序列化丢失信息。
+    /// `rate-limit.json` 中 0xs 书源出现, 旧 Java 模型未声明但 JSON 中存在, 保留以免丢字段。
     #[serde(default, deserialize_with = "lenient_bool")]
     pub ignore_ssl: bool,
 
@@ -79,11 +74,9 @@ pub struct Rule {
 }
 
 impl Rule {
-    /// 此书源能否加入聚合搜索。
-    ///
-    /// 判定与 `app::ops::search::spawn_search` 派发时完全一致：顶 `Rule.disabled` 为
-    /// false 且 `RuleSearch.disabled` 也为 false（`RuleSearch` 不存在视为 false）。
-    /// 搜索页书源下拉和派发共用此谓词，避免下拉里出现但实际不发请求的不一致。
+    /// 此书源能否加入聚合搜索。判定与 `app::ops::search::spawn_search` 派发时完全一致: 顶
+    /// `Rule.disabled` 为 false 且 `RuleSearch.disabled` 也为 false (`RuleSearch` 不存在视为 false)。
+    /// 搜索页书源下拉和派发共用此谓词, 避免"下拉里有但实际不发请求"的不一致。
     pub fn is_search_enabled(&self) -> bool {
         !self.disabled && self.search.as_ref().is_some_and(|s| !s.disabled)
     }
@@ -170,8 +163,7 @@ pub struct RuleToc {
     pub list: String,
     #[serde(default)]
     pub item: String,
-    /// 是否倒序展示。注意 JSON 中字段名是 `isDesc`，
-    /// 经 camelCase 反序列化后映射到本字段。
+    /// 是否倒序展示。JSON 中字段名是 `isDesc`, 经 `#[serde(rename)]` 映射到本字段。
     #[serde(rename = "isDesc", default, deserialize_with = "lenient_bool")]
     pub is_desc: bool,
     #[serde(default)]
@@ -215,14 +207,11 @@ pub struct RuleCrawl {
     pub retry_max_interval: Option<u32>,
 }
 
-// ---------- EffectiveCrawl + Source ----------
-// 原本在 `crate::rules::source`，合并到这里是因为它本质上只是 `Rule` 的
-// "派生视图" —— 跟 Rule 同模型层最自然，跨模块再 import 一层显得啰嗦。
+// ---------- EffectiveCrawl + Source (Rule 的派生视图) ----------
 
 use crate::config::AppConfig;
 
-/// 由 `AppConfig` 与 `Rule.crawl` 派生的有效抓取参数。
-/// 单位与 Java 端一致：interval 毫秒。
+/// 由 `AppConfig` 与 `Rule.crawl` 派生的有效抓取参数; interval 单位毫秒 (与 Java 端一致)。
 #[derive(Debug, Clone)]
 pub struct EffectiveCrawl {
     pub concurrency: Option<i32>,
@@ -248,8 +237,8 @@ impl EffectiveCrawl {
 
         if let Some(c) = rule.crawl.as_ref() {
             if let Some(v) = c.concurrency {
-                // const fn 中不能用 `i32::try_from` (尚非 const trait, issue #143874);
-                // u32 → i64 → i32: i64 截断对 i32 是 `cast_possible_truncation` (globally allowed)。
+                // const fn 里不能用 `i32::try_from` (尚非 const trait), 只能 `u32 → i64 → i32`;
+                // i64 截断成 i32 命中已全局 allow 的 `cast_possible_truncation`。
                 eff.concurrency = Some((v as i64) as i32);
             }
             if let Some(v) = c.min_interval {

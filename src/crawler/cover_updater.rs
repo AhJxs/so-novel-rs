@@ -1,23 +1,11 @@
 //! 3 站 `CoverUpdater` —— 对应 Java `core.CoverUpdater`。
 //!
-//! 起点在详情页抽出的 `coverUrl` 经常是 150×200 的占位小图。Java 端做法：并行
-//! 去 起点 / 纵横 / 七猫 三个"原始书源"按书名搜同名同作者的那条，各自抽出
-//! 候选封面 URL；再并发 GET 字节测 `width*height`，挑最大的那份作为最终 cover。
+//! 起点详情页抽出的 `coverUrl` 常是 150×200 占位小图; 这里并行去 起点 / 纵横 / 七猫 三个"原始书源"按书名+作者
+//! 搜同一条, 各抽候选封面 URL, 再并发 GET 字节测 `width*height`, 挑最大的作为最终 cover。
 //!
-//! 关键差异：
-//! - **起点** 站需要 `Cookie: <user_pasted>` 才能拿到未登录态被截断的搜索结果，
-//!   所以 `qidian_cookie` 是整段粘贴字符串（原样当 `Cookie:` 头，不解析 `w_tsfp`）。
-//!   cookie 为空时该站被跳过（`fetch_cover` 退化成 2 站）。
-//! - **纵横** / **七猫** 是公开搜索 API，**不附 Cookie**。
-//! - 封面字节下载**不附 Cookie**（裸 GET），与 Java 一致。
-//!
-//! 触发：原 Java 在 `BookParser.parse()` 里 `!rule.isNeedProxy()` 时调用。
-//! 我们的对应位置在 `parser::book::parse_book_detail` 末尾：构建 Book 后、
-//! 返回前，条件 `!rule.need_proxy` 时调一次替换 `book.cover_url`。
-//!
-//! 失败策略：**soft-skip**。3 站都没拿到有效候选时，原样返回详情页抽出的
-//! `coverUrl`（若空则用 `DEFAULT_COVER`）。任意一站超时 / 解析失败 / 字节下载
-//! 失败都不会让整本解析失败 —— 与其它 parser 行为一致。
+//! 关键差异: 起点需要 `Cookie: <user_pasted>` 才能拿到未登录态被截断的搜索结果 (整段粘贴, 原样当 `Cookie:` 头; 空则跳过该站),
+//! 纵横 / 七猫 是公开搜索 API **不附 Cookie**, 封面字节下载也**不附 Cookie**。触发点在 `parser::book::parse_book_detail` 末尾
+//! (`!rule.need_proxy` 时); 失败策略 **soft-skip**: 3 站都没拿到有效候选时原样返回详情页的 `coverUrl` (空则 `DEFAULT_COVER`), 不会让整本解析失败。
 
 use std::io::Cursor;
 use std::time::Duration;
@@ -35,14 +23,13 @@ use crate::models::Book;
 /// 起点 CDN 的占位默认封面，规则里没给 coverUrl / `CoverUpdater` 全部失败时用。
 const DEFAULT_COVER: &str = "https://bookcover.yuewen.com/qdbimg/no-cover";
 
-/// 单次抓取超时（Java 端 `TIMEOUT = 3000ms`；我们拉到 5s 给慢站一些缓冲）。
+/// 单次抓取超时；比 Java 端的 3s 放宽到 5s，给慢站一些缓冲。
 const TIMEOUT_SECS: u64 = 5;
 
 /// 入口：3 站 fan-out 找更高清封面，返回最佳 URL。
 ///
-/// `fallback_cover_url` 是详情页抽出的原始 cover URL（可能 None / 空串）；
-/// 3 站都没拿到有效候选时返回 fallback（fallback 自身为空则用 `DEFAULT_COVER`）。
-/// **永远返回非空 String**，让调用方无脑赋值给 `book.cover_url` 即可。
+/// `fallback_cover_url` 是详情页抽出的原始 cover URL；3 站都没拿到有效候选时返回 fallback
+/// （fallback 自身为空则用 `DEFAULT_COVER`）。**永远返回非空 String**，调用方无脑赋值给 `book.cover_url` 即可。
 ///
 /// # Examples
 ///
@@ -72,13 +59,12 @@ pub async fn fetch_cover(
     tracing::debug!(book = %book.book_name, author = %book.author, qidian_enabled = qidian_enabled, "CoverUpdater: 启动 3 站 fan-out");
 
     if book.book_name.trim().is_empty() {
-        // 书名空 → 无匹配依据，3 站都跑也是浪费。Java 端也直接返回。
+        // 书名空 → 无匹配依据，3 站都跑也是浪费。
         tracing::debug!(book = %book.book_name, "CoverUpdater: 书名空，跳过所有源");
         return fallback;
     }
 
-    // 3 站并发搜。cookie 为空时 qidian 退化为 None（不附 Cookie 就拿不到结果，
-    // 不如不跑）。
+    // cookie 为空时 qidian 退化为 None（不附 Cookie 拿不到结果，不如不跑）。
     let cookie_trim = qidian_cookie.trim();
     let (qd, zh, qm) = tokio::join!(
         async {
@@ -179,7 +165,7 @@ async fn fetch_qidian(client: &Client, book: &Book, cookie: &str) -> Option<Stri
             if cover.is_empty() {
                 continue;
             }
-            // Java 端 `URLUtil.normalize` + `replaceAll("/150(\\.webp)?", "")`
+            // Java 端 `URLUtil.normalize` + `replaceAll("/150(\\.webp)?", "")` 的等价物
             let normalized = cover.replace("/150.webp", "").replace("/150", "");
             return Some(normalized);
         }
@@ -187,9 +173,8 @@ async fn fetch_qidian(client: &Client, book: &Book, cookie: &str) -> Option<Stri
     None
 }
 
-/// 纵横：GET 搜 `search.zongheng.com`，form 字段当 query string（Hutool 同款）。
-/// 响应 JSON：`data.datas.list[].{name, authorName, coverUrl}`，
-/// `coverUrl` 是相对路径，要拼 `https://static.zongheng.com/upload` 前缀。
+/// 纵横：GET `search.zongheng.com`，form 字段当 query string（Hutool 同款）。响应
+/// `data.datas.list[].{name, authorName, coverUrl}`，`coverUrl` 是相对路径，要拼 `https://static.zongheng.com/upload` 前缀。
 async fn fetch_zongheng(client: &Client, book: &Book) -> Option<String> {
     let form = [
         ("keyword", book.book_name.as_str()),
@@ -219,9 +204,8 @@ async fn fetch_zongheng(client: &Client, book: &Book) -> Option<String> {
     None
 }
 
-/// 七猫：GET 搜 `qimao.com/qimaoapi/api/search/result`，form 当 query。
-/// 响应 JSON：`data.search_list[].{title, author, image_link}`，`image_link`
-/// 已经是完整 URL。
+/// 七猫：GET `qimao.com/qimaoapi/api/search/result`，form 当 query。
+/// 响应 `data.search_list[].{title, author, image_link}`，`image_link` 已经是完整 URL。
 async fn fetch_qimao(client: &Client, book: &Book) -> Option<String> {
     let form = [
         ("keyword", book.book_name.as_str()),
@@ -276,14 +260,10 @@ fn extract_attr(el: &scraper::ElementRef, sel: &str, attr: &str) -> String {
         .to_string()
 }
 
-/// 简化版同名同作者匹配。
+/// 简化版同名同作者匹配（都先 `strip_tags` 防 HTML 标签污染）。
 ///
-/// Java 端用 `HanLP.convertToSimplifiedChinese` 把候选和源都转成简体再比
-/// —— 防止起点搜出来繁体、详情页抓到简体的漏匹配。我们没接 `HanLP`：
-/// 99% 情况源站搜索结果和详情页来源一致，不会出现简繁差异，先按 `==` 直比；
-/// 出现再扩（zhconv crate 已有，复用 `util::zhconv::convert_text` 即可）。
-///
-/// 还做了一道 `strip_tags` 防 HTML 标签污染（"名字" 里偶有 `<em>高亮</em>`）。
+/// Java 端先用 `HanLP` 转简体再比；我们按 `==` 直比 —— 99% 情况源站搜索结果与详情页来源一致，
+/// 出现简繁漏匹配再扩（`util::zhconv::convert_text` 已有）。
 fn match_book(book: &Book, name: &str, author: &str) -> bool {
     let src_name = book.book_name.trim();
     let src_author = book.author.trim();
@@ -295,8 +275,7 @@ fn match_book(book: &Book, name: &str, author: &str) -> bool {
     src_name == clean_name && src_author == clean_author
 }
 
-/// 简易 HTML 标签剥离：去掉 `<...>` 包夹区段；不做实体解码（书名作者里基本
-/// 没有 `&xxx;`，加了反而让测试难写）。
+/// 简易 HTML 标签剥离：去掉 `<...>` 包夹区段；不做实体解码（书名作者里基本没有 `&xxx;`）。
 fn strip_tags(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut in_tag = false;
@@ -311,9 +290,8 @@ fn strip_tags(s: &str) -> String {
     out.trim().to_string()
 }
 
-/// 裸 GET 下载封面字节（**不附 Cookie** —— 起点封面 CDN 用 token 鉴权，不在
-/// Cookie 头里），用 `image::ImageReader` 解码后算 `width * height`。
-/// 任一步失败返回 None。
+/// 裸 GET 下载封面字节（**不附 Cookie** —— 起点封面 CDN 用 token 鉴权，不在 Cookie 头里），
+/// `image::ImageReader` 解码后算 `width * height`；任一步失败返回 None。
 async fn measure_resolution(client: &Client, url: &str) -> Option<u64> {
     let resp = client
         .get(url)
@@ -346,8 +324,6 @@ mod tests {
         }
     }
 
-    // ---------- normalize_fallback ----------
-
     #[test]
     fn normalize_fallback_uses_default_when_none() {
         assert_eq!(normalize_fallback(None), DEFAULT_COVER);
@@ -367,8 +343,6 @@ mod tests {
         );
     }
 
-    // ---------- is_valid_cover ----------
-
     #[test]
     fn is_valid_cover_rejects_garbage() {
         assert!(!is_valid_cover(""));
@@ -381,8 +355,6 @@ mod tests {
         assert!(is_valid_cover("https://example.com/c.jpg"));
         assert!(is_valid_cover("http://x.com/c.png"));
     }
-
-    // ---------- match_book / strip_tags ----------
 
     #[test]
     fn match_book_exact_match() {
@@ -422,9 +394,6 @@ mod tests {
         assert_eq!(strip_tags("<a href='x'>link</a>"), "link");
     }
 
-    // ---------- fetch_cover 入口 ----------
-
-    /// `book_name` 空 → 直接返回 fallback（不联网）。
     #[tokio::test]
     async fn fetch_cover_returns_fallback_when_bookname_empty() {
         let cfg = AppConfig::default();
@@ -434,7 +403,6 @@ mod tests {
         assert_eq!(got, "https://orig.com/c.jpg");
     }
 
-    /// `book_name` 空 + fallback None → `DEFAULT_COVER`。
     #[tokio::test]
     async fn fetch_cover_empty_bookname_falls_back_to_default() {
         let cfg = AppConfig::default();
@@ -444,8 +412,7 @@ mod tests {
         assert_eq!(got, DEFAULT_COVER);
     }
 
-    /// cookie 为空 + 正常 `book_name：3` 站中 qidian 退化为 None（不跑），
-    /// 纵横/七猫 联网失败 → 走 fallback。live 网络测试用 `#[ignore]` 标记。
+    /// cookie 空 + 正常书名：qidian 不跑，纵横/七猫 联网失败 → 走 fallback（live 网络测试，`#[ignore]`）。
     #[tokio::test]
     #[ignore = "live network: depends on zongheng / qimao availability"]
     async fn fetch_cover_returns_fallback_when_all_sites_fail() {

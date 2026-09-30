@@ -1,8 +1,7 @@
-//! `search` 子命令：单源或聚合搜索，统一以人类可读 / JSON 两种格式输出。
+//! `search` 子命令: 单源或聚合搜索, 输出人类可读或 JSON。
 //!
-//! 进度：走 `search_streaming` + `tokio::spawn` 独立 task（生产者），主线程同步
-//! 排空 mpsc 排空 outcomes（消费者）。两者并发，否则流式 = 批量。
-//! 详见 [[streaming-search-lesson]]。
+//! 流式进度: `search_streaming` 跑在 `tokio::spawn` 的独立 task (生产者), 主线程排空
+//! mpsc (消费者) —— 两者必须并发, 否则流式退化成批量 ([[streaming-search-lesson]])。
 
 use std::io::{IsTerminal, Write, stderr};
 
@@ -57,7 +56,6 @@ pub fn run_search(
         }
     });
 
-    // 是否走原地刷新：TTY + 非 quiet。管道 / 重定向 / 静默模式退回逐行。
     let in_place = !quiet && stderr().is_terminal();
     let mut outcomes: Vec<SourceSearchOutcome> = Vec::with_capacity(total_sources);
     while let Some(outcome) = rt.block_on(async { rx.recv().await }) {
@@ -79,8 +77,6 @@ pub fn run_search(
     rt.block_on(producer)
         .context("streaming search task join 失败")?;
     // in-place 进度行不留痕迹：清掉当前行（不写 \n），
-    // 让结果列表紧跟在前一行输出之后，无空行 / 残留搜索提示。
-    // 非 in-place 模式本就没在 stderr 上留进度，无需清理。
     if in_place {
         eprint!("\r\x1b[K");
         let _ = stderr().flush();
@@ -88,7 +84,6 @@ pub fn run_search(
     // 与 `search_aggregated` 行为对齐：按 source_id 升序，输出顺序稳定。
     outcomes.sort_by_key(|o| o.source_id);
 
-    // 拍平成单一列表 + 收集失败源（保留每条的 source_id/source_name）。
     let mut flat: Vec<SearchResult> = Vec::new();
     let mut failed: Vec<(i32, String, String)> = Vec::new();
     for o in outcomes {
@@ -111,7 +106,6 @@ pub fn run_search(
         return Ok(());
     }
 
-    // 人类可读：单一列表 + 全局序号。
     for (i, r) in flat.iter().enumerate() {
         println!(
             "{}. {}  作者:{}  最新:{}  [{}#{}]  {}",
@@ -135,13 +129,11 @@ pub fn run_search(
             .join(", ");
         println!("  失败源: {summary}");
     }
-    // 失败源详情走 stderr，不污染 stdout 纯结果区。
     print_failed_sources(&failed, quiet);
 
     // Windows console 坑：in-place 进度用 `\r\x1b[K` 改写光标位置后，
     // 程序退出时 cmd/PowerShell 不会自动重绘 prompt（要按一次 Enter）。
     // 在末尾补一个 \n，把光标推到下一行，让 shell prompt 立刻回来。
-    // 非 in-place 模式光标本来就干净，跳过。
     if in_place {
         eprintln!();
     }

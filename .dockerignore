@@ -1,10 +1,7 @@
-# Docker 构建上下文忽略 —— COPY . . 不会把这些发给 daemon
-# 大幅缩短构建上下文上传 + 避免 cache 失效
+# Docker 构建上下文忽略：缩短上传量 + 避免 cache 失效
 
-# 编译产物（本地 cargo build 出来的）
 target/
 
-# 编译缓存
 **/*.rs.bk
 
 # VCS / IDE
@@ -22,21 +19,18 @@ screenshots/
 *.log
 *.tmp
 
-# OS 杂项
 .DS_Store
 Thumbs.db
 
 # CI 配置（不参与运行时）
 .github/
 
-# 本地 docs build 输出（如果有）
 docs/_build/
 
 # Rust 工具链版本锁（避免 cargo 误读）
 rust-toolchain.toml
 rust-toolchain
 
-# 文档 / changelog（这些不进二进制）
 docs/
 *.md
 LICENSE*
@@ -44,6 +38,5 @@ DISCLAIMER*
 README*
 CLAUDE.md
 
-# 自己的 docker artifacts（防递归）
 Dockerfile
 .dockerignore

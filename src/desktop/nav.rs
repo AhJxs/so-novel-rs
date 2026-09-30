@@ -1,15 +1,10 @@
 //! 5 个一级导航页面 (`NavPage`) + 全局 key bindings + GPUI actions 注册。
 //!
-//! 主流程 [`RootView`] 在 [`super::root`], 这里只负责:
 //! - `NavPage` enum + label/icon/next/prev helpers;
-//! - `actions!` 宏声明 8 个 GPUI actions;
-//! - [`register_key_bindings`] 在 `desktop::run` 启动时调一次。
+//! - [`register_key_bindings`] 在 `desktop::run` 启动时调一次 (actions 声明在 `desktop` 顶层)。
 //!
-//! ## Key bindings 选择
-//!
-//! 翻页不用 `Ctrl+Tab`: `gpui_kit::component` 的 `InputState` 把 `tab` / `shift-tab` 绑到自己的
-//! `IndentInline` / `OutdentInline` 动作 (多行输入 tab 插入), 焦点在 Input 时 Tab 事件
-//! 被 Input 消费 (某些平台连 `ctrl-tab` 也被 keydown handler stop 冒泡), 应用级翻页
+//! 翻页不用 `Ctrl+Tab`: `gpui_kit::component` 的 `InputState` 把 `tab` / `shift-tab` 绑到
+//! 自己的 `IndentInline` / `OutdentInline`, 焦点在 Input 时 Tab 事件被消费, 应用级翻页
 //! action 拿不到。改用 `F6` 避开。
 
 use gpui_kit::component::IconName;
@@ -17,8 +12,8 @@ use gpui_kit::{App, KeyBinding, SharedString};
 
 use crate::i18n::ts;
 
-// `actions!` 宏在 [`crate::desktop`] 顶层 (mod.rs) 调用, 生成的 8 个 action 类型
-// 位于 `desktop::*`。这里只 re-export 给 root.rs 用。
+// `actions!` 宏在 `crate::desktop` (mod.rs) 调用, 生成的 action 类型位于 `desktop::*`,
+// 这里只 re-export 给 root.rs 用。
 pub(super) use crate::desktop::{
     NextPage, PrevPage, ShowLibrary, ShowSearch, ShowSettings, ShowSources, ShowTasks,
     ToggleSidebar,
@@ -66,7 +61,6 @@ impl NavPage {
         }
     }
 
-    /// 5 个 page 循环顺序: Search → Tasks → Library → Sources → Settings → Search。
     pub(super) const ALL: [Self; 5] = [
         Self::Search,
         Self::Tasks,

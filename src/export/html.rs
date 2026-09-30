@@ -1,15 +1,9 @@
 //! HTML 导出。对应 Java `handle.HtmlTocHandler`。
 //!
-//! 行为：
-//! - `chapters_dir` 下每章一个 `NNN_.html` 文件（已由 `write_chapter_files` 写好）；
-//! - 生成 `0_目录.txt`，列出 `文件名\t\t章节名`；
-//! - 把整个 `chapters_dir` 打包成 zip 放到 `out_dir` 下，文件名 `<书名>(<作者>).zip`。
+//! `chapters_dir` 下每章一个 `NNN_.html` (已由 `write_chapter_files` 写好); 先生成
+//! `0_目录.txt` (列出 `文件名\t\t章节名`), 再把整个目录打包成 `<书名>(<作者>).zip` 放入 `out_dir`。
 //!
-//! 与 Java 端差异：
-//! - Java 还会下载封面（HTTP）；为了让阶段 3b 不引入网络依赖（封面下载属
-//!   阶段 3c 调度层处理或 EPUB 专属），HTML 导出**不**下载封面。
-//!   `EpubExporter` 单独处理封面。
-//! - Java 用 hutool `ZipUtil.zip` 一行打包；Rust 用 `zip` crate 4.x 走标准 deflate。
+//! HTML 导出**不**下载封面 —— 网络属调度层, 封面归 `EpubExporter`。
 
 use std::fs::File;
 use std::io::{Read, Write};
@@ -42,7 +36,7 @@ impl Exporter for HtmlExporter {
             return Err(ExportError::EmptyChaptersDir(chapters_dir.to_path_buf()));
         }
 
-        // 1. 写目录索引：文件名 \t\t\t\t 章节名
+        // 目录索引: 文件名 + 章节名 (TAB 分隔)
         let toc_path = chapters_dir.join("0_目录.txt");
         let mut toc_lines = vec!["文件名\t\t\t\t章节名".to_string()];
         for f in &files {
@@ -52,12 +46,10 @@ impl Exporter for HtmlExporter {
             let name = f.file_name().and_then(|n| n.to_str()).unwrap_or_default();
             let html = std::fs::read_to_string(f)?;
             let title = extract_title(&html).unwrap_or_else(|| name.to_string());
-            // index_.html → 输出文件名是 `<index>_.html`
             toc_lines.push(format!("{name}\t\t{title}"));
         }
         std::fs::write(&toc_path, toc_lines.join("\n"))?;
 
-        // 2. 打包 zip
         std::fs::create_dir_all(out_dir)?;
         let zip_name = sanitize_filename(&format!("{}({}).zip", book.book_name, book.author));
         let zip_path = unique_path(out_dir, &zip_name);
@@ -75,8 +67,7 @@ fn is_chapter_html(p: &Path) -> bool {
 
 /// 从单章 HTML 里提取 `<title>...</title>` 文本。
 fn extract_title(html: &str) -> Option<String> {
-    /// 编译期确定的正则：用 match 走 panic 路径以避免 `clippy::expect_used`。
-    /// panic IS the design：源码字面量写错就是程序员错误。
+    /// 编译期确定的正则: 用 match 走 panic 路径避免 `clippy::expect_used` (panic 即设计)。
     #[allow(
         clippy::panic,
         reason = "static regex literal must compile; failure = programmer error"
@@ -183,7 +174,6 @@ mod tests {
                 .contains("起航")
         );
 
-        // 打开 zip 验证内容
         let f = File::open(&zip_path).unwrap();
         let mut zr = zip::ZipArchive::new(f).unwrap();
         let names: Vec<String> = (0..zr.len())
@@ -193,7 +183,6 @@ mod tests {
         assert!(names.iter().any(|n| n == "002_.html"));
         assert!(names.iter().any(|n| n == "0_目录.txt"));
 
-        // 目录文件含两章标题
         let mut toc_buf = String::new();
         zr.by_name("0_目录.txt")
             .unwrap()

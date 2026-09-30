@@ -1,21 +1,11 @@
 //! 章节正文段落整形。对应 Java `core.ChapterFormatter`。
+//! 顺序: 先 `clear_all_attributes`, 再按 `paragraphTagClosed` 二选一整形。
 //!
-//! 调用顺序（与 Java 端一致）：先 `clear_all_attributes`，再做段落整形。
-//!
-//! 两种整形模式（由规则的 `paragraphTagClosed` 决定）：
-//!
-//! 1. **闭合标签** (`true`)：源站每段已经被某个 tag 包住（常见是 `<p>`，但也有
-//!    `<span>` / `<div>` 等）。把所有非 `<p>` 的成对闭合 tag 改写为 `<p>`。
-//!    Java 用 `<(?!p\\b)([^>]+)>(.*?)</\\1>` 含负前瞻 + backreference，
-//!    Rust regex 都不支持。**改写策略**：因为前一步已经清空属性，输入形如
-//!    `<tag>x</tag>` 非常稳定，用
-//!    `<([A-Za-z][A-Za-z0-9]*)>([\s\S]*?)</[A-Za-z][A-Za-z0-9]*>` + 闭包里跳过
-//!    `p` 即可（不强制开闭对应；与 Java 实际行为等价：匹配最近的 `</tag2>`
-//!    而非 `</tag1>` 时，最终都被规整为 `<p>`，差异只在嵌套结构上，而源站
-//!    正文几乎没有正文级嵌套）。
-//!
-//! 2. **非闭合标签** (`false`)：源站每段以 `<br>+` 等分隔符隔开。按规则中的
-//!    `paragraphTag`（已经是个正则，例如 `<br>+`）切分，逐段包 `<p>`。
+//! 1. **闭合标签** (`true`)：把成对闭合 tag 全改写为 `<p>`。Java 的正则带负前瞻 +
+//!    backreference，Rust regex 都不支持；改用的 `<tag>...</tag>` 正则不强制开闭
+//!    名字对应，闭包里跳过 `p`。因上一步已清空属性, 输入形如 `<tag>x</tag>` 很稳定,
+//!    差异只在嵌套结构上, 而源站正文几乎没有正文级嵌套。
+//! 2. **非闭合标签** (`false`)：按规则的 `paragraphTag` 正则（如 `<br>+`）切分，逐段包 `<p>`。
 
 use regex::Regex;
 use std::sync::LazyLock;
@@ -25,7 +15,6 @@ use crate::parser::dom::clear_all_attributes;
 
 /// 编译期确定的正则：用 match + panic 避免 `clippy::expect_used`，与项目里
 /// 其它 `LazyLock` 静态正则统一风格。
-/// panic IS the design：源码字面量写错就是程序员错误。
 #[allow(
     clippy::panic,
     reason = "static regex literal must compile; failure = programmer error"
@@ -66,9 +55,7 @@ fn format_closed(html: &str) -> String {
         .into_owned()
 }
 
-/// 处理非闭合模式：按 `paragraph_tag` 正则切分，逐段包 `<p>`。
-///
-/// 与 Java `String.split(paragraphTag)` 行为对齐。空段落跳过。
+/// 处理非闭合模式：按 `paragraph_tag` 正则切分，逐段包 `<p>`。空段落跳过。
 fn format_open(html: &str, paragraph_tag: &str) -> String {
     if paragraph_tag.is_empty() {
         // 没有切分符，整段当一段
@@ -132,7 +119,6 @@ mod tests {
 
     #[test]
     fn closed_rewrites_span_to_p() {
-        // 源站可能用 <span>段</span> 当段落
         let r = closed_rule();
         let out = format_chapter("<span>段一</span><span>段二</span>", &r);
         assert_eq!(out, "<p>段一</p><p>段二</p>");
@@ -157,7 +143,6 @@ mod tests {
 
     #[test]
     fn open_splits_by_br_plus() {
-        // main.json 中最常见：paragraphTag = "<br>+"
         let r = open_rule("<br>+");
         let out = format_chapter("段一<br><br>段二<br>段三", &r);
         assert_eq!(out, "<p>段一</p><p>段二</p><p>段三</p>");
@@ -172,10 +157,8 @@ mod tests {
 
     #[test]
     fn open_with_invalid_regex_degrades_safely() {
-        // 不合法切分符 → 不切分 + warn；不丢正文
         let r = open_rule("[invalid");
         let out = format_chapter("段一<br>段二", &r);
-        // 全部当一段包起来
         assert!(out.contains("段一"));
         assert!(out.contains("段二"));
     }

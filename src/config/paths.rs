@@ -2,13 +2,12 @@
 
 use std::path::PathBuf;
 
-/// 程序启动时关心的几条路径。
 #[derive(Debug, Clone)]
 pub struct ConfigPaths {
     /// `config.toml` 路径。
     pub config_file: PathBuf,
-    /// 主题目录 `~/.sonovel/themes/`：首次启动写入 21 个 embed 主题，
-    /// 之后 watcher 监听这个目录，用户可手动放自定义 *.json 进去热加载。
+    /// 主题目录 `~/.sonovel/themes/`：首次启动写入 21 个 embed 主题，之后 watcher 监听
+    /// 该目录并热加载用户手动放入的自定义 *.json。
     pub themes_dir: PathBuf,
     /// 书源规则目录 `~/.sonovel/rules/`：存放书源 JSON 文件。
     pub rules_dir: PathBuf,
@@ -19,10 +18,8 @@ pub struct ConfigPaths {
 }
 
 impl ConfigPaths {
-    /// 路径约定：
-    /// - 所有文件统一存放在用户主目录下的 `~/.sonovel/`；
-    /// - 首次启动时各目录/文件不存在，会自动创建；
-    /// - 如果无法获取主目录（极端情况），回落到当前工作目录。
+    /// 路径约定：所有文件统一在 `~/.sonovel/` 下，首次启动自动创建；
+    /// 取不到主目录（极端情况）时回落到当前工作目录。
     pub fn discover() -> Self {
         let base = home_dir().join(".sonovel");
         Self {

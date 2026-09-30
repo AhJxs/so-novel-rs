@@ -9,18 +9,11 @@ use crate::models::EffectiveCrawl;
 
 /// 解析 hutool 风格的"宽松 JSON"字符串到键值对列表。
 ///
-/// 规则文件里 `Search.data` 长这样：
-/// ```text
-/// {searchkey: %s, searchtype: all}
-/// ```
-/// 注意：键和字符串值都没引号，是 hutool `JSONUtil.parseObj` 接受但
-/// `serde_json::from_str` 不接受的形式。这里用一个简单的正则做提取。
+/// 规则文件里 `Search.data` 形如 `{searchkey: %s, searchtype: all}`：键和字符串值
+/// 都没引号，`serde_json` 不接受、hutool `JSONUtil.parseObj` 接受，故用正则提取。
+/// 按出现顺序把每个值里的 `%s` 替换成 `args` 中下一个元素（与 Java `#buildData` 一致）。
 ///
-/// 调用时按出现顺序把每个值里的 `%s` 替换成 `args` 中下一个元素。
-/// 与 Java 端 `CrawlUtils#buildData` 行为一致。
-/// 编译期确定的正则：用 match 走 panic 路径以避免 `clippy::expect_used`，
-/// 与项目里其它 `LazyLock` 静态正则统一风格。
-/// panic IS the design：源码字面量写错就是程序员错误。
+/// 静态正则字面量写错即程序员错误，故直接 panic（避开 `clippy::expect_used`）。
 #[allow(
     clippy::panic,
     reason = "static regex literal must compile; failure = programmer error"
@@ -34,16 +27,15 @@ fn compile_static_re(pattern: &'static str) -> Regex {
 
 pub fn build_form_data(template: &str, args: &[&str]) -> Vec<(String, String)> {
     static KV: LazyLock<Regex> = LazyLock::new(|| {
-        // 形如 `key: value`，value 直到下一个 `,` 或 `}`。
-        // 容忍 key/value 两侧可选的引号，以及 value 内部的空白。
+        // 形如 `key: value`，value 直到下一个 `,` 或 `}`；容忍两侧可选引号。
         compile_static_re(r#"([\w\-]+)\s*:\s*("([^"]*)"|'([^']*)'|([^,}]*))"#)
     });
 
     let mut arg_iter = args.iter();
     let mut out = Vec::new();
     for cap in KV.captures_iter(template) {
-        // regex 第 1 组是 `[\w\-]+` 字面量, 命中即非空; 不命中 (NIL) 时视为空 key
-        // （保留 entry 顺序, 让 parser 仍然按出现次数消费 %s）。
+        // 第 1 组是 `[\w\-]+` 字面量，命中即非空；不命中时视为空 key 但**保留 entry 顺序**，
+        // 让 parser 仍按出现次数消费 %s。
         let key = cap.get(1).map_or("", |m| m.as_str()).trim().to_string();
         let raw = cap
             .get(3)
@@ -63,19 +55,16 @@ pub fn build_form_data(template: &str, args: &[&str]) -> Vec<(String, String)> {
     out
 }
 
-/// 把 GET 搜索 url 里的 `%s` 占位符替换成关键字。
-///
-/// 不直接用 `String::replace`，因为关键字可能含 `%`、`#` 等需要 URL 编码的字符。
-/// 规则模板里 `%s` 习惯写在 query string 里，这里对值做最小限度的 url-encode。
+/// 把 GET 搜索 url 里的 `%s` 占位符替换成关键字，并对关键字做最小限度的 url-encode
+/// （关键字可能含 `%`、`#` 等字符，不能直接 `String::replace`）。
 pub fn format_url_query(url_template: &str, keyword: &str) -> String {
     let encoded = url_encode_query_value(keyword);
     url_template.replacen("%s", &encoded, 1)
 }
 
 fn url_encode_query_value(s: &str) -> String {
-    // 与 Java URLUtil.encode 兼容的子集：保留 `A-Za-z0-9-_.~`，其余按 UTF-8 字节
-    // 转 `%XX`。空格转 `+` 与 `%20` 都被多数书源接受，这里选 `%20`，因为
-    // 规则里 GET 模板大多用空格直写。
+    // 与 Java URLUtil.encode 兼容的子集：保留 `A-Za-z0-9-_.~`，其余按 UTF-8 字节转
+    // `%XX`。空格用 `%20`（规则里 GET 模板大多用空格直写，`+` 与 `%20` 书源都接受）。
     const HEX: &[u8] = b"0123456789ABCDEF";
     let mut out = String::with_capacity(s.len());
     for b in s.as_bytes() {
@@ -114,23 +103,19 @@ pub fn random_interval_from_cfg(cfg: &AppConfig) -> u64 {
     rand::rng().random_range(lo..hi)
 }
 
-/// 清理不可见字符：控制字符、格式控制符、PUA、零宽字符等
-/// （这些往往是页面反爬手段，留在文本里会导致中文显示错乱）。
-///
-/// 对应 Java `util.CrawlUtils.cleanInvisibleChars`。Rust 端不能直接套
-/// `[\\p{C}...]` 正则（regex crate 默认禁用 Unicode 大类），改为白名单字符。
+/// 清理不可见字符：控制字符、零宽字符、BOM、行/段分隔等（页面反爬常用手段，
+/// 留在文本里会导致中文显示错乱）。对应 Java `util.CrawlUtils.cleanInvisibleChars`；
+/// Rust 端不能套 `[\\p{C}...]` 正则（regex crate 默认禁用 Unicode 大类），故用白名单。
 pub fn clean_invisible_chars(s: &str) -> String {
     s.chars()
         .filter(|c| {
-            // 保留：换行符、制表符、回车（这些是正常排版的一部分）
+            // 保留换行 / 制表 / 回车（正常排版）；其余控制字符与零宽字符、BOM 一并移除。
             if *c == '\n' || *c == '\r' || *c == '\t' {
                 return true;
             }
-            // 移除：所有控制字符（包含 C0 与 C1 控制区）
             if c.is_control() {
                 return false;
             }
-            // 显式黑名单：零宽空格、字节序标记、行/段分隔
             !matches!(
                 *c,
                 '\u{200B}' | '\u{200C}' | '\u{200D}' | '\u{2028}' | '\u{2029}' | '\u{FEFF}'

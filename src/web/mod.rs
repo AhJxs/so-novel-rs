@@ -27,7 +27,6 @@ use crate::db::SourcesConfig;
 use crate::http::HttpClients;
 use crate::models::Rule;
 
-// ── rust-embed：编译期把 web-ui/dist/ 嵌入二进制 ──────────────────────
 #[cfg(feature = "web")]
 use axum::{
     body::Body,
@@ -38,8 +37,7 @@ use axum::{
 #[cfg(feature = "web")]
 use rust_embed::RustEmbed;
 
-/// 编译期嵌入 `web-ui/apps/web/dist/` 下所有静态文件（monorepo 后产物路径）。
-/// `include-exclude` feature 会按 .gitignore 跳过 `node_modules/src`/ 等。
+/// 编译期嵌入 `web-ui/apps/web/dist/` 下所有静态文件。
 #[cfg(feature = "web")]
 #[derive(RustEmbed)]
 #[folder = "web-ui/apps/web/dist/"]
@@ -66,12 +64,11 @@ pub async fn spa_handler(req: Request<Body>) -> Response {
     }
 }
 
-/// `WebState::new` / `web::run` 的额外初始化参数，避免参数过多。
+/// `WebState::new` / `web::run` 的额外初始化参数（避免参数过多）。
 pub struct WebInitParams {
     pub sources_config: SourcesConfig,
     pub sources_config_path: PathBuf,
-    /// 启动时从 `tasks.json` 反序列化的任务列表（包括已完成 + 上次未结束的）；
-    /// 由调用方 (`load_tasks`) 读文件后传入。空 vec 表示无历史。
+    /// 启动时由调用方从 `tasks.json` 反序列化后传入；空 vec 表示无历史。
     pub tasks: Vec<DownloadTask>,
     pub tasks_file: PathBuf,
     pub next_task_id: u64,
@@ -79,28 +76,15 @@ pub struct WebInitParams {
 
 /// Web 服务共享状态。
 ///
-/// ## 任务存储是单源的 `Vec<DownloadTask>`
-///
-/// 旧实现是双 store：`HashMap<u64, ActiveDownload>`（活跃内存态）+ `Vec<DownloadTaskRecord>`
-/// （持久化历史）+ 一个跨线程的 bridge task 把两者同步 + merge 时还要兜底
-/// "active 拿 None/0 别把历史里正确的元数据盖掉" —— 这类问题反复出现，本质就是
-/// 双 store 各自维护同一份数据但时序窗口不一致。
-///
-/// 现在 web 跟 GPUI 一样只持一个 `Vec<DownloadTask>`：
-/// - 持久化字段全在 record-like fields 上（id / origin / `started_at_unix` / ...）
-/// - 运行期字段 `rx` / `cancel` / `cancelling` 也只是这个 struct 的一部分
-/// - 每个下载一个 per-task drain tokio task 排空 mpsc rx（详见
-///   `crate::web::handlers::download::spawn_task_drain`），负责把事件
-///   应用到 `state.tasks`（单源真相），前端轮询 `GET /api/tasks` 读进度。
-///
-/// `tasks_file` 只是磁盘路径，由调用方 inline 走 `crate::db::save_with_trim` 写盘。
+/// 任务存储是**单源** `Vec<DownloadTask>`（跟 GPUI 同型）：早先的
+/// 「活跃 map + 历史 vec + bridge task」双 store 会因时序窗口不一致而互相覆盖，
+/// 才改成持久化字段与运行期字段（`rx` / `cancel` / `cancelling`）同在一个 struct。
 pub struct WebState {
     pub config: RwLock<AppConfig>,
     pub http: Arc<HttpClients>,
     pub rules: RwLock<Vec<Rule>>,
     pub download_path: PathBuf,
     /// **单源真相**：每个任务（活跃 + 已结束）的所有状态都在这里。
-    /// 跟 `crate::desktop::model::AppModel::tasks` 同型 —— web 和 GUI 用的是同一个类型。
     pub tasks: Mutex<Vec<DownloadTask>>,
     pub next_task_id: Mutex<u64>,
     /// 内存态搜索任务注册表（搜索是瞬态，不落盘）。
@@ -109,7 +93,7 @@ pub struct WebState {
     pub next_search_id: Mutex<u64>,
     /// 访问码（仅存内存，启动时为空，用户通过 Web UI 设置）。
     pub access_code: Mutex<String>,
-    /// 书源配置（禁用列表等），toggle 时需要同步更新并持久化。
+    /// 书源配置（禁用列表等）；toggle 时必须同步更新并持久化。
     pub sources_config: RwLock<SourcesConfig>,
     /// `sources_config.json` 磁盘路径。
     pub sources_config_path: PathBuf,
@@ -117,10 +101,9 @@ pub struct WebState {
     pub tasks_file: PathBuf,
 }
 
-/// 任务状态（API 返回用，跟 DownloadTaskRecord.finished 1:1 映射）。
+/// 任务状态（API 返回用，与 `DownloadTask::finished` 1:1 映射）。
 ///
-/// 仅在序列化层暴露给前端用 —— 后端内部统一用 `DownloadTask::finished`
-/// (`Option<Result<PathBuf, FinishedReason>>`)，避免字符串语义。
+/// 只在序列化层给前端用 —— 后端内部统一用 `DownloadTask::finished`，避免字符串语义。
 #[derive(Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum TaskStatus {
     Downloading,

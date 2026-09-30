@@ -1,13 +1,9 @@
-//! `config.toml` 读写：核心 `load_config` / `save_config` + 各种 TOML helper。
+//! `config.toml` 读写：`load_config` / `save_config` + 各种 TOML helper。
 //!
-//! 设计目标：
-//! - 配置文件就在项目根目录（`./config.toml`）— 与 Java 时代的 bundle/config.ini 不同；
-//! - 用 `toml_edit` 保留注释 + 字段顺序，UI 设置页改完写回不会洗掉用户注释；
-//! - 字段语义沿用旧版（`extname` / `min-interval` 等保留 kebab-case）；
-//! - 旧 INI 默认 `1` / `0` 表示布尔，TOML 用真正的 bool；
-//! - 旧版 `-1` 占位"未指定"的整数，TOML 一律用键缺失（`Option`）。
-//!
-//! `source-id` / `search-limit` / `concurrency` 在 TOML 里如果不写就视为未指定。
+//! 用 `toml_edit` 而非 serde：保留注释 + 字段顺序，UI 设置页写回不会洗掉用户注释。
+//! 键名保持 kebab-case（`extname` / `min-interval`，与既有配置文件兼容）；"未指定"的
+//! 整数字段一律用**键缺失**（`Option`）表示，不写哨兵值 —— `source-id` / `search-limit` /
+//! `concurrency` 不写即视为未指定。
 
 use std::path::Path;
 
@@ -16,8 +12,6 @@ use toml_edit::{DocumentMut, Item, Table, value};
 
 use super::defaults::default_template_doc;
 use super::types::{AppConfig, ExportFormat, Language, ThemeDynMode, ThemeKind, ThemePref};
-
-// ---------- TOML helper ----------
 
 /// 从 TOML 文档中取 `table.key` 对应的 `Item`。
 fn t_item<'a>(doc: &'a DocumentMut, table: &str, key: &str) -> Option<&'a Item> {
@@ -50,8 +44,8 @@ fn t_float(doc: &DocumentMut, table: &str, key: &str) -> Option<f32> {
     let v = t_item(doc, table, key)?;
     v.as_float()
         .map(|f| f as f32)
-        // i 已经 clamp 到 i32 范围（外层 `i32::try_from`），i32→f32 只丢 9 位精度；
-        // 配置值（端口 / 超时秒数）< 2^23 = 8388608 时无损。
+        // i 已由外层 `i32::try_from` clamp 到 i32 范围，i32→f32 只丢 9 位精度；
+        // 配置值（端口 / 超时秒数）< 2^23 时无损。
         .or_else(|| {
             v.as_integer()
                 .and_then(|i| i32::try_from(i).ok())
@@ -71,22 +65,15 @@ fn sat_u16(v: i64) -> u16 {
     v.clamp(0, u16::MAX as i64) as u16
 }
 
-// ---------- load_config ----------
-
 /// 加载配置。文件不存在时返回 `Default::default()`。
 ///
 /// # Examples
 ///
-/// ```ignore
-/// let cfg = load_config(&PathBuf::from("config.toml"))?;
-/// println!("search_limit: {:?}", cfg.source.search_limit);
-/// ```
+/// 启动路径见 `core::bootstrap`：`load_config(&paths.config_file)`。
 ///
 /// # Errors
 ///
-/// - `std::io::Error` — 文件存在但读取失败
-/// - `toml_edit` parse 错误 — config.toml 语法错
-/// - 任意字段类型转换失败 — 通过 `Context` 包装
+/// 文件读取失败 / `toml_edit` 语法错 / 字段类型转换失败，均由 `Context` 包装返回。
 #[tracing::instrument(name = "config::load", skip_all, fields(path = %path.display()))]
 pub fn load_config(path: &Path) -> Result<AppConfig> {
     if !path.exists() {
@@ -101,10 +88,7 @@ pub fn load_config(path: &Path) -> Result<AppConfig> {
 
     let mut cfg = AppConfig::default();
 
-    // [global] —— 主题偏好。
-    //
-    // 新键：theme-kind / theme-name / theme-dyn-mode / theme-light / theme-dark。
-    // 旧键 `[global].theme = "X"`（单一主题名）的兼容迁移在本函数末尾 inline 做。
+    // [global]：旧键 `[global].theme = "X"`（单一主题名）的兼容迁移在本函数末尾做。
     let theme_kind = t_str(&doc, "global", "theme-kind");
     if let Some(v) = &theme_kind {
         cfg.global.theme_pref.kind = ThemeKind::parse(v);
@@ -139,7 +123,6 @@ pub fn load_config(path: &Path) -> Result<AppConfig> {
         cfg.global.font_size = v;
     }
 
-    // [download]
     if let Some(v) = t_str(&doc, "download", "download-path") {
         cfg.download.download_path = v;
     }
@@ -153,13 +136,11 @@ pub fn load_config(path: &Path) -> Result<AppConfig> {
         cfg.download.preserve_chapter_cache = v;
     }
 
-    // [source]
     cfg.source.search_limit = t_int(&doc, "source", "search-limit").map(sat_i32);
     if let Some(v) = t_bool(&doc, "source", "search-filter") {
         cfg.source.search_filter = v;
     }
 
-    // [crawl]
     cfg.crawl.concurrency = t_int(&doc, "crawl", "concurrency").map(sat_i32);
     if let Some(v) = t_int(&doc, "crawl", "min-interval") {
         cfg.crawl.min_interval = sat_u32(v);
@@ -180,12 +161,10 @@ pub fn load_config(path: &Path) -> Result<AppConfig> {
         cfg.crawl.retry_max_interval = sat_u32(v);
     }
 
-    // [cookie]
     if let Some(v) = t_str(&doc, "cookie", "qidian-cookie") {
         cfg.cookie.qidian_cookie = v;
     }
 
-    // [proxy]
     if let Some(v) = t_bool(&doc, "proxy", "enabled") {
         cfg.proxy.proxy_enabled = v;
     }
@@ -210,21 +189,16 @@ pub fn load_config(path: &Path) -> Result<AppConfig> {
     Ok(cfg)
 }
 
-// ---------- save_config ----------
-
-/// 把 `AppConfig` 写回 TOML。如果原文件存在，就在它上面 in-place 改字段（保留注释）；
+/// 把 `AppConfig` 写回 TOML：原文件存在就在它上面 in-place 改字段（保留注释），
 /// 不存在则用统一模板生成。
 ///
 /// # Examples
 ///
-/// ```ignore
-/// save_config(&PathBuf::from("config.toml"), &cfg)?;
-/// ```
+/// 设置页保存路径见 `web::handlers::settings` / `desktop::model::ops::settings`。
 ///
 /// # Errors
 ///
-/// - `std::io::Error` — 读取旧文件 / 写新文件失败
-/// - `toml_edit` parse 错误 — 旧 config.toml 损坏, fallback 用模板覆盖
+/// 读旧文件 / 写新文件失败；旧 `config.toml` 解析失败时 fallback 用模板覆盖。
 #[tracing::instrument(name = "config::save", skip_all, fields(path = %path.display()))]
 pub fn save_config(path: &Path, cfg: &AppConfig) -> Result<()> {
     let mut doc: DocumentMut = if path.exists() {
@@ -260,7 +234,6 @@ pub fn save_config(path: &Path, cfg: &AppConfig) -> Result<()> {
             t.remove(key);
         }
     }
-    // set
     set_str(
         &mut doc,
         "global",
@@ -302,7 +275,6 @@ pub fn save_config(path: &Path, cfg: &AppConfig) -> Result<()> {
     );
     set_float(&mut doc, "global", "font-size", cfg.global.font_size as f64);
 
-    // [download]
     set_str(
         &mut doc,
         "download",
@@ -328,7 +300,6 @@ pub fn save_config(path: &Path, cfg: &AppConfig) -> Result<()> {
         cfg.download.preserve_chapter_cache,
     );
 
-    // [source]
     match cfg.source.search_limit {
         Some(v) => set_int(&mut doc, "source", "search-limit", v as i64),
         None => unset(&mut doc, "source", "search-limit"),
@@ -340,7 +311,6 @@ pub fn save_config(path: &Path, cfg: &AppConfig) -> Result<()> {
         cfg.source.search_filter,
     );
 
-    // [crawl]
     match cfg.crawl.concurrency {
         Some(v) => set_int(&mut doc, "crawl", "concurrency", v as i64),
         None => unset(&mut doc, "crawl", "concurrency"),
@@ -377,7 +347,6 @@ pub fn save_config(path: &Path, cfg: &AppConfig) -> Result<()> {
         cfg.crawl.retry_max_interval as i64,
     );
 
-    // [cookie]
     set_str(
         &mut doc,
         "cookie",
@@ -385,7 +354,6 @@ pub fn save_config(path: &Path, cfg: &AppConfig) -> Result<()> {
         &cfg.cookie.qidian_cookie,
     );
 
-    // [proxy]
     set_bool(&mut doc, "proxy", "enabled", cfg.proxy.proxy_enabled);
     set_str(&mut doc, "proxy", "host", &cfg.proxy.proxy_host);
     set_int(&mut doc, "proxy", "port", cfg.proxy.proxy_port as i64);
@@ -393,8 +361,7 @@ pub fn save_config(path: &Path, cfg: &AppConfig) -> Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).ok();
     }
-    // 原子写：先写同目录下的临时文件 → fsync → rename → 避免断电/进程崩溃
-    // 时留下半截文件导致下次启动 config 解析失败。
+    // 原子写：同目录临时文件 → fsync → rename，避免断电/崩溃留下半截 config。
     crate::db::write_atomically(path, doc.to_string().as_bytes())
         .with_context(|| format!("原子写入 {}", path.display()))?;
     Ok(())

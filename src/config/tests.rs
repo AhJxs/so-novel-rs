@@ -1,7 +1,5 @@
-//! `config` 模块的单元测试。
-//!
-//! 历史上 `config/loader.rs` 单文件 917 行既含实现又含测试。
-//! 拆分子模块后，测试统一搬到这里。`super::*` 拿到所有 re-export 的公共 API。
+//! `config` 模块的单元测试。`super::*` 拿到所有 re-export 的公共 API，
+//! 覆盖默认值、TOML 往返、注释保留、旧键容错与 enum 解析。
 
 #![allow(
     clippy::expect_used,
@@ -31,13 +29,12 @@ fn loads_default_when_missing() {
 fn font_size_accepts_int_and_float_literal() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("config.toml");
-    // 整数形式（模板默认写法）
     std::fs::write(&path, "[global]\nfont-size = 18\n").unwrap();
     assert!(
         (load_config(&path).unwrap().global.font_size - 18.0).abs() < f32::EPSILON,
         "font-size should round-trip 18",
     );
-    // 浮点形式
+    // 浮点写法也要能往返
     std::fs::write(&path, "[global]\nfont-size = 20.5\n").unwrap();
     assert!(
         (load_config(&path).unwrap().global.font_size - 20.5).abs() < f32::EPSILON,
@@ -197,7 +194,6 @@ fn save_config_overwrites_existing_without_leaving_tmp() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("config.toml");
 
-    // 第一次写
     let cfg = AppConfig::default();
     save_config(&path, &cfg).unwrap();
     let original = std::fs::read_to_string(&path).unwrap();
@@ -240,7 +236,6 @@ fn save_config_writes_to_new_path() {
     let path = dir.path().join("nested/sub/config.toml");
     save_config(&path, &AppConfig::default()).unwrap();
     assert!(path.exists());
-    // 反向解析：load_config 应能读回 default
     let cfg = load_config(&path).unwrap();
     assert!((cfg.global.font_size - AppConfig::default().global.font_size).abs() < f32::EPSILON);
 }
@@ -258,7 +253,6 @@ fn export_format_parse_is_case_insensitive_for_markdown() {
 
 #[test]
 fn export_format_parse_falls_back_to_epub_for_unknown() {
-    // 既有行为不变：未知值回落 Epub（默认）
     assert_eq!(ExportFormat::parse("not-a-format"), ExportFormat::Epub);
     assert_eq!(ExportFormat::parse(""), ExportFormat::Epub);
 }

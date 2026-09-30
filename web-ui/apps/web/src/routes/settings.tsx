@@ -1,7 +1,5 @@
-// 设置页面。自动保存：字段变化即校验 + 防抖 PUT，无保存按钮。
-// 只读字段（min_interval、max_interval、cf_bypass）灰显。
-// 布局：分区卡片（图标 + 标题 + 说明），字段左右结构，数字用原生 number 输入，
-// 顶部轻量保存状态（保存中 / 已保存 ✓ / 保存失败）替代 toast。
+// 设置页面：字段变化即校验 + 防抖 PUT，无保存按钮；只读字段（min_interval、
+// max_interval、cf_bypass）灰显。顶部用轻量保存状态（保存中 / 已保存 ✓ / 失败）替代 toast。
 
 import { useState, useEffect, useRef, useCallback, type ReactNode } from "react"
 import {
@@ -53,8 +51,8 @@ const TXT_ENCODINGS = ["UTF-8", "GBK", "GB18030", "Big5", "BIG5HKSCS", "UTF-16LE
 /** 文本框防抖保存延迟（ms）。选择/开关/数字步进立即保存，文本输入防抖。 */
 const DEBOUNCE_MS = 800
 
-/** 规范化后端返回的导出格式。后端 serde 默认序列化枚举为 PascalCase（"Epub"），
- *  这里统一转小写以匹配 Select 选项 value（"epub"）。未知值回落 'epub'。 */
+/** 规范化后端返回的导出格式：serde 序列化为 PascalCase（"Epub"），转小写匹配
+ *  Select 的 value（"epub"）；未知值回落 'epub'。 */
 function normalizeFormat(raw: string | undefined): ExportFormat {
   const v = (raw ?? "").toLowerCase()
   return (FORMAT_OPTIONS as string[]).includes(v) ? (v as ExportFormat) : "epub"
@@ -63,10 +61,10 @@ function normalizeFormat(raw: string | undefined): ExportFormat {
 /** 保存状态：idle 无提示，saving 保存中，saved 已保存，error 失败。 */
 type SaveState = "idle" | "saving" | "saved" | "error"
 
-/** 字段级错误 key（i18n）。仅前端能判空的字段在此校验；目录存在性由后端返回。 */
+/** 字段级错误 key（i18n）。只校验前端能判空的字段。 */
 type FieldErrors = Partial<Record<"download_path" | "proxy_host", string>>
 
-/** 分区卡片：图标徽标 + 标题 + 说明 + 内容。 */
+/** 分区卡片：图标徽标 + 标题 + 说明。 */
 function Section({
   icon,
   title,
@@ -96,7 +94,7 @@ function Section({
   )
 }
 
-/** 字段行：标签 + 说明在左，控件在右。控件下方可显示校验错误。 */
+/** 字段行：标签 + 说明在左，控件在右。 */
 function Field({
   label,
   description,
@@ -122,7 +120,7 @@ function Field({
   )
 }
 
-/** 开关行：标签 + 说明在左，Switch 在右。 */
+/** 开关行：标签 + 说明在左。 */
 function ToggleRow({
   label,
   description,
@@ -145,7 +143,6 @@ function ToggleRow({
   )
 }
 
-/** 顶部保存状态指示。 */
 function SaveStatus({ state, t }: { state: SaveState; t: (k: string) => string }) {
   if (state === "idle") return null
   if (state === "saving") {
@@ -169,7 +166,7 @@ function SaveStatus({ state, t }: { state: SaveState; t: (k: string) => string }
   )
 }
 
-/** 数字输入：原生 number（min/max 由浏览器步进/箭头控制）。 */
+/** 数字输入：原生 number（min/max 由浏览器步进控制）。 */
 function NumberInput({
   value,
   onChange,
@@ -209,12 +206,11 @@ export default function SettingsPage() {
   const [errors, setErrors] = useState<FieldErrors>({})
   const [saveState, setSaveState] = useState<SaveState>("idle")
 
-  // 防抖定时器与保存状态复位定时器。
+  // 防抖定时器 + 保存状态复位定时器
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // 仅首次加载灌入表单。后续自动保存成功会 invalidate → refetch，
-  // 但不能用新数据覆盖用户正在编辑的表单，故只在 form===null 时初始化。
+  // 只在 form===null 时初始化：自动保存成功会 refetch，但不能覆盖用户正在编辑的表单。
   useEffect(() => {
     if (!settings || form !== null) return
 
@@ -238,7 +234,6 @@ export default function SettingsPage() {
     })
   }, [settings, form, i18n])
 
-  // 卸载时清理定时器。
   useEffect(() => {
     return () => {
       if (debounceTimer.current) clearTimeout(debounceTimer.current)
@@ -246,7 +241,7 @@ export default function SettingsPage() {
     }
   }, [])
 
-  /** 前端可判定的校验（判空）。返回错误 map；空 map = 通过。目录存在性交给后端。 */
+  /** 前端可判定的校验（判空）；目录存在性交给后端。 */
   const validate = useCallback(
     (f: EditableSettings): FieldErrors => {
       const errs: FieldErrors = {}
@@ -261,7 +256,7 @@ export default function SettingsPage() {
     [t],
   )
 
-  /** 执行保存：校验 → PUT → 更新状态。后端 400 时把 download_path 错误落到字段。 */
+  /** 校验 → PUT → 更新状态；后端 400 时把 download_path 错误落到字段。 */
   const commit = useCallback(
     (next: EditableSettings) => {
       const errs = validate(next)
@@ -279,9 +274,7 @@ export default function SettingsPage() {
           savedTimer.current = setTimeout(() => setSaveState("idle"), 2000)
         },
         onError: (err) => {
-          // 后端目录校验失败：按 `codeId`（稳定数字码）dispatch。
-          //   3004 = download_path_empty
-          //   3005 = download_path_not_dir
+          // 按稳定数字码 dispatch：3005 = download_path_not_dir，3004 = download_path_empty
           if (err instanceof ApiError && err.codeId === "3005") {
             setErrors((e) => ({ ...e, download_path: t("settings.error.pathNotDir") }))
             setSaveState("idle")
@@ -297,10 +290,7 @@ export default function SettingsPage() {
     [save, validate, t],
   )
 
-  /**
-   * 更新字段。immediate=true（选择/开关/数字步进）立即保存；
-   * 否则（文本输入）防抖保存。
-   */
+  /** 更新字段。immediate=true（选择/开关/数字步进）立即保存，否则（文本）防抖保存。 */
   const update = useCallback(
     (
       key: keyof EditableSettings,

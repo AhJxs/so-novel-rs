@@ -6,7 +6,6 @@ use std::process::Command;
 const FRONTEND_DIST: &str = "web-ui/apps/web/dist";
 
 fn main() {
-    // ── Frontend build: only when web feature is enabled ──────────────────
     println!("cargo:rerun-if-changed=web-ui/apps/web/src");
     println!("cargo:rerun-if-changed=web-ui/apps/web/package.json");
     println!("cargo:rerun-if-changed=web-ui/apps/web/vite.config.ts");
@@ -14,10 +13,8 @@ fn main() {
     println!("cargo:rerun-if-changed=web-ui/packages/ui/src");
 
     if std::env::var("CARGO_FEATURE_WEB").is_ok() {
-        // SO_NOVEL_SKIP_WEB_BUILD=1: explicitly skip `bun run build` here.
-        // Only intended for Rust static-analysis runs where the caller has
-        // already produced the frontend dist. Release / Docker builds must
-        // leave this unset so the latest frontend is compiled in.
+        // SO_NOVEL_SKIP_WEB_BUILD=1 skips `bun run build`; for static analysis only,
+        // Release / Docker builds must leave it unset so the latest frontend is compiled in.
         if std::env::var("SO_NOVEL_SKIP_WEB_BUILD").as_deref() == Ok("1") {
             let index = std::path::Path::new(FRONTEND_DIST).join("index.html");
             assert!(
@@ -39,8 +36,7 @@ fn main() {
         let ico = std::path::Path::new("assets").join("logo.ico");
         if ico.exists() {
             let mut res = winres::WindowsResource::new();
-            // ico path 是构建期固定常量，UTF-8 无效实际不会发生；保留 expect 行为
-            // 配合局部 `#[allow]` 而非 crate-level 抑制，避免误伤业务代码。
+            // 局部 `#[allow]` 而非 crate-level 抑制，避免误伤业务代码。
             #[allow(clippy::expect_used)]
             let icon_str = ico.to_str().expect("ico path is valid utf-8");
             res.set_icon(icon_str);
@@ -65,8 +61,7 @@ fn run_bun_build() {
             );
         }
         Err(e) => {
-            // bun not found (e.g. CI without bun, or non-standard PATH).
-            // Only fatal if the frontend dist doesn't already exist.
+            // bun not found：只有 dist 也不存在时才算致命。
             let index = std::path::Path::new(FRONTEND_DIST).join("index.html");
             assert!(
                 index.exists(),

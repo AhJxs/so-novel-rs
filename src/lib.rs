@@ -1,44 +1,27 @@
-//! so-novel-rs — Rust 桌面客户端（gpui-kit 0.7，egui 已完全移除）。
+//! so-novel-rs — Rust 桌面客户端（GPUI）。
 //!
-//! 模块划分：
-//! - `desktop` — 新 GPUI GUI 入口（Stage 1+）,内含 `desktop::model`（业务层，
-//!   原 `app/` 模块，2026-07-10 Phase 2 重构折叠到此） + GPUI 渲染 +
-//!   主题/导航/快捷键/通知/drain loop。
-//! - `db` / `crawler` / `config` / `models` / `parser` / `export` /
-//!   `http` / `js` / `utils` / `cli` / `core` — 业务 + 数据层（GUI 解耦）。
-//!
-//! ## 工程规约
-//!
-//! - `unsafe_code = "deny"`（`#![deny(unsafe_code)]` in lib.rs）：仓库内禁止 `unsafe`。
-//!   如确需启用, 必须先开 RFC 评审。
-//! - 文档政策: 重要 public fn 必带 `#[tracing::instrument]` + `# Errors` + `# Examples`
-//!   (PR #18–#20 已覆盖); struct/enum 顶层 doc 由各模块顶部 `//!` 文档承担。
-//!   字段级 docs 不强制 (serde-derived 字段跟 JSON 一一对应, 加 `///` 是噪声)。
-//! - clippy pedantic + nursery 触发: 一次性 PR 收敛 `mut` 多余、`clone()` 多余、
-//!   `must_use` 缺失等; 见 lib.rs 顶部的 `#![warn(clippy::*)]` 部分。
-//! - 错误体系: 领域错误 (`ExportError`/`WebError`/...) 保留在领域内, 通过
-//!   `From` 归一到 `crate::error::AppError`; 二进制入口 (`main.rs`) 允许用
-//!   `anyhow`。
-//! - 工具: `crate::utils::*` (rename 自旧 `util/`, 2026-07-08 PR #1)。
+//! 模块划分：`desktop`（GPUI 入口 + 业务 model + 渲染/主题/导航/通知）；`db` / `crawler` /
+//! `config` / `models` / `parser` / `export` / `http` / `js` / `utils` / `cli` / `core` 为与
+//! GUI 解耦的业务 + 数据层。
+//! 工程规约：仓库禁止 `unsafe`（确需启用须先过 RFC）；重要 public fn 必带
+//! `#[tracing::instrument]` + `# Errors` + `# Examples`；struct/enum 顶层 doc 由模块 `//!`
+//! 承担、字段级 docs 不强制（serde-derived 字段与 JSON 一一对应，加 `///` 是噪声）；
+//! 领域错误经 `From` 归一到 `crate::error::AppError`，仅 `main.rs` 可用 `anyhow`。
 
-// -------------------------------------------------------------------------------------
-// lint 配置（从 Cargo.toml [lints.*] 迁入，便于统一管理）
-// 设计原则:
-//   - rust 编译期 lint 全开, 不允许 `unsafe_code`（仓库无 unsafe 需求）
-//   - clippy 走 pedantic + nursery 渐进式收紧, 当前阶段以 warn 为主
-// -------------------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// lint 配置（自 Cargo.toml [lints.*] 迁入，便于统一管理）
+// 原则：rustc lint 全开且禁止 `unsafe_code`（仓库无 unsafe 需求）；
+// clippy 走 pedantic + nursery 渐进收紧，当前阶段以 warn 为主。
+// ---------------------------------------------------------------------------
 
 #![deny(unsafe_code)]
 #![allow(missing_docs)]
 #![warn(dead_code)]
 #![warn(invalid_value)]
 #![warn(rustdoc::broken_intra_doc_links)]
-// clippy: pedantic + nursery 整体 warn
 #![warn(clippy::pedantic, clippy::nursery)]
-// clippy: 安全/正确性子集单独 warn
 #![warn(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 #![warn(clippy::todo, clippy::unimplemented)]
-// clippy: 允许项（见设计原则注释）
 #![allow(
     clippy::module_name_repetitions,
     clippy::must_use_candidate,
@@ -51,13 +34,9 @@
     clippy::result_large_err
 )]
 
-// `rust_i18n::i18n!` 必须在 crate root 调一次 —— 它在 crate root 生成 `_rust_i18n_t`
-// 宏 + `_rust_i18n_try_translate` 查表函数 + locale 表，官方 `t!` 宏和
-// `rust_i18n::set_locale` 都依赖它（`crate::i18n::ts()` 就是包了一层 `t!`）。
-// 组件库（gpui_kit::component）内部也调了一次（加载它自带的 `locales/ui.yml`），两套 i18n
-// 实例各管各的 key 表，但**全局 locale 共享**（同一 `CURRENT_LOCALE`）。
-// `desktop::run` 启动时还会 `rust_i18n::extend!(gpui_component)` 把我们的表接到组件后端上
-// （方向：组件 → 先查 app.yml 的 `gpui_component:` 段 → 再回落 ui.yml）。
+// `rust_i18n::i18n!` 必须在 crate root 调一次（生成 `_rust_i18n_t` 宏 + `_rust_i18n_try_translate`
+// 查表函数 + locale 表，`t!` 与 `set_locale` 都依赖它）；组件库内部另调一次、各管各的 key 表，
+// 但**全局 locale 共享**；`desktop::run` 再用 `rust_i18n::extend!` 把我们的表接到组件后端（先查 app.yml 的 `gpui_component:` 段，再回落 ui.yml）。
 rust_i18n::i18n!("locales");
 
 pub mod cli;

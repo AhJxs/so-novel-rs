@@ -1,8 +1,5 @@
-//! `cli` 模块的单元测试。
-//!
-//! 历史上 `src/cli.rs` 单文件 549 行既含实现又含测试。
-//! 拆分子模块后，测试统一搬到这里。`Cli` / `Cmd` 通过 `super::*` 拿到
-//! 公共 re-export，`effective_cfg` 已在 Phase 3.3 搬到 `crate::core::bootstrap`。
+//! `cli` 模块的单元测试。`Cli` / `Cmd` 经 `super::*` 的公共 re-export 拿到;
+//! `effective_cfg` 等启动期工具在 `crate::core::bootstrap`。
 
 #![allow(
     clippy::expect_used,
@@ -27,8 +24,7 @@ fn cli_rejects_version_subcommand() {
 
 #[test]
 fn cli_accepts_version_flag() {
-    // --version 现在走手动分发（`SetTrue` + `mod.rs::run` 打印并退出），
-    // 不再让 clap 抛 DisplayVersion error。验证 flag 被正确解析为 true 即可。
+    // --version 走手动分发 (`SetTrue` + `run` 打印并退出), 这里只验证 flag 被解析为 true。
     let cli = Cli::try_parse_from(["so-novel-rs", "--version"]).unwrap();
     assert!(cli.version_flag, "--version 应被解析为 true");
 }
@@ -324,7 +320,6 @@ fn cli_quiet_long_flag() {
 
 #[test]
 fn cli_quiet_short_flag() {
-    // 短选项 `-q` 必须同样有效（与 `-v` 对齐）。
     let cli = Cli::try_parse_from(["so-novel-rs", "-q", "search", "kw"]).unwrap();
     assert!(cli.quiet, "-q 应被解析为 true");
     match cli.command.expect("subcommand present") {
@@ -343,7 +338,6 @@ fn cli_quiet_global_position() {
 
 #[test]
 fn cli_quiet_default_false() {
-    // 默认 false：脚本里不传 --quiet 时不应被意外抑制。
     let cli = Cli::try_parse_from(["so-novel-rs", "sources"]).unwrap();
     assert!(!cli.quiet);
 }
@@ -356,11 +350,8 @@ fn cli_verbose_and_quiet_combine() {
     assert!(cli.quiet);
 }
 
-/// `build_localized_command` 与 derive `Cli::command()` 在 arg IDs / subcommand
-/// 名称集合上必须等价 —— 这是手搓版"行为兼容 derive"的唯一机械性保证。
-///
-/// 任何对 `build_localized_command` 的改动如果漏了某个 arg / subcommand，或
-/// 改了 arg id / short / long 标识，都会被这条测试抓住。
+/// `build_localized_command` 与 derive `Cli::command()` 在 arg ID / subcommand 名称集合上
+/// 必须等价 —— 这是手搓版"行为兼容 derive"的唯一机械保证; 漏 arg 或改 id/short/long 都会被抓住。
 #[test]
 fn localized_command_matches_derive_structure() {
     let derive = Cli::command();
@@ -380,7 +371,6 @@ fn localized_command_matches_derive_structure() {
         "顶层 arg ID 集合必须与 derive 完全一致"
     );
 
-    // subcommand 名称集合。
     let derive_subs: std::collections::BTreeSet<String> = derive
         .get_subcommands()
         .map(|s| s.get_name().to_string())
@@ -394,7 +384,6 @@ fn localized_command_matches_derive_structure() {
         "subcommand 名称集合必须与 derive 完全一致"
     );
 
-    // sources 必须有 list / enable / disable 三个 sub-subcommand。
     let sources = localized
         .find_subcommand("sources")
         .expect("sources subcommand must exist");
@@ -412,12 +401,9 @@ fn localized_command_matches_derive_structure() {
     );
 }
 
-/// 三种 locale 下 `build_localized_command` 的顶层 `about` / `long_about`
-/// 必须互不相同 —— 这是"真的拿到翻译"的最小可见断言。
+/// 三种 locale 下顶层 `about` / `long_about` 必须互不相同 —— "真的拿到翻译"的最小可见断言。
 ///
-/// `build_localized_command` 内部会调 `rust_i18n::set_locale` + 清缓存，
-/// 整个进程全局生效。结尾恢复 en 避免污染后续测试（与 `i18n::tests::ts_and_ts_fmt_work`
-/// 同样的收尾策略）。
+/// `build_localized_command` 内部会 `set_locale` + 清缓存 (进程全局), 故结尾恢复 en。
 #[test]
 fn localized_command_about_changes_with_language() {
     let en = build_localized_command(Language::English);
@@ -432,17 +418,14 @@ fn localized_command_about_changes_with_language() {
     assert_ne!(en_about, hk_about, "en 与 zh-HK about 应不同");
     assert_ne!(zh_about, hk_about, "zh-CN 与 zh-HK about 应不同");
 
-    // 简单自检：英文 about 包含 "So Novel"，繁简 about 包含 "批量下載"/"批量下载"。
     assert!(en_about.contains("So Novel"));
     assert!(zh_about.contains("批量下载"));
     assert!(hk_about.contains("批量下載"));
 
-    // 收尾：恢复 en。
     rust_i18n::set_locale("en");
     crate::i18n::invalidate_cache();
 }
 
-/// `subcommand_name` 把 `Cmd` variant 映射到 clap 子命令名。
 #[test]
 fn subcommand_name_maps_variants() {
     let search = Cli::try_parse_from(["so-novel-rs", "search", "kw"]).unwrap();
@@ -460,14 +443,10 @@ fn subcommand_name_maps_variants() {
     );
 }
 
-/// `locale_for` 是项目里 `Language → locale 字符串` 的唯一权威映射（针对本项目
-/// 自己的 `app.yml` + 前端 JSON 文件名）。测试三种 enum 的输出 + 关键差异：
-/// `TraditionalChinese` 返回 `zh-TW` —— 跟 `Language::as_str()` 的 `"zh-TW"` 巧合一致。
+/// `locale_for` 是 `Language → locale 字符串` 的唯一权威映射 (本项目 `app.yml` + 前端 JSON
+/// 文件名); 三种 enum 都要覆盖, 其中 `TraditionalChinese` → `zh-TW`。
 ///
-/// 注意：gpui-kit 0.5 时代 `gpui_kit::component::set_locale(...)` 不接受 `zh-TW`
-/// （当时只有 en / zh-CN / zh-HK / it，桌面路径要靠 [`crate::i18n::locale_for_gpui`]
-/// 返回 `zh-HK` 兜底）；0.6 起其 ui.yml 已含 `zh-TW`，两套映射统一 —— 见
-/// `src/desktop/mod.rs::run`。
+/// 它与 `locale_for_gpui` 现已统一 (组件库 ui.yml 已含 `zh-TW`), 详见 `src/desktop/mod.rs::run`。
 #[test]
 fn locale_for_maps_to_rust_i18n_tags() {
     assert_eq!(

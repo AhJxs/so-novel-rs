@@ -1,18 +1,11 @@
 //! 书源管理端点: 列表 / 禁用切换 / 连通性测试。
 //!
-//! ## 锁协议
+//! 锁协议：`source_toggle` 分四步短锁，每步取完即放（持锁期间不做磁盘 IO）；
+//! `source_test` 只读锁拿 `rule.url` 后立即释放，再发 HTTP。
+//! 本模块的 `SourceInfo` 是 web 层 4 字段 DTO，与 `models::SourceInfo`（10 字段）不同。
 //!
-//! - `source_toggle`: 分四步短锁, 每一步取完即放, 避免持锁期间做磁盘 IO。
-//! - `source_test`: 只读锁拿 `rule.url`, 释放后再发 HTTP。
-//!
-//! 注: 本模块定义的 `SourceInfo` 是 web 层 DTO（仅 4 字段: id/name/url/enabled）,
-//! 与 `models::SourceInfo`（10 字段, 含 health / `delay_ms` / `http_status）不同`。
-//!
-//! ## i18n
-//!
-//! 错误走 [`WebError`]（按请求 locale 翻译 `message`，`code` 稳定不变）。
-//! `source_test` 端点始终返 200 + `SourceTestResult.error: Option<String>`，
-//! 该 string 自身是 localized text（书源未找到 / "HTTP {status}" 模板）。
+//! 错误走 [`WebError`]；`source_test` 特殊——始终 200，用 localized 的
+//! `SourceTestResult.error` 报错，前端不必为这个 case 单独处理 404。
 
 use axum::Json;
 use axum::extract::State;
@@ -94,7 +87,6 @@ pub async fn source_toggle(
         {
             r.disabled = now_disabled;
         }
-        // 显式 drop, 让锁尽早释放 (clippy::significant_drop_tightening)
         drop(rules);
         Ok(())
     })?;
@@ -123,13 +115,9 @@ pub struct SourceTestResult {
     pub error: Option<String>,
 }
 
-/// `POST /api/sources/{id}/test` — 用 GET 探活, 10s 超时。
+/// `POST /api/sources/{id}/test` — 用 GET 探活，10s 超时。
 ///
-/// 端点**始终**返 200 + JSON body —— 即使书源未找到，也用 `SourceTestResult.error`
-/// 字段报错（前端统一按 JSON 渲染，不必为这个 case 单独处理 404）。
-///
-/// `error` 字段是按 locale 翻译的文案（书源未找到 / "HTTP {status}" 模板 /
-/// reqwest 错误原文本）。
+/// 用 `SourceTestResult.error`（按 locale 翻译）报错，始终返 200 —— 见模块头。
 ///
 /// # Errors
 ///
@@ -174,8 +162,7 @@ pub async fn source_test(
                 error: if ok {
                     None
                 } else {
-                    // `WebErrors.source_test_http_status` 在 3 locale 都是字面量
-                    // `"HTTP {status}"` —— 不是自然语言，所以 3 locale 输出相同。
+                    // 该 key 在 3 locale 都是字面量 `"HTTP {status}"`，输出相同。
                     Some(ts_for_locale(locale, "WebErrors.source_test_http_status"))
                 },
             }

@@ -1,24 +1,17 @@
 //! 全局追踪 ID：一次搜索/下载/详情拉取/TOC 预取 = 一个 `TraceId`。
 //!
-//! 设计目标：
-//! - **最小侵入**：通过 `tracing` span 跨 `.await` 传播，函数签名零改动。
-//! - **可 grep**：每个顶层操作 mint 一个 `u64`；日志文件里 `trace_id=42` 即可
-//!   还原一次完整调用的全部阶段。
-//! - **细粒度子事件**用 `sub=` 字段表达（`sub=chapter:142` / `sub=source:5`），
-//!   不另起 `trace_id，保持父子关系简单`。
+//! 通过 `tracing` span 跨 `.await` 传播, 函数签名零改动。顶层操作 mint 一个 `u64`,
+//! 日志里 `trace_id=42` 即可还原一次调用的全部阶段; 细粒度子事件用 `sub=` 字段表达。
 //!
-//! 调用入口在 `app/ops/search.rs` / `app/ops/download.rs` 的 4 个 `spawn_*` 处。
-//! `#[tracing::instrument]` 在 crawler / parser 入口处接管，把 `trace_id` 透传
-//! 给所有 `tracing::info!/warn!/error!` 调用 —— 无需把 `TraceId` 加到任何函数签名里。
+//! 入口在 `ops/search.rs` / `ops/download.rs` 的 4 个 `spawn_*`; `#[tracing::instrument]`
+//! 在 crawler / parser 入口接管, 把 `trace_id` 透传给所有 `tracing::info!/warn!/error!`。
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
 /// 单调递增的全局 ID 源。从 1 开始（0 保留为"未分配"哨兵，理论不会被用到）。
 static NEXT: AtomicU64 = AtomicU64::new(1);
 
-/// 单次顶层操作的追踪 ID。
-///
-/// 复制成本 = 8 字节（`Copy`），可在 `.instrument(span)` 之间随意 clone。
+/// 单次顶层操作的追踪 ID（`Copy`, 可在 `.instrument(span)` 之间随意 clone）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TraceId(u64);
 
@@ -46,10 +39,6 @@ impl From<u64> for TraceId {
     }
 }
 
-/// `sub=` 字段的常用字面量。集中放这里方便改、避免散落的字符串。
-///
-/// 搜索：每源完成时 `sub = format!("source:{id}", id = source_id)`。
-/// 下载：章节失败时 `sub = format!("chapter:{order}")`。
 pub mod sub {
     pub const SEARCH: &str = "search";
     pub const DETAIL: &str = "detail";
@@ -108,8 +97,7 @@ mod tests {
         assert_ne!(id, TraceId::from(43u64));
     }
 
-    /// 端到端验证：mint 一个 `trace_id，挂到` span 上，
-    /// 在 span 内部用 `tracing::info!` 触发事件，
+    /// 端到端验证: mint 一个 `trace_id` 挂到 span 上, 在 span 内触发 `tracing::info!`,
     /// 校验 `trace_id=N` 出现在事件字段里 —— 这是 grep 流程的核心假设。
     #[test]
     fn trace_id_appears_in_event_fields() {
@@ -151,8 +139,7 @@ mod tests {
 
         let buf = cap.0.lock().unwrap();
         let s = String::from_utf8_lossy(&buf);
-        // 校验 trace_id 出现在 capture 的输出里 —— 完整断言字段格式比较脆，
-        // 这里只检查"trace_id=<数字>"这个 token 在日志里。
+        // 只检查"trace_id=<数字>"这个 token 在日志里 —— 断言完整字段格式太脆。
         let needle = format!("trace_id={}", id.raw());
         let contains_needle = s.contains(&needle);
         let msg = format!("expected log to contain {needle:?}, got:\n{s}");

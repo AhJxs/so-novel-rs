@@ -1,12 +1,4 @@
-//! 详情页 HTML 解析 + 主流程
-//!
-//! 来自原 `parser/book.rs`:
-//! - [`BookError`] 错误枚举
-//! - [`parse_book_detail`] 公共入口 (抓 + 解析 + `CoverUpdater`)
-//! - [`parse_book_html`] 离线同步解析 (便于测试)
-//! - [`content_type_for`] / [`optional_field`] 内部 helper
-//!
-//! 封面 URL 处理在 [`super::cover`]。
+//! 详情页 HTML 解析 + 主流程: [`parse_book_detail`] 抓 + 解析 + `CoverUpdater`。封面 URL 处理在 [`super::cover`]。
 
 use anyhow::Result;
 use regex::Regex;
@@ -44,18 +36,12 @@ pub enum BookError {
 /// 抓取 + 解析详情页。
 ///
 /// `cf_bypass_base` 同 `search_one`: CF 命中时若非空则自动重试 bypass 服务。
-/// `qidian_cookie` 是全局 `AppConfig.qidian_cookie` —— **仅供 `CoverUpdater` 使用**,
-/// 详情页 fetch 本身**不附** Cookie 头 (与 Java 端语义一致; cookie 只在 `CoverUpdater`
-/// 跑起点站搜索时才用得上)。
-///
-/// 末尾 `!rule.need_proxy` 时调 3 站 `CoverUpdater` 拿更高清封面 (与 Java
-/// `BookParser.parse()` line 71 行为对齐)。
+/// `qidian_cookie` **仅供 `CoverUpdater` 使用**, 详情页 fetch 本身**不附** Cookie 头。
 ///
 /// # Examples
 ///
 /// ```ignore
 /// let book = parse_book_detail(&client, &rule, &url, None, None).await?;
-/// println!("{}: {}", book.book_name, book.author);
 /// ```
 ///
 /// # Errors
@@ -99,7 +85,6 @@ pub async fn parse_book_detail(
     let cf_hit = has_cloudflare(&response.html);
     let html_after_cf = if cf_hit {
         if let Some(base) = cf_bypass_base.filter(|s| !s.trim().is_empty()) {
-            // `source_id` + `url` 已在 span 里 —— 事件文本只补"做了什么"。
             tracing::info!("详情页命中 Cloudflare, 尝试 cf-bypass");
             fetch_via_cf_bypass(client, base, url)
                 .await
@@ -114,12 +99,9 @@ pub async fn parse_book_detail(
 
     let mut book = parse_book_html(&html_after_cf, &response.final_url, rule)?;
 
-    // 3 站 CoverUpdater: 仅 `!rule.need_proxy` 时跑 (与 Java `BookParser.parse()`
-    // line 71 一致 —— 代理 IP 会被起点等网站屏蔽, 故代理时不使用源站封面)。
-    // 失败/无可用候选时 `cover_updater::fetch_cover` 内部已经返回原 fallback,
-    // 这里无脑赋值即可。
+    // 3 站 CoverUpdater: 仅 `!rule.need_proxy` 时跑 —— 代理 IP 会被起点等网站屏蔽。
+    // 失败/无候选时 `cover_updater::fetch_cover` 内部已返回原 fallback, 无脑赋值即可。
     if !rule.need_proxy {
-        // `source_id` 已在 span 里 —— 只补新字段 `book` 和 `has_qidian_cookie`。
         tracing::debug!(
             book = %book.book_name,
             has_qidian_cookie = qidian_cookie.is_some_and(|s| !s.trim().is_empty()),
@@ -133,13 +115,10 @@ pub async fn parse_book_detail(
         )
         .await;
         if maybe_replace_cover(&mut book, new_cover) {
-            // 同样是去掉冗余的 `source_id`。
             tracing::info!(book = %book.book_name, "CoverUpdater 替换封面");
         }
     }
 
-    // 终止事件: 保留"新信息" (author / cf_hit / cover_url / elapsed_ms),
-    // 去掉已在 span 里的 `source_id`。
     tracing::info!(
         book = %book.book_name,
         author = %book.author,
@@ -178,7 +157,7 @@ pub fn parse_book_html(html: &str, base_url: &str, rule: &Rule) -> Result<Book, 
         &book_rule.author,
         content_type_for(&book_rule.author),
     )?;
-    // Java 端 BookParser: author.replace("作者: ", "")
+    // author 前缀 (如 "作者: ") 需剥掉
     let author = author.replace("作者: ", "").replace("作者:", "");
     if book_name.is_empty() || author.is_empty() {
         return Err(BookError::MissingTitleOrAuthor);
@@ -190,9 +169,7 @@ pub fn parse_book_html(html: &str, base_url: &str, rule: &Rule) -> Result<Book, 
     let latest_chapter_url = optional_field(&document, &book_rule.latest_chapter_url)?
         .and_then(|u| abs_url(base_url, &u).or(Some(u)));
     let last_update_time = optional_field(&document, &book_rule.last_update_time)?.map(|s| {
-        // Java 端 BookParser: lastUpdateTime.replaceAll("(更新时间|最后更新): ", "")
         static RE: LazyLock<Regex> = LazyLock::new(|| {
-            // panic IS the design：源码字面量写错就是程序员错误。
             #[allow(
                 clippy::panic,
                 reason = "static regex literal must compile; failure = programmer error"
@@ -206,8 +183,7 @@ pub fn parse_book_html(html: &str, base_url: &str, rule: &Rule) -> Result<Book, 
     });
     let status = optional_field(&document, &book_rule.status)?;
 
-    // coverUrl 抽出来如果是相对路径, 按 baseUri 拼成绝对 (Java 端 jsoup `absUrl("content")`
-    // 会自动做这件事)。
+    // coverUrl 若是相对路径, 按 baseUri 拼成绝对
     let raw_cover = select_and_invoke_js(
         &document,
         &book_rule.cover_url,
@@ -245,8 +221,8 @@ mod tests {
     use crate::config::LangType;
     use crate::db::apply_default_rule;
 
-    /// 笔趣阁22 真实详情规则。注意 Java 注释提到 meta 字段名拼错 (`lastest_chapter_name`),
-    /// 我们保留这个拼写以保持兼容。
+    /// 笔趣阁22 真实详情规则。Java 注释提到 meta 字段名拼错 (`lastest_chapter_name`),
+    /// 保留这个拼写以保持兼容。
     fn rule_22biqu() -> Rule {
         let mut r: Rule = serde_json::from_str(
             r#"{
@@ -264,9 +240,7 @@ mod tests {
     }
 
     /// 一个仿真的详情页 HTML: 包含 og:novel:* meta 标签 + 简介 div。
-    /// 22biqu 的详情页字段 99% 来自 meta, 配规则里 book 段几乎是空的,
-    /// 所以默认填充会把 bookName / author / intro / category / coverUrl 等
-    /// 全部回退到 meta 查询。
+    /// 22biqu 的详情页字段 99% 来自 meta。
     fn fake_book_html() -> String {
         r#"<!doctype html>
 <html><head>
@@ -298,7 +272,7 @@ mod tests {
         assert_eq!(book.latest_chapter.as_deref(), Some("第99章 标题"));
         assert_eq!(book.last_update_time.as_deref(), Some("2026-06-13 12:00"));
         assert_eq!(book.status.as_deref(), Some("连载"));
-        // 相对 cover URL 应被拼为绝对
+        // coverUrl 相对路径应被拼为绝对
         assert_eq!(
             book.cover_url.as_deref(),
             Some("https://www.22biqu.com/cover/1.jpg")
@@ -309,7 +283,6 @@ mod tests {
     #[test]
     fn missing_book_name_or_author_returns_typed_error() {
         let rule = rule_22biqu();
-        // 没有 og:novel:book_name 的 HTML
         let html = r#"<html><head>
             <meta property="og:novel:author" content="某人">
             </head><body></body></html>"#;
@@ -319,7 +292,6 @@ mod tests {
 
     #[test]
     fn book_name_via_explicit_selector_overrides_meta_default() {
-        // 模拟一条规则: bookName 不走 meta, 而走显式 CSS 选择器
         let mut rule: Rule = serde_json::from_str(
             r#"{
                 "url": "https://demo.test/",
@@ -343,15 +315,12 @@ mod tests {
         </body></html>"#;
 
         let book = parse_book_html(html, "https://demo.test/", &rule).expect("should parse");
-        // 显式选择器优先于 meta
         assert_eq!(book.book_name, "真书名");
         assert_eq!(book.author, "真作者");
     }
 
     #[test]
     fn cover_url_with_js_postprocess_concats_host() {
-        // main.json mcxs 真实规则:
-        //   "coverUrl": "meta[property=\"og:image\"]@js:r='http://www.mcxs.info'+r"
         let mut rule: Rule = serde_json::from_str(
             r#"{
                 "url": "http://www.mcxs.info/",
@@ -398,7 +367,6 @@ mod tests {
         let cfg = AppConfig::default();
         let client = build_async_client(&cfg, &ClientOptions::default()).unwrap();
 
-        // 先搜一下, 拿到第一个结果的 URL。
         let mut search_rule: Rule = serde_json::from_str(
             r#"{
                 "url": "https://www.22biqu.com/",

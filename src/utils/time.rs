@@ -1,27 +1,21 @@
-//! 时间格式化工具：把 unix 时间戳渲染成本地时区的 `YYYY-MM-DD HH:MM`。
+//! 时间格式化：unix 时间戳 → 本地时区 `YYYY-MM-DD HH:MM`。
 //!
-//! 故意不引 `chrono` —— 它的 features / tz database 太重，而 UI 显示精度只到分钟。
-//! 自己用 Howard Hinnant 的 `civil_from_days` 算法做日历换算，跨 1970-2100 完全准确。
-//! 时区偏移走 `time::UtcOffset::current_local_offset()`（仅启用了 `local-offset` feature）。
+//! 故意不引 `chrono`（features / tz database 太重），日历换算用 Howard Hinnant 的
+//! `civil_from_days`（1970-2100 完全准确），时区偏移走 `time::UtcOffset::current_local_offset()`。
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-/// 当前 unix 时间戳（秒）。
-///
-/// 失败时（系统时钟早于 `UNIX_EPOCH` 这种罕见情况）返回 0 —— UI 显示"未知"
-/// 远比 `panic!` 友好。`DownloadTask::started_at_unix = 0` 在语义上表示"任务还没
-/// 开始"，和这个 fallback 自然重合。
+/// 当前 unix 时间戳（秒）。系统时钟早于 `UNIX_EPOCH` 这种罕见情况返回 0 —— UI 显示
+/// "未知"远比 panic 友好，且 `started_at_unix = 0` 语义上本就表示"任务还没开始"。
 pub fn now_unix_secs() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(0))
 }
 
-/// 把 unix 秒数（可能为负或 0）格式化为 `YYYY-MM-DD HH:MM`（本地时区）。
-///
-/// `unix_secs <= 0` 视为"未知" —— `DownloadTask` 里 `started_at_unix=0` 表示
-/// 任务还没开始；library 里 `modified_unix_secs=0` 表示读不到 mtime。统一返回 "未知"
-/// 让 UI 直接显示而不必各自判 0。
+/// 把 unix 秒数（可能为负或 0）格式化为 `YYYY-MM-DD HH:MM`（本地时区）。`unix_secs <= 0`
+/// 一律返回 "未知"：`started_at_unix=0` 表示任务未开始、`modified_unix_secs=0` 表示读不到
+/// mtime，让 UI 直接显示而不必各自判 0。
 pub fn format_unix_local(unix_secs: i64) -> String {
     if unix_secs <= 0 {
         return "未知".to_string();
@@ -64,8 +58,6 @@ pub fn format_duration(d: Duration) -> String {
         format!("{days} 天 {h} 时")
     }
 }
-
-// ---------- 内部：本地时区日历换算 ----------
 
 fn local_date(t: SystemTime) -> (i32, u32, u32) {
     let days = days_from_unix(t);
@@ -128,10 +120,7 @@ fn local_tz_offset_secs() -> i64 {
     }
 }
 
-// ---------- u64 便捷入口（library 用）----------
-
-/// `u64` 版本，便于 `LibraryEntry::modified_unix_secs` 这种从 fs 拿到的非负时间戳。
-/// 内部夹到 `i64::MAX`（实际上 u64 表示的时间到 2554 年才溢出，UI 场景不会发生）。
+/// `u64` 版本，便于 `LibraryEntry::modified_unix_secs` 这种非负时间戳；内部夹到 `i64::MAX`。
 pub fn format_unix_local_u64(unix_secs: u64) -> String {
     let s = i64::try_from(unix_secs).unwrap_or(i64::MAX);
     format_unix_local(s)

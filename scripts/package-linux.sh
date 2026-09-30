@@ -1,19 +1,9 @@
 #!/usr/bin/env bash
 # 打包 so-novel-rs 的 Linux 发行包。
-#
-# 用法：
-#   bash scripts/package-linux.sh                              # 默认 x86_64
-#   bash scripts/package-linux.sh aarch64-unknown-linux-gnu    # 指定 target
-#
-# 行为：
-# - 自动选择构建工具：在 Linux 主机上（如 CI runner）用原生 `cargo`，
-#   否则用 `cross`（容器化交叉编译，要装 Docker + cross）。
-#   设 `FORCE_CROSS=1` 强制使用 cross；`FORCE_CARGO=1` 强制原生 cargo。
-# - 把可执行文件 + README + rules 打成 tar.gz。
-#   HTML 模板 / logo 已通过 `include_*!` 嵌入二进制；
-#   bundle/rules/ 随包携带，方便用户编辑或导入规则。
-#
-# 产物：dist/so-novel-rs-<version>-linux-<arch>.tar.gz
+# 用法：bash scripts/package-linux.sh [target]（默认 x86_64，可传 aarch64-unknown-linux-gnu）。
+# 构建工具：Linux 主机（如 CI runner）用原生 `cargo`，否则用 `cross`（容器化交叉编译，需装
+# Docker + cross）；`FORCE_CROSS=1` / `FORCE_CARGO=1` 可强制指定。
+# 产物：dist/so-novel-rs-<version>-linux-<arch>.tar.gz（可执行文件 + README + bundle/rules/）。
 
 set -euo pipefail
 
@@ -47,7 +37,6 @@ choose_builder() {
         echo "cargo"
         return
     fi
-    # 其它平台（Windows / macOS）：用 cross。
     echo "cross"
 }
 
@@ -56,11 +45,9 @@ echo "→ 构建工具: $BUILDER"
 echo "→ Target  : $TARGET"
 echo "→ 版本    : $VERSION"
 
-# ----- 构建 -----
 case "$BUILDER" in
     cargo)
-        # 主机就是 Linux 时仍可指定 target — 但不同 arch 仍要 cross；
-        # 这里保留 --target 让 x86_64 → aarch64 之类的 case 不退化为本机编。
+        # 保留 --target，避免交叉 arch（x86_64 → aarch64）退化为本机编。
         cargo build --release --target "$TARGET"
         ;;
     cross)
@@ -86,7 +73,6 @@ cp "$BIN" "$OUTDIR/"
 chmod +x "$OUTDIR/${NAME}"
 cp -r bundle/rules "$OUTDIR/rules"
 
-# README 让用户知道运行时依赖。
 cat > "$OUTDIR/README.md" <<'EOF'
 # So Novel — Linux 包
 
@@ -117,7 +103,6 @@ sudo dnf install libxkbcommon mesa-libGL fontconfig \
 ```
 EOF
 
-# ----- 打 tar.gz -----
 ( cd dist && tar -czf "${STAGE}.tar.gz" "${STAGE}" )
 echo "→ 产物: ${TARBALL}"
 ls -lh "${TARBALL}"

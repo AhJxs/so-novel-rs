@@ -1,15 +1,10 @@
-//! 章节模型
-//!
-//! 章节是下载任务的核心数据单元。同时承担 PO 角色 (落盘到 `chapters/` 目录)
-//! 和 DTO 角色 (Web SSE 推送 `ProgressEvent` / Web API 响应)。
+//! 章节模型: 下载任务的核心数据单元, 兼 PO (落盘到 `chapters/`) 与 DTO (Web SSE / API 响应)。
 
 use serde::{Deserialize, Serialize};
 
-/// 单章数据。对应 Java `model.Chapter`。
-///
-/// `content` 是 HTML (原始解析结果), 过滤 (filter.rs) + 格式化 (formatter.rs) 在
-/// export 阶段做。`content.is_empty()` 表示 "章节正文为空", 是 `ChapterError::EmptyContent`
-/// 错误的判定依据。
+/// 单章数据。对应 Java `model.Chapter`。`content` 是 HTML (原始解析结果), 过滤 (filter.rs) +
+/// 格式化 (formatter.rs) 在 export 阶段做; `content.is_empty()` 是 `ChapterError::EmptyContent`
+/// 的判定依据。
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Chapter {
     /// 章节详情页 URL (书源内唯一)。

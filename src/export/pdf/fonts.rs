@@ -1,4 +1,4 @@
-//! CJK 字体发现 + 字宽量宽器
+//! CJK 字体发现 + 字宽量宽器。
 //!
 //! 跨系统找一份 CJK 字体 (TTC/TTF/OTF), 找不到时降级到启发式量宽 (CJK=1em, ASCII=0.55em)。
 
@@ -14,7 +14,7 @@ pub const CJK_FONT: &str = "CJK";
 
 /// 字符宽度量宽器。
 ///
-/// - `Embedded`: 用真实 CJK 字体字形度量 (精确, CJK 路径)。
+/// - `Embedded`: 用真实 CJK 字体字形度量 (精确)。
 /// - `Heuristic`: CJK=1em、ASCII=0.55em、空格=0.3em 的近似 (无字体降级路径)。
 pub enum Measurer {
     Embedded {
@@ -30,7 +30,7 @@ impl Measurer {
         match self {
             Self::Embedded { font, width_cache } => {
                 let cp = ch as u32;
-                // 字形原始宽度 (0–1000 units), 与 size 无关, 缓存 u32 键。
+                // 字形原始宽度 (0–1000 units, 与 size 无关), 故缓存 u32 键、最后除 1000。
                 let raw = *width_cache
                     .borrow_mut()
                     .entry(cp)
@@ -43,7 +43,7 @@ impl Measurer {
                 } else if ch.is_ascii() {
                     0.55 * size
                 } else {
-                    size // CJK 全角
+                    size
                 }
             }
         }

@@ -1,12 +1,10 @@
-//! 抓取页（gpui-kit 组件库的 `Settings` 左侧 sidebar 第 2 项）。
+//! 抓取页（`Settings` 左侧 sidebar 第 2 项）。
 //!
-//! 3 个 group：
-//! - 书源：搜索条数上限（number_input，-1 sentinel）/ 过滤低相似度（switch）
-//! - 并发与间隔：并发上限（number_input，-1 sentinel）/ 请求间隔 min / max（u32）
-//! - 重试：启用失败重试（switch）/ 最大重试次数（u32）/ 重试间隔 min / max（u32）
+//! 3 个 group：书源（搜索条数上限 / 过滤低相似度）、并发与间隔（并发上限 / 请求间隔 min·max）、
+//! 重试（启用重试 / 最大次数 / 重试间隔 min·max）。
 //!
-//! 全是纯 field + setter，无 dropdown 副作用（不调 `apply_theme_pref` 等），
-//! 所以 8 个 setter 一致走 `bool_field` / `number_field_option_i32` / `number_field_u32_clamped`。
+//! 全是纯 field + setter，无 dropdown 副作用，统一走 `bool_field` /
+//! `number_field_option_i32` / `number_field_u32_clamped`。
 
 use gpui_kit::App;
 use gpui_kit::component::setting::{NumberFieldOptions, SettingGroup, SettingItem, SettingPage};
@@ -27,7 +25,7 @@ pub(super) fn build(ctx: &PageCtx<'_>, _cx: &App) -> SettingPage {
             SettingGroup::new()
                 .title(ts("Settings.group.source"))
                 .items(vec![
-                    // -- 搜索条数上限（Option<i32>, -1 = 不限）--
+                    // 搜索条数上限（Option<i32>, -1 = 不限）
                     SettingItem::new(
                         ts("Settings.item.search_limit"),
                         number_field_option_i32(
@@ -42,7 +40,7 @@ pub(super) fn build(ctx: &PageCtx<'_>, _cx: &App) -> SettingPage {
                         ),
                     )
                     .description(ts("Settings.desc.search_limit")),
-                    // -- 过滤低相似度 --
+                    // 过滤低相似度
                     SettingItem::new(
                         ts("Settings.item.search_filter"),
                         bool_field(
@@ -57,7 +55,7 @@ pub(super) fn build(ctx: &PageCtx<'_>, _cx: &App) -> SettingPage {
             SettingGroup::new()
                 .title(ts("Settings.group.concurrency"))
                 .items(vec![
-                    // -- 并发上限（Option<i32>, -1 = 自动）--
+                    // 并发上限（Option<i32>, -1 = 自动）
                     SettingItem::new(
                         ts("Settings.item.concurrency"),
                         number_field_option_i32(
@@ -72,7 +70,7 @@ pub(super) fn build(ctx: &PageCtx<'_>, _cx: &App) -> SettingPage {
                         ),
                     )
                     .description(ts("Settings.desc.concurrency")),
-                    // -- 请求间隔 min --
+                    // 请求间隔 min
                     SettingItem::new(
                         ts("Settings.item.min_interval"),
                         number_field_u32_clamped(
@@ -87,7 +85,7 @@ pub(super) fn build(ctx: &PageCtx<'_>, _cx: &App) -> SettingPage {
                         ),
                     )
                     .description(ts("Settings.desc.min_interval")),
-                    // -- 请求间隔 max --
+                    // 请求间隔 max
                     SettingItem::new(
                         ts("Settings.item.max_interval"),
                         number_field_u32_clamped(
@@ -107,7 +105,7 @@ pub(super) fn build(ctx: &PageCtx<'_>, _cx: &App) -> SettingPage {
             SettingGroup::new()
                 .title(ts("Settings.group.retry"))
                 .items(vec![
-                    // -- 启用失败重试 --
+                    // 启用失败重试
                     SettingItem::new(
                         ts("Settings.item.enable_retry"),
                         bool_field(
@@ -117,7 +115,7 @@ pub(super) fn build(ctx: &PageCtx<'_>, _cx: &App) -> SettingPage {
                         ),
                     )
                     .description(ts("Settings.desc.enable_retry")),
-                    // -- 最大重试次数 --
+                    // 最大重试次数
                     SettingItem::new(
                         ts("Settings.item.max_retries"),
                         number_field_u32_clamped(
@@ -132,7 +130,7 @@ pub(super) fn build(ctx: &PageCtx<'_>, _cx: &App) -> SettingPage {
                         ),
                     )
                     .description(ts("Settings.desc.max_retries")),
-                    // -- 重试间隔 min --
+                    // 重试间隔 min
                     SettingItem::new(
                         ts("Settings.item.retry_min_interval"),
                         number_field_u32_clamped(
@@ -147,7 +145,7 @@ pub(super) fn build(ctx: &PageCtx<'_>, _cx: &App) -> SettingPage {
                         ),
                     )
                     .description(ts("Settings.desc.retry_min_interval")),
-                    // -- 重试间隔 max --
+                    // 重试间隔 max
                     SettingItem::new(
                         ts("Settings.item.retry_max_interval"),
                         number_field_u32_clamped(

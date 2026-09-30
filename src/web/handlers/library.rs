@@ -1,11 +1,8 @@
 //! 书库列表 + 文件下载 + 删除。
 //!
-//! Phase 3.5：白名单 / `LibraryEntry` / `list_library_entries` / `open_download_file`
-//! 全部搬到 [`crate::core::library`]；这里只做 HTTP 层的取参 + 状态码映射。
-//!
-//! Phase 4.x：handler 错误统一走 [`crate::web::error::WebError`]，响应 body
-//! 经 [`crate::i18n::ts_for_locale`] 按请求 locale 翻译。成功 body（删除确认）
-//! 同样是按 locale 翻译的 localized 字符串。
+//! 白名单 / 目录列举 / 文件打开都实现于 [`crate::core::library`]，这里只做 HTTP
+//! 层的取参 + 状态码映射。错误与成功 body 都经 [`crate::i18n::ts_for_locale`]
+//! 按请求 locale 翻译。
 
 use axum::extract::{Path, Query, State};
 use axum::http::header;
@@ -37,9 +34,7 @@ pub async fn library_list(
     Json(entries)
 }
 
-/// `DELETE /api/library/:filename` — 删除本地下载文件。
-///
-/// 成功响应：localized "Deleted" / "已删除" / "已刪除" 字符串（plain text body）。
+/// `DELETE /api/library/:filename` — 删除本地下载文件（成功返 localized plain text）。
 pub async fn library_delete(
     Locale(locale): Locale,
     State(state): State<SharedState>,
@@ -50,9 +45,7 @@ pub async fn library_delete(
     Ok(ts_for_locale(locale, "WebErrors.library_deleted"))
 }
 
-/// `GET /api/files/:filename` — 下载书库文件（binary body）。
-///
-/// 错误经 `WebError` 渲染（status 400/404/500 + JSON envelope）。
+/// `GET /api/files/:filename` — 下载书库文件（binary body，错误走 `WebError`）。
 pub async fn file_download(
     State(state): State<SharedState>,
     Path(filename): Path<String>,
@@ -74,10 +67,7 @@ pub async fn file_download(
         .into_response())
 }
 
-// ── WebError 自动装箱 ──────────────────────────────────────────
-//
-// `OpenFileError` → `WebError`：NotFound → 404 + WebErrors.not_found 翻译；
-// Io → 500 + WebErrors.internal 翻译（避免泄漏内部路径）。
+// `OpenFileError` → `WebError`：NotFound → 404；Io → 500（不泄漏内部路径）。
 impl From<OpenFileError> for WebError {
     fn from(e: OpenFileError) -> Self {
         match e {

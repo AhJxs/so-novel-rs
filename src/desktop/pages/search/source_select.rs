@@ -1,15 +1,11 @@
 //! 选书源下拉的自定义 `SelectItem`。
 //!
-//! 为什么需要：gpui-kit 组件内置的 `SelectItem` impls（`String` / `SharedString` /
-//! `&'static str`）都强制 `value() == title() == self`，无法让 value 是 `"rule:1"`、
-//! title 是 `"起点 (ZH_CN)"`。手写小 struct 是最简方案。
+//! 必须自定义：组件内置的 `SelectItem` impl（`String` / `SharedString` / `&'static str`）
+//! 强制 `value() == title()`，没法让 value 是 `"rule:1"`、title 是 `"起点 (ZH_CN)"`。
 //!
-//! - `value`: 内部 id —— `"all"` 表示"聚合搜索"（= `None`），`"rule:{id}"` 表示单源。
-//! - `title`: 给用户看的文本 —— 聚合搜索时是 `ts("Search.source.aggregate")`；
-//!   单源时是 `format!("{name} ({LANG})")`。
-//! - `Value` 关联类型 = `SharedString`：`Confirm(Some(value))` 拿到的还是
-//!   `SharedString`，解析逻辑 `v == "all" → None;
-//!   v.strip_prefix("rule:").and_then(parse) → Some(id)`。
+//! - `value`: `"all"` = 聚合搜索（= `None`），`"rule:{id}"` = 单源。
+//! - `title`: 用户可见文本（聚合标题或 `format!("{name} ({LANG})")`）。
+//! - `Value` = `SharedString`，`Confirm(Some(value))` 的解析逻辑见 `mod.rs` 的订阅。
 
 use gpui_kit::SharedString;
 use gpui_kit::component::select::SelectItem;

@@ -1,7 +1,5 @@
-// 下载任务页面。轮询 Task 列表，显示进度条，支持取消。
+// 下载任务页面：轮询 Task 列表 + 进度条 + 取消 / 删除（AlertDialog 二次确认）。
 // 进度：total_chapters 已确定 → 定量进度条；解析阶段（=0）→ indeterminate。
-// 分页：跟 library/search 同款 Pagination（含折叠）。
-// 删除走 AlertDialog 二次确认（跟 library 页同模式）。
 
 import { useState, useEffect, useCallback, useMemo } from "react"
 import { ArrowDown, ArrowDownToLine, Ban, CheckCircle2, CircleX } from "lucide-react"
@@ -37,7 +35,7 @@ import type { Task } from "@/lib/types"
 
 const PAGE_SIZE = 12
 
-// 状态映射：color 给 icon/badge 文字用，bg 给卡片左侧色块用。
+// 状态映射：color 给 icon/badge 文字，bg 给卡片左侧色块。
 const STATUS_MAP: Record<string, { labelKey: string; color: string; bg: string }> = {
   Downloading: { labelKey: "tasks.status.downloading", color: "text-blue-500", bg: "bg-blue-100 dark:bg-blue-900" },
   Finished:    { labelKey: "tasks.status.finished", color: "text-green-500", bg: "bg-green-100 dark:bg-green-900" },
@@ -45,7 +43,7 @@ const STATUS_MAP: Record<string, { labelKey: string; color: string; bg: string }
   Cancelled:   { labelKey: "tasks.status.cancelled", color: "text-gray-400", bg: "bg-gray-100 dark:bg-gray-800" },
 }
 
-// 顶部 badge 背景：状态色 15% 半透明。
+// 顶部 badge 背景：状态色 15% 半透明
 const STATUS_BADGE_BG: Record<keyof typeof STATUS_MAP, string> = {
   Downloading: "bg-blue-500/15 text-blue-500",
   Finished:    "bg-green-500/15 text-green-500",
@@ -64,7 +62,7 @@ export default function TasksPage() {
   const totalPages = Math.max(1, Math.ceil(tasks.length / PAGE_SIZE))
   const paged = tasks.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
 
-  // 顶部状态 badge：按固定顺序，计数 = 0 不渲染。
+  // 顶部状态 badge：固定顺序，计数 = 0 不渲染
   const statusCounts = useMemo(() => {
     const counts: Record<string, number> = {}
     for (const task of tasks) counts[task.status] = (counts[task.status] ?? 0) + 1
@@ -84,7 +82,6 @@ export default function TasksPage() {
     setPending(null)
   }
 
-  // 总页数多时折叠中间页
   const pageItems = useCallback((): ("ellipsis" | number)[] => {
     if (totalPages <= 7) return Array.from({ length: totalPages }, (_, i) => i + 1)
     const items: ("ellipsis" | number)[] = [1]
@@ -131,7 +128,6 @@ export default function TasksPage() {
             ))}
           </div>
 
-          {/* 分页 */}
           {totalPages > 1 && (
             <div className="pt-2">
               <Pagination className="justify-end">
@@ -197,7 +193,7 @@ function TaskCard({ task: t, onCancel, onDelete }: { task: Task; onCancel: () =>
   const { t: translate } = useTranslation()
   const s = STATUS_MAP[t.status] ?? STATUS_MAP.Downloading
   const pct = t.total_chapters > 0 ? Math.round((t.current_chapter / t.total_chapters) * 100) : 0
-  // 已结束的任务（包括失败 / 取消）保留最后一次的进度。
+  // 已结束的任务（含失败 / 取消）保留最后一次进度
   const showProgress = t.total_chapters > 0
   const isActive = t.status === "Downloading"
 
@@ -237,8 +233,7 @@ function TaskCard({ task: t, onCancel, onDelete }: { task: Task; onCancel: () =>
           </div>
         </div>
 
-        {/* 进度条：解析阶段（total_chapters=0 且还在 Downloading）用不定态；
-            已知总数用定量。已结束任务保留最后进度。 */}
+        {/* 解析阶段（total_chapters=0 且仍 Downloading）用不定态，否则定量 */}
         {(showProgress || (isActive && t.total_chapters === 0)) && (
           <div className="flex flex-col gap-1.5">
             {showProgress && (

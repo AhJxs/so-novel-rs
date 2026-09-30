@@ -1,6 +1,4 @@
-//! PDF 文档构建主流程
-//!
-//! `PdfExporter` + `Paginator` (流式分页) + `Run` (单行文本) + 排版常量。
+//! PDF 文档构建主流程: `PdfExporter` + `Paginator` (流式分页) + `Run` (单行文本) + 排版常量。
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -50,7 +48,6 @@ impl Exporter for PdfExporter {
             return Err(ExportError::EmptyChaptersDir(chapters_dir.to_path_buf()));
         }
 
-        // 解析每章: 抽 <h1> 标题 + <p> 段落, 剥成纯文本。
         let mut chapters: Vec<(Option<String>, Vec<String>)> = Vec::with_capacity(files.len());
         for path in &files {
             let raw = fs::read_to_string(path)?;
@@ -63,8 +60,8 @@ impl Exporter for PdfExporter {
         let out_name = sanitize_filename(&format!("{}({}).pdf", book.book_name, book.author));
         let out_path = unique_path(out_dir, &out_name);
 
-        // CJK 字体: 找到 → 量宽用 EmbeddedFont, 注册到 builder; 找不到 → 启发式量宽,
-        // 不注册字体 (中文 tofu 但排版照常)。
+        // CJK 字体: 找到则量宽用 EmbeddedFont 并注册到 builder;
+        // 找不到则启发式量宽、不注册字体 (中文 tofu 但排版照常)。
         let font_bytes = find_cjk_font();
         let measurer = if let Some(b) = &font_bytes {
             Measurer::Embedded {
@@ -95,8 +92,7 @@ impl Exporter for PdfExporter {
 
         let mut builder = DocumentBuilder::new().metadata(metadata);
         if let Some(b) = &font_bytes {
-            // 量宽用的 EmbeddedFont 已被 measurer 持有 (非 Clone), 这里再解析一份注册
-            // 到 builder。解析 msyh.ttc ~20k 字形表, 开销可忽略。
+            // 量宽用的 EmbeddedFont 已被 measurer 持有 (非 Clone), 故这里再解析一份给 builder。
             let font = EmbeddedFont::from_data(Some(CJK_FONT.into()), b.clone())
                 .map_err(|e| ExportError::Pdf(format!("font parse: {e}")))?;
             builder = builder.register_embedded_font(CJK_FONT, font);
@@ -142,10 +138,6 @@ impl Exporter for PdfExporter {
     }
 }
 
-// ---------------------------------------------------------------------------
-// 排版
-// ---------------------------------------------------------------------------
-
 /// 单行文本: 内容 + 绝对坐标 (x=左边距或居中, y=基线) + 字体名 + 字号。
 struct Run {
     text: String,
@@ -159,7 +151,7 @@ struct Run {
 const PAGE_W: f32 = 595.0;
 const PAGE_H: f32 = 842.0;
 const MARGIN: f32 = 56.0; // ≈2cm
-const CONTENT_W: f32 = PAGE_W - 2.0 * MARGIN; // 可排宽度
+const CONTENT_W: f32 = PAGE_W - 2.0 * MARGIN;
 
 const BODY_SIZE: f32 = 12.0;
 const TITLE_SIZE: f32 = 20.0;
@@ -224,7 +216,7 @@ impl<'b> Paginator<'b> {
         self.line(text, x, size, lh);
     }
 
-    /// 一个段落: 首行缩进 2em, 逐字换行到 `CONTENT_W。段后留白`。
+    /// 一个段落: 首行缩进 2em, 逐字换行到 `CONTENT_W`, 段后留白。
     fn paragraph(&mut self, text: &str, size: f32) {
         let lh = size * 1.8;
         let indent = 2.0 * size;
@@ -362,7 +354,6 @@ mod tests {
             "not a PDF (magic mismatch): {:?}",
             &bytes[..8.min(bytes.len())]
         );
-        // 文件名含书名 + 作者
         let name = path.file_name().unwrap().to_string_lossy();
         assert!(name.contains("起航"), "name missing book: {name}");
         assert!(name.contains("苹果"), "name missing author: {name}");

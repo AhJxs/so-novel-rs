@@ -62,12 +62,10 @@ jobs:
           version="${{ steps.version.outputs.version }}"
           is_release="${{ steps.version.outputs.is_release }}"
           
-          # 矩阵内部构建时，【只】推送带独立架构后缀的 tag，避免并行构建时相互覆盖。
-          # 顶级的全局 tag (如 :latest 和 :0.3.2) 统一由后面的 manifest job 合并生成。
+          # 只推带架构后缀的 tag（避免并行构建互相覆盖）；顶级 tag 由后面的 manifest job 生成。
           if [[ "$is_release" == "true" ]]; then
             tags=( "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${version}-${{ matrix.arch }}" )
           else
-            # 手动触发时，仅打一个本地/非覆盖性的 dev-arch tag 用于辨识
             tags=( "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${version}-${{ matrix.arch }}" )
           fi
           

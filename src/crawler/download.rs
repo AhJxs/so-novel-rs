@@ -1,9 +1,7 @@
 //! 阶段二: 章节下载 + 导出
 //!
-//! 主流程: `download_book` 调 `resolve_book` 拿到 Book + 章节列表,
-//! 然后调 `download_chapters` 并发抓取 + 导出。
-//!
-//! 关键路径: Semaphore 限并发 / per-task write / 取消用 `tokio::select`
+//! 主流程: `download_book` 调 `resolve_book` 拿到 Book + 章节列表, 然后调 `download_chapters`
+//! 并发抓取 + 导出。关键路径: Semaphore 限并发 / per-task write / 取消用 `tokio::select`
 //! 配合 reqwest future drop 实现零延迟中断。
 
 use std::path::PathBuf;
@@ -37,10 +35,8 @@ use super::retry as retry_mod;
 ///
 /// # Errors
 ///
-/// - `CrawlerError::Book` / `Toc` — 详情/目录解析失败
-/// - `CrawlerError::EmptyToc` — 目录返回 0 章
-/// - `CrawlerError::Cancelled` — 用户取消
-/// - `CrawlerError::Export` — 导出失败
+/// `CrawlerError::Book` / `Toc` 详情/目录解析失败; `EmptyToc` 目录返回 0 章;
+/// `Cancelled` 用户取消; `Export` 导出失败。
 #[tracing::instrument(
     name = "download_book",
     skip_all,
@@ -90,8 +86,7 @@ pub async fn download_book(
 
 /// 阶段二: 下载指定章节 + 导出。
 ///
-/// `chapters` 已由调用方按用户选择过滤过范围。`DownloadOptions` 中需传入
-/// progress sender 和 cancel token。
+/// `chapters` 已由调用方按用户选择过滤过范围。
 ///
 /// # Examples
 ///
@@ -101,10 +96,8 @@ pub async fn download_book(
 ///
 /// # Errors
 ///
-/// - `CrawlerError::Cancelled` — 用户取消 (含 dispatch 阶段 + drain 阶段)
-/// - `CrawlerError::EmptyToc` — 全部章节失败 / 目录空
-/// - `CrawlerError::Export` — 导出失败
-/// - `CrawlerError::Io` — 写盘失败
+/// `CrawlerError::Cancelled` 用户取消 (含 dispatch + drain 阶段); `EmptyToc` 全部章节失败 / 目录空;
+/// `Export` 导出失败; `Io` 写盘失败。
 #[tracing::instrument(
     name = "download_chapters",
     skip_all,
@@ -142,12 +135,10 @@ pub async fn download_chapters(
     let rule = Arc::new(source.rule.clone());
     let cf_bypass_owned: Option<Arc<str>> = cf_bypass.map(Arc::from);
 
-    // 准备 chapters 目录
     let book_dir_name = build_book_dir_name(book, cfg.download.ext_name);
     let chapters_dir = std::path::Path::new(&cfg.download.download_path).join(&book_dir_name);
     std::fs::create_dir_all(&chapters_dir)?;
 
-    // 并发抓章节
     let max_concurrent = compute_concurrency(source, chapters.len());
     let render_target: RenderTarget = cfg.download.ext_name.into();
     let rule_chapter = Arc::new(
@@ -183,22 +174,19 @@ pub async fn download_chapters(
         let cancel = cancel.clone();
         let eff = eff.clone();
         let enable_retry = cfg.crawl.enable_retry;
-        // 简繁转换需要源/目标语言。`source` / `cfg` 是借用, 闭包 'static 要求 owned
-        // 值; clone Rule (Arc 浅拷贝, 开销小) 和 target LangType (Copy)。
-        // 目标语言从界面语言 (`Language`) 推导 —— 合并设置后用户只设 Language。
+        // 简繁转换需要源/目标语言: `source` / `cfg` 是借用, 闭包 'static 要求 owned 值,
+        // 故 clone Rule (Arc 浅拷贝, 开销小) 与 target LangType (Copy)。
         let rule_lang = source.rule.language.clone();
         let target_lang = cfg.global.language.to_book_target_lang();
 
-        // per-task write path
         let ch_dir = chapters_dir.clone();
         let ch_format = format;
         let ch_digit_count = digit_count;
         let ch_notify = notify.clone();
 
         handles.push(tokio::spawn(async move {
-            // 限并发。`acquire_owned` 当前 tokio 实现在 Semaphore 不被 close 的情况
-            // 下永远成功, 但 API 返回 Result; 防御性: 万一未来切换实现/close 信号进来,
-            // 把这一章记为 Failed 而不是 panic 把整个下载任务搞炸。
+            // 限并发。`acquire_owned` 在 Semaphore 不被 close 时永远成功, 但 API 返回 Result;
+            // 防御性: 万一将来实现变化 / 有 close 信号, 把这一章记为 Failed 而不是 panic 整个任务。
             let _permit = match permit.acquire_owned().await {
                 Ok(p) => p,
                 Err(e) => {
@@ -207,9 +195,8 @@ pub async fn download_chapters(
                 }
             };
 
-            // 章节内随机间隔 (爬取礼貌性)。
-            // 用 select! 配合 cancel — interval 一般是 100ms-2s, 整段 sleep
-            // 期间用户取消应当瞬间响应, 不能傻等到 sleep 结束。
+            // 章节内随机间隔 (爬取礼貌性)。用 select! 配合 cancel —— 间隔常是 100ms-2s,
+            // 取消应当瞬间响应, 不能傻等到 sleep 结束。
             let interval = {
                 let lo = eff.min_interval_ms.max(1) as u64;
                 let hi = eff.max_interval_ms.max(eff.min_interval_ms + 1) as u64;
@@ -244,13 +231,11 @@ pub async fn download_chapters(
                             return Err(ChapterError::Http("cancelled".to_string()));
                         }
                         parse_chapter(&client, &rule, &chapter, cf.as_deref()).await
-                        //       ^^^^^^^ Arc<Rule> 自动 deref coercion 到 &Rule
                     }
                 },
                 max_attempts,
-                // 重试间隔用 random_retry_interval_ms (同时受 retry-min / retry-max 约束,
-                // 与 Java 端 randomInterval(config, true) 一致)。原 linear_backoff 不读
-                // retry-max, 会让 retry-max-interval 配置形同虚设。
+                // 重试间隔用 random_retry_interval_ms (同时受 retry-min / retry-max 约束, 与 Java 端
+                // randomInterval(config, true) 一致); 自写 linear backoff 会忽略 retry-max 配置。
                 move |_attempt| {
                     let dur = Duration::from_millis(crate::http::random_retry_interval_ms(&eff));
                     async move {
@@ -276,7 +261,6 @@ pub async fn download_chapters(
                         &rule_lang,
                         target_lang,
                     );
-                    // per-chapter write: persist immediately
                     if let Err(e) = write_single_chapter(
                         &ch_dir,
                         order,
@@ -298,8 +282,7 @@ pub async fn download_chapters(
                 }
                 Err(e) => {
                     let reason = format!("{e:#}");
-                    // `sub=chapter:{order}` 让 grep `trace_id=N` 后能直接看到
-                    // 这次下载里所有失败的章节序号 (按 sub 排序)。
+                    // `sub=chapter:{order}` 让 grep `trace_id=N` 后能直接看到这次下载里所有失败的章节序号。
                     tracing::warn!(
                         order = order,
                         sub = %format!("chapter:{order}"),
@@ -321,9 +304,8 @@ pub async fn download_chapters(
         }));
     }
 
-    // 5. 收尾。同时用 select! race "全部 join" 与 "cancel":
-    //    - 用户取消 → 立即 abort 所有 chapter handle、发 Progress::Cancelled、return
-    //    - 正常完成 → 收 rendered
+    // 收尾: 用 select! race "全部 join" 与 "cancel"。
+    // 用户取消 → 立即 abort 所有 chapter handle + 发 `Progress::Cancelled`; 正常完成 → 收 rendered。
     let mut rendered_count = 0usize;
     let drain_handles = async {
         for h in &mut handles {
@@ -344,8 +326,7 @@ pub async fn download_chapters(
             for h in &handles {
                 h.abort();
             }
-            // 章节文件在 task 内部已完成写盘 (或未能写入),
-            // 所以取消时 chapters_dir 一定是空的 (除非用户事先放过文件) — 直接清理。
+            // 章节文件由 task 内部完成写盘, 取消时 chapters_dir 一般是空的 (除非用户事先放过文件)。
             cleanup_chapters_dir_if_empty(&chapters_dir);
             let _ = progress.send(Progress::Cancelled);
             if let Some(ref n) = notify { n() }
@@ -368,8 +349,6 @@ pub async fn download_chapters(
         return Err(CrawlerError::EmptyToc);
     }
 
-    // 6. 导出 (章节文件已在每个 task 中写入 chapters_dir)
-
     // 封面: 仅 EPUB 才下载; 失败 soft-skip。
     let cover_bytes = if matches!(render_target, RenderTarget::Epub) {
         download_cover(client, book.cover_url.as_deref()).await
@@ -382,7 +361,6 @@ pub async fn download_chapters(
     let final_path =
         exporter.merge_with_cover(book, &chapters_dir, out_dir, cover_bytes.as_deref())?;
 
-    // 7. 清理章节临时目录
     if !cfg.download.preserve_chapter_cache
         && let Err(e) = std::fs::remove_dir_all(&chapters_dir)
     {
@@ -399,8 +377,7 @@ pub async fn download_chapters(
         n();
     }
 
-    // 终态日志已由 ops/download.rs 的 `下载任务终止 outcome=ok` 覆盖;
-    // 这里留 debug 级用于排查"为什么声称 1454 章只渲染了 1400 章"之类的细节。
+    // 终态日志已由 ops/download.rs 覆盖; 这里留 debug 级用于排查"声称 1454 章只渲染 1400 章"之类的细节。
     // `book` / `chapters` 已在 `#[tracing::instrument]` 的 span 字段里 —— 不重复带。
     tracing::debug!(
         rendered = rendered_count,
@@ -421,10 +398,8 @@ enum ChapterOutcome {
     Cancelled,
 }
 
-/// 与 Java `Crawler` 中并发数计算一致:
-/// - `concurrency = Some(n)`: 直接用, 但 ≤ 100;
-/// - `None` (即 -1): 自动 = `min(50, toc.len())`;
-/// - 任何情况下不超过章节数。
+/// 与 Java `Crawler` 中并发数计算一致: `Some(n)` 直接用但 ≤ 100; `None` (即 -1) 自动
+/// = `min(50, toc.len())`; 任何情况下不超过章节数。
 fn compute_concurrency(source: &Source, toc_len: usize) -> usize {
     let configured = source.effective_crawl.concurrency;
     let raw = match configured {
@@ -436,13 +411,8 @@ fn compute_concurrency(source: &Source, toc_len: usize) -> usize {
 
 /// 取消 / 提前失败时清理 `chapters_dir`: **只删空目录**。
 ///
-/// - 目录里已经写过章节文件 (用户成功跑过部分章节但中途取消, 下一轮"重试"想接着用)
-///   或用户事先在那放了别的文件 → 保留;
-/// - 目录是空的 (典型场景: 取消时还没来得及 `write_chapter_files`) → 删掉, 不留垃圾。
-///
-/// 用 `read_dir().next().is_none()` 判空, 比 `remove_dir_all` 安全得多。
-/// 任何 IO 错误都只 `tracing::warn!` —— 清理失败不影响 cancel 主流程, 下次启动用户
-/// 自己删也不痛。
+/// 目录里已写过章节文件 (用户想接着用) 或用户事先放了别的文件 → 保留; 目录是空的 → 删掉不留垃圾。
+/// 用 `read_dir().next().is_none()` 判空比 `remove_dir_all` 安全; 任何 IO 错误只 `tracing::warn!`。
 fn cleanup_chapters_dir_if_empty(dir: &std::path::Path) {
     let Ok(mut entries) = std::fs::read_dir(dir) else {
         // 目录不存在 / 读不了 — 没什么可清的
@@ -513,9 +483,7 @@ mod tests {
     #[test]
     fn concurrency_default_is_min_50_and_toc() {
         let s = make_source(None);
-        // toc 较大时上限 50
         assert_eq!(compute_concurrency(&s, 200), 50);
-        // toc 较小时被章节数压低
         assert_eq!(compute_concurrency(&s, 7), 7);
         // 0 章节也至少给 1 (避免 Semaphore::new(0))
         assert_eq!(compute_concurrency(&s, 0), 1);
@@ -529,7 +497,6 @@ mod tests {
         let huge = make_source(Some(500));
         assert_eq!(compute_concurrency(&huge, 200), 100);
 
-        // 即使配置了大值, 也不能超过 toc 长度
         let s2 = make_source(Some(50));
         assert_eq!(compute_concurrency(&s2, 3), 3);
     }

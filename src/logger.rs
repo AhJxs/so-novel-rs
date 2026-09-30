@@ -1,23 +1,12 @@
-//! 日志系统 (PR #17, 2026-07-08 重构; 2026-07-08 默认改为 Text).
+//! 日志系统：`tracing_subscriber` 的全局初始化 + 输出格式选择。
 //!
-//! # 设计
+//! - text 模式（默认）：人类可读文本 + ANSI 颜色；JSON 模式由 `LOG_FORMAT=json` 切换，
+//!   生产/容器环境用，便于聚合栈 (Loki / ELK) parse
+//! - env filter 走 `RUST_LOG`（默认 `info,so_novel_rs=debug`）
+//! - **`tracing_subscriber::init` 全局唯一，二次 init 会 panic**，须由 caller 自行保证：
+//!   `cli::run`（`--verbose`）与 `startup::dispatch`（Web / Gui 路径）已分流、各自只调一次
 //!
-//! - **text 模式 (默认)**: 人类可读文本 + ANSI 颜色, 开发期常用
-//! - **JSON 模式**: `LOG_FORMAT=json` 环境变量切换, 生产/容器环境用, 便于聚合栈 (Loki / ELK) parse
-//! - **env filter**: `RUST_LOG=info,so_novel_rs=debug` 走 `tracing_subscriber::EnvFilter`
-//! - **init 一次**: `tracing_subscriber::init()` 全局唯一; 二次 init 会 panic,
-//!   caller 需自行保证 (CLI 启动期 + `startup::dispatch` 模式已分流)
-//!
-//! # 调用方
-//!
-//! - `cli::run` 内部: `--verbose` 时 init
-//! - `startup::dispatch` Web 路径: `attach_console` 后 init
-//! - `startup::dispatch` Gui 路径: 直接 init
-//!
-//! # 不在本模块
-//!
-//! - tracing macro 本身 (`tracing::info!` 等) — 在所有业务代码直接用
-//! - `TraceId` 链路 ID — 在 `app::trace` 模块
+//! tracing macro 本身与 `TraceId` 链路（`app::trace`）不在本模块。
 
 use std::str::FromStr;
 use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
@@ -57,8 +46,7 @@ impl FromStr for LogFormat {
 ///
 /// # Errors
 ///
-/// 当 `LOG_FORMAT` 环境变量是无效值时, 启动 panic. 用 `init_with_format`
-/// 走非 panic 路径。
+/// `LOG_FORMAT` 是无效值时 panic；需非 panic 路径用 `init_with_format`。
 pub fn init() {
     let format = std::env::var("LOG_FORMAT")
         .ok()
@@ -104,9 +92,7 @@ pub fn init_with_format(format: LogFormat) -> Result<(), String> {
     Ok(())
 }
 
-/// 旧 `init_tracing` 别名, 保留给 cli 启动期调用 (无 env filter, 全部 info 起步).
-///
-/// 二次 init 静默 no-op (而不是 panic); 业务方可放心多次调.
+/// 旧 `init_tracing` 别名, 保留给 cli 启动期调用。二次 init 静默 no-op (而非 panic), 可放心多次调。
 pub fn init_compat_legacy() {
     let filter = EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| EnvFilter::new("info,so_novel_rs=debug"));
@@ -150,7 +136,6 @@ mod tests {
             .with(fmt::layer().with_target(false))
             .set_default();
         init_compat_legacy();
-        // 二次 init 也静默 (try_init + no-op)
         init_compat_legacy();
     }
 }

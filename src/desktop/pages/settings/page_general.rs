@@ -1,14 +1,7 @@
-//! 常规页（gpui-kit 组件库的 `Settings` 左侧 sidebar 第 1 项）。
+//! 常规页（`Settings` 左侧 sidebar 第 1 项）：外观 + 网络 + 下载 3 个 group。
 //!
-//! 3 个 group：
-//! - 外观：主题模式（dropdown） / 按模式条件渲染的主题 `item（theme_mode_items`）/
-//!   `语言（dropdown，after_set` 弹重启 dialog）/ 字号（Slider）
-//! - 网络：GitHub 代理 / Cloudflare bypass（Input）
-//! - 下载：下载目录（Input + 「浏览」suffix Button，调 rfd）/ 默认格式（dropdown）/
-//!   TXT 编码（dropdown）/ 保留章节缓存 / 启用下载进度条（switch）
-//!
-//! `theme_mode_items` 之前在 `SettingsPage` impl 内（settings.rs:381），是 100 行的
-//! 闭包工厂。拆到本文件 —— 只服务「外观」组，留 `pub(super)` 即可。
+//! 外观 = 主题模式 + 按模式条件渲染的主题 item + 语言 + 字号滑块；
+//! 网络 = GitHub 代理 / Cloudflare bypass；下载 = 目录 / 默认格式 / TXT 编码 / 章节缓存。
 
 use gpui_kit::component::{
     ActiveTheme as _, AxisExt as _, IconName, Sizable as _, WindowExt as _,
@@ -38,9 +31,7 @@ pub(super) fn build(ctx: &PageCtx<'_>, cx: &App) -> SettingPage {
     let m = ctx.model.clone();
     let theme_kind = ctx.model.read(cx).config.global.theme_pref.kind;
 
-    // 3 种应用语言 → (value_str, label)，存到 TOML `[global].language`，
-    // 由 `Language::as_str()` 给出（"zh-CN" / "zh-TW" / "en"）。
-    // label 走 i18n：切到 English 时显示 "Simplified Chinese" / "Traditional Chinese" / "English"。
+    // 存到 TOML `[global].language`，value 由 `Language::as_str()` 给出。
     let language_options: Vec<(SharedString, SharedString)> = vec![
         (
             Language::SimplifiedChinese.as_str().into(),
@@ -92,7 +83,6 @@ pub(super) fn build(ctx: &PageCtx<'_>, cx: &App) -> SettingPage {
                 .title(ts("Settings.group.appearance"))
                 .items(
                     vec![
-                        // -- 主题模式：动态 / 静态 --
                         SettingItem::new(
                             ts("Settings.item.theme_kind"),
                             dropdown_field(
@@ -114,7 +104,7 @@ pub(super) fn build(ctx: &PageCtx<'_>, cx: &App) -> SettingPage {
                     .into_iter()
                     .chain(theme_mode_items(ctx, theme_kind, &m))
                     .chain(std::iter::once(
-                        // -- 界面语言（Language：应用 UI 语言；同时也是下载目标语言）--
+                        // -- 界面语言（应用 UI 语言，同时也是下载目标语言）--
                         SettingItem::new(
                             ts("Settings.item.language"),
                             dropdown_field(
@@ -143,10 +133,8 @@ pub(super) fn build(ctx: &PageCtx<'_>, cx: &App) -> SettingPage {
                         .description(ts("Settings.desc.language")),
                     ))
                     .chain(std::iter::once(
-                        // -- 字号（滑块，12–24px，实时缩放整个 app）--
-                        // SliderState 由 `SettingsPage::new` 缓存（同 theme_state），
-                        // 闭包里只复用。右侧小标签实时显示当前 px（从 SliderState 读，
-                        // 拖拽过程中也跟着变）。`.flex_1()` 让滑块填满剩余宽度。
+                        // -- 字号（滑块 12–24px，实时缩放整个 app）--
+                        // SliderState 由 `SettingsPage::new` 建一次缓存，右侧标签实时读当前 px。
                         SettingItem::new(
                             ts("Settings.item.font_size"),
                             SettingField::render({
@@ -175,8 +163,7 @@ pub(super) fn build(ctx: &PageCtx<'_>, cx: &App) -> SettingPage {
                             }),
                         )
                         .description(ts("Settings.desc.font_size")),
-                    ))
-                    .collect::<Vec<_>>(),
+                    )),
                 ),
             // ============ 网络 ============
             SettingGroup::new()
@@ -205,44 +192,20 @@ pub(super) fn build(ctx: &PageCtx<'_>, cx: &App) -> SettingPage {
             SettingGroup::new()
                 .title(ts("Settings.group.download"))
                 .items(vec![
-                    // -- 下载目录（带「浏览…」图标，点击调 rfd 选目录）--
-                    // gpui-kit 组件的 `SettingField::input` 只能给裸 Input
-                    // 没法挂 suffix icon。改走 `SettingField::render` + 原生
-                    // `Input::new(&ctx.download_path_input).suffix(Button::...)`。
-                    // InputState 缓存到 `SettingsPage` struct（和 theme_state 同理，
-                    // 避免 click / focus / 输入内容在每次 render 后丢失），rfd 选
-                    // 完目录回写 model + notify，下一次 render 走 `sync_download_path`
-                    // 把 model 的新值推回 InputState。
                     SettingItem::new(
                         ts("Settings.item.download_path"),
                         SettingField::render({
                             let download_path_input = ctx.download_path_input.clone();
                             let pick_folder_listener = ctx.pick_folder_listener.clone();
                             move |options, _window, _cx| {
-                                // 宽度要手动设：SettingField::input 内部 `.w_64()` /
-                                // `.w_full()` 依 layout，不设的话 input 渲染成 0
-                                // 大小 → text 被裁切看不见、suffix button 没 hit area
-                                // → click 不响应。详见 `string.rs:76-86`。
+                                // 宽度要手动设：不设的话 input 渲染成 0 大小 → text 被裁切、
+                                // suffix button 没 hit area → click 不响应。
                                 let mut el = Input::new(&download_path_input)
                                     .with_size(options.size())
                                     .suffix({
-                                        // ghost + xsmall 让 button 视觉上就是 icon，
-                                        // 不抢 input 焦点、看起来像 input 的一部分。
-                                        // input_story.rs:240 用的就是这个 pattern。
-                                        //
-                                        // **click handler**用 owner-cache 的
-                                        // `pick_folder_listener`（见 SettingsPage struct
-                                        // 注释）—— render 闭包拿不到 `Context<Self>`，
-                                        // 在这里现建 `cx.listener` 不可行；早先尝试
-                                        // 「`page_handle.update(cx, |_page, ctx| cx.spawn(...))`」
-                                        // 双层套娃下 click 不触发。
-                                        //
-                                        // `Rc<dyn Fn + 'static>::as_ref()` 拿到的是
-                                        // `&'a Rc<dyn Fn>`，**不是 `'static`** —— `Button::on_click`
-                                        // 要 `impl Fn + 'static`，传引用被拒。包一层
-                                        // `move |...| listener(...)` 转成新的
-                                        // `impl Fn + 'static`：捕获 Rc（'static），
-                                        // 内部走 Rc::deref 调底层闭包。
+                                        // click handler 用 owner-cache 的 `pick_folder_listener`
+                                        // （render 闭包拿不到 `Context<Self>`，不能现建 `cx.listener`）；
+                                        // `Rc` 要包一层闭包才满足 `on_click` 的 `'static`。
                                         let listener = pick_folder_listener.clone();
                                         Button::new("download-path-pick")
                                             .ghost()
@@ -252,8 +215,8 @@ pub(super) fn build(ctx: &PageCtx<'_>, cx: &App) -> SettingPage {
                                                 listener(ev, window, app);
                                             })
                                     });
-                                // horizontal layout → 固定 256px（与 `SettingField::input`
-                                // 默认行为一致）；其它 → 占满整行。
+                                // horizontal layout → 固定 256px（与 `SettingField::input` 默认一致）；
+                                // 其它 → 占满整行。
                                 if options.layout().is_horizontal() {
                                     el = el.w_64();
                                 } else {
@@ -313,14 +276,8 @@ pub(super) fn build(ctx: &PageCtx<'_>, cx: &App) -> SettingPage {
         ])
 }
 
-/// 按主题模式构建条件渲染的主题 item。
-///
-/// - `ThemeKind::Static` → 仅「静态主题」Select（全量主题）。
-/// - `ThemeKind::Dynamic` → 「浅色/深色切换」dropdown + 「浅色主题」Select + 「深色主题」Select
-///   （浅/深 Select 已按 mode 过滤，不会把深色变体选进浅色槽）。
-///
-/// 整 item 显隐（不是返回空 div 占位）：切模式后 `apply_theme_pref` →
-/// `cx.refresh_windows()` → 下一帧 `build_pages` 读到新 `kind`，本函数返回不同 item 集。
+/// 按主题模式构建条件渲染的主题 item。整 item 显隐（不是返回空 div 占位）：切模式后下一帧
+/// `build_pages` 读到新 `kind`，本函数返回不同 item 集。
 fn theme_mode_items(ctx: &PageCtx<'_>, kind: ThemeKind, m: &Entity<AppModel>) -> Vec<SettingItem> {
     match kind {
         ThemeKind::Static => vec![
@@ -406,12 +363,8 @@ fn theme_mode_items(ctx: &PageCtx<'_>, kind: ThemeKind, m: &Entity<AppModel>) ->
     }
 }
 
-/// `theme_kind` / `theme_dyn_mode` setter 写完字段后的副作用：
-/// 1. `apply_theme_pref` 读最新 pref + 应用到全局 Theme；
-/// 2. `apply_font_size` 重新设字号（`apply_config` 会重置字号）。
-///
-/// 写不到 caller 的闭包环境 —— 用模块内 `fn` 强制成 fn pointer，让
-/// `dropdown_field(... after_set: Option<fn(...)>)` 能 clone 出 `'static`。
+/// `theme_kind` / `theme_dyn_mode` setter 写完字段后的副作用：应用主题 + 重应用字号
+/// （`apply_config` 会重置字号）。用模块内 `fn` 让它能当 `after_set` 的 fn pointer。
 fn after_theme_kind(m: &Entity<AppModel>, cx: &mut App) {
     let pref = m.read(cx).config.global.theme_pref.clone();
     themes::apply_theme_pref(&pref, None, cx);
@@ -419,23 +372,8 @@ fn after_theme_kind(m: &Entity<AppModel>, cx: &mut App) {
 }
 
 /// language setter 写完字段后的副作用：弹「重启确认」Dialog。
-///
-/// setter 只有 `&mut App` 没有 `&mut Window`。直接调
-/// `cx.windows().next().update(|.., window, cx| open_dialog)`
-/// 中转会 `Err(window not found)`（2026-06-19 日志）——
-/// 根因是 `AnyWindowHandle::update` 内部 `cx.windows.get_mut(id).take()`
-/// 把窗口从 `SlotMap` 临时挪到调用栈，而我们 setter 是从 dropdown
-/// Confirm 同步触发的，此时 root view 的 `update_window` 回调栈
-/// 还没退出，再次 `take()` 同一窗口 → `SlotMap` 里为 None →
-/// 报 "window not found"。
-///
-/// 解法：`cx.defer(closure)` —— 把闭包作为 Effect 推到
-/// flush 队列（gpui 层），下一次 `flush_effects`
-/// 时跑（届时窗口已放回 SlotMap），不再受 `update_window` 嵌套
-/// take 影响。代价 1 帧延迟 ≈ 16ms，跟 `GPApp` 内部调度同步，
-/// 用户无感。
-///
-/// 不污染 AppModel、不需要给 `SettingsPage` 加 flag、也不动 `RootView`。
+/// setter 只有 `&mut App` 没有 `&mut Window`，且从 dropdown Confirm 同步触发时窗口还在
+/// `update_window` 调用栈里（直接 update 会报 "window not found"），故用 `cx.defer` 延后一帧。
 fn after_language(_m: &Entity<AppModel>, cx: &mut App) {
     cx.defer(|cx| {
         tracing::info!("language setter: defer 触发, 调 open_dialog");
@@ -445,7 +383,7 @@ fn after_language(_m: &Entity<AppModel>, cx: &mut App) {
                     alert
                         .title(ts("Settings.language_restart_dialog.title"))
                         .description(ts("Settings.language_restart_dialog.message"))
-                        // gpui-kit 0.7：单项 builder 取代整包 `DialogButtonProps`。
+                        // 单项 builder 取代整包 `DialogButtonProps`。
                         .ok_text(ts("Settings.language_restart_dialog.restart_button"))
                         .cancel_text(ts("Settings.language_restart_dialog.later_button"))
                         .confirm()

@@ -22,20 +22,18 @@ use super::super::trace::{TraceId, sub};
 use crate::core::DownloadTask;
 use crate::utils::time::now_unix_secs;
 
-/// spawn 共享上下文：提取 `rules` / `config` / `http` / `runtime` 四个参数，
-/// 消除 `spawn_download` / `spawn_download_range` / `spawn_resolve_toc` 的重复参数列表。
+/// spawn 共享上下文: 提取 `rules` / `config` / `http` / `runtime`,
+/// 消除各 `spawn_*` 的重复参数列表。
 pub struct OpsCtx<'a> {
     pub rules: &'a [Rule],
     pub config: &'a AppConfig,
     pub http: Arc<HttpClients>,
     pub runtime: &'a tokio::runtime::Runtime,
-    /// 唤醒信号 sender：producer 写入 mpsc 后调 `notify()` 让 `drain_loop`
-    /// 立即排空，不必等 100ms 兜底。详见 `crate::desktop::model::events::WakeupHandle`。
+    /// 唤醒信号 sender: producer 写入 mpsc 后 `notify()`, 让 `drain_loop` 立即排空。
     pub wakeup: &'a WakeupHandle,
 }
 
-/// 派一个 TOC 预取任务（获取元数据 + 章节列表，不开始下载）。
-/// 返回接收端，调用方存入 `search.toc_rx`。
+/// 派一个 TOC 预取任务（获取元数据 + 章节列表, 不开始下载）, 返回接收端。
 pub fn spawn_resolve_toc(
     ctx: &OpsCtx<'_>,
     target: &SearchResult,
@@ -48,7 +46,7 @@ pub fn spawn_resolve_toc(
     let book_url = target.url.clone();
     let source_id = target.source_id;
 
-    // 顶层 trace_id —— TOC 预取是一次独立的"动作"，独立 mint。
+    // 顶层 trace_id —— TOC 预取是独立动作, 单独 mint。
     let trace_id = TraceId::mint();
     let span = tracing::info_span!(
         sub::TOC,
@@ -102,8 +100,7 @@ pub fn spawn_resolve_toc(
     rx
 }
 
-/// 记录下载任务的终态日志（ok / cancelled / failed）。
-/// 消除 `spawn_download` / `spawn_download_range` 的 match 块复制。
+/// 记录下载任务终态日志 (ok / cancelled / failed)。消除两个 `spawn_*` 的 match 复制。
 fn log_download_outcome(
     result: Result<PathBuf, CrawlerError>,
     book_name: &str,
@@ -121,7 +118,7 @@ fn log_download_outcome(
             );
         }
         Err(CrawlerError::Cancelled) => {
-            // 用户取消 — Progress::Cancelled 已由 crawler 内部发；这里只补一条尾日志。
+            // Progress::Cancelled 已由 crawler 内部发, 这里只补尾日志。
             tracing::info!(
                 book = %book_name,
                 elapsed_ms = started.elapsed().as_millis() as u64,
@@ -143,7 +140,7 @@ fn log_download_outcome(
     }
 }
 
-/// 派一个指定章节范围的下载任务。跳过 resolve 阶段，直接进入下载。
+/// 派一个指定章节范围的下载任务, 跳过 resolve 阶段直接下载。
 /// `chapters` 已由调用方按用户选择过滤过范围。
 pub fn spawn_download_range(
     ctx: &OpsCtx<'_>,
@@ -172,7 +169,7 @@ pub fn spawn_download_range(
     let wakeup_guard = ctx.wakeup.clone();
     wakeup_guard.notify();
 
-    // 顶层 trace_id：一次下载 = 一个 trace_id；后续所有阶段共享。
+    // 一次下载 = 一个 trace_id, 后续所有阶段共享。
     let trace_id = TraceId::mint();
     let span = tracing::info_span!(
         sub::DOWNLOAD,
@@ -256,7 +253,7 @@ pub fn spawn_download(
     let book_url = target.url.clone();
     let cancel_for_task = cancel.clone();
     let tx_for_task = tx.clone();
-    // 顶层 trace_id：一次下载 = 一个 trace_id；后续所有阶段共享。
+    // 一次下载 = 一个 trace_id, 后续所有阶段共享。
     let trace_id = TraceId::mint();
     let span = tracing::info_span!(
         sub::DOWNLOAD,
@@ -285,7 +282,7 @@ pub fn spawn_download(
             };
             let source = Source::from(rule, &cfg);
             let client = http.for_rule(&source.rule);
-            // 留一个 sender 副本用于失败时发 Progress::Failed（tx_for_task 会 move 进 opts）。
+            // 留一个 sender 副本给失败路径发 Progress::Failed（tx_for_task 会 move 进 opts）。
             let tx_for_failure = tx_for_task.clone();
             let notify: std::option::Option<
                 std::sync::Arc<dyn Fn() + std::marker::Send + std::marker::Sync>,

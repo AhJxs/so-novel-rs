@@ -1,9 +1,6 @@
 #!/bin/sh
 # 一键启用项目 git hooks：把 core.hooksPath 指向 tracked `.githooks/` 目录。
-#
-# 用法：sh scripts/install-hooks.sh
-# 克隆仓库后执行一次即可；之后 .githooks/pre-commit 会在每次 git commit 时自动
-# 格式化暂存的 .rs 文件。
+# 用法：sh scripts/install-hooks.sh（克隆后执行一次即可；之后 pre-commit 自动格式化暂存 .rs）。
 
 set -e
 

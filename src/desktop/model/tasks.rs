@@ -1,16 +1,14 @@
-//! `AppModel` 任务管理方法
+//! `AppModel` 任务管理方法。
 //!
-//! `delete_task` 走 3 步骤：
-//! 1. `delete_task_inner` 决定能不能删 —— 纯函数返回 `DeleteTaskResult` enum；
-//! 2. `&mut self.delete_task` 包装 inner + fire-and-forget 落盘（`self.runtime.spawn_blocking(... crate::db::save_with_trim ...)`）；
-//! 3. 调用方（`TasksPage::prompt_delete` 的 `on_ok` 闭包）match enum 决定 push 哪条 toast。
+//! `delete_task` 分三步: `delete_task_inner` 纯函数判定能否删 → `delete_task` 包装它
+//! 并 fire-and-forget 落盘 → 调用方 match `DeleteTaskResult` 决定推哪条 toast。
 
 use crate::i18n::ts_fmt;
 
 use super::{AppModel, ops};
 use crate::core::DownloadTask;
 
-/// `AppModel::delete_task` 的返回值。区分三种互斥结果，供 UI 决定哪条 toast 文案。
+/// `AppModel::delete_task` 的返回值。三种互斥结果, 对应不同 toast 文案。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DeleteTaskResult {
     Deleted,
@@ -19,7 +17,6 @@ pub enum DeleteTaskResult {
 }
 
 impl AppModel {
-    /// 清掉所有已结束的任务。
     pub fn clear_finished_tasks(&mut self) {
         let before = self.tasks.len();
         ops::clear_finished_tasks(&mut self.tasks);
@@ -41,12 +38,8 @@ impl AppModel {
 
     /// 删除单条任务记录（仅已结束的，运行中跳过）。
     ///
-    /// 返回 `DeleteTaskResult`：
-    /// - `Deleted`：找到且已结束，内存 `tasks` retain 移除 + 异步落盘。
-    /// - `StillRunning`：找到但还在跑，**不删** —— UI 入口已过滤运行中任务，这里兜底 race。
-    /// - `Missing`：id 不存在 —— 同上兜底 concurrent delete。
-    ///
-    /// 落盘失败由 `tracing::warn!` 记日志，不弹 toast —— 与 `clear_finished_tasks` 行为一致。
+    /// `StillRunning` / `Missing` 都是兜底 race（UI 入口已过滤）。落盘失败只
+    /// `tracing::warn!`, 不弹 toast —— 与 `clear_finished_tasks` 一致。
     pub fn delete_task(&mut self, id: u64) -> DeleteTaskResult {
         let result = delete_task_inner(&mut self.tasks, id);
         if result == DeleteTaskResult::Deleted {
@@ -62,10 +55,10 @@ impl AppModel {
     }
 }
 
-/// 纯函数：`delete_task` 的内存逻辑部分 —— 找 + retain。
+/// 纯函数: `delete_task` 的内存逻辑（找 + retain）。
 ///
-/// 抽出来是为了让单元测试不必造 `AppModel`（后者要从磁盘读 yaml）。落盘逻辑保留
-/// 在 `delete_task` 这层，因为持久化路径是 `&self` 的，不在内层函数可达范围。
+/// 抽出来是为了让单元测试不必造 `AppModel`; 落盘逻辑留在外层, 因为持久化路径
+/// 属于 `&self`, 内层函数够不到。
 fn delete_task_inner(tasks: &mut Vec<DownloadTask>, id: u64) -> DeleteTaskResult {
     let Some(task) = tasks.iter().find(|t| t.id == id) else {
         return DeleteTaskResult::Missing;
@@ -91,7 +84,7 @@ mod tests {
     use crate::models::SearchResult;
     use std::path::PathBuf;
 
-    /// 构造一个最小 `DownloadTask`，16 个字段全填默认值；测试只关 `id` + `finished`。
+    /// 构造一个最小 `DownloadTask`, 测试只关 `id` + `finished`。
     fn dummy_task(id: u64) -> DownloadTask {
         DownloadTask {
             id,

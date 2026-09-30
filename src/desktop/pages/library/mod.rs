@@ -1,18 +1,12 @@
 //! Library 页面：本地书库（下载目录里的电子书文件）。
 //!
-//! 行为：
-//! - 进入页面时若 `library.scanned_dir` 为空 / 不匹配 `config.download.download_path` → 自动扫一次。
-//! - 工具栏：文件名过滤输入 + 文件类型按钮组（不在 State 里实现 —— 切语言即时更新）。
-//! - 列表：`gpui_kit::component::list::List`（虚拟滚动）+ `LibraryDelegate`，每页 30 条（5 列：文件名 /
-//!   格式 / 大小 / 修改时间 / 3 动作）。
-//! - 分页页脚走 `components::Pagination`（薄封装 gpui-kit 组件库的
-//!   `component::pagination::Pagination`）。**可见性由组件自己判**：不足一页
-//!   （条目 ≤ `PAGE_SIZE`）渲染 `Empty` 隐藏；超过一页则按组件库默认样式
-//!   渲染页码 + 省略号下拉。
-//! - **没有文件 watcher** —— 列表只在「首次进入 / 下载目录变化」时自动扫一次，
-//!   其余情况靠 `PageHeader` 右上角「刷新」按钮手动触发。
-//! - 删除走 `WindowExt::open_dialog` 二次确认 → `model.delete_library_entry` → `entries_version`
-//!   bump 让 `ListCache` 立即失效，UI 实时反映删除结果。
+//! - 进入页面时 `library.scanned_dir` 与 `config.download.download_path` 不一致 → 自动扫一次。
+//! - 工具栏：文件名过滤输入 + 文件类型按钮组（不持 State —— 切语言即时更新）。
+//! - 列表：`List`（虚拟滚动）+ `LibraryDelegate`，每页 30 条；分页页脚走 `components::Pagination`，
+//!   其可见性由组件自判（不足一页渲染 `Empty`）。
+//! - **没有文件 watcher**：只在「首次进入 / 下载目录变化」自动扫，其余靠「刷新」按钮。
+//! - 删除走 `WindowExt::open_dialog` 二次确认 → `model.delete_library_entry` → bump
+//!   `entries_version` 让 `ListCache` 立即失效。
 
 mod delegate;
 mod row;
@@ -45,7 +39,7 @@ use self::delegate::LibraryDelegate;
 pub struct LibraryPage {
     model: Entity<AppModel>,
 
-    /// struct 字段持有（InputState / `ListState`）—— owner 持有避免 click / focus 丢失。
+    /// `InputState` / `ListState` 由 owner 持有，否则 click / focus 丢失。
     filter_input: Entity<InputState>,
     list_state: Entity<ListState<LibraryDelegate>>,
 
@@ -71,11 +65,11 @@ impl LibraryPage {
         })
         .detach();
 
-        // 文件类型过滤在 render 里用 button group 实现（不持 State —— 切语言即时更新）。
-        // 扩展名（epub / txt / zip / html / pdf）不译，是技术名词。
+        // 文件类型过滤用 render 里的 button group 实现（不持 State → 切语言即时更新）；
+        // 扩展名（epub / txt / zip / html / pdf / md）不译，是技术名词。
 
-        // delegate 持有 `Entity<LibraryPage>`（不是 WeakEntity）—— Entity 永驻
-        // (`RootView` 持有)，`render_item` 需要调 `prompt_delete` 拿 `Context<LibraryPage>`。
+        // delegate 持有强引用 `Entity<LibraryPage>`（不是 WeakEntity）：Entity 永驻，
+        // 且 `render_item` 里 `prompt_delete` 需要 `Context<LibraryPage>`。
         let page_handle = cx.entity();
         let delegate = LibraryDelegate::new(page_handle);
         let list_state = cx.new(|cx| ListState::new(delegate, window, cx));
@@ -88,8 +82,7 @@ impl LibraryPage {
         }
     }
 
-    /// 设置文件类型过滤（None = "全部"，Some("epub") / Some("txt") / ...）。
-    /// 跳回第 1 页（filter 变化后旧页码可能越界）。
+    /// 设置文件类型过滤（None = "全部"）+ 跳回第 1 页（filter 变化后旧页码可能越界）。
     fn set_ext_filter(&mut self, new_ext: Option<String>, cx: &mut Context<Self>) {
         self.model.update(cx, |m, _cx| {
             m.library.filter_ext = new_ext;
@@ -98,8 +91,7 @@ impl LibraryPage {
         cx.notify();
     }
 
-    /// 首次进入 / 下载目录变化时自动扫一次。
-    /// `过滤变化（filter_text` / `filter_ext）不走这里` —— 不改变路径。
+    /// 首次进入 / 下载目录变化时自动扫一次（filter 变化不走这里，路径没变）。
     fn maybe_auto_scan(&mut self, cx: &mut Context<Self>) {
         let download_path =
             std::path::PathBuf::from(self.model.read(cx).config.download.download_path.clone());
@@ -111,8 +103,8 @@ impl LibraryPage {
         }
     }
 
-    /// `PageHeader` 「刷新」按钮 —— 重扫下载目录。`scan_in_flight` 期间点多次会被
-    /// `refresh_library_async` 内部的 flag 拦截，重复触发零成本。
+    /// `PageHeader`「刷新」按钮 —— 重扫下载目录（`scan_in_flight` 期间的重复点击会被
+    /// `refresh_library_async` 内部 flag 拦掉）。
     fn manual_refresh(&mut self, cx: &mut Context<Self>) {
         self.model.update(cx, |m, _cx| m.refresh_library_async());
         self.current_page = 0;
@@ -123,7 +115,7 @@ impl LibraryPage {
     pub(super) fn prompt_delete(&self, path: PathBuf, window: &mut Window, cx: &mut App) {
         let model = self.model.clone();
         let model_id = model.entity_id();
-        // 文件名兜底：空时用 i18n fallback 替。
+        // 文件名兜底：空时用 i18n 文案。
         let raw_name = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
         let file_name: String = if raw_name.is_empty() {
             ts("Library.fallback_unknown_filename").to_string()
@@ -132,30 +124,23 @@ impl LibraryPage {
         };
 
         window.open_alert_dialog(cx, move |alert: AlertDialog, _window, _cx| {
-            // alert builder 是 Fn（被 open_alert_dialog 复用，每次点击都重调）；
-            // on_ok 也必须 Fn —— 全部 clone 捕获，避开 FnOnce。
+            // alert builder 与 on_ok 都是 Fn —— 捕获的变量全部 clone，避开 FnOnce。
             let model_for_ok = model.clone();
             let path_for_ok = path.clone();
             let model_id_for_ok = model_id;
 
             alert
                 .title(ts("Library.delete_dialog.title"))
-                // 占位符必须走 ts_fmt —— 直接 format! 拼字符串会在切语言时让
-                // 占位符翻译也跟着拼，顺序错乱。
+                // 占位符必须走 ts_fmt —— 直接 format! 会把占位符也拼进被翻译的字符串。
                 .description(ts_fmt(
                     "Library.delete_dialog.message",
                     &[("file_name", &file_name)],
                 ))
-                // gpui-kit 0.7：按钮文案 / variant 直接用 AlertDialog 上的
-                // `ok_text` / `cancel_text` / `ok_variant` 单项 builder —— 0.6 时代
-                // 只能整包传 `DialogButtonProps::default().xxx(...)`（0.7 里
-                // `.button_props()` 仍可编译，但单项 builder 更清晰，且上游测试
-                // `the_direct_builders_match_button_props` 保证两者等价）。
-                // 调用顺序无关：`confirm()` 只写 show_cancel，不会覆盖已设的文案。
+                // 按钮文案 / variant 直接用 AlertDialog 的单项 builder（`ok_text` /
+                // `cancel_text` / `ok_variant`）。调用顺序无关：`confirm()` 不会覆盖已设文案。
                 .ok_text(ts("Library.delete_dialog.confirm_button"))
                 .cancel_text(ts("Library.delete_dialog.cancel_button"))
                 .ok_variant(ButtonVariant::Danger)
-                // `.confirm()` 是 AlertDialog 的方法（show_cancel=true）。
                 .confirm()
                 .on_ok(move |_ev: &ClickEvent, _window, cx| {
                     model_for_ok.update(cx, |m, _cx| {
@@ -172,19 +157,14 @@ impl Render for LibraryPage {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.maybe_auto_scan(cx);
 
-        // placeholder 在 `new()` 一次性设好；language setter 切语言走"重启进程"
-        // 路径，新进程重建 InputState 时自然拿到新 locale，无需 render 差量刷新。
+        // placeholder 在 `new()` 一次设好；切语言走重启进程，无需 render 差量刷新。
 
-        // 1) 通过 `model.update` 拿 `&mut AppModel` —— list_cache 写入需要可
-        //    变借用，而 `model.read(cx)` 只能拿 `&AppModel`。闭包内：(a) 算
-        //    filter signature；(b) 查 list_cache 命中则 clone Arc、未命中则
-        //    走 filtered_entries 后写回；(c) 取出展示数据。闭包返回
-        //    `(Arc<Vec<LibraryEntry>>, usize, Option<String>, String, Option<String>, bool)`。
+        // 用 `model.update` 拿 `&mut AppModel`（list_cache 写入需要可变借用）：算 filter
+        // signature → 命中缓存则 clone Arc、否则过滤+排序后写回 → 取出展示数据。
         let (entries_arc, total, scan_err, download_path, current_ext, scan_in_flight) =
             self.model.update(cx, |model, _cx| {
-                // 命中 cache = Arc::clone（只增引用计数，零 alloc）；未命中 = 走
-                // 完整 filter+sort 然后写回。cache key 包含 (entries_version,
-                // filter_sig)，filter_text / filter_ext 变 → signature 变 → 失效。
+                // cache key 含 (entries_version, filter_sig)：filter_text / filter_ext 一改
+                // 就失效重算。
                 let filter_sig = crate::desktop::model::filter_signature(&[
                     model.library.filter_text.as_str(),
                     model.library.filter_ext.as_deref().unwrap_or(""),
@@ -199,7 +179,6 @@ impl Render for LibraryPage {
                 let entries_arc = if let Some(arc) = model.list_cache.get::<LibraryEntry>(key) {
                     arc
                 } else {
-                    // miss：跑一遍 filter+sort，写回。
                     let mut v: Vec<LibraryEntry> = model
                         .library
                         .entries
@@ -226,9 +205,8 @@ impl Render for LibraryPage {
                 let scan_err = model.library.last_error.clone();
                 let download_path = model.config.download.download_path.clone();
                 let current_ext = model.library.filter_ext.clone();
-                // 读 scan_in_flight —— 刷新按钮的 loading 状态用。
-                // drain_loop 100ms tick 内排空 scan channel 时会清零 + notify AppModel，
-                // LibraryPage 是观察者会自动 re-render，loading 状态随之收敛。
+                // scan_in_flight 给刷新按钮的 loading 用；drain loop 排空 scan channel 时
+                // 会清零 + notify，本页作为观察者自动 re-render。
                 let scan_in_flight = model.library.scan_in_flight;
                 (
                     entries_arc,
@@ -241,8 +219,7 @@ impl Render for LibraryPage {
             });
 
         let w = compute_page_window(total, &mut self.current_page);
-        // 每条带"全局序号" = 在完整 filtered 列表里的位置（0-based，跨分页连续）。
-        // delegate 只看 `(global_ix, entry)`，不依赖 current_page / PAGE_SIZE。
+        // 每条带全局序号（完整 filtered 列表里的 0-based 位置，跨分页连续）。
         let page_items: Vec<(usize, LibraryEntry)> = if total == 0 {
             Vec::new()
         } else {
@@ -272,10 +249,7 @@ impl Render for LibraryPage {
                         Button::new("library-refresh")
                             .icon(Icon::new(IconName::Redo))
                             .label(ts_cached("Library.action_refresh"))
-                            // scan_in_flight=true 时：禁用 + 显示 spinner，
-                            // 视觉上告诉用户"正在扫，不要再点"。
-                            // manual_refresh 内部也会被 scan_in_flight 拦截，
-                            // 禁用只是双保险（鼠标 / 键盘都可触发 button click）。
+                            // 扫描中：禁用 + spinner，manual_refresh 内部也会拦一次。
                             .loading(scan_in_flight)
                             .disabled(scan_in_flight)
                             .on_click(cx.listener(|this, _, _window, cx| {
@@ -310,9 +284,7 @@ impl Render for LibraryPage {
                     )
                     .into_any_element()
             } else {
-                // 水平 12px 留出 ListItem 右侧选中边框不被滚动条遮住的位置；
-                // 垂直 4px 给行间呼吸空间但不让间距喧宾夺主。
-                // 参考 crates/story/src/stories/list_story.rs:594-602。
+                // 12px padding 让 ListItem 的选中边框不被滚动条遮住。
                 div()
                     .flex_1()
                     .w_full()
@@ -323,8 +295,7 @@ impl Render for LibraryPage {
                     .child(List::new(&self.list_state).p(px(12.)).size_full())
                     .into_any_element()
             })
-            // 分页页脚：可见性由 `Pagination` 自己判（列表条目 ≤ `PAGE_SIZE`
-            // 即不足一页 → 渲染 `Empty`），caller 不用再 `when`。
+            // 页脚可见性由 `Pagination` 自己判，caller 不用 `when`。
             .child(Pagination::new(
                 self.current_page,
                 w.page_count,

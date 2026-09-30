@@ -23,14 +23,9 @@ pub struct BookDetailParams {
 
 /// 从共享状态中提取配置和指定书源。
 ///
-/// 返回 [`WebError`]：
-/// - **锁毒化** (`rw_read_or` 失败) → `Internal("internal_error")`，动态消息进日志，
-///   响应 body 不外泄（依赖 [`WebError::From<String>`] blanket impl，Phase 3.0）。
-/// - **书源 id 不存在** → `NotFound("")`，4xx 给前端。内部字符串**忽略**，统一翻译成
-///   `WebErrors.not_found` —— 避免泄漏内部 id / 路径（Phase 4.x i18n 改造）。
-///
-/// **不要**把锁毒化静默转成 `NotFound`（旧实现 `.map_err(|_| NotFound)` 的 bug）：
-/// 锁毒化是 500（服务端状态损坏），不是 404（资源不存在）。
+/// 锁毒化（`rw_read_or` 失败）→ `Internal("internal_error")`，动态消息只进日志；
+/// 书源 id 不存在 → `NotFound("")`。
+/// **不要**把锁毒化静默转成 `NotFound`：那是 500（服务端状态损坏），不是 404。
 fn extract_config_and_rule(
     state: &SharedState,
     source_id: i32,

@@ -1,14 +1,10 @@
 //! 导出器统一抽象 + 共用工具。
 //!
-//! 流程划分（与 Java `Crawler` + `CrawlerPostHandler` 等价）：
-//! 1. 渲染层（`render`）把章节正文转成"目标格式的字符串"。
-//! 2. 暂存层：`write_chapter_files` 把每章的字符串写入临时章节目录，
-//!    文件名形如 `001_标题.html` / `001.html` / `001_标题.txt`。
-//! 3. 合并层：实现 `Exporter` trait 的具体导出器（txt/html/epub）从该目录
-//!    读取所有章节，输出最终文件。
+//! 三层流程：`render` 把章节正文渲染成目标格式字符串 → `write_chapter_files` 写入临时章节目录
+//! (文件名形如 `001_标题.html` / `001_.html` / `001_标题.txt`) → `Exporter` 的具体实现
+//! (txt/html/epub/pdf/md) 从该目录读回所有章节、输出最终成品。
 //!
-//! 这一层只做**同步**文件 IO；网络下载（如 EPUB 封面）在 epub.rs 内自己处理。
-//! 调度（并发抓取 + 重试）在阶段 3c 的 `crawler` 模块里。
+//! 本层只做**同步**文件 IO；网络下载（如 EPUB 封面字节）由调用方或 epub.rs 自己处理。
 
 use std::path::{Path, PathBuf};
 
@@ -51,11 +47,8 @@ pub trait Exporter {
         out_dir: &Path,
     ) -> Result<PathBuf, ExportError>;
 
-    /// 带封面的合并入口。默认实现忽略封面，与 `merge` 等价；
-    /// EPUB 导出器覆写此方法以把封面字节写入电子书。
-    ///
-    /// `cover_bytes`：调用方（阶段 3c 调度层）负责下载封面字节，下载失败时
-    /// 传 `None`，由实现者降级（不带封面继续）。
+    /// 带封面的合并入口。默认实现忽略封面、与 `merge` 等价；EPUB 覆写它把封面字节写入电子书。
+    /// `cover_bytes`：调用方（调度层）负责下载，失败时传 `None`，实现者降级为不带封面继续。
     fn merge_with_cover(
         &self,
         book: &Book,
@@ -67,11 +60,9 @@ pub trait Exporter {
     }
 }
 
-/// 按 `ExportFormat` 选择导出器。Pdf 用 `pdf_oxide` 真生成 PDF（章节文件由
-/// `render_chapter(target=Pdf)` 写出成 Html，`PdfExporter` 内部再合并成 PDF）。
-///
-/// Markdown 导出由 `MdExporter`（`src/export/md.rs`）负责 —— 输出单个 `.md`
-/// 文件，包含 YAML front matter、`## 目录` TOC 与 `<a id="chapter-N">` 锚点。
+/// 按 `ExportFormat` 选择导出器。Pdf 走 `pdf_oxide` 真生成 PDF（章节文件由
+/// `render_chapter(target=Pdf)` 写成 Html，`PdfExporter` 内部再合并成 PDF）；
+/// Markdown 由 `md.rs` 输出单个 `.md`（含 YAML front matter、TOC 与 `<a id="chapter-N">` 锚点）。
 pub fn exporter_for(format: ExportFormat, txt_encoding: &str) -> Box<dyn Exporter + Send + Sync> {
     match format {
         ExportFormat::Txt => Box::new(super::txt::TxtExporter::new(txt_encoding)),
@@ -82,14 +73,10 @@ pub fn exporter_for(format: ExportFormat, txt_encoding: &str) -> Box<dyn Exporte
     }
 }
 
-/// 把"已渲染章节"列表写入 `chapters_dir`，文件名前缀为前导零的 order，
-/// 后缀根据格式决定。返回写入的文件总数。
+/// 把"已渲染章节"写入 `chapters_dir`（文件名前缀为前导零 order），返回写入的文件总数。
 ///
-/// 与 Java 端 `Crawler#generateChapterPath` 命名约定一致：
-/// - `html` → `001_.html`（下划线后无标题，便于翻页脚本拼前缀）
-/// - `txt`  → `001_<标题>.txt`
-/// - `epub` → `001_<标题>.html`（XHTML 内容，最终被 epub merge 引用）
-/// - `pdf`  → 同 html（阶段 1 锁定不实现）
+/// 命名约定与 Java 端 `Crawler#generateChapterPath` 一致：`html`/`pdf` → `001_.html`
+/// （下划线后无标题，便于翻页脚本拼前缀），`txt` → `001_<标题>.txt`，`epub` → `001_<标题>.html`。
 pub fn write_chapter_files(
     chapters_dir: &Path,
     rendered: &[RenderedChapter],
@@ -109,7 +96,6 @@ pub fn write_chapter_files(
             ExportFormat::Html | ExportFormat::Pdf => format!("{order}_.html"),
             ExportFormat::Txt => format!("{order}_{safe_title}.txt"),
             ExportFormat::Epub => format!("{order}_{safe_title}.html"),
-            // Filename layout is final (Task 3); chapter body content lands in Task 4 (MdExporter).
             ExportFormat::Markdown => format!("{order}_{safe_title}.md"),
         };
         let path = unique_path(chapters_dir, &filename);
@@ -119,8 +105,8 @@ pub fn write_chapter_files(
     Ok(total)
 }
 
-/// 把单章写入 `chapters_dir（并发安全：order` 唯一不会冲突）。
-/// 不检查文件已存在（全新下载不可能冲突），避免每章一次额外 syscall。
+/// 把单章写入 `chapters_dir`（并发安全：order 唯一不会冲突）。不检查文件是否已存在
+/// （全新下载不可能冲突），省掉每章一次额外 syscall。
 pub fn write_single_chapter(
     dir: &Path,
     order: u32,
@@ -136,7 +122,6 @@ pub fn write_single_chapter(
         ExportFormat::Html | ExportFormat::Pdf => format!("{order_str}_.html"),
         ExportFormat::Txt => format!("{order_str}_{safe_title}.txt"),
         ExportFormat::Epub => format!("{order_str}_{safe_title}.html"),
-        // Filename layout is final (Task 3); chapter body content lands in Task 4 (MdExporter).
         ExportFormat::Markdown => format!("{order_str}_{safe_title}.md"),
     };
     let path = dir.join(&filename);
@@ -177,7 +162,6 @@ pub fn build_book_dir_name(book: &Book, format: ExportFormat) -> String {
 
 /// 单个已渲染章节。
 ///
-/// `body` 已是目标格式的字符串（来自 `export::render::render_chapter`），
 /// `title` 是 `ChapterFilter` 重写过的最终标题。
 #[derive(Debug, Clone)]
 pub struct RenderedChapter {
@@ -227,10 +211,8 @@ pub(crate) fn strip_html_tags(s: &str) -> String {
     use regex::Regex;
     use std::sync::LazyLock;
 
-    // 这些正则由源码字面量直接构造，编译期就确定能编译；
-    // 用 `match` 走 panic 路径以避免 clippy::expect_used。
-    // panic IS the design：源码字面量写错就是程序员错误，让它在启动期炸出来
-    // 比在 lazy init 期间崩在半成品状态更易诊断。
+    // 正则由源码字面量构造，编译期确定能编译；用 `match` 走 panic 路径避免 `clippy::expect_used`。
+    // panic 即设计：字面量写错是程序员错误，启动期炸出来比在 lazy init 崩在半成品状态更易诊断。
     #[allow(
         clippy::panic,
         reason = "static regex literal must compile; failure = programmer error"
@@ -304,7 +286,6 @@ mod tests {
         ];
         let count = write_chapter_files(dir.path(), &rendered, ExportFormat::Html).unwrap();
         assert_eq!(count, 2);
-        // 至少 3 位前导零（即使章节数 < 1000）
         assert!(dir.path().join("001_.html").exists());
         assert!(dir.path().join("002_.html").exists());
     }
@@ -372,7 +353,6 @@ mod tests {
         let deduped = dir.path().join("001_第1章 楔子 (1).html");
         assert!(original.exists(), "original missing");
         assert!(deduped.exists(), "deduped missing");
-        // 内容不同
         assert_eq!(
             std::fs::read_to_string(&original).unwrap(),
             "<html>first</html>"
@@ -420,7 +400,6 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("README"), b"x").unwrap();
         let p = unique_path(dir.path(), "README");
-        // stem=README, ext=None → fallback "html" used
         assert_eq!(p, dir.path().join("README (1).html"));
     }
 

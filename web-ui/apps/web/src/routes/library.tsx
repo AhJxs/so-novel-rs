@@ -1,5 +1,4 @@
-// 书库页面。按扩展名过滤（前端过滤，后端暂不支持 ?ext=）。
-// 提供下载链接（GET /api/files/:filename）+ 删除（带确认对话框）+ 分页。
+// 书库页面：按扩展名过滤（前端过滤，后端暂不支持 ?ext=）+ 下载链接 + 删除（带确认）+ 分页。
 // 过滤 Tab 右侧挂 Badge 显示每种类型文件数。
 
 import { Book, ArrowDown, Trash2 } from "lucide-react"
@@ -47,7 +46,7 @@ const PAGE_SIZE = 12
 export default function LibraryPage() {
   const [ext, setExt] = useState<string>("all")
   const [page, setPage] = useState(1)
-  const [pending, setPending] = useState<LibraryFile | null>(null) // 待删除文件（打开确认框）
+  const [pending, setPending] = useState<LibraryFile | null>(null)
   const { data: allFiles = [], isLoading } = useLibrary()
   const { mutate: del } = useDeleteFile()
   const { t } = useTranslation()
@@ -56,7 +55,7 @@ export default function LibraryPage() {
   const totalPages = Math.max(1, Math.ceil(files.length / PAGE_SIZE))
   const paged = files.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
 
-  // 每种 ext 的文件数（含 0）—— 一次 reduce 算 6 个数（O(n)）。
+  // 每种 ext 的文件数（含 0）
   const extCounts = useMemo(() => {
     const counts: Record<string, number> = { all: allFiles.length, epub: 0, txt: 0, pdf: 0, html: 0, md: 0 }
     for (const f of allFiles) {

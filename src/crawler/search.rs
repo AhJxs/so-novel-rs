@@ -1,11 +1,7 @@
 //! 聚合搜索。对应 Java `action.AggregatedSearchAction`。
 //!
-//! 在多个书源上并发执行 `search_one`，把结果合并成一个列表。
-//! 本层只负责聚合；相似度过滤 / 排序由调用方在结果聚合后调
-//! `crate::parser::filter_sort`（对应 Java `SearchResultsHandler`）。
-//!
-//! parser 是 async 的（基于 `reqwest::Client`），这里直接 spawn async task，
-//! 不再走 `spawn_blocking`。
+//! 在多个书源上并发执行 `search_one`, 把结果合并成一个列表; 相似度过滤 / 排序由调用方在聚合后调
+//! `crate::parser::filter_sort`（对应 Java `SearchResultsHandler`）。parser 是 async 的, 直接 spawn async task。
 
 use std::sync::Arc;
 
@@ -32,9 +28,7 @@ pub struct SourceSearchOutcome {
 }
 
 /// 在所有给定 sources 上并发执行搜索，返回每源的结果。
-///
-/// `cf_bypass_base` 与各 parser 中的同名参数一致：CF 命中时若非空则
-/// 调用外部 bypass 服务。
+/// `cf_bypass_base` 与各 parser 中的同名参数一致：CF 命中时若非空则调用外部 bypass 服务。
 #[tracing::instrument(skip_all, fields(sources = sources.len(), keyword = %crate::utils::fs::truncate_log(&keyword, 10)))]
 pub async fn search_aggregated(
     http: Arc<HttpClients>,
@@ -59,9 +53,7 @@ pub async fn search_aggregated(
 
 /// 流式聚合搜索：每源完成后立即通过 `tx` 推送，而不是等全部完成再返回。
 ///
-/// 与 `search_aggregated` 的区别：
-/// - `search_aggregated` 收集所有结果到 Vec，适合测试和一次性批量处理。
-/// - `search_streaming` 每完成一源就推送，适合 UI 逐源更新进度。
+/// `search_aggregated` 收集所有结果到 Vec（适合测试 / 一次性批量处理），本函数适合 UI 逐源更新进度。
 #[tracing::instrument(skip_all, fields(sources = sources.len(), keyword = keyword))]
 pub async fn search_streaming(
     http: Arc<HttpClients>,
@@ -88,8 +80,7 @@ pub async fn search_streaming(
 
 /// 为每个 source spawn 一个异步搜索任务，返回 `JoinSet`。
 ///
-/// 调用方决定如何消费结果（收集到 Vec 或逐个推送 channel）。
-/// 共享逻辑：日志、Client 复用、per-source 计时、结果包装。
+/// 调用方决定如何消费结果（收集到 Vec 或逐个推送 channel）；共享逻辑：日志、Client 复用、结果包装。
 fn spawn_search_tasks(
     http: &Arc<HttpClients>,
     sources: Vec<Source>,
@@ -199,7 +190,6 @@ mod tests {
             outcomes[1].result,
             Err(SearchError::SearchDisabled)
         ));
-        // 顺序按 source_id
         assert_eq!(outcomes[0].source_id, 1);
         assert_eq!(outcomes[1].source_id, 2);
     }

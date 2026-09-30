@@ -1,10 +1,4 @@
-//! 目录解析工具 + 错误类型
-//!
-//! 来自原 `parser/toc.rs`:
-//! - [`TocError`] 错误枚举 (跨文件共享)
-//! - [`extract_book_id`] / [`format_with_id`] / [`resolve_base_for_join`] 工具函数
-//!
-//! 主流程 [`parse_toc`] 在 [`super::single`], 分页收集在 [`super::paginated`]。
+//! 目录解析工具 + 错误类型。主流程在 [`super::single`], 分页收集在 [`super::paginated`]。
 
 use thiserror::Error;
 
@@ -33,11 +27,8 @@ pub enum TocError {
     Selector(#[from] SelectError),
 }
 
-/// 用 `Book.url` 这个正则从详情页 URL 中提取书 ID。
-/// 没配 / 不匹配时返回 `None`。
-///
-/// Java 端用 hutool `ReUtil.getGroup1`; 规则里 `Book.url` 一定含一个捕获组。
-/// 这里允许规则形如 `https://(?:www\.)?69shuba\.com/book/(.*?)\.htm`。
+/// 用 `Book.url` 这个正则从详情页 URL 中提取书 ID。没配 / 不匹配时返回 `None`。
+/// 规则里 `Book.url` 一定含一个捕获组 (Java 端用 hutool `ReUtil.getGroup1`)。
 pub(super) fn extract_book_id(rule: &Rule, book_url: &str) -> Option<String> {
     let book_rule = rule.book.as_ref()?;
     if book_rule.url.is_empty() {
@@ -48,8 +39,7 @@ pub(super) fn extract_book_id(rule: &Rule, book_url: &str) -> Option<String> {
     cap.get(1).map(|m| m.as_str().to_string())
 }
 
-/// 把 `template` 里的第一处 `%s` 用 `id` 替换;
-/// `id` 为 None 或 template 为空时原样返回。
+/// 把 `template` 里的第一处 `%s` 用 `id` 替换; `id` 为 None 或 template 为空时原样返回。
 pub(super) fn format_with_id(template: &str, id: Option<&str>) -> String {
     if template.is_empty() {
         return String::new();
@@ -57,9 +47,7 @@ pub(super) fn format_with_id(template: &str, id: Option<&str>) -> String {
     id.map_or_else(|| template.to_string(), |v| template.replacen("%s", v, 1))
 }
 
-/// 计算 absUrl 的 base:
-/// - 优先用 `toc.baseUri` (已经被 ID 模板格式化过),
-/// - 否则用当前页 URL。
+/// 计算 absUrl 的 base: 优先用 `toc.baseUri` (已经被 ID 模板格式化过), 否则用当前页 URL。
 pub(super) fn resolve_base_for_join(toc_base_uri: &str, current_page_url: &str) -> String {
     if toc_base_uri.trim().is_empty() {
         current_page_url.to_string()

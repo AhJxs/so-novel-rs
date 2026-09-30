@@ -1,6 +1,4 @@
-//! 下载任务持久化数据结构。
-//!
-//! 从 `db/tasks.rs` 迁移而来，供 `tasks_store` 和 `app` 模块共用。
+//! 下载任务持久化数据结构, 供 `tasks_store` / `app` / `db::tasks` 共用。
 
 use std::path::PathBuf;
 
@@ -8,9 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{Book, SearchResult};
 
-/// 任务结束原因 —— 替代原先用字符串字面量做语义 tag 的反模式。
-///
-/// `is_cancelled` / `is_failed` 直接 match enum，不再依赖字符串等值检测。
+/// 任务结束原因: 用 enum 而非字符串字面量做语义 tag, `is_cancelled` 等直接 match。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum FinishedReason {
@@ -58,9 +54,8 @@ pub struct DownloadTaskRecord {
     pub failures: Vec<FailureRecord>,
 }
 
-/// 失败章节明细。`DownloadTask` 里原本是 `Vec<(u32, String, String)>` 元组，
-/// 这里改成 struct 让 serde 序列化为 `{"index":..., "title":..., "reason":...}`，
-/// 人类可读且向后兼容性好（加字段不破坏老数据）。
+/// 失败章节明细。原本是 `Vec<(u32, String, String)>` 元组, 改成 struct 让 serde 序列化为
+/// `{"index":..., "title":..., "reason":...}`, 人类可读且加字段不破坏老数据。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FailureRecord {
     pub index: u32,

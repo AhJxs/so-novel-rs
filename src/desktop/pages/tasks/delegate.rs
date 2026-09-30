@@ -8,7 +8,6 @@ use super::TasksPage;
 use super::row;
 use super::summary::TaskSummary;
 
-/// `gpui_kit::component::list::List` 的 delegate —— 把当前过滤下的 `TaskSummary` 列表渲染成行。
 pub(super) struct TasksDelegate {
     /// 当前过滤下要展示的任务。
     pub(super) page_items: Vec<TaskSummary>,

@@ -1,6 +1,5 @@
-// useSearch 钩子 —— 封装 SearchContext 的访问。
-// 单独拆出来是为了让 contexts/search-context.tsx 只导出组件，
-// 满足 react-refresh 的 fast refresh 要求（一个文件只导出组件）。
+// useSearch：封装 SearchContext 的访问。单独拆出是为了让 search-context.tsx 只导出组件，
+// 满足 react-refresh / fast refresh 要求。
 
 import { useContext } from 'react'
 import { SearchContext, type UseSearchReturn } from '@/contexts/search-context'

@@ -1,34 +1,11 @@
 //! 共享 HTTP client 集合。
 //!
-//! # 为什么需要这个？
+//! `reqwest::Client` 持有连接池 + TLS session cache，每次 `build()` 都是全新实例 =
+//! 重置 keep-alive + 重做 TLS 握手。故按"配置维度"维护固定实例：`safe` /
+//! `unsafe_ssl`（`Rule.ignore_ssl=true` 的老书源）/ `gh_proxy`（更新检查专用）。
 //!
-//! `reqwest::Client` 内部持有连接池 + TLS session cache。每次 `Client::builder().build()`
-//! 都得到一个**全新**实例，等于"重置所有 keep-alive 连接 + 重做 TLS 握手"。
-//!
-//! 之前的实现（`crawler/mod.rs::resolve_book` / `download_chapters` /
-//! `crawler/search.rs` / `crawler/health.rs` 等）每次爬取都从零构造，
-//! 100 章小说 = 100 次 TLS 握手 = 30-50% 浪费。
-//!
-//! # 设计
-//!
-//! 按"配置维度"维护少量固定实例。reqwest 一旦构造完，proxy /
-//! `danger_accept_invalid_certs` 都不能 in-place 改 —— 所以维度变了就得
-//! 整体 rebuild。
-//!
-//! 实际只维护 3 个实例：
-//! - `safe` —— `unsafe_ssl=false` 的常规请求（占 99% 流量）
-//! - `unsafe_ssl` —— `Rule.ignore_ssl=true` 的老书源
-//! - `gh_proxy` —— 更新检查专用，走 forward proxy，配置跟其它 client 互斥
-//!
-//! 没有"per-Rule 单独 client"——`unsafe_ssl` 是 per-Rule 的**唯一**维度，
-//! 所以 2 个 client 足够覆盖所有规则。配置改了 proxy → `rebuild_proxy`
-//! 重建 safe + `unsafe_ssl` `两个实例（gh_proxy` 不受 proxy 影响）。
-//!
-//! # 并发安全
-//!
-//! `reqwest::Client` 本身 `Send + Sync`（内部 Arc）。`proxy_signature`
-//! 用 `std::sync::Mutex` —— 锁粒度极小（只在 `rebuild_proxy` 拿一下），用
-//! `parking_lot` 收益不抵加依赖成本。
+//! proxy / `danger_accept_invalid_certs` 构造后**不能** in-place 改，维度变了只能整体 rebuild；
+//! `proxy_signature` 短路"没真改就不重建"（用 `std::sync::Mutex`，不值得换 `parking_lot`）。
 
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
@@ -60,33 +37,23 @@ impl ProxySignature {
     }
 }
 
-/// 共享 HTTP client 集合。
-///
-/// 跨任务复用连接池 + TLS session。构造代价一次性（启动时），
-/// 之后每个爬取只拿 `Arc::clone` —— 零成本。
-///
-/// 持有 3 个 `Arc<reqwest::Client>`：`safe` / `unsafe_ssl` / `gh_proxy`。
-/// proxy 改了 → `rebuild_proxy` `整体替换前两个；gh_proxy` 是更新检查专用，
-/// 独立维护（用户主动改 `gh_proxy` 字符串才会重建）。
+/// 共享 HTTP client 集合。构造代价一次性（启动时），之后每个爬取只 `Arc::clone`。
 pub struct HttpClients {
-    /// safe / `unsafe_ssl` 两个 client 用 `RwLock` 保护：
-    /// - `for_rule` 只做 `RwLock::read（无竞争，桌面场景几乎全是读`）；
-    /// - `rebuild_proxy` 用 `RwLock::write` 替换 Arc。
-    ///   比裸指针 + unsafe 更安全，且 `reqwest::Client` 内部本身就是 Arc（clone ≈ `Arc::clone`）。
+    /// safe / `unsafe_ssl` 两个 client：`for_rule` 只 read，`rebuild_proxy` 用 write 换 Arc。
+    /// clone ≈ `Arc::clone`（`reqwest::Client` 内部本就是 Arc）。
     clients: RwLock<(Arc<reqwest::Client>, Arc<reqwest::Client>)>,
-    /// `gh_proxy` 字符串 + 对应 `client。gh_proxy` 为空时这个 client 不被使用
-    /// 但保留 —— 用户从有 → 无切换时不会出现"没 client 可用"的窗口。
+    /// `gh_proxy` 字符串 + 对应 `client。gh_proxy` 为空时不用它但保留 ——
+    /// 用户从有 → 无切换时不会出现"没 client 可用"的窗口。
     gh_proxy: Mutex<(String, Arc<reqwest::Client>)>,
-    /// 当前生效的 proxy 元组；用于 `rebuild_proxy` 短路"没真改就不重建"。
+    /// 当前生效的 proxy 元组；用于短路"没真改就不重建"。
     proxy_signature: Mutex<ProxySignature>,
 }
 
 impl HttpClients {
-    /// 兜底空集：`safe` / `unsafe_ssl` 都是 `reqwest::Client::new()`，`gh_proxy` 空字符串 + 同款 client。
+    /// 兜底空集：两个 client 都是 `reqwest::Client::new()`，`gh_proxy` 为空串。
     ///
-    /// Phase 3.3：`core::bootstrap::load_context` 在 proxy strip 后仍失败时最后
-    /// 兜底用 —— 比 panic 友好（前端用户仍能进入 UI，下载页报网络错即可）。
-    /// 日常路径都走 [`Self::new`]。
+    /// `core::bootstrap::load_context` 在 proxy strip 后仍失败时最后兜底用 ——
+    /// 比 panic 友好（前端仍能进 UI，下载页报网络错即可）。日常路径都走 [`Self::new`]。
     pub fn empty() -> Self {
         let bare = Arc::new(reqwest::Client::new());
         Self {
@@ -110,8 +77,8 @@ impl HttpClients {
             build_async_client(cfg, &ClientOptions { unsafe_ssl: true })
                 .context("构造 unsafe_ssl HTTP client 失败")?,
         );
-        // gh_proxy client：如果用户配了 gh_proxy，用它做 forward proxy；否则退化为普通 client。
-        // `gh_proxy_pair()` 调用方自己判断 URL 是否为空决定是否使用。
+        // gh_proxy client：配了就用它做 forward proxy，否则退化为普通 client。
+        // 调用方自己判断 URL 是否为空决定是否使用。
         let gh_proxy_url = cfg.global.gh_proxy.trim().to_string();
         let gh_proxy_client = if gh_proxy_url.is_empty() {
             Arc::new(
@@ -146,13 +113,13 @@ impl HttpClients {
 
     /// 按 `Rule.ignore_ssl` 选 client。
     ///
-    /// 返回 owned `reqwest::Client`（内部是 Arc，clone 只做 refcount bump，几乎零开销）。
-    /// 返回 owned 而非 `&` 是因为底层用 `RwLock` 保护：`RwLockReadGuard` 不能泄漏出引用。
+    /// 返回 owned 而非 `&`：底层是 `RwLock`，`RwLockReadGuard` 不能泄漏出引用；
+    /// clone 只做 refcount bump，几乎零开销。
     #[inline]
     pub fn for_rule(&self, rule: &Rule) -> reqwest::Client {
         rw_read_or("for_rule", &self.clients).map_or_else(
             |_| {
-                // 锁 poison：退路拿 unsafe_ssl（哪怕可能坏，也比 worker panic 把整个 web 拖死好）。
+                // 锁 poison：退路拿 unsafe_ssl（哪怕可能坏，也比 worker panic 拖死整个 web 好）。
                 // 二次 read 仍失败则返 reqwest::Client::new() 作 last resort。
                 self.clients.read().map_or_else(
                     |_| {
@@ -172,10 +139,8 @@ impl HttpClients {
         )
     }
 
-    /// `gh_proxy` 专用 client（更新检查用）。
-    ///
-    /// 返回 `(gh_proxy_url, Arc<client>)` —— 调用方应自己判断 `gh_proxy_url.is_empty()`
-    /// 再决定用这个 client 还是改走 `for_rule`。
+    /// `gh_proxy` 专用 client（更新检查用）。返回 `(gh_proxy_url, Arc<client>)`，
+    /// 调用方需自行判断 `gh_proxy_url.is_empty()` 决定是否改走 `for_rule`。
     pub fn gh_proxy_pair(&self) -> (String, Arc<reqwest::Client>) {
         // 锁 poison：返空配置 + safe client（调用方看到空 url 会走 for_rule 路径，
         // 不会用坏掉的 gh_proxy client）。
@@ -191,8 +156,7 @@ impl HttpClients {
             |guard| (guard.0.clone(), Arc::clone(&guard.1)),
         )
     }
-    /// proxy 配置变了 → 重建 safe + `unsafe_ssl` 两个 client。
-    ///
+    /// proxy 配置变了 → 重建 safe + `unsafe_ssl` 两个 client（`gh_proxy` 不受 proxy 影响）。
     pub fn rebuild_proxy(&self, cfg: &AppConfig) -> Result<()> {
         let new_sig = ProxySignature::from_cfg(cfg);
         let old_sig = mutex_or("rebuild_proxy:read_sig", &self.proxy_signature)
@@ -203,9 +167,8 @@ impl HttpClients {
             return Ok(());
         }
 
-        // proxy 改了 —— 重建。用 RwLock::write 原子替换两个 Arc。
-        // 读端在 rebuild 期间短暂阻塞（reqwest::Client 构造不含 IO，代价小）；
-        // 旧 Arc 被 in-flight 任务 clone 过去的引用不会受影响，等它们自然 drop。
+        // proxy 改了 —— 用 RwLock::write 原子替换两个 Arc。读端在 rebuild 期间短暂阻塞
+        // （构造 client 不含 IO）；已 clone 到 in-flight 任务的旧 Arc 不受影响，自然 drop。
         let safe = Arc::new(
             build_async_client(cfg, &ClientOptions { unsafe_ssl: false })
                 .context("重建 safe HTTP client 失败")?,
@@ -231,9 +194,7 @@ impl HttpClients {
         Ok(())
     }
 
-    /// 仅测试用：拿到当前 `safe（unsafe_ssl=false）client` 的 Arc 内部指针，
-    /// 用于断言"rebuild 真的换了实例"。返回 `Result` 让调用点（test mod 已
-    /// `allow(unwrap_used)`）决定 panic 还是吞错。
+    /// 仅测试用：拿 `safe` client 的 Arc 内部指针，用于断言"rebuild 真的换了实例"。
     #[cfg(test)]
     fn safe_client_ptr(&self) -> Result<*const reqwest::Client, anyhow::Error> {
         // 测试路径上锁不会 poison；panic 立即可见，比静默返错更易调试。
@@ -321,8 +282,7 @@ mod tests {
 
     #[test]
     fn rebuild_proxy_ignores_non_proxy_changes() {
-        // 改一个跟 proxy 无关的字段（这里直接复用 default_cfg() 的 host）——
-        // signature 一致 → 不重建。
+        // 与 proxy 无关的字段变了 → signature 一致 → 不重建。
         let clients = HttpClients::new(&default_cfg()).unwrap();
         let before = clients.safe_client_ptr().unwrap();
 

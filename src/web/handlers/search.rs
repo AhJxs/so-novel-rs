@@ -1,8 +1,7 @@
 //! 搜索 API（任务轮询模型）。
 //!
-//! `POST /api/search` 创建内存态搜索任务并立即返回 `task_id`；
-//! `GET /api/search/{task_id}` 轮询当前累计状态；`DELETE` 显式清理。
-//! 替代旧 SSE 流式实现。crawler 复用 `search_streaming` 的 mpsc 通道，仅消费端改为累计进 task。
+//! `POST` 建内存态任务并返 `task_id`，`GET /{task_id}` 轮询累计状态，`DELETE` 清理。
+//! 复用 `search_streaming` 的 mpsc 通道，消费端把结果累计进 task。
 
 use std::sync::Arc;
 
@@ -24,7 +23,7 @@ use crate::web::locale::Locale;
 use crate::web::{SearchStatus, SearchTask, SharedState, SourceSearchError};
 
 /// 搜索任务 TTL（秒）：超时后 `POST /api/search` 会 sweep 掉。
-/// `now_unix_secs()` 返回 i64，这里同型避免每次比较转类型。
+/// 与 `now_unix_secs()` 同为 i64，避免每次比较转类型。
 const SEARCH_TTL_SECS: i64 = 600;
 
 /// `POST /api/search` 请求体。
@@ -41,7 +40,7 @@ pub struct SearchCreateResponse {
     pub task_id: u64,
 }
 
-/// 把 [`crate::parser::SearchError`] 映射到稳定的 [`ErrorCode`]（沿用旧实现）。
+/// 把 [`crate::parser::SearchError`] 映射到稳定的 [`ErrorCode`]。
 const fn search_err_code(e: &crate::parser::SearchError) -> ErrorCode {
     use crate::parser::SearchError;
     use ErrorCode as C;
@@ -57,7 +56,7 @@ const fn search_err_code(e: &crate::parser::SearchError) -> ErrorCode {
 /// `POST /api/search` — 创建搜索任务。
 ///
 /// 校验 keyword → sweep 过期任务 → mint id → 插入 `state.search_tasks` →
-/// spawn crawler（`search_streaming` 持有 tx，消费端循环累计进 task）→ 立即返回 `task_id`。
+/// spawn crawler → 立即返回 `task_id`。
 pub async fn search_create(
     Locale(locale): Locale,
     State(state): State<SharedState>,
@@ -79,7 +78,7 @@ pub async fn search_create(
     let limit = req.limit.map(|v| v.max(0) as usize).filter(|v| *v > 0);
     let cf_bypass = config_helpers::cf_bypass(&config);
 
-    // sweep 过期 + mint id + 插入
+    // 持锁内完成 sweep + mint id + 插入，避免中间被别的请求看到半成品
     let task_id = {
         let mut tasks = mutex_or("search:sweep", &state.search_tasks)?;
         let now = now_unix_secs();
@@ -104,7 +103,7 @@ pub async fn search_create(
         id
     };
 
-    // spawn：crawler 独立子任务持有 tx；外层循环消费 rx 累计进 task。
+    // crawler 独立子任务持有 tx；外层循环消费 rx 并把结果累计进 task。
     let (tx, rx) = mpsc::unbounded_channel::<crate::crawler::search::SourceSearchOutcome>();
     let http_for_crawler = Arc::clone(&http);
     let state_for_spawn = Arc::clone(&state);
@@ -145,7 +144,7 @@ pub async fn search_create(
                 }
             }
         }
-        // crawler 退出（tx drop）→ rx 关闭 → 0 源场景兜底标 done。
+        // crawler 退出 → rx 关闭：0 源场景下循环一次都没转，兜底标 Done。
         if let Ok(mut tasks) = state_for_spawn.search_tasks.lock() {
             if let Some(task) = tasks.get_mut(&task_id)
                 && task.status == SearchStatus::Running
@@ -159,7 +158,7 @@ pub async fn search_create(
     Ok((StatusCode::CREATED, Json(SearchCreateResponse { task_id })))
 }
 
-/// `GET /api/search/{task_id}` 响应体（每轮轮询返回当前累计）。
+/// `GET /api/search/{task_id}` 响应体（每次轮询返回当前累计值）。
 #[derive(Serialize)]
 pub struct SearchStatusResponse {
     pub status: SearchStatus,
@@ -174,8 +173,9 @@ pub async fn search_status(
     State(state): State<SharedState>,
     Path(task_id): Path<u64>,
 ) -> Result<Json<SearchStatusResponse>, WebError> {
-    let tasks =
-        read_state_or_json("search:status", || mutex_or("search:status", &state.search_tasks))?;
+    let tasks = read_state_or_json("search:status", || {
+        mutex_or("search:status", &state.search_tasks)
+    })?;
     let Some(task) = tasks.get(&task_id) else {
         return Err(WebError::NotFound("search_task"));
     };

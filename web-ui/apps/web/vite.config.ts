@@ -15,8 +15,7 @@ export default defineConfig({
     proxy: { "/api": "http://localhost:8080" },
   },
   build: {
-    // 生产 sourcemap: 'hidden' —— 生成 .map 但不带 //# sourceMappingURL，
-    // 给 Sentry / 用户报错用，公开文件不暴露源码结构。
+    // 'hidden'：生成 .map 但不带 sourceMappingURL，给报错追踪用又不公开暴露源码结构
     sourcemap: "hidden",
     chunkSizeWarningLimit: 800,
   },

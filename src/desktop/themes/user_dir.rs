@@ -1,17 +1,11 @@
 //! 用户 themes 目录同步: 创建 / 补缺失 / 不覆盖。
-//!
-//! 见 [`ensure_user_themes_dir`] 同步规则。
 
 use std::path::Path;
 
 use super::embedded::embedded_themes;
 
-/// 把 embed 主题同步到用户 themes 目录。
-///
-/// 同步规则:
-/// - **目录不存在** → 创建 + 写全部 21 个 embed 主题
-/// - **目录已存在** → 只补缺失的 (app 升级新增主题时自动加进来)
-/// - **不覆盖任何已存在文件** —— 用户可能改过、或全是自定义主题
+/// 把 embed 主题同步到用户 themes 目录: 目录不存在 → 创建 + 写全部 21 个 embed 主题; 已存在 → 只补
+/// 缺失的 (app 升级新增主题时自动加进来), **不覆盖任何已存在文件** —— 用户可能改过、或全是自定义主题。
 ///
 /// # Errors
 ///
@@ -48,7 +42,6 @@ mod tests {
     #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
     use super::*;
 
-    /// 首次调用 → 创建目录 + 写入 21 个 embed 主题。
     #[test]
     fn ensure_user_themes_dir_creates_when_missing() {
         let tmp = tempfile::tempdir().expect("tempdir");
@@ -74,19 +67,16 @@ mod tests {
         }
     }
 
-    /// 后续调用 → 已存在文件**不覆盖** (保留用户修改)。
     #[test]
     fn ensure_user_themes_dir_preserves_user_modifications() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let path = tmp.path().join("themes");
         ensure_user_themes_dir(&path).expect("first call");
 
-        // 用户改了 adventure.json
         let modified = path.join("adventure.json");
         let custom_payload = r#"{"themes":[{"name":"my-custom","mode":"light"}]}"#;
         std::fs::write(&modified, custom_payload).expect("user modification");
 
-        // 第二次调用不应覆盖
         ensure_user_themes_dir(&path).expect("second call");
         let content = std::fs::read_to_string(&modified).expect("read back");
         assert_eq!(
@@ -102,11 +92,9 @@ mod tests {
         let path = tmp.path().join("themes");
         ensure_user_themes_dir(&path).expect("first call");
 
-        // 用户删了一个 embed 主题
         let removed = path.join("adventure.json");
         std::fs::remove_file(&removed).expect("delete");
 
-        // 第二次调用应补回来
         ensure_user_themes_dir(&path).expect("second call");
         assert!(
             removed.exists(),

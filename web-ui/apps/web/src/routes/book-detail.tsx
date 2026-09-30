@@ -1,5 +1,5 @@
-// 书籍详情页 —— 详情展示 + 目录获取。
-// 点击下载直接 start + 跳转到 /tasks，进度在任务页里看（后端任务独立于组件生命周期）。
+// 书籍详情页：详情展示 + 目录获取。点击下载后跳 /tasks 看进度
+//（后端任务独立于组件生命周期）。
 
 import { useState } from "react"
 import { useParams, useNavigate, useLocation } from "react-router-dom"
@@ -32,7 +32,6 @@ export default function BookDetailPage() {
 
   const [format, setFormat] = useState<ExportFormat>("epub")
 
-  // 启动下载：等后端把任务 push 到 state.tasks（POST 返回即入库）才跳任务页。
   const handleDownload = async () => {
     if (!bookUrl || sourceId == null) return
     await startDl({ url: decoded, sourceId, format })

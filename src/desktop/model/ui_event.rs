@@ -1,21 +1,13 @@
 //! 业务层 → UI 层的事件枚举。
 //!
-//! Plain data，**零 GUI 依赖**（不 import `gpui_kit`）——
-//! 让 `crate::desktop::model` 保持与 UI 框架解耦（详见 `src/lib.rs` 顶部注释）。
+//! Plain data, **零 GUI 依赖**（不 import `gpui_kit`）—— 让 `crate::desktop::model`
+//! 与 UI 框架解耦。
 //!
-//! 流向：
-//! 1. 业务方法（`AppModel::push_*` / `events::drain` 内部）push `UIEvent` 到
-//!    `AppModel::pending_ui_events`；
-//! 2. `desktop::root::render` 每帧排空该队列，调
-//!    `ui_event_to_notification` 翻译成 `gpui_kit::component::notification::Notification`，
-//!    再 `window.push_notification(...)` 真正弹 toast。
+//! 流向: 业务方法 push 到 `AppModel::pending_ui_events` → `desktop::root` 每帧排空,
+//! 翻译成 `gpui_kit::component::notification::Notification` 后 `push_notification`。
 //!
-//! 为什么有 `OpenLink`：旧实现里"有新版本"toast 挂了
-//! `on_click(|_,_,cx| cx.open_url("https://github.com/.../releases/latest"))`，
-//! 是用户拿到新版本号后一键跳到 release 页的关键交互。`Info`/`Success`/
-//! `Warning`/`Error` 都是不可点的纯文本 toast，承载不了这种语义。
-//! `OpenLink` 是 "可点 toast" 的通用载体 —— 后续如果有"打开本地文件"/
-//! "打开书源主页" 等需求，同一 variant 直接复用。
+//! `OpenLink` 承载"可点 toast": `Info` / `Success` / `Warning` / `Error` 都是不可点
+//! 纯文本, 表达不了"点一下跳 release 页"这类交互。
 #[derive(Debug, Clone)]
 pub enum UIEvent {
     /// 普通提示，蓝色 icon。例："已是最新版本"。
@@ -26,8 +18,8 @@ pub enum UIEvent {
     Warning(String),
     /// 错误提示，红色 icon。例："下载失败：网络超时"。
     Error(String),
-    /// 可点击 toast —— 消息用 `message` 渲染，点击触发 `cx.open_url(url)`。
-    /// 翻译层（`desktop::root::ui_event_to_notification`）负责挂 `on_click`。
+    /// 可点击 toast —— 消息用 `message` 渲染, 点击触发 `cx.open_url(url)`
+    /// （`on_click` 由 `desktop::root::ui_event_to_notification` 挂）。
     OpenLink { message: String, url: String },
 }
 

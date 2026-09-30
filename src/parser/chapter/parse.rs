@@ -1,13 +1,5 @@
-//! 单章正文解析主流程
-//!
-//! 来自原 `parser/chapter.rs`:
-//! - [`ChapterError`] 错误枚举
-//! - [`parse_chapter`] 公共异步入口: 抓 + 解析 + 派发单页/分页
-//! - [`parse_chapter_html`] 离线同步解析 (便于测试)
-//! - [`fetch_single_page_content`] 单页抓取 (无 `nextPage` 规则时)
-//! - [`fetch_with_cf_fallback`] `http::fetch_with_cf_fallback` 的 typed-error 包装
-//!
-//! 分页循环 + 终止判定在 [`super::pagination`]。
+//! 单章正文解析主流程: [`parse_chapter`] 抓 + 解析 + 派发单页/分页,
+//! [`parse_chapter_html`] 离线同步解析。分页循环 + 终止判定在 [`super::pagination`]。
 
 use anyhow::Result;
 use reqwest::Client;
@@ -40,7 +32,7 @@ pub enum ChapterError {
 /// 抓取并解析单章正文。
 ///
 /// `chapter` 入参里只有 url/title/order 是有效的；本函数填回 `content`（原始 HTML，
-/// 未做清洗 / 模板渲染 — 那些在阶段 3 的 ChapterFilter/Formatter 里做）。
+/// 未做清洗 / 模板渲染，那些由 filter / formatter 负责）。
 ///
 /// `cf_bypass_base` 同其它 parser。
 ///
@@ -48,7 +40,6 @@ pub enum ChapterError {
 ///
 /// ```ignore
 /// let ch = parse_chapter(&client, &rule, &chapter, None).await?;
-/// println!("{} 字", ch.content.len());
 /// ```
 ///
 /// # Errors
@@ -94,8 +85,6 @@ pub async fn parse_chapter(
     })
 }
 
-/// 仅做"已知 HTML → 正文 HTML 字符串"的纯解析；便于离线测试。
-///
 /// # Examples
 ///
 /// ```ignore
@@ -194,10 +183,8 @@ mod tests {
         </body></html>"#;
         let rule = rule_22biqu_chapter();
         let content = parse_chapter_html(html, &rule).unwrap();
-        // content 走 HTML，内含两段 <p>
         assert!(content.contains("第一段"));
         assert!(content.contains("第二段"));
-        // 不含 .title 的内容（说明 #content 选对了）
         assert!(!content.contains("第1章 起航"));
     }
 

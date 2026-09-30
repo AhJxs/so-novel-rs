@@ -1,10 +1,8 @@
 //! 搜索结果详情 Dialog body 渲染：左侧封面 + 右侧字段列表。
 //!
-//! 布局 `h_flex`：左封面固定 `COVER_W × COVER_H`，右字段 `flex_1`。Dialog body 自带
-//! `overflow_y_scrollbar`（见 组件库的 `Dialog::render），字段多` / 简介长可滚动查看。
-//!
-//! 封面是反应式的：`render_detail_cover` 每帧重读 live `cover_cache`，封面到达后自动刷新
-//! （drain loop 100ms notify → `RootView` 重 render → Dialog builder 重调本函数）。
+//! 详情字段与封面都是反应式的：drain loop 每 100ms notify 触发重 render，builder 重调本
+//! 函数重读 live cache，从占位自动切到真实内容。详情字段只有详情请求才完整，所以优先
+//! `detail_cache` 的 Book，未回来时用 `SearchResult` 兜底。
 
 use std::io::Cursor;
 use std::sync::Arc;
@@ -24,8 +22,8 @@ use crate::models::SearchResult;
 
 use super::SearchPage;
 
-/// 详情 Dialog 封面区固定尺寸（宽 × 高）。封面比例不一，统一容器 + `ObjectFit::Contain`
-/// 居中显示，留白用 muted 背景，跟空态 / 失败占位共用同一个框。
+/// 详情 Dialog 封面区固定尺寸（宽 × 高）。封面比例不一，统一容器 + `ObjectFit::Fill`
+/// 保证布局稳定。
 const COVER_W: f32 = 120.0;
 const COVER_H: f32 = 170.0;
 
@@ -37,9 +35,8 @@ pub(super) fn content(
     url: &str,
     cx: &mut App,
 ) -> impl IntoElement {
-    // 详情是再次请求拿的完整字段（intro / category / status / latest / last_update / author），
-    // 搜索结果里这些是空的。优先用 detail_cache 的 Book；detail 还没回来时用 SearchResult
-    // 兜底（intro 会显 unknown），drain loop 把 Book 拉回来后自动切到完整数据。
+    // 详情字段（intro / category / status / latest / last_update / author）搜索结果里是空的，
+    // 优先取 detail_cache 的 Book。
     let book = page
         .read(cx)
         .model
@@ -57,7 +54,7 @@ pub(super) fn content(
         r.source_name.clone()
     };
 
-    // 合并：detail-only 字段优先 Book，Book 为空时回退 SearchResult。
+    // detail-only 字段优先 Book，Book 为空时回退 SearchResult。
     let book_name = b
         .map(|x| x.book_name.clone())
         .filter(|s| !s.trim().is_empty())
@@ -78,7 +75,7 @@ pub(super) fn content(
         .or(r.last_update_time.as_deref());
     let intro = b.and_then(|x| x.intro.as_deref()).or(r.intro.as_deref());
 
-    // 链接行：label + 可点击 Link（自带 link 色 / 下划线 / hover，点击 cx.open_url 打开）。
+    // 链接行：label + 可点击 Link（自带 link 色 / 下划线 / hover）。
     let url_display = if r.url.trim().is_empty() {
         ts("Search.detail.unknown")
     } else {
@@ -96,8 +93,7 @@ pub(super) fn content(
                 .child(ts("Search.detail.field.url")),
         )
         .child(
-            // gpui 层无 break_all —— URL 无空格不会自动换行，overflow_x_hidden 截断
-            // 超长部分（用户点开链接即可看完整 URL）。
+            // URL 无空格不会自动换行，overflow_x_hidden 截断超长部分。
             div()
                 .flex_1()
                 .min_w_0()
@@ -157,7 +153,7 @@ pub(super) fn content(
         .child(detail_row(
             ts("Search.detail.field.intro"),
             detail_opt(intro),
-            // 长简介（数千字）容易把 Dialog body 顶出视口 → 内滚上限 ~10 行（200px）。
+            // 长简介（数千字）会把 Dialog body 顶出视口 → 内滚上限 ~10 行（200px）。
             Some(200.0),
             cx,
         ))
@@ -170,7 +166,7 @@ pub(super) fn content(
         .child(fields.flex_1().min_w_0())
 }
 
-/// `Option<&str>` → 显示值；`None` / 纯空白 → `Search.detail.unknown` fallback。
+/// `Option<&str>` → 显示值；`None` / 纯空白 → `Search.detail.unknown`。
 fn detail_opt(v: Option<&str>) -> SharedString {
     match v {
         Some(s) if !s.trim().is_empty() => SharedString::from(s.to_string()),
@@ -178,10 +174,9 @@ fn detail_opt(v: Option<&str>) -> SharedString {
     }
 }
 
-/// 详情 Dialog 的「label + value」行：label 固定 84px、muted、xs；value `flex_1、可换行`。
+/// 「label + value」行：label 固定 84px、muted、xs；value `flex_1` 可换行。
 ///
-/// `max_h`：长内容字段（如简介）传 `Some(px)` 给 value 区设最大高度 + 内部滚动条，
-/// 避免单个字段把整个 Dialog 撑得超高。
+/// `max_h` 给 value 区设最大高度 + 内滚，避免长字段把 Dialog 撑超高。
 fn detail_row(
     label: SharedString,
     value: SharedString,
@@ -197,14 +192,14 @@ fn detail_row(
 
     let value_inner = div()
         .flex_1()
-        // min_w_0 让 flex 子项能收缩到内容以下，长 value 不会把行宽撑爆。
+        // min_w_0 让 flex 子项可收缩到内容以下，长 value 不会撑爆行宽。
         .min_w_0()
         .text_sm()
         .text_color(cx.theme().foreground)
         .child(value);
 
-    // `overflow_y_scrollbar` 是 terminal builder（返回 `Scrollable<Div>`），类型与
-    // `Div` 不同 → 不能用 `when_some` 链在内部，按 max_h 分支构造两种 element。
+    // `overflow_y_scrollbar` 是 terminal builder（返回 `Scrollable<Div>`，类型不是 `Div`），
+    // 所以只能按 max_h 分支构造两种 element，不能链在 `when_some` 里。
     let value_el: gpui_kit::AnyElement = if let Some(h) = max_h {
         value_inner
             .max_h(px(h))
@@ -223,18 +218,14 @@ fn detail_row(
 
 /// 解码封面原始字节 → `Arc<RenderImage>`。
 ///
-/// `CoverEntry` 是 UI 中立的（只存原图字节，见 `app/cover.rs`），解码必须放 UI 层。
-/// 流程跟 gpui 自己的 `AssetLoader::<ImageDecoder>` 内部一致（`img.rs` L669-692）：
-/// `image::ImageReader` → `into_rgba8()` → RGBA↔BGRA swap（GPUI 纹理是 BGRA）→ `Frame` → `RenderImage`。
-///
-/// 失败返回 `None`（不是 panic）—— 调用方缓存负面结果，避免每帧重试解码。
+/// `CoverEntry` 只存原图字节（UI 中立，见 `app/cover.rs`），所以解码必须放 UI 层。
+/// 失败返回 `None` 而非 panic —— 调用方缓存负面结果，避免每帧重试解码。
 fn decode_cover_image(bytes: &[u8]) -> Option<Arc<RenderImage>> {
     // with_guessed_format 让 image crate 按 magic bytes 推断格式（PNG/JPEG/WebP/…）。
     let reader = image::ImageReader::new(Cursor::new(bytes))
         .with_guessed_format()
         .ok()?;
-    // 二次保险：解码前再校验是有效图片 —— CoverEntry::Ready 已在下载时 probe 过一次，
-    // 但缓存可能跨进程/异常，这里 probe 一次更稳，且只是几 µs 的开销。
+    // 二次保险：CoverEntry::Ready 下载时已 probe 过，但缓存可能跨进程，这里再 probe 一次。
     let dynamic = match reader.decode() {
         Ok(d) => d,
         Err(e) => {
@@ -244,32 +235,25 @@ fn decode_cover_image(bytes: &[u8]) -> Option<Arc<RenderImage>> {
     };
     let mut rgba = dynamic.into_rgba8();
 
-    // RGBA → BGRA：GPUI 纹理期望 BGRA 字节序（见 gpui img.rs L671-674 swap(0,2)）。
-    for pixel in rgba.chunks_exact_mut(4) {
+    // RGBA → BGRA：GPUI 纹理期望 BGRA 字节序。
+    for pixel in rgba.as_chunks_mut::<4>().0 {
         pixel.swap(0, 2);
     }
 
-    // `Frame` 是 `image::Frame`（跟 gpui 的 `RenderImage::new` 内部一致，见 gpui img.rs
-    // L669-692 用 `image::Frame::new`）。**别**写成 `gpui_kit::Frame` —— 那是 window 模块的
-    // dispatch tree Frame（pub(crate)，外部不可构造，类型也对不上）。
+    // `Frame` 指 `image::Frame`。**别**写成 `gpui_kit::Frame` —— 那是 window 模块的
+    // dispatch tree Frame，pub(crate) 且类型对不上。
     let frame = image::Frame::new(rgba);
     Some(Arc::new(RenderImage::new(vec![frame])))
 }
 
 /// 渲染详情 Dialog 的封面区。
 ///
-/// 封面两级查找（封面不在 `SearchResult` 里，得先拉详情拿 `cover_url` 再下载字节）：
-/// 1. `detail_cache[(source_id, url)]` → `DetailState::Loaded(book)` → `book.cover_url`
-/// 2. `cover_cache[(source_id, cover_url)]` → `CoverEntry::Ready { bytes, uri }` → 解码
+/// 封面不在 `SearchResult` 里，要两级查找：`detail_cache` 拿 `book.cover_url` →
+/// `cover_cache` 拿 `CoverEntry::Ready` 的字节 → 解码。任一级没到都显示「加载中」
+/// （drain loop 100ms 后重 render 自动补上）；无 `cover_url` 显示「无封面」。
 ///
-/// 状态分支：
-/// - `DetailState::Pending` / detail 未拉 → 显示「封面加载中…」（drain loop 100ms 后刷新）
-/// - `Loaded` 但无 `cover_url` → 「无封面」
-/// - 有 `cover_url` 但 `cover_cache` 还没到 / `Failed` → 「封面加载中…」/「封面获取失败」
-/// - `CoverEntry::Ready` → 命中本页解码缓存就渲染，未命中就解码 + 写缓存再渲染
-///
-/// `page: &Entity<SearchPage>`：本页 `cover_images` 缓存是 `&mut self` 字段，必须通过
-/// `page.update` 拿可变借用写缓存。读 model 也走 `page.model`，避免在已借 `model` 时再借。
+/// `page` 必须传 entity：`cover_images` 是 `&mut self` 字段，只能靠 `page.update` 拿
+/// 可变借用写缓存。
 fn render_detail_cover(
     page: &Entity<SearchPage>,
     source_id: i32,
@@ -311,7 +295,7 @@ fn render_detail_cover(
                     .peek(&(source_id, cover_url.to_string()));
                 match cover {
                     Some(CoverEntry::Ready { bytes, uri }) => {
-                        // 命中本页解码缓存就复用；否则解码 + 写缓存。
+                        // 命中本页解码缓存直接复用，否则解码后写缓存。
                         if let Some(cached) = p.cover_images.get(uri.as_str()).cloned() {
                             cached.map_or(CoverView::Failed, CoverView::Image)
                         } else if let Some(img) = decode_cover_image(bytes) {
@@ -329,7 +313,7 @@ fn render_detail_cover(
         }
     });
 
-    // 固定容器：muted 底 + 圆角 + 居中内容。封面 / 占位文案都进同一个框，保证布局稳定。
+    // 固定容器：封面 / 各种占位都进同一个框，保证布局不抖。
     let container = div()
         .w(px(COVER_W))
         .h(px(COVER_H))
@@ -343,7 +327,7 @@ fn render_detail_cover(
 
     match view {
         CoverView::Image(rendered) => container.child(
-            // 变量改名 `rendered` —— `img` 是 gpui 自由函数（`gpui_kit::img(source)`），避免遮蔽。
+            // 改名 `rendered` —— `img` 是自由函数，避免遮蔽。
             img(ImageSource::Render(rendered))
                 .rounded(cx.theme().radius)
                 .object_fit(ObjectFit::Fill)

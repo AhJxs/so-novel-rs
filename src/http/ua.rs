@@ -1,7 +1,6 @@
 //! User-Agent 池。对应 Java `util.RandomUA`。
 //!
-//! 与 Java 端逻辑一致：随机选 OS + 浏览器 + 主版本号，按 4 种格式拼接。
-//! 主要用途是规避一部分书源对单一 UA 的速率限制。
+//! 随机选 OS + 浏览器 + 主版本号，拼成 4 种格式之一，用于规避书源对单一 UA 的限速。
 
 use rand::RngExt;
 
@@ -52,7 +51,6 @@ mod tests {
         for _ in 0..50 {
             let ua = random_ua();
             assert!(ua.starts_with("Mozilla/5.0"), "bad UA: {ua}");
-            // 任一浏览器关键字必须出现
             assert!(
                 BROWSERS.iter().any(|b| ua.contains(b)) || ua.contains("Version/"),
                 "no browser token in {ua}"

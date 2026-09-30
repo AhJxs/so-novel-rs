@@ -1,14 +1,9 @@
 //! Cloudflare 真人验证检测 + 外部 bypass 服务调用。
-//! 对应 Java `util.CrawlUtils#hasCf` + 各 Parser 中的 `${cfBypass}/html?url=...` 调用。
 //!
-//! Java 实现：用 jsoup 解析后取 `document.title()`，与一组关键 title 比对。
-//! Rust 这里直接在原始 HTML 字符串上做 `<title>...</title>` 提取，
-//! 避免每次都跑一遍 scraper（CF 检测会在每页都做一次）。
+//! 用户用 config.toml 的 `[global] cf-bypass` 指向旁路服务；命中 CF 时调
+//! `${cf-bypass}/html?url=<target>` 取回真实 HTML。对应 Java `util.CrawlUtils#hasCf`。
 //!
-//! bypass 服务约定参考 sarperavci/CloudflareBypassForScraping：
-//! - 用户在 config.toml 的 `[global] cf-bypass` 中填一个本机/远端服务的 base URL
-//!   （如 `http://127.0.0.1:8000`）；
-//! - 我们在命中 CF 时调用 `${cf-bypass}/html?url=<urlencoded>`，得到去 CF 后的真实 HTML。
+//! 检测直接在原始 HTML 上取 `<title>`，不走 scraper（每页都会检测一次）。
 
 use std::time::Duration;
 
@@ -24,9 +19,7 @@ const CF_TITLES: &[&str] = &[
     "Checking your browser before accessing",
 ];
 
-/// 编译期确定的正则：用 match 走 panic 路径以避免 `clippy::expect_used`，
-/// 与项目里其它 `LazyLock` 静态正则统一风格。
-/// panic IS the design：源码字面量写错就是程序员错误。
+/// 静态正则字面量写错即程序员错误，故直接 panic（避开 `clippy::expect_used`）。
 #[allow(
     clippy::panic,
     reason = "static regex literal must compile; failure = programmer error"
@@ -52,18 +45,7 @@ pub fn has_cloudflare(html: &str) -> bool {
 
 /// 调用外部 cf-bypass 服务获取去 CF 后的页面 HTML。
 ///
-/// `cf_bypass_base` 例如 `"http://127.0.0.1:8000"`，
-/// `target_url` 是真正想抓的页面 URL。
-///
-/// Java 端用 hutool `HttpUtil.get(...)` 同步请求；这里复用调用方
-/// 已经构造好的 `Client`（保持 cookie / 代理一致）。
-/// 把 `target_url` 转发给外部 CF 旁路服务, 返回解扰后的 HTML。
-///
-/// `cf_bypass_base` 例如 `"http://127.0.0.1:8000"`,
-/// `target_url` 是真正想抓的页面 URL。
-///
-/// Java 端用 hutool `HttpUtil.get(...)` 同步请求; 这里复用调用方
-/// 已经构造好的 `Client` (保持 cookie / 代理一致)。
+/// 复用调用方已构造好的 `Client`（保持 cookie / 代理一致）。
 ///
 /// # Examples
 ///
@@ -84,8 +66,7 @@ pub async fn fetch_via_cf_bypass(
     cf_bypass_base: &str,
     target_url: &str,
 ) -> Result<String> {
-    // 与 Java 端 `${cfBypass}/html?url=<原 URL>` 完全一致；
-    // 不对 url 做编码 — Java 端也没编码（hutool 直接拼字符串）。
+    // 与 Java 端 `${cfBypass}/html?url=<原 URL>` 一致：**不做** url 编码。
     let url = format!(
         "{}/html?url={}",
         cf_bypass_base.trim_end_matches('/'),
@@ -108,8 +89,8 @@ pub async fn fetch_via_cf_bypass(
     if !status.is_success() {
         anyhow::bail!("cf-bypass returned HTTP {status}: {text}");
     }
-    // 二次校验：旁路服务若自身返回 CF 挑战页（服务挂了 / 被二次挑战 / 配错），
-    // 直接当正文喂给 parser 会报出令人困惑的 EmptyContent，不如显式失败。
+    // 二次校验：旁路服务自身若返回 CF 挑战页，直接喂给 parser 只会报出困惑的
+    // EmptyContent，不如显式失败。
     if has_cloudflare(&text) {
         anyhow::bail!("cf-bypass 仍返回 Cloudflare 验证页: {url}");
     }
@@ -147,7 +128,6 @@ mod tests {
     /// 不真发请求；只验证 `fetch_via_cf_bypass` 的 URL 拼接形状（trim '/'）。
     #[test]
     fn cf_bypass_url_formatting_via_dry_run() {
-        // 仅形状校验：复用拼接逻辑会涉及私有 const，把判定从外部行为出发。
         let base_with_slash = "http://127.0.0.1:8000/";
         let base = base_with_slash.trim_end_matches('/');
         let target = "https://www.69shuba.com/book/123/";

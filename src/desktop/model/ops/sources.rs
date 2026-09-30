@@ -19,7 +19,7 @@ pub fn toggle_source_disabled(
     source_url: &str,
 ) {
     let now_disabled = sources_config.toggle_disabled(source_url);
-    // 更新内存中的规则状态（URL 键规范化集中到 core::sources）
+    // 同步内存里的规则状态（URL 键规范化统一在 core::sources）。
     if let Some(r) = rules
         .iter_mut()
         .find(|r| core_sources::rule_key(r) == core_sources::disabled_url_key(source_url))
@@ -28,12 +28,9 @@ pub fn toggle_source_disabled(
     }
 }
 
-/// 从用户选中的 JSON 文件导入书源到 `~/.sonovel/rules/`。
+/// 从用户选中的 JSON 文件导入书源到 `~/.sonovel/rules/`（同名文件覆盖）。
 ///
-/// **去重**：文件名相同时 replace（覆盖）。
-/// 返回 `ImportResult { filename }`。
-///
-/// 失败：返回 `Err(AppError)`，调用方用 `e.message()` 渲染 toast notification。
+/// 失败返回 `Err(AppError)`, 调用方用 `e.message()` 渲染 toast。
 pub fn add_sources_from_file(
     rules_dir: &Path,
     sources_config: &SourcesConfig,
@@ -47,18 +44,18 @@ pub fn add_sources_from_file(
         .ok_or_else(|| AppError::invalid("无法获取文件名"))?
         .to_string();
 
-    // 验证文件内容是否有效（解析链统一在 core::sources::parse_rules_bytes）
+    // 验证文件内容有效（解析链统一在 core::sources::parse_rules_bytes）。
     let bytes = std::fs::read(source_path).map_err(|e| AppError::io_msg(&e, "读取文件失败"))?;
     let _: Vec<Rule> = core_sources::parse_rules_bytes(&bytes, source_path)
         .map_err(|e| AppError::internal(format!("{e:#}")))?;
 
-    // 复制文件到 rules 目录（重名则覆盖）
+    // 复制文件到 rules 目录（重名覆盖）。
     let dest = rules_dir.join(&filename);
     std::fs::copy(source_path, &dest).map_err(|e| AppError::io_msg(&e, "复制文件失败"))?;
 
     tracing::info!("已导入书源文件: {}", dest.display());
 
-    // 如果导入的是当前活跃文件，重新加载规则
+    // 导入的是当前活跃文件 → 重新加载规则。
     let mut reloaded_active = false;
     if filename == sources_config.active_file {
         match core_sources::load_active(rules_dir, sources_config) {
@@ -81,9 +78,8 @@ pub fn add_sources_from_file(
 #[derive(Debug, Clone)]
 pub struct ImportResult {
     pub filename: String,
-    /// true = 这条导入触发了 `active_file` 重载（rule 集合变了）；false = 只是
-    /// 追加了一个非活跃文件。调用方据此决定是否清空搜索状态（旧 results 的
-    /// `source_id` 在新 rule 集合里可能指向错源）。
+    /// true = 这次导入触发了 `active_file` 重载（rule 集合变了, 旧 results 的
+    /// `source_id` 可能指向错源, 调用方需清空搜索状态）。
     pub reloaded_active: bool,
 }
 
@@ -97,22 +93,21 @@ pub fn delete_source(
     sources_state: &mut SourcesState,
     source_url: &str,
 ) -> AppResult<bool> {
-    // URL 键规范化集中到 core::sources
+    // URL 键规范化统一在 core::sources。
     let url_key = core_sources::disabled_url_key(source_url);
 
-    // 在 retain 之前捕获要删除的规则 ID（retain 后就找不到了）
+    // 必须在 retain 之前捕获规则 ID（retain 后就找不到了）。
     let doomed_id = rules
         .iter()
         .find(|r| core_sources::rule_key(r) == url_key)
         .map(|r| r.id);
 
-    // 从内存中移除
     let before = rules.len();
     rules.retain(|r| core_sources::rule_key(r) != url_key);
     let deleted = rules.len() < before;
 
     if deleted {
-        // 从活跃文件中重新保存（原子写入，防止崩溃时损坏文件）
+        // 重新保存活跃文件（原子写入, 防崩溃损坏）。
         let file_path = rules_dir.join(&sources_config.active_file);
         if file_path.exists() {
             let content = serde_json::to_string_pretty(rules)
@@ -121,7 +116,7 @@ pub fn delete_source(
                 .map_err(|e| AppError::internal(format!("写入文件失败: {e}")))?;
         }
 
-        // 清理健康检查状态
+        // 清掉这条源的健康检查结果。
         if let Some(id) = doomed_id {
             sources_state.health.remove(&id);
         }
@@ -130,9 +125,7 @@ pub fn delete_source(
     Ok(deleted)
 }
 
-/// 切换活跃书源文件。
-///
-/// 返回切换后的规则列表。
+/// 切换活跃书源文件, 返回切换后的规则列表。
 pub fn switch_active_file(
     rules_dir: &Path,
     sources_config: &mut SourcesConfig,

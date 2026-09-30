@@ -1,5 +1,4 @@
-// 搜索页 —— 任务轮询搜索，结果渐进累计。状态在 SearchProvider 里，
-// 跨路由切换（去书库/任务等再回来）保留已加载的结果。
+// 搜索页：任务轮询搜索，结果渐进累计。状态在 SearchProvider，跨路由切换保留。
 
 import { useState, useCallback, useEffect } from "react"
 import { useNavigate } from "react-router-dom"
@@ -35,7 +34,7 @@ const PAGE_SIZE = 12
 
 export default function SearchPage() {
   const [keyword, setKeyword] = useState("")
-  const [sourceId, setSourceId] = useState<string>("")  // 显示用 string
+  const [sourceId, setSourceId] = useState<string>("")
   const [page, setPage] = useState(1)
   const navigate = useNavigate()
   const { t } = useTranslation()
@@ -46,12 +45,12 @@ export default function SearchPage() {
   const totalPages = Math.max(1, Math.ceil(results.length / PAGE_SIZE))
   const paged = results.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
 
-  // 文件数变化（如新一轮搜索结果数变少）时把页码夹回合法范围。
+  // 结果数变化时把页码夹回合法范围
   useEffect(() => {
     setPage((p) => Math.min(p, totalPages))
   }, [totalPages])
 
-  // 总页数多时折叠中间页：始终保留首页 / 末页 + 当前页前后各 1 页，中间用 … 代替。
+  // 总页数多时折叠中间页，始终保留首页 / 末页 + 当前页前后各 1 页
   const pageItems = useCallback((): ("ellipsis" | number)[] => {
     if (totalPages <= 7) return Array.from({ length: totalPages }, (_, i) => i + 1)
     const items: ("ellipsis" | number)[] = [1]

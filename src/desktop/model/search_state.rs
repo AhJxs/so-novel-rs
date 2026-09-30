@@ -1,5 +1,3 @@
-//! 搜索状态：搜索页的全部状态 + 后台通信。
-
 use std::collections::{HashMap, HashSet};
 use std::num::NonZeroUsize;
 use tokio::runtime::Runtime;
@@ -12,12 +10,8 @@ use crate::models::{Book, Chapter, SearchResult};
 
 use super::cover::{CoverEntry, cover_entry_from_bytes};
 
-/// 封面结果缓存最大条目数。
-///
-/// 旧实现是 `HashMap` 无上限，长会话累积所有查看过的封面。
-/// 64 条覆盖了搜索页通常浏览的"当前结果集 + 最近历史"。
-/// `SearchResult` 单条 cover 字节一般 50KB-200KB，64 条上限 ≈ 5-10MB，
-/// 与原"无上限"相比稳态内存有界。
+/// 封面结果缓存最大条目数。64 条 ≈ 5-10MB, 让长会话的内存有界
+/// （旧实现是无上限 `HashMap`, 会累积所有查看过的封面）。
 const COVER_CACHE_CAPACITY: NonZeroUsize = match NonZeroUsize::new(64) {
     Some(n) => n,
     None => unreachable!(),
@@ -39,69 +33,43 @@ pub struct TocEvent {
     pub state: TocState,
 }
 
-/// 搜索状态（搜索下载页用）。
+/// 搜索页状态（含后台通道）。
 pub struct SearchState {
-    /// 用户输入。
     pub keyword: String,
     /// `None` = 聚合搜索；`Some(rule_id)` = 仅当前书源。
     pub source_id: Option<i32>,
 
-    /// 上次搜索的关键词（用于结果列表的标题展示，知道是哪次搜的）。
     pub last_keyword: Option<String>,
-    /// 已收到的结果（按 `source_id` 升序）。
     pub results: Vec<SearchResult>,
-    /// `results` 改动的单调递增版本号：`drain` 写入新结果时 +1。
-    /// UI 渲染用 `(results_version, filter_hash, page_index)` 缓存过滤/排序结果，
-    /// 避免每帧重算 + clone —— 详见 `crate::desktop::model::list_cache`。
     pub results_version: u64,
-    /// 各源的搜索状态：true = 跑完，false = 还在跑。
-    /// 用 (`source_id`, `source_name`, status) 让 UI 显示哪个源还在等。
+    /// 各源搜索状态 (true = 跑完), 让 UI 显示哪个源还在等。
     pub source_status: Vec<(i32, String, SourceStatus)>,
-    /// 整体是否在跑（true 时禁用搜索按钮）。
     pub running: bool,
-    /// 最近一次错误（顶部红条）。
     pub last_error: Option<String>,
 
     /// 后台搜索通过此通道汇报"单源完成"。
     pub rx: Option<mpsc::UnboundedReceiver<SourceSearchEvent>>,
-    /// 总共要等多少源（含错误源）。
     pub expected: usize,
-    /// 已收到多少源。
     pub received: usize,
 
-    /// 当前选中的搜索结果（行索引）；用于右侧详情面板。
     pub selected: Option<usize>,
-    /// `详情缓存：(source_id`, url) → DetailState。后台 spawn 后回写。
     pub detail_cache: HashMap<(i32, String), DetailState>,
-    /// 详情后台任务的接收端（每条结果一个事件）。
     pub detail_rx: Option<mpsc::UnboundedReceiver<DetailEvent>>,
 
-    /// `spawn_search` 时拷自 `cfg.search_filter；全部源返回后用它决定是否调用` `filter_sort`。
     pub filter_after_done: bool,
 
-    /// TOC `预取缓存：(source_id`, url) → `TocState`。
     pub toc_cache: HashMap<(i32, String), TocState>,
-    /// TOC 预取后台任务的接收端。
     pub toc_rx: Option<mpsc::UnboundedReceiver<TocEvent>>,
-    /// 用户选择的章节起始序号（1-based）。
     pub chapter_range_start: u32,
-    /// 用户选择的章节结束序号（1-based）。
     pub chapter_range_end: u32,
 
-    // ---- 封面（5b 增强） ----
-    /// 封面下载完成通道的发送端：保留以便多次 spawn 复用同一通道。
     pub cover_tx: Option<mpsc::UnboundedSender<CoverEvent>>,
-    /// 封面下载完成通道的接收端。
     pub cover_rx: Option<mpsc::UnboundedReceiver<CoverEvent>>,
-    /// `封面结果缓存：(source_id`, `cover_url`) → `CoverEntry`。
-    ///
-    /// **LRU 上限 `COVER_CACHE_CAPACITY`（64）**：长会话累积所有查看过的
-    /// 封面的旧实现（`HashMap` 无界）会被这个 LRU 取代，超额自动驱逐。
-    /// 切换 active rule 文件时 `clear()` 整表（避免 stale 占用）。
+    /// 封面结果缓存; 上限 `COVER_CACHE_CAPACITY`, 切 active rule 时整表 `clear()`。
     pub cover_cache: LruCache<(i32, String), CoverEntry>,
-    /// 正在下载中的封面 URL；防止重复 spawn。
+    /// 正在下载中的封面 URL; 防止重复 spawn。
     pub cover_in_flight: HashSet<(i32, String)>,
-    /// `drain_detail` 期间收集到的待 prefetch 封面 URL，drain 后由 `AppModel` 取出统一派发。
+    /// `drain_detail` 期间收集的待 prefetch 封面 URL, 之后由 `AppModel` 统一派发。
     pub pending_cover_prefetch: Vec<(i32, String)>,
 }
 
@@ -184,16 +152,15 @@ pub enum SourceStatus {
 pub struct SourceSearchEvent {
     pub source_id: i32,
     pub source_name: String,
-    /// 单源搜索结果。`AppError` 承载 [`crate::parser::SearchError`] / 后台
-    /// 任务异常退出等场景, 调用方用 `e.message()` 拿 i18n 渲染文本。
+    /// 单源搜索结果。`AppError` 承载 [`crate::parser::SearchError`] / 任务异常退出;
+    /// 调用方用 `e.message()` 拿 i18n 渲染文本。
     pub result: crate::error::AppResult<Vec<SearchResult>>,
 }
 
 impl SearchState {
     /// rule 集合整体变化时（切活跃书源文件 / 导入触发 active 重载）调用。
-    /// `SearchResult.source_id: i32` 是数值弱匹配 —— 同一 id 在新文件里可能
-    /// 指向完全不同的源，留着旧 results 会让用户点到错源下载，所以整体退到
-    /// `Default`；`keyword` 是用户连续输入，必须保留。
+    /// `source_id: i32` 是数值弱匹配 —— 同一 id 在新文件里可能指向完全不同的源,
+    /// 留着旧 results 会让用户点到错源下载, 所以整体退到 `Default`; `keyword` 必须保留。
     pub fn clear_results_and_caches(&mut self) {
         let keyword = std::mem::take(&mut self.keyword);
         *self = Self::default();
@@ -246,8 +213,8 @@ impl SearchState {
         let toc_changed = self.drain_toc();
         any |= detail_changed || cover_changed || toc_changed;
 
-        // results 实际内容有变时 bump 一档（cache key 含 results_version，
-        // 任何变化一次 bump 即失效，无需重复 +1）。
+        // 搜索结果 / 详情 / 封面 / TOC 有事件时 bump 一档，让含 `results_version`
+        // 的缓存 key 失效（一次 bump 即够，无需按变化次数计数）。
         if any {
             self.results_version = self.results_version.wrapping_add(1);
         }
@@ -259,6 +226,7 @@ impl SearchState {
         let mut any = false;
         let _ = try_drain_all(&mut self.detail_rx, |ev: DetailEvent| {
             any = true;
+            // 详情带回 cover_url 时先入队, 由 `AppModel` 统一下载（见 `events::drain`）。
             if let DetailState::Loaded(book) = &ev.state
                 && let Some(cover_url) = book
                     .cover_url
@@ -283,8 +251,7 @@ impl SearchState {
             let entry = cover_entry_from_bytes(ev.source_id, &ev.url, ev.bytes);
             self.cover_cache.put((ev.source_id, ev.url), entry);
         });
-        // sender 已 drop：连同 `cover_tx` 一起清，避免后续 `spawn_cover_download`
-        // 误用旧 tx；`cover_rx` 已被 `try_drain_all` 留为 None。
+        // sender 已 drop: 清掉 `cover_tx`, 免得之后 `spawn_cover_download` 误用旧 tx。
         if matches!(outcome, DrainOutcome::Disconnected) {
             self.cover_tx = None;
         }
@@ -296,7 +263,7 @@ impl SearchState {
         let mut any = false;
         let _ = try_drain_all(&mut self.toc_rx, |ev: TocEvent| {
             any = true;
-            // 首次加载完成时初始化章节范围
+            // 首次加载完成时初始化章节范围。
             if let TocState::Loaded(_, chapters) = &ev.state
                 && (self.chapter_range_start == 0 || self.chapter_range_end == 0)
             {
@@ -309,8 +276,6 @@ impl SearchState {
     }
 
     /// 派一个封面下载任务。已有缓存 / 正在下载 / url 为空时直接返回（幂等）。
-    /// `client` 是共享 HTTP client 集合，封面下载固定走 safe `通道（unsafe_ssl=false`
-    /// 的常规请求），不复用 `cfg` 自己造 client。
     pub fn spawn_cover_download(
         &mut self,
         source_id: i32,
@@ -323,8 +288,7 @@ impl SearchState {
             return;
         }
         let key = (source_id, url.to_string());
-        // 用 `peek` 而非 `contains`：`contains` 在 lru 0.12 同样要 &mut。
-        // 这里只判断"是否要发请求"，不需要 promote 顺序（已存在 = 直接命中）。
+        // 用 `peek` 而非 `contains`: 这里只判断"是否要发请求", 不需要 promote 顺序。
         if self.cover_cache.peek(&key).is_some() || self.cover_in_flight.contains(&key) {
             return;
         }
@@ -341,9 +305,8 @@ impl SearchState {
 
         let url_owned = url.to_string();
         let source_id_send = source_id;
-        // `client` 是 `&reqwest::Client` 借自 caller，不能跨 `.await` move。
-        // reqwest::Client::clone 是廉价 Arc clone（共享底层连接池），
-        // 这正是 Phase 3.1 想要的"跨任务复用连接池"语义。
+        // `client` 借自 caller 不能跨 `.await` move; `reqwest::Client::clone` 是廉价
+        // Arc clone (共享连接池), 正是"跨任务复用"要的语义。
         let client = client.clone();
         runtime.spawn(async move {
             let key_send = (source_id_send, url_owned.clone());
@@ -455,7 +418,7 @@ mod search_state_tests {
         assert!(s.cover_in_flight.is_empty());
     }
 
-    /// 回归测试：跑完 spawn 后 drop `multi_thread` runtime 不应触发
+    /// 回归测试: 跑完 spawn 后 drop `multi_thread` runtime 不应触发
     /// "Cannot drop a runtime in a context where blocking is not allowed"。
     #[test]
     fn cover_runtime_drop_does_not_panic() {
@@ -476,19 +439,15 @@ mod search_state_tests {
         drop(rt);
     }
 
-    /// 回归测试：切活跃书源文件后，旧 results / 缓存 全部清空，但用户输入
-    /// 的 `keyword` 保留（用户连续输入不应被打断）。`source_id` 重置为 `None`，
-    /// 避免 dropdown 指着新文件里不存在的 id 让下一次搜索派空。
-    ///
-    /// 场景对应：`SearchResult.source_id: i32` 弱匹配，切文件后旧 id 可能指向
-    /// 完全不同的 rule —— 直接清空比"保留 + 静默错源下载"安全得多。
+    /// 回归测试：切活跃书源文件后旧 results / 缓存全部清空, 但用户输入的
+    /// `keyword` 保留 —— `source_id` 是数值弱匹配, 旧 id 可能指向完全不同的
+    /// rule, 留旧结果会让用户点到错源下载。
     #[test]
     fn clear_results_and_caches_resets_rule_bound_state() {
         let mut s = SearchState {
             keyword: "校花".to_string(),
             ..Default::default()
         };
-        // 模拟"已搜过一轮"：往每个 rule-bound 容器里塞一条样本
         s.source_id = Some(3);
         s.last_keyword = Some("校花".to_string());
         s.results.push(SearchResult {
@@ -512,10 +471,9 @@ mod search_state_tests {
         );
 
         s.clear_results_and_caches();
-        // 二次 clear 在 default 状态上不应 panic
+        // 二次 clear 在 default 状态上不应 panic。
         s.clear_results_and_caches();
 
-        // keyword 保留 —— 其他字段都回到 Default，靠类型系统保证
         assert_eq!(s.keyword, "校花");
         assert!(s.source_id.is_none(), "source_id 应重置为 None");
         assert!(s.results.is_empty(), "results 应清空");

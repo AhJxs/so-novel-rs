@@ -19,7 +19,6 @@ use crate::utils::system::{open_path, reveal_in_folder};
 use super::TasksPage;
 use super::summary::TaskSummary;
 
-/// 渲染一条任务行（卡片式：序号 / 标题行 / 进度条 / 失败折叠 / 动作按钮）。
 pub(super) fn render(task: &TaskSummary, page: &Entity<TasksPage>, cx: &App) -> impl IntoElement {
     let running = task.is_running();
     let succeeded = matches!(task.finished, Some(Ok(_)));
@@ -72,7 +71,7 @@ pub(super) fn render(task: &TaskSummary, page: &Entity<TasksPage>, cx: &App) -> 
     };
     let status_label: SharedString = ts_cached(status_key);
 
-    // 作者：优先详情拉的 book_meta.author（完整），否则 origin.author；空走 fallback。
+    // 作者：优先详情拉的 book_meta.author，否则 origin.author；空走 fallback。
     let author_display: SharedString = {
         let from_book = task.book_meta.as_ref().map(|b| b.author.as_str());
         let raw = from_book.filter(|s| !s.trim().is_empty()).or_else(|| {
@@ -93,7 +92,7 @@ pub(super) fn render(task: &TaskSummary, page: &Entity<TasksPage>, cx: &App) -> 
         SharedString::from(truncate(&task.origin.source_name, 20))
     };
 
-    // 书名行：书名 · 作者 · 书源名（作者 / 书源名 muted、xs，紧贴书名右侧）。
+    // 书名行：书名 · 作者 · 书源名（作者 / 书源名 muted、xs）。
     let title_line = h_flex()
         .gap_2()
         .items_baseline()
@@ -112,7 +111,6 @@ pub(super) fn render(task: &TaskSummary, page: &Entity<TasksPage>, cx: &App) -> 
         );
 
     // 进度条上的章节信息：N/M 章 · 失败 n（走 ts_fmt 占位符，避免切语言乱序）。
-    // 失败数为 0 时不显示「失败 n」段。
     let chapters_text = if failed_count > 0 {
         format!(
             "{} · {}",
@@ -171,7 +169,6 @@ pub(super) fn render(task: &TaskSummary, page: &Entity<TasksPage>, cx: &App) -> 
                 .flex_1()
                 .min_w(px(0.))
                 .gap_2()
-                // 标题行：书名 · 作者 · 书源名（左）+ 状态徽章（右）
                 .child(
                     h_flex()
                         .items_center()
@@ -180,9 +177,8 @@ pub(super) fn render(task: &TaskSummary, page: &Entity<TasksPage>, cx: &App) -> 
                         .child(title_line)
                         .child(StatusBadge::new(status, status_label)),
                 )
-                // 进度条 + 章节信息：进度条始终显示（已完成 100% / 失败·取消保留当前进度），
-                // 章节信息（N/M 章 · 失败 n）在左、开始时间在右（行内两端对齐），
-                // 进度条在上方整行下方。
+                // 进度条 + 章节信息：进度条始终显示（失败 / 取消保留当前进度），
+                // 章节信息在左、开始时间在右，进度条在下方整行。
                 .child(
                     v_flex()
                         .gap_1()
@@ -214,17 +210,13 @@ pub(super) fn render(task: &TaskSummary, page: &Entity<TasksPage>, cx: &App) -> 
                                 .w_full()
                                 .bg(cx.theme().success),
                         )
-                        // 失败章节不再用行内 Accordion 折叠 —— `List` 要求所有行等高 +
-                        // `overflow_hidden`（见 组件库 list.rs），Accordion 展开撑高
-                        // 会被裁掉。改成动作按钮区的「失败明细」按钮 → 弹 Dialog 只读列表
-                        // （`TasksPage::show_failures`），把可变高度内容移出虚拟列表行。
-                        // 动作按钮行
+                        // 失败章节不用行内 Accordion 折叠 —— `List` 要求行等高 + overflow_hidden，
+                        // 展开会被裁掉；改走「失败明细」按钮弹 Dialog（见 `TasksPage::show_failures`）。
                         .child(
                             h_flex()
                                 .pt_1()
                                 .gap_2()
                                 .justify_end()
-                                // 取消（仅运行中）
                                 .when(running, |this| {
                                     let page_for_cancel = page.clone();
                                     let task_id = task.id;
@@ -265,8 +257,7 @@ pub(super) fn render(task: &TaskSummary, page: &Entity<TasksPage>, cx: &App) -> 
                                             }),
                                     )
                                 })
-                                // 失败明细（有失败章节时）→ 弹只读 Dialog 列出失败章节 + 原因。
-                                // 不再用行内 Accordion（List 等高 + overflow_hidden 撑不开）。
+                                // 失败明细（有失败章节时）→ 弹只读 Dialog。
                                 .when(!task.failures.is_empty(), |this| {
                                     let page_for_fails = page.clone();
                                     let task_id = task.id;
@@ -283,7 +274,7 @@ pub(super) fn render(task: &TaskSummary, page: &Entity<TasksPage>, cx: &App) -> 
                                                 &[("n", &fail_count.to_string())],
                                             ))
                                             .on_click(move |_, window: &mut Window, cx| {
-                                                // Fn handler：每次点击重新 clone 给 update 闭包。
+                                                // 每次点击重新 clone 给 update 闭包。
                                                 let failures = failures.clone();
                                                 let book_name = book_name.clone();
                                                 page_for_fails.update(cx, |_p, cx| {
@@ -292,7 +283,6 @@ pub(super) fn render(task: &TaskSummary, page: &Entity<TasksPage>, cx: &App) -> 
                                             }),
                                     )
                                 })
-                                // 打开 / 位置（仅成功）
                                 .when_some(output_path, |this, path| {
                                     let path_open = path.clone();
                                     let path_reveal = path;
@@ -324,8 +314,7 @@ pub(super) fn render(task: &TaskSummary, page: &Entity<TasksPage>, cx: &App) -> 
                                             }),
                                     )
                                 })
-                                // 删除（仅已结束：完成 / 失败 / 已取消）—— 弹 confirm Dialog 二次确认，
-                                // 跟 library.rs prompt_delete 同模式。
+                                // 删除（仅已结束）→ 弹 confirm Dialog 二次确认。
                                 .when(!running, |this| {
                                     this.child(
                                         Button::new(("task-delete", task_id))
@@ -334,9 +323,8 @@ pub(super) fn render(task: &TaskSummary, page: &Entity<TasksPage>, cx: &App) -> 
                                             .icon(Icon::new(IconName::Delete))
                                             .label(ts_cached("Tasks.card.action.delete"))
                                             .on_click(move |_, window: &mut Window, cx| {
-                                                // prompt_delete 要 &self + &mut Window + &mut App：
-                                                // page.update 闭包内 cx 是 Context<TasksPage>（无 window），
-                                                // 所以 window 从 on_click 自带的 &mut Window 传入。
+                                                // `prompt_delete` 要 `&mut Window`，而 page.update 闭包里
+                                                // 只有 `Context<TasksPage>`，故 window 从 on_click 传入。
                                                 page_for_delete.update(cx, |p, cx| {
                                                     p.prompt_delete(
                                                         task_id,

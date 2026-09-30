@@ -1,7 +1,7 @@
-//! `sources` 子命令：list / enable / disable。
+//! `sources` 子命令: list / enable / disable。
 //!
-//! 启用/禁用通过读写 `~/.sonovel/sources_config.json` 的 `disabled_urls` 实现
-//! （URL 为 key，因为 ID 在不同书源文件里可能不同 — 见 `persistent::sources_config`）。
+//! 启用/禁用读写 `~/.sonovel/sources_config.json` 的 `disabled_urls`, **以 URL 为 key**
+//! (ID 在不同书源文件里可能重复)。
 
 use anyhow::{Context, Result};
 
@@ -52,11 +52,9 @@ pub fn run_list(paths: &ConfigPaths, json: bool) -> Result<()> {
     Ok(())
 }
 
-/// 设置指定 ID 书源的禁用状态。
-/// - `disable=true`  → 把规则 URL 加入 `disabled_urls` 并写回磁盘
-/// - `disable=false` → 从 `disabled_urls` 移除并写回磁盘
+/// 设置指定 ID 书源的禁用状态: 把规则 URL 加入 / 移出 `disabled_urls` 并写回磁盘。
 ///
-/// 找不到 ID / 已是目标状态：都按幂等处理（前者错误，后者早退）。
+/// 找不到 ID → 错误; 已是目标状态 → 幂等早退, 不写盘。
 pub fn run_set_disabled(paths: &ConfigPaths, id: i32, disable: bool) -> Result<()> {
     let mut sources_config = SourcesConfig::load(&paths.sources_config);
     let rules: Vec<Rule> =
@@ -68,7 +66,8 @@ pub fn run_set_disabled(paths: &ConfigPaths, id: i32, disable: bool) -> Result<(
     let url = rule.url.clone();
     let name = &rule.name;
 
-    // URL 键归一走 core::sources::disabled_url_key —— 与 SourcesConfig::toggle_disabled 同源
+    // URL 键归一必须走 `core_sources::disabled_url_key`, 与 `SourcesConfig::toggle_disabled`
+    // 同源 —— 否则两边键不一致, 禁用状态读不回来。
     let key = core_sources::disabled_url_key(&url);
     let already = sources_config.disabled_urls.contains(&key);
     let state = if disable { "已禁用" } else { "已启用" };
@@ -98,8 +97,8 @@ mod tests {
     use super::*;
     use crate::config::ConfigPaths;
 
-    /// 临时目录 + 一个 minimal rules.json（含 2 条规则） + `ConfigPaths`。
-    /// 跳过 `ConfigPaths::discover()（它会读用户主目录），直接拼路径`。
+    /// 临时目录 + minimal rules.json (2 条规则) + `ConfigPaths`; 跳过会读用户主目录的
+    /// `ConfigPaths::discover()`, 直接拼路径。
     fn setup_two_sources() -> (tempfile::TempDir, ConfigPaths) {
         let dir = tempfile::tempdir().unwrap();
         let rules_dir = dir.path().join("rules");
@@ -140,11 +139,9 @@ mod tests {
     fn disable_then_enable_round_trip() {
         let (_dir, paths) = setup_two_sources();
 
-        // 初始：0 禁用
         assert_eq!(rule_count(&paths, true), 0);
         assert_eq!(rule_count(&paths, false), 2);
 
-        // 禁用 #1
         run_set_disabled(&paths, 1, true).unwrap();
         assert_eq!(rule_count(&paths, true), 1);
         assert_eq!(rule_count(&paths, false), 1);
@@ -156,7 +153,6 @@ mod tests {
                 .contains("https://a.test/")
         );
 
-        // 启用 #1
         run_set_disabled(&paths, 1, false).unwrap();
         assert_eq!(rule_count(&paths, true), 0);
         assert_eq!(rule_count(&paths, false), 2);
@@ -182,7 +178,6 @@ mod tests {
         run_set_disabled(&paths, 1, true).unwrap();
         // 重复禁用：不应再写盘，但仍返回 Ok
         run_set_disabled(&paths, 1, true).unwrap();
-        // disabled_urls 仍只有一条
         assert_eq!(
             SourcesConfig::load(&paths.sources_config)
                 .disabled_urls
@@ -194,8 +189,7 @@ mod tests {
     #[test]
     fn list_json_outputs_rules() {
         let (_dir, paths) = setup_two_sources();
-        // json=true 时不 print 到 stdout 测试困难，跳过端到端，
-        // 这里只验证 run_list 非 json 路径不报错
+        // json 输出难以在进程内断言, 这里只验证非 json 路径不报错。
         run_list(&paths, false).unwrap();
     }
 }

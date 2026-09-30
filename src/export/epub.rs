@@ -1,19 +1,11 @@
 //! EPUB 导出。对应 Java `handle.EpubMergeHandler`。
 //!
-//! 行为：
-//! - 输出文件 `<outDir>/<bookName>(<author>).epub`；
-//! - metadata：title/author/description/language/publisher（与 Java 一致）；
-//! - 章节：从 `chapters_dir` 按文件名升序读，文件名形如 `001_<标题>.html`，
-//!   截"第一个 `_` 后"为 TOC 标题；
-//! - 封面：阶段 3b 暂不下载（避免 export 层引入 reqwest 直接调用）。
-//!   `book.cover_url` 字段在阶段 3c 调度层下载后通过 `merge_with_cover_bytes`
-//!   传入；纯离线测试通过 `merge_with_cover_bytes(&[])` 跳过封面即可。
+//! 输出 `<outDir>/<bookName>(<author>).epub`: metadata 写 title/author/description/language
+//! (与 Java 一致); 章节从 `chapters_dir` 按文件名升序读 `001_<标题>.html`, 截第一个 `_` 之后
+//! 作为 TOC 标题。
 //!
-//! 与 Java 端差异：
-//! - Java 用 `epub4j-core`；Rust 用 `epub-builder`，两者 API 不同但 EPUB 输出
-//!   结构一致（`mimetype` + `META-INF/container.xml` + OPF + NCX + 章节 XHTML）。
-//! - Java 端封面下载失败会 `Console.error` 但仍继续；我们这里把"封面字节"
-//!   作为输入参数，由调度层负责 soft-skip 决策。
+//! 封面字节由调度层下载后经 `merge_with_cover_bytes` 传入 (export 层不依赖 reqwest);
+//! 未传或写入失败时 soft-skip 封面、继续产出。
 
 use std::fs::File;
 use std::io::{BufWriter, Write};
@@ -53,10 +45,10 @@ impl Exporter for EpubExporter {
     }
 }
 
-/// 实际合并实现：支持外部传入封面字节（mime/png/jpeg 推断）。
+/// 实际合并实现：支持外部传入封面字节。
 ///
-/// `cover_bytes` 为 None 时不写封面；为 Some 时按文件头判断 mime（仅 PNG / JPEG，
-/// 其它降级为 `image/jpeg`）。这与 Java 端把 cover bytes 写到 `cover.jpg` 一致。
+/// `cover_bytes` 为 None 时不写封面；Some 时按 magic number 判 mime (PNG/JPEG/GIF/WEBP/BMP,
+/// 未知降级 `image/jpeg`), 与 Java 端把 cover bytes 写到 `cover.jpg` 一致。
 pub fn merge_with_cover_bytes(
     book: &Book,
     chapters_dir: &Path,
@@ -79,7 +71,6 @@ pub fn merge_with_cover_bytes(
     let epub_lang = if book.language.is_empty() {
         "zh".to_string()
     } else {
-        // EPUB 规范接受 "zh-CN" 等 BCP 47 标签，直接使用。
         book.language.clone()
     };
     builder
@@ -95,7 +86,6 @@ pub fn merge_with_cover_bytes(
         .metadata("generator", "so-novel-rs")
         .map_err(|e| ExportError::Epub(format!("metadata generator: {e}")))?;
 
-    // 封面
     if let Some(bytes) = cover_bytes.filter(|b| !b.is_empty()) {
         let mime = detect_image_mime(bytes);
         let ext = match mime {
@@ -118,13 +108,12 @@ pub fn merge_with_cover_bytes(
         }
     }
 
-    // 章节
     let total_chapters = files.len();
     let digit = total_chapters.to_string().len().max(3);
     let started = std::time::Instant::now();
     for (idx, path) in files.iter().enumerate() {
-        // 流式：File 直接作为 R: Read 传给 EpubContent，避免 read_to_end 把整章
-        // 字节先吃进 Vec<u8> 再交出去。1000 章 * 50KB = 50MB 内存 → 流式后约 0。
+        // 流式: File 直接作为 `Read` 传给 `EpubContent`, 避免 `read_to_end` 把整章字节
+        // 先吃进 Vec (1000 章 × 50KB 会白占 50MB)。
         let file = File::open(path)?;
         let title =
             chapter_title_from_filename(path).unwrap_or_else(|| format!("第 {} 章", idx + 1));
@@ -144,7 +133,6 @@ pub fn merge_with_cover_bytes(
         "EPUB 章节合并完成"
     );
 
-    // 落盘
     std::fs::create_dir_all(out_dir)?;
     let out_name = sanitize_filename(&format!("{}({}).epub", book.book_name, book.author));
     let out_path = unique_path(out_dir, &out_name);
@@ -184,7 +172,6 @@ fn chapter_title_from_filename(p: &Path) -> Option<String> {
 }
 
 fn detect_image_mime(bytes: &[u8]) -> &'static str {
-    // 简单 magic number 检测，覆盖常见图片格式。
     if bytes.starts_with(&[0x89, b'P', b'N', b'G']) {
         "image/png"
     } else if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
@@ -196,7 +183,6 @@ fn detect_image_mime(bytes: &[u8]) -> &'static str {
     } else if bytes.starts_with(b"BM") {
         "image/bmp"
     } else {
-        // 兜底：最常见的是 JPEG，但无法确定时降级为通用二进制
         "image/jpeg"
     }
 }
@@ -286,7 +272,6 @@ mod tests {
                 .is_some_and(|ext| ext.eq_ignore_ascii_case("epub"))
         );
 
-        // EPUB 是 ZIP；用 zip crate 打开校验关键文件
         let f = File::open(&path).unwrap();
         let mut zr = zip::ZipArchive::new(f).unwrap();
         let names: Vec<String> = (0..zr.len())
@@ -312,8 +297,7 @@ mod tests {
         std::fs::create_dir_all(&out).unwrap();
         write_chapter_files(&chapters, &sample_chapters(), ExportFormat::Epub).unwrap();
 
-        // 最小 PNG 头 + IEND（构造一个合法的 1x1 PNG 字节序列）
-        // 直接用 PNG signature + 一段任意字节即可让 epub-builder 接受写入。
+        // 用 PNG signature + 任意字节构造输入 (epub-builder 只校验文件头)。
         let mut png = vec![0x89u8, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
         png.extend_from_slice(&[0u8; 32]);
 
@@ -323,7 +307,6 @@ mod tests {
         let names: Vec<String> = (0..zr.len())
             .map(|i| zr.by_index(i).unwrap().name().to_string())
             .collect();
-        // 封面相关文件应存在
         assert!(
             names.iter().any(|n| n.ends_with("cover.png")),
             "no cover.png in {names:?}"

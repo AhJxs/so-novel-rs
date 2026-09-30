@@ -1,25 +1,14 @@
-//! 默认配置与下载路径发现。
-//!
-//! 跟 `toml_io.rs` 拆开是因为这些是"应用知道、但 TOML 序列化无关"的数据：
-//! 下载路径依赖 OS（`directories` crate），默认模板是一段手写 TOML 字符串。
-//! 它们与 schema 同寿命，但不参与 `load_config` 的字段读取流程。
+//! 默认配置与下载路径发现。与 `toml_io.rs` 拆开：这里是"应用知道、但 TOML 序列化无关"
+//! 的数据（下载路径依赖 OS，默认模板是一段手写 TOML 字符串），不参与 `load_config` 流程。
 
 use toml_edit::DocumentMut;
 
-/// 默认下载目录：系统 Documents 文件夹下的 `Novel/` 子目录。
+/// 默认下载目录：系统 Documents 下的 `Novel/`（Windows `%USERPROFILE%\Documents`、
+/// macOS `~/Documents`、Linux XDG `XDG_DOCUMENTS_DIR`；`directories` 拿真实位置）。
 ///
-/// - Windows：`%USERPROFILE%\Documents\Novel`（或被用户改过的位置 — `directories`
-///   底层走 `SHGetKnownFolderPath(FOLDERID_Documents)`，会拿到真实位置）
-/// - macOS：`~/Documents/Novel`
-/// - Linux：XDG `XDG_DOCUMENTS_DIR`，未设置时一般是 `~/Documents`
-///
-/// 取不到（极端环境无 home，例如 Docker 容器里没有 `HOME`/`USERPROFILE`）时回
-/// 落到 cwd 相对路径 `./downloads`。带 `./` 前缀是为了在网页设置页 / 日志
-/// warning / 实际存储值三处展示一致 —— 用户能一眼看出是「相对路径」而不是
-/// 「绝对的 `downloads` 目录」。
-///
-/// 返回字符串而非 `PathBuf`：`AppConfig.download_path` 字段就是 String，
-/// 字符串能被设置页直接放到 `TextEdit` 里编辑，也能直接序列化进 TOML。
+/// 取不到（极端环境无 home，如 Docker 里没有 `HOME`/`USERPROFILE`）时回落到 cwd 相对
+/// 路径 `./downloads`；带 `./` 是为了在设置页 / 日志 / 存储值三处展示一致。
+/// 返回 `String` 而非 `PathBuf`：`AppConfig.download_path` 就是 String，可直接编辑与序列化。
 pub fn default_download_path() -> String {
     use directories::UserDirs;
     if let Some(user_dirs) = UserDirs::new()
@@ -31,11 +20,9 @@ pub fn default_download_path() -> String {
     "./downloads".to_string()
 }
 
-/// 第一次启动 / 模板 / 文件被破坏时使用的默认 TOML 文档。
-///
-/// 模板是源码内 `&'static str` 字面量，解析失败只可能是源码写错，
-/// 此时 `panic!` 是把"程序员错误"尽早暴露到启动期，避免后续读到
-/// 半残 `DocumentMut` 引发更难诊断的二次失败。
+/// 第一次启动 / 模板 / 文件被破坏时使用的默认 TOML 文档。模板是源码内 `&'static str`
+/// 字面量，解析失败只可能是源码写错 → `panic!` 把程序员错误尽早暴露在启动期，避免
+/// 后续读到半残 `DocumentMut` 引发更难诊断的二次失败。
 #[allow(
     clippy::panic,
     reason = "static template literal must parse; failure = programmer error"

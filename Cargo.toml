@@ -13,16 +13,13 @@ path = "src/main.rs"
 
 [features]
 default = ["gui"]
-# GUI 桌面特性：拉入 GPUI 栈 + 文件对话框 + LRU 封面缓存。
-# 默认开启 —— 主入口是 GUI 客户端（gpui_app::run），CLI / Web 走子路径。
-# `cargo build --no-default-features --features gui` 得到仅含 GUI 的二进制。
+# GUI 桌面特性：GPUI 栈 + 文件对话框；默认开启（主入口是 GUI）。
 gui = [
     "dep:gpui-kit",
     "dep:rfd",
 ]
-# Web 服务特性：拉入 axum 栈 + SSE 流工具。
-# `cargo build --no-default-features --features web` 得到不含任何 GPUI 系统库链接的 Web 二进制
-# （Dockerfile 用这个路径，去掉所有 xcb/xkbcommon/wayland/egl/mesa/vulkan 依赖）。
+# Web 服务特性：axum 栈 + SSE 工具。`--no-default-features --features web`
+# 得到不链接任何 GPUI 系统库（xcb/wayland/egl/mesa/vulkan）的二进制，Dockerfile 走这条。
 web = [
     "dep:rust-embed",
     "dep:mime_guess",
@@ -35,45 +32,37 @@ web = [
 
 [dependencies]
 gpui-kit = { version = "0.7.0", optional = true }
-# 国际化 —— rust-i18n（同 gpui-kit 组件库内部用的库），我们直接复用框架机制：
+# 国际化 —— 复用 gpui-kit 组件库内部用的同一套 rust-i18n 机制。
 rust-i18n = "4.2.4"
 
-# Async runtime (kept lean — used in later stages; pulled now so tests/integration are stable)
+# Async runtime
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "fs", "signal"] }
 
-# smol：gpui 层（gpui-kit 内置）的 `cx.spawn` 用的是 smol executor（在 smol 之上封了一层），
-# 不是 tokio。在 cx.spawn 的 future 内部**不能**用 `tokio::time::sleep` /
-# `tokio::sync::mpsc::channel` —— 那边没有 tokio reactor，会 panic。
-# LibraryPage 的 watcher 任务必须用 smol 的 channel + smol 定时器（通过
-# `async_cx.background_executor().timer(...)` 拿）。
-# 选 smol 而非给项目新加 tokio runtime：项目顶层只有 gpui 一个 runtime，
-# 再起一个 tokio runtime 会导致两套 executor 共存、background task 跨线程
-# 调度难以追踪。
+# smol：gpui 的 `cx.spawn` 跑在 smol executor 上（不是 tokio），其 future 内部**不能**用
+# `tokio::time::sleep` / `tokio::sync::mpsc::channel`（没有 tokio reactor，会 panic），
+# 要用 smol channel + `async_cx.background_executor().timer(...)`。项目顶层只保留 gpui 一个
+# runtime，避免两套 executor 共存、background task 跨线程调度难以追踪。
 smol = "2"
 
 # Errors / logging
 anyhow = "1"
 thiserror = "2"
 tracing = "0.1"
-# `ansi` feature 必须开：`tracing-subscriber` 默认会用 `Style::italic/dimmed`
-# 给字段名（`trace_id=` 等）加颜色码；不开启此 feature 时 `.with_ansi(false)`
-# `json` feature: 启用后 `.json()` layer 可用, 容器/聚合栈用; 默认开 (PR #17)
+# `ansi` 必须开：否则 tracing-subscriber 不给字段名（`trace_id=` 等）加颜色码。
+# `json` 给容器 / 聚合栈的 `.json()` layer 用。
 tracing-subscriber = { version = "0.3", features = ["env-filter", "ansi", "json"] }
 
 # Config / serde
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 json5 = "1.3"
-# 配置文件用 TOML（取代旧的 config.ini / configparser）。
-# 用 toml_edit 而非 toml — 后者写出会丢注释和顺序；toml_edit 保留原文档结构，
-# 设置页编辑后写回不会洗掉用户的注释 / 字段排列。
+# 配置用 toml_edit 而非 toml：后者写出会丢注释和顺序，设置页写回会洗掉用户的注释 / 字段排列。
 toml_edit = { version = "0.25", features = ["serde"] }
 
 # Filesystem helpers
 directories = "6"
 
-# HTTP client (rustls 避免 OpenSSL 依赖；cookies 用于规则中的 Cookie 头注入；
-# gzip/brotli 解压由 reqwest 透明处理)。
+# HTTP client（rustls 免 OpenSSL；cookies 供规则注入 Cookie 头；gzip/brotli 透明解压）。
 reqwest = { version = "0.13.4", default-features = false, features = [
     "rustls",
     "cookies",
@@ -93,41 +82,37 @@ encoding_rs = "0.8"
 chardetng = "1"
 
 # JavaScript 引擎（书源规则 @js: 后处理 + quanben5 加密）。
-# 选 boa 而非 rquickjs：纯 Rust 无 C 工具链依赖，
-# 现有规则全部 ES5/ES6 子集 boa 完整支持（详见 audit §6.1 的修订）。
+# 选 boa 而非 rquickjs：纯 Rust 无 C 工具链依赖，规则用到的 ES5/ES6 子集它都支持。
 boa_engine = "0.21"
 
-# 静态/惰性初始化（UA 池等）。原来用 once_cell 1.x，
-# Rust 1.80+ 提供 `std::sync::LazyLock`（[std::sync::LazyLock]），行为等价，
-# 编译期 const fn 约束也兼容我们的用法。已在 13 个文件中批量替换为 std 版本。
+# rand（UA 池等）。惰性初始化改用 std::sync::LazyLock，不再需要 once_cell。
 rand = "0.10"
 
-# 图片解码校验：下载的封面字节在缓存前用 image::ImageReader 校验是否真的是有效图片，
-# 避免 UI 渲染时才发现 Failed（GPUI 不会在下载阶段做解码）。
+# 图片解码校验：下载的封面字节在缓存前先校验是否真是有效图片，避免 UI 渲染时才 Failed。
 image = "0.25"
 
 # URL 解析与拼接（absUrl）
 url = "2"
 
-# 字符串相似度（聚合搜索结果排序用，等价 Java hutool StrUtil.similar）。纯 Rust 无依赖。
+# 字符串相似度（聚合搜索结果排序，等价 Java hutool StrUtil.similar）。
 strsim = "0.11"
 
-# EPUB 生成（纯 Rust + 内置 zip）。0.8 系列与 epub-builder 当前稳定版。
+# EPUB 生成（纯 Rust + 内置 zip）。
 epub-builder = "0.8"
 
-# zip 打包（HTML 整本下载用）。关掉 bzip2/lzma 等带 C 依赖的特性，只保留 deflate；
-# 减少在 Windows MSVC 上编译时对 cl.exe 的潜在依赖。
+# zip 打包（HTML 整本下载用）。关掉 bzip2/lzma 等带 C 依赖的特性，只留 deflate，
+# 减少 Windows MSVC 编译时对 cl.exe 的依赖。
 zip = { version = "8", default-features = false, features = ["deflate-flate2"] }
 
-# CLI 子命令（5c）。
+# CLI 子命令。
 clap = { version = "4", features = ["derive"] }
 
 # Web 前端资源嵌入（web feature 专属）。
 # `include-exclude` 按 #[folder] 的 .gitignore 规则过滤（跳过 .map / node_modules / src 等）。
 rust-embed = { version = "8", features = ["include-exclude"], optional = true }
-# MIME 类型推导，给 rust-embed 提供的静态文件设置 Content-Type。
+# MIME 推导，给 rust-embed 的静态文件设置 Content-Type。
 mime_guess = { version = "2", optional = true }
-# Web 服务：axum（tokio 原生 HTTP 框架）+ tower-http（CORS 中间件）。（web feature 专属）
+# Web 服务：axum + tower-http CORS。（web feature 专属）
 axum = { version = "0.8", features = ["macros"], optional = true }
 axum_session = { version = "0.20", optional = true }
 async-stream = { version = "0.3", optional = true }
@@ -136,46 +121,34 @@ tower-http = { version = "0.7", features = ["cors"], optional = true }
 
 
 # 原生文件选择对话框（书源管理「添加」按钮：选 JSON 文件导入）。
-# Linux 走 xdg-portal 而非默认 GTK3，避免引入 gtk3 系统依赖；
-# Windows / macOS 走原生 IFileOpenDialog / NSOpenPanel。
-#
-# rfd 0.17 起移除了 ashpd / async-std / tokio runtime feature：`xdg-portal` 现在
-# 自带 pollster（轻量 blocking poll executor），不再依赖 ashpd，也就不再有「gpui
-# 默认启 ashpd async-std、rfd 再启 tokio 触发 ashpd compile_error」的旧冲突。
-# AsyncFileDialog API 不变，仍返回 impl Future，由调用方的 executor（gpui 的
-# background_executor）驱动。
+# 用 xdg-portal 而非默认 GTK3，避免引入 gtk3 系统依赖；它自带 pollster，
+# 不再需要 ashpd / tokio runtime。AsyncFileDialog 返回 impl Future，由调用方 executor 驱动。
 rfd = { version = "^0.17.2", default-features = false, features = ["xdg-portal"], optional = true }
 
-# 读系统本地时区（UtcOffset::current_local_offset）。local-offset feature 在 Windows / macOS / Linux
-# 各自调 OS API（GetTimeZoneInformation / localtime_r / ...），跨平台用一个 API 拿偏移秒数。
+# 读系统本地时区（UtcOffset::current_local_offset）；local-offset 在三个平台各自调 OS API。
 time = { version = "0.3", default-features = false, features = ["local-offset"] }
 zhconv = "0.4.1"
-# 不启用 `rendering` feature：项目只用 `pdf_oxide::writer::{DocumentBuilder, ...}` 直接拼文本
-# （详见 `src/export/pdf.rs:6-7` 注释，不走 `from_html_css` 渲染流水线）。`rendering` 会拉入
-# 一整套 HTML/CSS 解析依赖，编译时间显著增加而无功能收益。
+# 不启用 `rendering` feature：只用 pdf_oxide::writer 直接拼文本，不走 from_html_css 渲染流水线；
+# `rendering` 会拉入整套 HTML/CSS 解析依赖，编译时间显著增加而无功能收益。
 pdf_oxide = { version = "0.3.77" }
 
-# LRU 缓存（`SearchState::cover_cache` 走有界 LRU 替代无界 HashMap，
-# 避免长会话累积所有查看过的封面字节）。
+# LRU 缓存（`SearchState::cover_cache` 用有界 LRU 替代无界 HashMap，避免长会话累积封面字节）。
 lru = "0.18"
 
-# Windows DWM 圆角 / 暗色标题栏暂未在 GPUI 路径启用（Stage 12 决定）。
-# 当前只保留 CLI 模式需要的 console attach 那一部分 feature。
+# 当前只保留 CLI 模式需要的 console attach feature（DWM 圆角 / 暗色标题栏未在 GPUI 路径启用）。
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-sys = { version = "0.61", features = [
-    # CLI 模式启动时把 stdio 附到父进程的控制台（cmd / PowerShell），
-    # 让 GUI subsystem 的 exe 也能像普通 console app 一样输出。
+    # CLI 启动时把 stdio 附到父进程控制台（cmd / PowerShell），让 GUI subsystem 的 exe 也能输出。
     "Win32_System_Console",
 ] }
 
 [dev-dependencies]
 tempfile = "3"
-# 测试用：构造最小 PNG 验证 cover_entry_from_bytes。
+# 构造最小 PNG 验证 cover_entry_from_bytes。
 image = "0.25"
 # axum Router 在测试里走 tower::ServiceExt::oneshot。
 tower = { version = "0.5", features = ["util"] }
 
-# 在 Windows 上把 assets/logo.ico 嵌入 exe 的资源段（资源管理器/任务栏会看到图标）。
-# build.rs 调用，仅 Windows target 需要。
+# 在 Windows 上把 assets/logo.ico 嵌入 exe 资源段（build.rs 调用，仅 Windows 需要）。
 [target.'cfg(target_os = "windows")'.build-dependencies]
 winres = "0.1"

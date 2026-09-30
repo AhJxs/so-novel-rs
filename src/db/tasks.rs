@@ -8,12 +8,9 @@ use super::write_atomically;
 use crate::core::DownloadTask;
 use crate::models::DownloadTaskRecord;
 
-/// 已完成任务的最大保留数量。
-/// 超出此数量的已完成任务（按完成时间从旧到新）会被自动删除。
-/// 运行中的任务不受此限制。
+/// 已完成任务的最大保留数量, 超出后按完成时间从旧到新删除; 运行中的任务不受限制。
 const MAX_COMPLETED_TASKS: usize = 1000;
 
-/// 从 JSON 文件加载所有任务记录。
 pub fn load(path: &Path) -> Vec<DownloadTaskRecord> {
     if !path.exists() {
         return Vec::new();
@@ -30,19 +27,13 @@ pub fn load(path: &Path) -> Vec<DownloadTaskRecord> {
     }
 }
 
-/// 保存所有任务到 JSON 文件（原子写入）。
-///
-/// 接收运行期 [`DownloadTask`] 切片 → 内部转 [`DownloadTaskRecord`] → 写盘。
-/// 三端共用入口：cli / web / desktop 全部把内存里的 `Vec<DownloadTask>` 直
-/// 接传进来；record 转换是写盘前的最后一步, 不再由调用方手动 `.map(to_record)`。
+/// 保存所有任务到 JSON 文件（原子写入）。接收运行期 [`DownloadTask`] 切片 → 内部转
+/// [`DownloadTaskRecord`] → 写盘; cli / web / desktop 三端共用, 调用方不再手动 `.map(to_record)`。
 pub fn save(path: &Path, tasks: &[DownloadTask]) -> anyhow::Result<()> {
     let records: Vec<DownloadTaskRecord> = tasks.iter().map(DownloadTask::to_record).collect();
     save_records(path, &records)
 }
 
-/// 私有 helper: 已构造好的 [`DownloadTaskRecord`] 切片 → 文件。
-///
-/// [`save`] 和 [`save_with_trim`] 都走它; 序列化 + 原子写集中在一处。
 fn save_records(path: &Path, records: &[DownloadTaskRecord]) -> anyhow::Result<()> {
     let content = serde_json::to_string_pretty(records)?;
     if let Some(parent) = path.parent() {
@@ -52,12 +43,8 @@ fn save_records(path: &Path, records: &[DownloadTaskRecord]) -> anyhow::Result<(
     Ok(())
 }
 
-/// 清理超额的已完成任务，保留最近的 `MAX_COMPLETED_TASKS` 条。
-///
-/// - 运行中的任务（`finished.is_none()`）不受影响；
-/// - 按 `finished_at_unix` 从新到旧排序，保留最新的 N 条；
-/// - 没有 `finished_at_unix` 的已完成任务（异常情况）视为最旧；
-/// - 返回被删除的条数。
+/// 清理超额的已完成任务，保留最近的 `MAX_COMPLETED_TASKS` 条，返回被删除的条数。运行中的任务
+/// （`finished.is_none()`）不受影响；按 `finished_at_unix` 从新到旧排序，缺该字段的视为最旧。
 pub fn trim_completed(tasks: &mut Vec<DownloadTaskRecord>) -> usize {
     let completed_count = tasks.iter().filter(|t| t.finished.is_some()).count();
     if completed_count <= MAX_COMPLETED_TASKS {
@@ -66,7 +53,6 @@ pub fn trim_completed(tasks: &mut Vec<DownloadTaskRecord>) -> usize {
 
     let to_remove = completed_count - MAX_COMPLETED_TASKS;
 
-    // 收集已完成任务的 id + 时间戳，按时间从旧到新排序
     let mut completed: Vec<(u64, i64)> = tasks
         .iter()
         .filter(|t| t.finished.is_some())
@@ -86,9 +72,7 @@ pub fn trim_completed(tasks: &mut Vec<DownloadTaskRecord>) -> usize {
     before - tasks.len()
 }
 
-/// 保存任务并自动清理超额的已完成任务。
-///
-/// 在保存前调用 `trim_completed`，确保文件大小有界。
+/// 保存任务并自动清理超额的已完成任务（保存前调 `trim_completed`，确保文件大小有界）。
 ///
 /// # Examples
 ///
@@ -135,7 +119,6 @@ mod tests {
         }
     }
 
-    /// 测试辅助：插入或更新一条任务记录。
     fn upsert(tasks: &mut Vec<DownloadTaskRecord>, rec: DownloadTaskRecord) {
         if let Some(existing) = tasks.iter_mut().find(|t| t.id == rec.id) {
             *existing = rec;
@@ -144,7 +127,6 @@ mod tests {
         }
     }
 
-    /// 测试辅助：获取下一个可用的任务 ID。
     fn next_task_id(tasks: &[DownloadTaskRecord]) -> u64 {
         tasks.iter().map(|t| t.id).max().unwrap_or(0) + 1
     }
@@ -224,7 +206,6 @@ mod tests {
 
     #[test]
     fn trim_completed_removes_old_when_over_limit() {
-        // 构造超过 MAX_COMPLETED_TASKS 条已完成任务
         let mut tasks: Vec<DownloadTaskRecord> = (1..=1200)
             .map(|i| {
                 let mut rec = sample_rec(
@@ -235,7 +216,6 @@ mod tests {
                 rec
             })
             .collect();
-        // 加一条运行中的任务
         tasks.push(sample_rec(1201, None));
 
         let before = tasks.len();
@@ -287,10 +267,8 @@ mod tests {
         assert_eq!(loaded.len(), 2);
     }
 
-    /// 验证 [`save_with_trim`] 的统一入口（`&[DownloadTask]` → record → 文件 →
-    /// record → 还原）在混合状态（running + finished）下无损。既有 roundtrip
-    /// 测试只校验 `id` / `len`，这里补 finished payload + completed 字段的
-    /// 端到端检查 —— 这是 Phase 0.3 把 record 转换下沉到 `db::` 后的核心契约。
+    /// 验证 [`save_with_trim`] 统一入口在混合状态 (running + finished) 下无损: 既有
+    /// roundtrip 测试只校验 `id` / `len`, 这里补 finished payload + completed 字段的端到端检查。
     #[test]
     fn save_with_trim_roundtrips_running_and_finished() {
         let dir = tempfile::tempdir().unwrap();

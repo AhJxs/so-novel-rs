@@ -1,42 +1,9 @@
 //! Web API 统一错误类型。
 //!
-//! 解决 2 个问题：
-//! 1. **内部错误细节泄漏**：原 handler 一律 `format!("{e:#}")` 把 anyhow / thiserror
-//!    的完整 cause 链（包含内部路径、库函数名、堆栈）拼进 500 body 返回前端。
-//!    攻击面 = 内网监听 / 公网部署时的栈 / 库版本指纹泄漏。
-//! 2. **错误码不分类**：原 handler 一律 `INTERNAL_SERVER_ERROR`，
-//!    前端无法区分"书源 URL 拼错"（4xx） vs "网络失败"（5xx） vs "CF 命中"（5xx）。
-//!
-//! 新协议（response body 形态）：
-//! ```json
-//! { "error": { "code": "<stable_id>", "message": "<localized per Accept-Language>" } }
-//! ```
-//!
-//! 短码见 [`WebErrorKind::code`]，稳定不变（前端可以 switch 分支）；
-//! `message` 走 [`super::error_code::ErrorCode::message_for`] 按请求 locale 翻译。
-//!
-//! 用法：
-//! ```ignore
-//! // 标准用法（handler 拿 Locale extractor）
-//! async fn handler(Locale(locale): Locale, ...) -> Result<...> {
-//!     // ...
-//!     Err(WebError::NotFound(""))?;
-//!     // 或：
-//!     Err(WebError::from(...))?;
-//! }
-//! // into_response 自动用全局 locale；per-request locale 调用下面：
-//! err.into_response_for_locale(locale)
-//! ```
-//!
-//! 迁移现有 handler：
-//! ```ignore
-//! // 旧
-//! .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:#}")))?;
-//!
-//! // 新
-//! .map_err(WebError::from)?;
-//! // → 编译期要求 handler 返回 Result<_, WebError>
-//! ```
+//! 只暴露稳定短码 + 按请求 locale 翻译的 message，**绝不**把 anyhow/thiserror
+//! 的 cause 链（内部路径、库名、堆栈）拼进 response body。短码变更属 breaking
+//! change；handler 返 `Result<_, WebError>`（`?` 自动装箱），渲染走
+//! `into_response_for_locale(locale)` 拿 per-request 翻译。
 
 use axum::Json;
 use axum::http::StatusCode;
@@ -52,7 +19,7 @@ use crate::parser::{BookError, ChapterError, SearchError, TocError};
 /// 注意：短码变更属于 breaking change，发布前要同步前端。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WebErrorKind {
-    /// 4xx：请求参数 / URL / 解析目标本身有问题（书源规则缺失、字段为空、选择器解析错）
+    /// 4xx：请求参数 / URL / 解析目标本身有问题
     BadRequest,
     /// 4xx：书源未找到 / 任务未找到 / 文件不存在
     NotFound,
@@ -62,17 +29,15 @@ pub enum WebErrorKind {
     UpstreamUnavailable,
     /// 5xx：上游命中 Cloudflare 且未配 bypass
     Cloudflare,
-    /// 5xx：其他未分类服务端错误（解析失败 / 选择器错 / JS 失败 / 导出失败 / IO）
+    /// 5xx：其他未分类服务端错误（解析 / JS / 导出 / IO）
     Internal,
 }
 
 /// Web API 错误包装。所有业务 handler 统一返 `Result<_, WebError>`。
 ///
-/// 设计：
-/// - 业务错误（BookError / `TocError` / 等）→ 对应分类
-/// - `std::io::Error` → Internal + 简短 `"io_error"` message
-/// - 锁 poison / SSE 内部 stream 错误**不**走这里（lock.rs 维持 `(StatusCode, String)`,
-///   那是不同语义:网络层 vs 业务层）
+/// 业务错误（BookError / `TocError` / 等）→ 对应分类；`std::io::Error` → Internal。
+/// 锁 poison / SSE 内部 stream 错误**不**走这里（lock.rs 保持 `(StatusCode, String)`，
+/// 那是网络层语义，与业务层不同）。
 #[allow(dead_code)] // Conflict / BadRequest 留作未来 task_cancel / settings_put 业务流用
 #[derive(Debug)]
 pub enum WebError {
@@ -88,21 +53,19 @@ pub enum WebError {
     Crawler(CrawlerError),
     /// 导出失败
     Export(ExportError),
-    /// 显式 not found（书源/任务/文件）。内部字符串**忽略**，统一翻译成
-    /// `WebErrors.not_found` —— 避免泄漏内部 id / 路径。
+    /// 显式 not found（书源/任务/文件）。内部字符串**忽略**，避免泄漏内部 id / 路径。
     NotFound(&'static str),
     /// 显式 conflict。内部字符串**忽略**，统一翻译成 `WebErrors.conflict`。
     Conflict(&'static str),
     /// 显式 bad request。内部字符串**忽略**，统一翻译成 `WebErrors.bad_request`。
     BadRequest(&'static str),
-    /// 显式内部错误（catch-all，message 不含内部 cause）。内部字符串**忽略**，
-    /// 统一翻译成 `WebErrors.internal` / `WebErrors.io_error`。
+    /// 显式内部错误（catch-all，message 不含内部 cause）。内部字符串**忽略**。
     Internal(&'static str),
-    /// settings PUT: `download_path` 是空串 → 400，翻译成 `WebErrors.download_path_empty`。
+    /// settings PUT: `download_path` 是空串 → 400。
     DownloadPathEmpty,
-    /// settings PUT: `download_path` 不是已存在目录 → 400，翻译成 `WebErrors.download_path_not_dir`。
+    /// settings PUT: `download_path` 不是已存在目录 → 400。
     DownloadPathNotDir,
-    /// `task_cancel`: 任务已结束，无法取消 → 409，翻译成 `WebErrors.task_already_finished`。
+    /// `task_cancel`: 任务已结束 → 409。
     TaskAlreadyFinished,
 }
 
@@ -200,12 +163,8 @@ impl WebError {
 
     /// 暴露的 message（**不含**内部 cause / 库错误细节）。
     ///
-    /// 文案走 [`super::error_code::ErrorCode::message_for`] 单点维护 + per-locale 翻译。
-    /// 全局 locale fallback（仅 `IntoResponse` / 测试场景用），web handler
-    /// **必须**走 [`Self::into_response_for_locale`] 拿正确翻译。
-    ///
-    /// 例外: `NotFound/Conflict/BadRequest/Internal` 4 个显式变体接受调用方传
-    /// 入的动态消息（已被忽略），统一翻译成对应的 `WebErrors.*` key。
+    /// 用全局 locale，仅 `IntoResponse` / 测试场景用；web handler **必须**走
+    /// [`Self::into_response_for_locale`] 拿 per-request 翻译，避免并发互相踩。
     #[allow(dead_code)] // public API + `IntoResponse` 间接使用，clippy 检测不到
     pub fn message(&self) -> String {
         self.code().message()
@@ -260,12 +219,11 @@ impl WebError {
 
 #[derive(Serialize)]
 struct ErrorBody {
-    /// `WebErrorKind` `snake_case` 短码 (`bad_request` / `not_found` / ...)。
-    /// 日志检索 + 跨语言错误大类标识用。前端 dispatch **不要**用这个
-    /// （多个 variant 共用同一 kind，无法细分）—— 用 `code_id` 数字码。
+    /// `WebErrorKind` snake_case 短码。前端 dispatch **不要**用这个 —— 多个
+    /// variant 共用同一 kind，无法细分；用 `code_id`。
     code: &'static str,
-    /// 业务层稳定数字码 (`3004` / `3005` / `3006` / ...)。前端按这个 dispatch。
-    /// 稳定不变，加新 variant 必须同步前端。
+    /// 业务层稳定数字码（`3004` / `3005` / ...）。前端按这个 dispatch，
+    /// 加新 variant 必须同步前端。
     code_id: &'static str,
     message: String,
 }
@@ -278,11 +236,8 @@ struct ErrorEnvelope {
 impl WebError {
     /// 把 `WebError` 渲染成 axum `Response`，**使用指定 locale** 翻译 `message`。
     ///
-    /// 这是 web handler 的**规范路径** —— 从 `Locale` extractor 拿 locale 字符串
-    /// 传入，避免并发请求之间全局 locale 互相踩。
-    ///
-    /// `IntoResponse` impl 转调这个方法，传全局 locale（向后兼容旧测试 /
-    /// 不带 Locale 的场景）。
+    /// web handler 的规范路径：locale 从 `Locale` extractor 拿，避免并发请求
+    /// 之间全局 locale 互相踩。`IntoResponse` 转调这里，传全局 locale。
     pub fn into_response_for_locale(self, locale: &str) -> Response {
         let kind = self.classify();
         let status = kind.status();
@@ -358,21 +313,17 @@ impl From<ExportError> for WebError {
 }
 impl From<std::io::Error> for WebError {
     fn from(e: std::io::Error) -> Self {
-        // 内部 io 错误不暴露路径（路径里可能有用户名等），只留类型标签
+        // 内部 io 错误不暴露路径（可能含用户名），只留类型标签
         tracing::warn!("web API io error: {e:#}");
         Self::Internal("io_error")
     }
 }
 
-// ── Phase 3.0: 锁 / 通用 String→WebError blanket impl ────────────────────
+// ── 锁 / 通用 String→WebError blanket impl ────────────────────
 //
-// 让 `?` 自动把锁毒化 (`rw_read_or` 返回 `Result<_, String>`) 和其它 String 错误
-// 装箱到 `WebError::Internal`。响应 body 始终返回稳定的 `"internal_error"` 短码，
-// 动态消息只进日志（参见 `Self::Internal(&'static str)` 的契约 —— 内部
-// 文案绝不外泄；这里跟 `From<std::io::Error>` 用同样的 "warn + 静态 label" 模式）。
-//
-// 修复了 `web::handlers::book.rs:48` 旧 bug：之前 `.map_err(|_| NotFound(...))`
-// 把锁毒化静默转成 404，丢诊断信息。
+// 让 `?` 自动把锁毒化（`rw_read_or` 返回 `Result<_, String>`）装箱到
+// `WebError::Internal`：响应体只给稳定短码 `"internal_error"`，动态消息进日志。
+// 锁毒化是 500（服务端状态损坏），**不能**静默转成 404。
 
 impl From<String> for WebError {
     fn from(s: String) -> Self {
@@ -387,35 +338,15 @@ impl From<&str> for WebError {
     }
 }
 
-// ── Phase 3.8: 锁 / 内部错误统一收纳 ──────────────────────────────
+// ── 锁 / 内部错误统一收纳 ──────────────────────────────
 //
-// 背景：handler 入口处常需要拿 1-3 个共享状态锁（config / rules / sources_config）
-// 后才开始"真业务"。旧写法是逐句 `.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?`
-// 重复 ~10 处；遇到 2+ 锁时还套一层 IIFE 把多个锁打包成单个 `Result`。
-//
-// helper 是 free function 而非 trait —— `read_state_or_json`：闭包返回
-// `Result<T, String>`，失败 → `WebError`。
-//
-// `label` 走 `tracing::warn!`，与 `rw_read_or` 内部 `tracing::error!` 一一对应
-// （一个锁 helper 一个 label，便于 grep 调用栈）。
+// handler 入口常要拿 1-3 个共享状态锁，逐句 `.map_err(..)` 重复且易漏。
+// `label` 与 `rw_read_or` 内部日志一一对应（一个 helper 一个 label，便于 grep）。
 
 /// 非-SSE handler 专用：拿锁 / 读共享状态，失败 → `WebError::Internal("internal_error")`。
 ///
-/// 调用方典型用法：
-/// ```ignore
-/// let cfg = read_state_or_json("settings_get", || {
-///     Ok(rw_read_or("settings_get", &state.config)?.clone())
-/// })?;
-/// ```
-///
-/// **行为合约**：
-/// - `Ok(v)` → 原样返回
-/// - `Err(msg)` → `tracing::warn!("web handler {label} state read failed: {msg}")`
-///   + 返回 `Err(WebError::Internal("internal_error"))`（500 + 稳定 JSON envelope）
-///
-/// `String` error 类型与 `rw_read_or` / `mutex_or` 直接对接；`?` 即可。统一到 `WebError`
-/// 后 handler 返回 `Result<Json<T>, WebError>` 走 axum `IntoResponse for Result` 的
-/// 全局 locale 路径 —— per-request locale 改造是下一阶段（独立 PR）。
+/// 闭包返回 `Result<T, String>`，与 `rw_read_or` / `mutex_or` 直接对接，`?` 即可：
+/// 失败记 warn 并返回 `WebError::Internal("internal_error")`（500 + 稳定 envelope）。
 pub fn read_state_or_json<T, F>(label: &str, f: F) -> Result<T, WebError>
 where
     F: FnOnce() -> Result<T, String>,
@@ -460,7 +391,6 @@ mod tests {
 
     #[test]
     fn classify_maps_task_already_finished_to_409() {
-        // 任务已结束想取消 → Conflict (409)
         let err = WebError::TaskAlreadyFinished;
         assert_eq!(err.classify(), WebErrorKind::Conflict);
     }
@@ -479,7 +409,6 @@ mod tests {
 
     #[test]
     fn message_does_not_leak_internal_cause() {
-        // 构造一个含敏感路径的 cause，验证 message 不含它
         let err = WebError::Book(BookError::Parse(
             "C:\\Users\\admin\\secrets\\config.json".into(),
         ));
@@ -492,9 +421,7 @@ mod tests {
 
     #[test]
     fn message_ignores_internal_string_of_explicit_variants() {
-        // NotFound/Conflict/BadRequest/Internal 接受内部字符串但翻译时忽略
         let err = WebError::NotFound("任务 id=42 私有路径 C:\\foo");
-        // 显式传 locale —— 不依赖全局 atomic
         let msg = err.code().message_for("zh-CN");
         assert!(!msg.contains("C:\\"), "message leaked path: {msg}");
         assert!(!msg.contains("42"), "message leaked id: {msg}");
@@ -510,21 +437,17 @@ mod tests {
 
     #[test]
     fn into_response_for_locale_uses_given_locale() {
-        // 关键不变量：per-locale 翻译不走全局 locale
+        // 不变量：per-locale 翻译不读全局 locale
         rust_i18n::set_locale("en"); // 全局是 en
         let err = WebError::Book(BookError::BookRuleMissing);
         let resp = err.into_response_for_locale("zh-CN");
-        // 状态码跟 message 是 locale 无关的稳定字段，仅断言 status
         assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
         rust_i18n::set_locale("en");
     }
 
-    // ── Phase 3.0: blanket From<String> / From<&str> ─────────────────
-
     #[test]
     fn from_string_maps_to_internal_with_stable_label() {
-        // 动态消息 (e.g. 锁毒化) → Internal("internal_error") label 稳定，
-        // 敏感信息只进日志，响应 body 不外泄。
+        // 动态消息 (e.g. 锁毒化) → label 稳定，敏感信息只进日志。
         let err: WebError = String::from("rwlock 'web:config' poisoned at byte 42").into();
         assert_eq!(err.classify(), WebErrorKind::Internal);
         assert!(matches!(err, WebError::Internal("internal_error")));
@@ -541,7 +464,6 @@ mod tests {
 
     #[test]
     fn from_string_via_question_mark_operator() {
-        // 模拟 `?` 在 Result<T, String> 上的行为 (RwLock/Mutex poison helper 返回的形态)
         let result: Result<i32, String> = Err("poisoned lock at web:tasks".to_string());
         let web: Result<i32, WebError> = result.map_err(WebError::from);
         assert!(web.is_err());
@@ -556,15 +478,12 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
     }
 
-    // ── i18n: per-locale 翻译契约 ────────────────────────────────
-
     #[test]
     fn into_response_for_locale_translates_per_request() {
         // 全局切到 en，per-locale 调用翻译成 zh-CN —— 证明不走全局
         rust_i18n::set_locale("en");
         let err = WebError::NotFound("ignored internal string");
 
-        // 抓 response body 的 JSON 字符串
         let resp_zh = err.into_response_for_locale("zh-CN");
         let body_zh = response_body_string(resp_zh);
         assert!(

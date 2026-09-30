@@ -1,33 +1,12 @@
-//! 持久化层 : 所有 `~/.sonovel/` 下的 JSON 文件读写。
+//! 持久化层: 所有 `~/.sonovel/` 下的 JSON 文件读写 (tasks / `sources_config` / rules)。
 //!
-//! # 子模块
+//! **错误**: 领域级 `RulesError` 保留路径与原因; 顶层 `DaoError` 统一归一, 业务层 `?` 一步透传到
+//! `AppError`; task 文件字段简单, 暂用 `anyhow::Result`。
 //!
-//! - `tasks` — 下载任务 `tasks.json` 的 CRUD (load / save / `trim_completed`)
-//! - `sources_config` — 书源配置 `sources_config.json` 的读写 (`SourcesConfig`)
-//! - `rules` — 规则目录 `rules/` 的初始化与加载 (含 META_* 常量, load/apply/init)
-//! - `mod.rs` — 公共 helper (`write_atomically` 原子写) + 顶层 `DaoError`
+//! **同步 I/O**: 全用 `std::fs` —— dao 函数被 CLI 启动 / web setup / gpui 启动等同步上下文直接
+//! 调用; 迁到 `tokio::fs` 是 sync → async 的行为变更, 需全仓 caller 同步改。
 //!
-//! # 错误处理
-//!
-//! - **领域级**: `RulesError` (thiserror) 承载规则文件 IO + 解析错误, 保留
-//!   路径和原因 (强类型, 不丢信息)
-//! - **顶层归一**: `DaoError` (thiserror) 统一所有 dao 层错误, 业务层用 `?`
-//!   一步透传到 `AppError`
-//! - **task 文件**: 暂用 `anyhow::Result`, 字段简单 (单 JSON array) 不值得
-//!   单独错误枚举, 错误消息走 `format!("{e:#}")` 给 UI
-//!
-//! # I/O 策略 (不抢跑, 留 PR #12 阶段)
-//!
-//! - 当前所有读写作 **同步** `std::fs`, 因为 dao 函数被 CLI 启动 / web setup /
-//!   gpui 启动等同步上下文直接调用
-//! - 迁到 `tokio::fs` 是行为变更 (sync → async), 需全仓 caller 同步改, 单独 PR
-//! - 关键路径已加 `#[tracing::instrument]`, 出问题能直接定位
-//!
-//! # 原子写
-//!
-//! [`write_atomically`] 是核心: 写 tmp → fsync → rename, 断电最坏情况"老文件
-//! 还在", 不会留半截。Windows 上 rename 不允许覆盖, 先 remove 再 rename 是
-//! 已知妥协, 配合 fsync 仍保证一致性。
+//! **[`write_atomically`] 是原子写核心**: 写 tmp → fsync → rename, 断电最坏情况"老文件还在"。
 
 mod rules;
 mod sources_config;
@@ -44,10 +23,8 @@ use std::path::{Path, PathBuf};
 pub use tasks::{load as load_tasks, save as save_tasks, save_with_trim};
 pub use tasks_init::load_tasks_from_file;
 
-/// 顶层 dao 错误
-///
-/// 业务层用 `?` 一步透传到 [`crate::error::AppError::Db`]。`RulesError` 仍保留
-/// (有路径 + 原因, 不能丢), 通过 `From<RulesError> for DaoError` 自动归一。
+/// 顶层 dao 错误: 业务层用 `?` 一步透传到 [`crate::error::AppError::Db`]；`RulesError` 仍保留
+/// (有路径 + 原因, 不能丢), 通过 `From<RulesError> for DaoError` 归一。
 #[derive(Debug, thiserror::Error)]
 pub enum DaoError {
     /// IO 错误 (读 / 写 / 文件锁 / 权限)。
@@ -78,15 +55,9 @@ impl From<DaoError> for crate::error::AppError {
     }
 }
 
-/// 把 `data` 写到 `path`，失败时不会留下半截文件。
-///
-/// 步骤：
-/// 1. 在目标同一目录下生成唯一临时文件名（避免与其它实例的 tmp 冲突）；
-/// 2. 全量写入并 fsync，确保字节落盘；
-/// 3. `rename` 覆盖目标 — POSIX 原子、Windows 在同卷上也是原子操作；
-/// 4. 失败时主动删除临时文件，不留垃圾。
-///
-/// 同目录是为了让 `rename` 是原子的（跨目录 / 跨文件系统 rename 不是原子）。
+/// 把 `data` 写到 `path`, 失败时不会留下半截文件: 同目录生成唯一临时名 (避免多实例冲突) →
+/// 全量写 + fsync → `rename` 覆盖 → 失败时主动删临时文件。临时文件放同目录是为了让 `rename`
+/// 是原子的 (跨目录 / 跨文件系统 rename 不是原子)。
 #[tracing::instrument(skip(data), fields(path = %path.display(), bytes = data.len()))]
 pub fn write_atomically(path: &Path, data: &[u8]) -> std::io::Result<()> {
     use std::io::Write;
@@ -118,9 +89,8 @@ pub fn write_atomically(path: &Path, data: &[u8]) -> std::io::Result<()> {
         return Err(e);
     }
 
-    // rename 覆盖目标。如果目标已存在，std::fs::rename 在 Windows 上会
-    // 失败（不允许覆盖），所以先 remove 再 rename。两步不是严格原子，
-    // 但配合上面的 fsync，断电最坏情况是"老文件还在"（不是半截）。
+    // rename 覆盖目标。Windows 上 `std::fs::rename` 不允许覆盖已存在的目标, 所以先
+    // remove 再 rename。两步不是严格原子, 但配合上面的 fsync, 断电最坏是"老文件还在"。
     if path.exists()
         && let Err(e) = std::fs::remove_file(path)
     {
@@ -168,12 +138,10 @@ mod tests {
         // 写一个不可写的目录触发失败, 验证没有 .tmp.* 残留
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("data.json");
-        // 把 path 做成目录, write 会失败
         std::fs::create_dir(&path).unwrap();
         let result = write_atomically(&path, b"x");
         assert!(result.is_err());
 
-        // 没有 .tmp.* 残留
         let leftover: Vec<_> = std::fs::read_dir(dir.path())
             .unwrap()
             .flatten()

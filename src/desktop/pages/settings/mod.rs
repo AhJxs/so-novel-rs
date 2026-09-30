@@ -1,17 +1,7 @@
-//! 设置 page：用 gpui-kit 组件库的 `Settings` 组件搭的一级导航页面。
+//! 设置 page：用 gpui-kit 的 `Settings` 组件搭的一级导航页面。
 //!
-//! 与其他 4 个 page（Library / Search / Tasks / Sources）一样：
-//! - `RootView` 一次性创建 entity，跨切换保留内部状态；
-//! - 通过 sidebar 5 个 `SidebarMenuItem` 中的一项 + `Cmd+5` 直接跳。
-//!
-//! ## 保存机制（auto-save，无手动按钮）
-//!
-//! 每个 setter 改完字段后**立即**调 `model.persist_settings()` 写盘 ——
-//! 没有单独的"立即保存"按钮：任何字段改动都 O(1) 立刻落盘（改主题 / 改 host 均如此）。
-//!
-//! 主题列表（`SettingField::dropdown`）每次 Render 重新 snapshot —— 用户装了
-//! 新主题 → `ThemeRegistry::watch_dir` reload → observer 触发 `cx.notify()` → 本页
-//! 重渲染 → dropdown 自动出现新选项。
+//! 保存机制（auto-save，无手动按钮）：每个 setter 改完字段后**立即**调
+//! `model.persist_settings()` 写盘，没有单独的"立即保存"按钮。
 //!
 //! `NumberFieldOptions` 接 `f64`；对 `Option<i32>` 用 sentinel `-1.0` 表示"不限制"。
 
@@ -37,13 +27,11 @@ use crate::i18n::ts;
 
 use ctx::{PageCtx, PickFolderListener};
 
-/// 设置 page entity。由 `RootView::new` 创建，挂在 sidebar 第 5 个 nav item。
 pub struct SettingsPage {
     model: Entity<AppModel>,
 
-    /// 所有 `Entity<InputState>` / `SelectState` / `SliderState` 都必须在 `new` 里建一次
-    /// 并缓存：`SettingField::render` 闭包签名是 `Fn + 'static`，拿不到 `&mut Context<Self>`，
-    /// 每帧现建会丢 popup / focus / 拖拽位置。订阅 handler 也只在 owner 上挂一次。
+    /// 所有 `Entity<InputState>` / `SelectState` / `SliderState` 都必须在 `new` 里建一次并缓存：
+    /// `SettingField::render` 闭包是 `Fn + 'static`，拿不到 `&mut Context<Self>`。
     download_path_input: Entity<InputState>,
     font_size_state: Entity<SliderState>,
     qidian_cookie_input: Entity<TextareaState>,
@@ -51,40 +39,28 @@ pub struct SettingsPage {
     theme_state_dyn_light: Entity<SelectState<SearchableVec<SharedString>>>,
     theme_state_dyn_dark: Entity<SelectState<SearchableVec<SharedString>>>,
 
-    /// 主题名快照，用于差量同步到 `SelectState`。
-    ///
-    /// 主题列表**不是**静态的：启动时 `ThemeRegistry::watch_dir` async 加载 21 个 embed，
-    /// `SettingsPage::new` 跑时列表可能只有 gpui-kit 组件库默认的 Light + Dark 两个。等
-    /// async 加载完 → `apply_theme_pref` 触发 `cx.refresh_windows()` → 下一帧 render
-    /// 在 `sync_theme_items` 里重新拍快照 + 对比，发现变了就 `set_items` 推过去 + 按 config
-    /// 选中值重定位。
+    /// 主题名快照，用于差量同步到 `SelectState`：主题是 async 加载的，`sync_theme_items`
+    /// 对比快照后补 `set_items` + 重定位选中值。
     last_theme_names: Vec<SharedString>,
     last_light_names: Vec<SharedString>,
     last_dark_names: Vec<SharedString>,
 
-    /// 「下载目录」输入框右侧「浏览」按钮的 click listener ——
-    /// `new` 里通过 `cx.listener(...)` 建一次并缓存为 `Rc<dyn Fn>`，render 闭包只 `as_ref()` 复用。
-    ///
-    /// 之前试过在 `SettingField::render` 闭包里现建，但拿不到 `Context<Self>` 调不了 `cx.listener`；
-    /// 也试过 `page_handle.update(cx, |_page, ctx| ctx.spawn(...))` 桥接，但该桥接下 click 不触发
-    /// （suffix 内 button 被 Input 的 `on_mouse_down` 抢 hit，或双重 update 后 `WeakEntity` 已 stale）。
-    /// `sources.rs::pick_and_add` 的 working
-    /// pattern（`cx.listener` 绑到 entity，entity 方法内直接 `cx.spawn`）才稳。
+    /// 「下载目录」输入框右侧「浏览」按钮的 click listener —— render 闭包拿不到
+    /// `Context<Self>`，所以 `new` 里 `cx.listener(...)` 建一次缓存成 `Rc<dyn Fn>`。
     pick_folder_listener: PickFolderListener,
 }
 
 impl SettingsPage {
     pub fn new(model: Entity<AppModel>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        // 主题 SelectState ×3：静态槽全量、动态浅/深槽按 mode 过滤（可搜索；主题 30+ 项）。
-        // items 初始可能只有默认 Light/Dark（async 加载未完），render 里 sync_theme_items
-        // 会异步补齐 + 重定位选中。
+        // 主题 SelectState ×3：静态槽全量、动态浅/深槽按 mode 过滤（可搜索）。
+        // items 初始可能缺项（async 加载未完），render 里 `sync_theme_items` 会补齐 + 重定位选中。
         let initial_names = themes::list_theme_names(cx);
         let initial_light = themes::list_theme_names_by_mode(cx, false);
         let initial_dark = themes::list_theme_names_by_mode(cx, true);
 
         let pref0 = model.read(cx).config.global.theme_pref.clone();
-        // 宏而非闭包：`window: &mut Window` 闭包捕获后只能调一次（&mut 借用），三个
-        // SelectState 各需独立借用 → 宏在调用处展开。
+        // 用宏而不是闭包：闭包捕获 `window: &mut Window` 后只能调一次，三个 `SelectState`
+        // 各需独立借用 → 宏在调用处展开。
         macro_rules! make_state {
             ($names:expr, $cur:expr) => {{
                 let items: SearchableVec<SharedString> = ($names).to_vec().into();
@@ -156,18 +132,16 @@ impl SettingsPage {
         })
         .detach();
 
-        // click listener 必须 owner-cache —— 见字段 doc。
+        // click listener 必须 owner-cache。
         let pick_folder_listener: PickFolderListener =
             Rc::new(cx.listener(|this, _ev, _window, cx| {
                 this.pick_folder(cx);
             }));
 
-        // `multi_line(true).rows(3)`：用户能粘贴整段 `Cookie:` 头（不止单 key=value）；
-        // placeholder 提示 cookie 头以 `w_tsfp=` 开头（DevTools 复制）。
+        // 多行：`TextareaState` 模式本身携带多行，`.rows(3)` 给 3 行高度，
+        // 用户可粘贴整段 `Cookie:` 头。
         let initial_qidian_cookie = model.read(cx).config.cookie.qidian_cookie.clone();
         let qidian_cookie_input = cx.new(|cx| {
-            // gpui-kit 0.6：多行不再由 `multi_line(true)` 标记，改用
-            // `TextareaState`（`InputBaseState<TextareaMode>`），模式本身就携带多行。
             TextareaState::new(window, cx)
                 .rows(3)
                 .placeholder(ts("Settings.placeholder.qidian_cookie"))
@@ -206,8 +180,7 @@ impl SettingsPage {
         // 拖拽每 px 触发：写 config + persist（500ms debounce 合并）+ apply_font_size。
         // 字号写入 `Theme.font_size` 后 `Root::render` 下一帧用新值设 rem_size → 全 app 缩放。
         cx.subscribe(&font_size_state, |this, _state, event, cx| {
-            // gpui-kit 0.6 的 SliderEvent 多了一个 `Release` 变体（拖完松手才发）。
-            // 连续拖拽期间只关心 `Change`，Release 不携带新值（最后一次 Change 已落盘）。
+            // 连续拖拽期间只关心 `Change`，`Release` 不携带新值（最后一次 Change 已落盘）。
             let SliderEvent::Change(value) = event else {
                 return;
             };
@@ -238,11 +211,8 @@ impl SettingsPage {
         }
     }
 
-    /// 把当前 `config.global.theme_pref` 应用到全局 Theme + 重应用字号。
-    ///
-    /// 抽出来给三处 Select Confirm 订阅 + kind/dyn-mode dropdown setter 复用，
-    /// 避免每个 setter `各写一遍「apply_theme_pref` + `apply_font_size`」。
-    /// `apply_theme_pref` 内部会 `apply_config（重置字号），所以字号必须在后面重应用`。
+    /// 把当前 `config.global.theme_pref` 应用到全局 Theme + 重应用字号（`apply_theme_pref` 内部
+    /// 会 `apply_config` 重置字号，所以必须在后面重应用）。
     fn reapply_theme(&self, window: Option<&mut Window>, cx: &mut App) {
         let pref = self.model.read(cx).config.global.theme_pref.clone();
         themes::apply_theme_pref(&pref, window, cx);
@@ -250,18 +220,8 @@ impl SettingsPage {
     }
 
     /// 「下载目录」旁边的「浏览」按钮点击 → 调 rfd 选目录 → 回写 model + persist + notify。
-    ///
-    /// 用 `rfd::AsyncFileDialog`（rfd 0.15 + `tokio` feature）——
-    /// 内部走 `tokio::task::spawn_blocking`，dialog 在 tokio 专门的 blocking thread
-    /// pool 上跑，正确初始化 COM apartment + message pump。
-    ///
-    /// 别用同步 `rfd::FileDialog::pick_folder()` 丢 `cx.background_executor().spawn`
-    /// 上 —— Windows 下 `IFileOpenDialog::Show()` 需要 STA + message pump，
-    /// tokio worker thread 没有，`Show()` 静默失败立即返回 None 且 dialog 不显示。
-    /// 详见 memory `rfd-windows-async-file-dialog-only.md`。
-    ///
-    /// `cur` 在 click handler 里同步读出再 move 进 async —— 别在 async 里
-    /// `model.read(async_cx)`，那里只有 `&mut AsyncApp`，拿不到 `&App`。
+    /// 必须用 `rfd::AsyncFileDialog`（内部走 `tokio::task::spawn_blocking`，能初始化 COM
+    /// apartment + message pump）；同步版丢 worker thread 上会因缺 STA 静默返回 None。
     fn pick_folder(&self, cx: &Context<Self>) {
         let cur = self.model.read(cx).config.download.download_path.clone();
         let title = ts("Settings.choose_download_dir_dialog_title");
@@ -287,14 +247,8 @@ impl SettingsPage {
         .detach();
     }
 
-    /// 主题列表变 → 同步到 `SelectState`。
-    ///
-    /// 拿不到 `cx.observe_global::<ThemeRegistry>` 的 Window 参数（callback 只有
-    /// `&mut Context<Self>`），改在 `Render::render` 里做差量更新：每次 render 重
-    /// 拍快照，对比 `last_xxx_names`：没变 → 0 开销返回；变了 → `set_items` + `set_selected_index`。
-    ///
-    /// 触发链：`themes::init` async reload 完成 → `apply_theme_pref` 触发 `Theme` observer
-    /// → `cx.refresh_windows()` → render → 这里检测到变化。
+    /// 主题列表变 → 同步到 `SelectState`。拿不到 `cx.observe_global::<ThemeRegistry>` 需要的
+    /// Window，改在 render 里差量更新：重拍快照对比 `last_xxx_names`，变了才更新 items。
     fn sync_theme_items(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let pref = self.model.read(cx).config.global.theme_pref.clone();
 
@@ -335,11 +289,8 @@ impl SettingsPage {
         }
     }
 
-    /// 外部改了 `model.config.download.download_path`（目前唯一的外部源是 rfd 选目录）→ 同步到
-    /// InputState。常规键入走 `InputEvent::Change` 订阅，那条路径已维护一致性。
-    ///
-    /// `InputState::set_value` 需要 `&mut Window`，observer 拿不到，走 render 路径
-    /// —— 和 `sync_theme_items` 同套路。
+    /// 外部改了 `model.config.download.download_path`（目前唯一来源是 rfd 选目录）→ 同步到
+    /// `InputState`。`InputState::set_value` 需要 `&mut Window`，observer 拿不到，走 render 路径。
     fn sync_download_path(&self, window: &mut Window, cx: &mut Context<Self>) {
         let model_val = self.model.read(cx).config.download.download_path.clone();
         let input_val = self.download_path_input.read(cx).value().to_string();
@@ -351,7 +302,7 @@ impl SettingsPage {
         });
     }
 
-    /// 组装 4 个 `SettingPage（page_general` / `page_crawl` / `page_proxy` / `page_about`）。
+    /// 组装 4 个 `SettingPage`。
     fn build_pages(&self, cx: &App) -> Vec<SettingPage> {
         let ctx = PageCtx {
             model: &self.model,
@@ -379,9 +330,7 @@ impl Render for SettingsPage {
 
         let pages = self.build_pages(cx);
 
-        // Settings id 固定 —— 不随 language 变。早期为「实时切语言」把 lang 塞进 id
-        // 靠 `use_keyed_state` 重建 SettingsState，但语言切换已改成重启生效，不再有
-        // 「切语言当帧刷新已缓存值」的需求。固定 id 也避免切语言误触重置用户的
+        // Settings id 固定 —— 不随 language 变，避免切语言（重启生效）误触重置用户的
         // page / 搜索框 / 滚动位置。
         Settings::new("settings-page")
             .with_group_variant(GroupBoxVariant::Outline)
@@ -389,5 +338,5 @@ impl Render for SettingsPage {
     }
 }
 
-// 用到的 trait —— `Rc::new` 需要 `Rc` 类型。
+// `PickFolderListener` 用到的 `Rc`。
 use std::rc::Rc;

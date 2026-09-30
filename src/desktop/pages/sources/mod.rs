@@ -52,8 +52,8 @@ pub struct SourcesPage {
 
 impl SourcesPage {
     pub fn new(model: Entity<AppModel>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        // 1. 名字 / URL 过滤 Input。placeholder 在 state 上设初值（gpui-kit 组件 API
-        // 限制，element 层无 placeholder 字段），后续 render 里用 sentinel 检测切语言。
+        // 1. 名字 / URL 过滤 Input。placeholder 只能设在 state 上（gpui-kit API 限制），
+        // 后续 render 里用 sentinel 检测切语言。
         let initial_placeholder = ts("Sources.filter.placeholder");
         let filter_input =
             cx.new(|cx| InputState::new(window, cx).placeholder(initial_placeholder.clone()));
@@ -70,8 +70,8 @@ impl SourcesPage {
         })
         .detach();
 
-        // 2. 选择活跃书源文件的下拉框。items 首次为空：render 第一次跑时会从
-        // `rules_dir` 重建。这条路径处理用户手动添加/删除规则文件后的刷新。
+        // 2. 活跃书源文件下拉框。items 首次为空，render 第一次跑时从 `rules_dir` 重建
+        // （用户手动增删规则文件后也靠这条路径刷新）。
         let items: SearchableVec<String> = Vec::<String>::new().into();
         let rule_file_select =
             cx.new(|cx| SelectState::new(items, None, window, cx).searchable(false));
@@ -111,10 +111,8 @@ impl SourcesPage {
         let model = self.model.clone();
         let page_handle = cx.entity().downgrade();
         cx.spawn(async move |_weak, async_cx| {
-            // rfd 弹原生 OS 文件选择器 —— 三个标签（对话框标题 + 两个 filter 名字）
-            // 都走 `ts()` 翻译，跟 app 其他用户可见文本保持一致。
-            // `.as_ref()` 把 `SharedString` → `&str`（rfd 0.15 的 `add_filter` / `set_title`
-            // 签名是 `&str`，不接受 owned `String` / `SharedString`）。
+            // 三个标签（对话框标题 + 两个 filter 名字）都走 `ts()` 翻译。
+            // `.as_ref()` 把 `SharedString` → `&str`（rfd 的 `add_filter` / `set_title` 要 `&str`）。
             let file = rfd::AsyncFileDialog::new()
                 .add_filter(
                     ts("Sources.add_source.filter_json").as_ref(),
@@ -158,14 +156,8 @@ impl SourcesPage {
 
 impl Render for SourcesPage {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        // 实时 i18n 同步（仅 placeholder —— gpui-kit 组件 API 限制必须存在 State）。
-        //
-        // 状态过滤不走 sentinel（已经用 button group，label 现取 `ts(...)`）。
-        //
-        // `set_placeholder` 内部 `cx.notify()` 只通知 InputState 重新 render。
-        // 但 `Input` 元素是在 SourcesPage render 时构造的，SourcesPage 不重
-        // render，Input 元素就不重画。这里额外 `cx.notify()` 强制 SourcesPage 重
-        // render，触发 Input 重构造 → 读取 InputState 的最新 placeholder 渲染。
+        // 实时 i18n 同步（仅 placeholder）。`set_placeholder` 只通知 InputState 重 render，
+        // 而 `Input` 元素是 SourcesPage render 时构造的，故这里额外 `cx.notify()` 强制重 render。
         let new_placeholder = ts("Sources.filter.placeholder");
         if self.last_seen_placeholder != new_placeholder {
             self.last_seen_placeholder = new_placeholder.clone();
@@ -210,8 +202,6 @@ impl Render for SourcesPage {
         let rules_dir = model.paths.rules_dir.clone();
         let _ = model;
 
-        // 同步活跃书源文件下拉框选项。
-        // 每次 render 都重新读取 rules_dir（用户可能手动添加/删除了文件）。
         let rule_files = list_rule_files(&rules_dir);
         let items: SearchableVec<String> = rule_files.into();
         let sel = active_file;
@@ -225,7 +215,6 @@ impl Render for SourcesPage {
             }
         });
 
-        // 过滤后取当前页切片 —— 跟 library.rs 同模式（global 序号 + 切片 + 推给 delegate）。
         let filtered = self.model.read(cx).sources_state.filtered_rules(&all_rules);
         let total = filtered.len();
         let w = compute_page_window(total, &mut self.current_page);
@@ -239,7 +228,6 @@ impl Render for SourcesPage {
                 .collect()
         };
 
-        // 推给 delegate（包括 health map，让 row 渲染时拿到健康状态）。
         let health_for_delegate = health;
         let page_handle = cx.entity();
         self.list_state.update(cx, |state, _cx| {
@@ -277,11 +265,8 @@ impl Render for SourcesPage {
                     ),
             )
             // ---- toolbar: 名字过滤 + 活跃书源文件选择 + 状态过滤 ----
-            //
-            // **状态过滤**用 3 个 Button 而不是 SelectState —— 原因：
-            // SelectState 把 options 翻译字段冻在 state 里，切语言不会自动更新。
-            // Button 组在 render 里现取 `ts(...)`，永远跟当前 locale 同步。状态
-            // 用 `selected` style 标记，存的是 enum 不带翻译。
+            // 状态过滤用 3 个 Button 而不是 SelectState：后者把 options 的翻译字段冻在 state 里，
+            // 切语言不更新；Button 组在 render 里现取 `ts(...)`。
             .child(toolbar::render(
                 &self.filter_input,
                 &self.rule_file_select,
@@ -357,8 +342,7 @@ impl Render for SourcesPage {
                     )
                     .into_any_element()
             } else {
-                // List 容器：跟 library.rs 同款（border + .px(12).py(4) +
-                // List::new().size_full()），让选中边框不被滚动条遮挡。
+                // List 容器（border + padding + size_full）。
                 div()
                     .flex_1()
                     .w_full()
@@ -369,9 +353,7 @@ impl Render for SourcesPage {
                     .child(List::new(&self.list_state).p(px(12.)).size_full())
                     .into_any_element()
             })
-            // ---- 分页页脚（仅在列表非空时渲染 —— 空态不显示，避免无意义的"第 1 页 / 共 0 条"）----
-            // 分页页脚：可见性由 `Pagination` 自己判（不足一页 → `Empty`）。
-            // Sources 通常 < 30 条 → `page_count == 1` → 页脚直接不渲染。
+            // ---- 分页页脚（`Pagination` 自己判可见性，不足一页不渲染）----
             .child(Pagination::new(
                 self.current_page,
                 w.page_count,

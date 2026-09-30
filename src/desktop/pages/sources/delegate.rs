@@ -12,7 +12,6 @@ use crate::models::Rule;
 use super::SourcesPage;
 use super::row;
 
-/// `gpui_kit::component::list::List` 的 delegate —— 把当前过滤下的 (index, Rule) 列表渲染成行。
 pub(super) struct SourcesDelegate {
     pub(super) page_items: Vec<(usize, Rule)>,
     pub(super) health: HashMap<i32, SourceHealth>,

@@ -1,11 +1,5 @@
-//! 目录解析主流程 + 单页抽取
-//!
-//! 来自原 `parser/toc.rs`:
-//! - [`parse_toc`] 公共入口: 抓分页 + 抽章节
-//! - [`parse_one_toc_page`] 从一页 HTML 抽章节 (含 `is_desc` 倒序逻辑)
-//! - [`parse_items_from_fragment`] / [`push_chapter`] 内部 helper
-//!
-//! 分页收集在 [`super::paginated`], 工具 + `TocError` 在 [`super::utils`]。
+//! 目录解析主流程 + 单页抽取: [`parse_toc`] 抓分页 + 抽章节, [`parse_one_toc_page`]
+//! 从一页 HTML 抽章节 (含 `is_desc` 倒序)。
 
 use anyhow::Result;
 use reqwest::Client;
@@ -20,14 +14,13 @@ use super::utils::{TocError, extract_book_id, format_with_id, resolve_base_for_j
 
 /// 抓取并解析整本书的目录。
 ///
-/// `book_url` 是详情页 URL (与 SearchResult.url 一致)。
-/// `cf_bypass_base` 同其它 parser: CF 命中且非空时调用旁路服务。
+/// `book_url` 是详情页 URL (与 SearchResult.url 一致)。`cf_bypass_base` 非空时
+/// CF 命中会自动走旁路服务。
 ///
 /// # Examples
 ///
 /// ```ignore
 /// let chapters = parse_toc(&client, &rule, &book_url, cf_bypass).await?;
-/// println!("共 {} 章", chapters.len());
 /// ```
 ///
 /// # Errors
@@ -52,23 +45,21 @@ pub async fn parse_toc(
 ) -> Result<Vec<Chapter>, TocError> {
     let toc_rule = rule.toc.as_ref().ok_or(TocError::TocRuleMissing)?;
 
-    // 1. 用 Book.url 正则把书 ID 提出来 (如果配了), 再格式化 toc.url / toc.baseUri。
     let book_id = extract_book_id(rule, book_url);
     let toc_url = format_with_id(&toc_rule.url, book_id.as_deref());
     let toc_base_uri = format_with_id(&toc_rule.base_uri, book_id.as_deref());
 
-    // 2. 决定第一页 URL — 若 toc.url 配了就用它, 否则用 book_url (目录在详情页内)。
+    // toc.url 没配就用 book_url (目录在详情页内)
     let first_url = if toc_url.is_empty() {
         book_url.to_string()
     } else {
         toc_url
     };
 
-    // 3. 抓第一页, 按需走 CF 旁路。
     let first_html =
         fetch_with_cf_fallback(client, &first_url, toc_rule.timeout, cf_bypass_base).await?;
 
-    // 4. 收集所有分页 URL (含第一页, 按出现顺序去重)。
+    // 收集所有分页 URL (含第一页, 按出现顺序去重)
     let mut page_urls: Vec<String> = vec![first_url.clone()];
     if !toc_rule.next_page.is_empty() {
         let extra = collect_pagination_urls(
@@ -88,10 +79,8 @@ pub async fn parse_toc(
         }
     }
 
-    // 5. 并行抓所有分页 (page_urls 已含全部页面 URL — 模式1 option 下拉一次性
-    //    收集、模式2 递归在 collect_pagination_urls 内部已走完), 再按原顺序解析。
-    //    第一页 HTML 已抓过, 不重复发请求。任一页抓取失败 → 整本目录失败 (保留
-    //    原串行实现的语义)。并发用 JoinSet + Semaphore 限到 8, 避免一次打 200 个请求。
+    // 并发抓剩余分页 (Semaphore 限到 8, 避免一次打 200 个请求)。第一页已抓过,
+    // 不重复发请求。任一页失败 → 整本目录失败。
     let n = page_urls.len();
     let mut htmls: Vec<String> = Vec::with_capacity(n);
     htmls.resize(n, String::new());
@@ -112,9 +101,8 @@ pub async fn parse_toc(
             let cf = cf_bypass_base.map(std::string::ToString::to_string);
             let sem = sem.clone();
             set.spawn(async move {
-                // `acquire_owned` 在 Semaphore 不被 close 的情况下永远成功;
-                // 防御性: 万一未来切换实现 / close 信号进来, 转换成 TocError::Parse
-                // 让上层知道分页抓取出问题, 而不是 panic 把整个目录解析任务搞炸。
+                // `acquire_owned` 在 Semaphore 不 close 时永远成功; 万一失败也转成
+                // TocError::Parse 上报, 而不是 panic 把整个目录解析任务搞炸。
                 let _permit = match sem.acquire_owned().await {
                     Ok(p) => p,
                     Err(e) => {
@@ -134,7 +122,7 @@ pub async fn parse_toc(
         }
     }
 
-    // 按原 page_urls 顺序解析, 保证章节顺序与串行实现一致。
+    // 按原 page_urls 顺序解析, 保证章节顺序与串行实现一致
     let mut all_items: Vec<Chapter> = Vec::new();
     let mut order: u32 = 1;
     for (idx, page_url) in page_urls.iter().enumerate() {
@@ -177,18 +165,12 @@ pub fn parse_one_toc_page(
     let item_selector = crate::parser::cache::cached_selector(&toc_rule.item)
         .map_err(|e| TocError::Parse(format!("无效的 item 选择器 `{}`: {e:?}", toc_rule.item)))?;
 
-    // 当 toc.list 配置时 (极少数书源), 先把 list 的 inner_html 当成新文档处理。
+    // 配了 toc.list 时 (极少数书源), 先把 list 的 inner_html 当新文档处理 (同 Java 端)。
     let elements: Vec<scraper::ElementRef<'_>> = if toc_rule.list.is_empty() {
         document.select(&item_selector).collect()
     } else {
-        // 取出 list 选中元素的 HTML, 作为新 fragment 解析后再选 item。
-        // Java 端原代码也是这么做的: `JsoupUtils.selectAndInvokeJs(document, r.getList(), HTML)`
         let inner = select_and_invoke_js(&document, &toc_rule.list, ContentType::Html)?;
         let frag = Html::parse_fragment(&inner);
-        // 重新建一个 owned doc, select 后再把每个元素 outer-html 收集,
-        // 再统一解析; 但更简单的做法: 在 fragment 上直接选。
-        // ⚠️ 这里需要把 fragment 转借出 'static 不可能, 所以走"再克隆 HTML"路径。
-        // 我们退而求其次: 在 fragment 上选完直接产生 Chapter 数据后退出。
         return Ok(parse_items_from_fragment(
             &frag,
             &item_selector,
@@ -199,7 +181,7 @@ pub fn parse_one_toc_page(
 
     let mut chapters = Vec::with_capacity(elements.len());
     if toc_rule.is_desc {
-        // 倒序: 源站本身是新→旧, 规则希望我们按"旧→新"输出
+        // 源站本身是新→旧, 规则希望按"旧→新"输出
         for el in elements.iter().rev() {
             push_chapter(el, base_for_href, order_counter, &mut chapters);
         }
@@ -296,8 +278,6 @@ mod tests {
         r
     }
 
-    // ---------- 单页目录 (顺序) ----------
-
     #[test]
     fn parses_single_page_toc_in_order() {
         let html = r#"<html><body>
@@ -339,15 +319,12 @@ mod tests {
                 .unwrap();
 
         assert_eq!(chapters.len(), 3);
-        // 输出顺序: 1 → 9 → 10
         assert_eq!(chapters[0].title, "第1章 楔子");
         assert_eq!(chapters[1].title, "第9章 倒数");
         assert_eq!(chapters[2].title, "第10章 终章");
         assert_eq!(chapters[0].order, 1);
         assert_eq!(chapters[2].order, 3);
     }
-
-    // ---------- Book.url 正则提取书 ID ----------
 
     #[test]
     fn extract_book_id_from_real_69shuba_pattern() {
@@ -378,11 +355,8 @@ mod tests {
         assert_eq!(format_with_id("", Some("777")), "");
     }
 
-    // ---------- 分页 URL 收集 (option 下拉模式) ----------
-
     #[test]
     fn collects_option_dropdown_pagination_urls() {
-        // 仿 22biqu / wxsy.net 真实下拉结构
         let html = r#"<html><body>
             <select id="indexselect">
                 <option value="/biqu5/">第1-100章</option>
@@ -391,7 +365,7 @@ mod tests {
             </select>
         </body></html>"#;
 
-        // 不发请求; 直接用 helper (option 模式不需要二次抓取)。
+        // option 模式不需要二次抓取, 直接用 helper
         let document = Html::parse_document(html);
         let sel = Selector::parse("#indexselect > option").unwrap();
         let elements: Vec<_> = document.select(&sel).collect();
@@ -449,7 +423,7 @@ mod tests {
 
     #[test]
     fn resolve_base_preserves_untrimmed_toc_uri() {
-        // 代码 trim 检查但返回原串 — 记录这个行为
+        // 代码只 trim 检查, 返回原串
         let base = resolve_base_for_join("  https://x.com/  ", "https://y.com/");
         assert_eq!(base, "  https://x.com/  ");
     }

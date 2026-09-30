@@ -1,12 +1,8 @@
-//! 规则模块常量
-//!
-//! 包含 `META_*` 模板查询 (给 `apply_default_rule` 填默认值用) + `BUNDLED_RULES`
+//! `META_*` 模板查询 (给 `apply_default_rule` 填默认值用) + `BUNDLED_RULES`
 //! 编译期嵌入的规则文件列表 (给 `init_rules_dir` 首次启动落盘用)。
 
-/// meta 默认查询 (与 Java `util.SourceUtils` 常量一致)。
-///
-/// `apply_default_rule` 在 `book` 字段缺失时回落到这些查询, 让规则可以
-/// 依赖浏览器解析 `<meta>` 标签的能力 (很多站点在 head 里塞 og:* 元信息)。
+/// meta 默认查询。`apply_default_rule` 在 `book` 字段缺失时回落到这些查询, 让规则可以
+/// 依赖浏览器解析 `<meta>` 标签 (很多站点在 head 里塞 og:* 元信息)。
 pub const META_BOOK_NAME: &str = r#"meta[property="og:novel:book_name"]"#;
 pub const META_AUTHOR: &str = r#"meta[property="og:novel:author"]"#;
 pub const META_INTRO: &str = r#"meta[name="description"]"#;

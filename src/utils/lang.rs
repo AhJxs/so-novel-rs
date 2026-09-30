@@ -2,8 +2,7 @@
 
 use crate::config::LangType;
 
-/// 检测系统当前 locale 并映射到 `LangType`。
-/// 在 Linux 上读 `LANG` 环境变量，Windows/macOS 上读 `LC_ALL`/`LANG` 兜底，
+/// 检测系统当前 locale 并映射到 `LangType`：依次读 `LC_ALL` / `LC_MESSAGES` / `LANG`，
 /// 都拿不到时默认 `ZhCn`（与 Java 端一致）。
 pub fn detect_system_lang() -> LangType {
     let candidates = [
@@ -33,7 +32,6 @@ mod tests {
 
     #[test]
     fn fallback_is_zh_cn() {
-        // 即使 env 中无关也至少返回某个 LangType（不 panic）。
         let lt = detect_system_lang();
         assert!(matches!(
             lt,

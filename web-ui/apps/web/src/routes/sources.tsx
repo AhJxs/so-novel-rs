@@ -20,7 +20,7 @@ export default function SourcesPage() {
   const [testingAll, setTestingAll] = useState(false)
   const [testedCount, setTestedCount] = useState(0)
 
-  // 一键测速：并发测所有书源，各自结果独立回填，完成一个计数 +1 反映进度。
+  // 一键测速：并发测所有源，各自独立回填，完成一个计数 +1 反映进度
   const testAll = async () => {
     if (testingAll) return
     setTestingAll(true)

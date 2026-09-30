@@ -1,16 +1,9 @@
 //! TXT 导出。对应 Java `handle.TxtMergeHandler`。
 //!
-//! 行为：
-//! - 输出文件 `<outDir>/<bookName>(<author>).txt`；
-//! - 首页插入书籍信息（书名 / 作者 / 简介），然后按章节文件名升序合并；
-//! - 编码可选 UTF-8（默认）/ GBK / Big5 等，由 config.txt-encoding 决定。
-//!   底层用 `encoding_rs` 转码；目标编码不可识别时降级 UTF-8 + warn。
-//!
-//! 与 Java 端的差异：
-//! - Java 用 hutool `FileAppender` 一次次 append；Rust 这里用 `BufWriter` 按片段
-//!   编码写入，避免超长小说整本内容同时驻留内存。
-//! - Java 用 `HtmlUtil.cleanHtmlTag(intro)` 去 HTML 标签；
-//!   Rust 用一个简单正则去标签 + 去掉 HTML 实体（`&xxx;`），与 `ChapterFilter` 用法一致。
+//! 输出 `<outDir>/<bookName>(<author>).txt`: 首页写书籍信息 (书名 / 作者 / 简介), 再按章节
+//! 文件名升序合并。编码由 config `txt-encoding` 决定 (UTF-8 默认 / GBK / Big5 等), 经
+//! `encoding_rs` 转码, 编码不可识别时降级 UTF-8 + warn; 全程 `BufWriter` 按片段流式编码,
+//! 不让整本书同时驻留内存。
 
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
@@ -97,7 +90,6 @@ impl Exporter for TxtExporter {
             return Err(ExportError::EmptyChaptersDir(chapters_dir.to_path_buf()));
         }
 
-        // 转码 + 写入：按首页/章节片段流式编码，避免整本小说拼成一个 String。
         std::fs::create_dir_all(out_dir)?;
         let filename = sanitize_filename(&format!("{}({}).txt", book.book_name, book.author));
         let out_path = unique_path(out_dir, &filename);
@@ -119,7 +111,7 @@ impl Exporter for TxtExporter {
             }
         ))?;
 
-        // 章节合并（每个文件已是 render::render_txt 的输出：标题 + 缩进段落 + \n）
+        // 章节合并 (每个文件已是 `render::render_txt` 的输出: 标题 + 缩进段落 + \n)
         for path in &files {
             // 跳过 0_ 开头的辅助文件（封面图、目录索引）
             if let Some(name) = path.file_name().and_then(|s| s.to_str())
@@ -129,7 +121,6 @@ impl Exporter for TxtExporter {
             }
             let content = std::fs::read_to_string(path)?;
             writer.write_str(&content)?;
-            // 章节之间留一空行
             if !content.ends_with("\n\n") {
                 writer.write_str("\n")?;
             }
@@ -182,7 +173,6 @@ mod tests {
         let exp = TxtExporter::new(encoding);
         let p = exp.merge(&sample_book(), &chapters, &out).unwrap();
         assert!(p.exists(), "expected output file: {}", p.display());
-        // 移交所有权前先把生成路径读一遍，避免后面忘记
         let _ = p;
         dir
     }
@@ -230,8 +220,7 @@ mod tests {
         let dir = write_and_export("GBK");
         let out = dir.path().join("out").join("起航(苹果).txt");
         let bytes = std::fs::read(&out).unwrap();
-        // GBK 编码的"中文"两字应在文件里以 0xD6 0xD0 0xCE 0xC4 出现
-        // 但我们没写"中文"；先确认 UTF-8 解码失败（GBK 字节不是合法 UTF-8）
+        // GBK 字节不是合法 UTF-8, 故 UTF-8 解码必然失败。
         let utf8_decoded = std::str::from_utf8(&bytes);
         assert!(
             utf8_decoded.is_err(),
@@ -280,14 +269,12 @@ mod tests {
     #[test]
     fn unknown_encoding_falls_back_to_utf8() {
         let exp = TxtExporter::new("not-a-real-encoding");
-        // 不抛错；TxtExporter::new 内部会 warn 并用 UTF-8。
         assert_eq!(exp.encoding, encoding_rs::UTF_8);
     }
 
     #[test]
     fn merge_dedup_output_filename_on_collision() {
-        // 同一本书二次导出到同 out_dir：第一次得到 `<book>(<author>).txt`，
-        // 第二次因 `unique_path` 加 ` (1)` 后缀，不应覆盖前一次。
+        // 二次导出到同 out_dir: 因 `unique_path` 加 ` (1)` 后缀, 不应覆盖前一次。
         let dir = tempfile::tempdir().unwrap();
         let chapters = dir.path().join("chapters");
         let out = dir.path().join("out");
