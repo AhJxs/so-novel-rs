@@ -28,7 +28,7 @@ pub fn load(path: &Path) -> Vec<DownloadTaskRecord> {
 }
 
 /// 保存所有任务到 JSON 文件（原子写入）。接收运行期 [`DownloadTask`] 切片 → 内部转
-/// [`DownloadTaskRecord`] → 写盘; cli / web / desktop 三端共用, 调用方不再手动 `.map(to_record)`。
+/// [`DownloadTaskRecord`] → 写盘; cli / desktop 共用, 调用方不再手动 `.map(to_record)`。
 pub fn save(path: &Path, tasks: &[DownloadTask]) -> anyhow::Result<()> {
     let records: Vec<DownloadTaskRecord> = tasks.iter().map(DownloadTask::to_record).collect();
     save_records(path, &records)

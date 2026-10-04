@@ -1,13 +1,10 @@
 //! 通用锁 poison 防护：把"锁被 poison 时不 panic、返 `Result`"这套模式抽出来，
-//! 供 web / http / gpui 这类长寿命服务统一使用。
-//!
-//! web handler 走 axum 专用的 `(StatusCode, String)` 形态（`src/web/handlers/lock.rs`）；
-//! 本模块是不直接走 axum、但仍要防 poison panic 的模块用的通用版。
+//! 供 http / gpui 这类长寿命服务统一使用。
 
 use std::sync::{Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 /// 拿 `Mutex` 锁。poisoned 时记录 `tracing::error!` 并返 `Err(message)`，
-/// 由调用方决定怎么处理（上层模块通常包装成 HTTP 5xx 或业务 error enum）。
+/// 由调用方决定怎么处理（上层模块通常包装成业务 error enum）。
 ///
 /// # Examples
 ///

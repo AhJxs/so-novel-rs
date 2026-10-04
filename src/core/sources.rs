@@ -1,7 +1,7 @@
-//! 三端共用的书源（Rule）查找 + 解析 + URL 键规范化。
+//! CLI / desktop 共用的书源（Rule）查找 + 解析 + URL 键规范化。
 //!
-//! 原先 desktop / web / cli / db 多处各自写同一套 `iter().find(|r| r.id == id)` 或 `r.url.trim().to_lowercase()`
-//! 的重复；抽到这里后调用方只用 `find_rule_by_id` / `find_rule_by_url` / `rule_key` / `disabled_url_key`。
+//! 原先 desktop / cli / db 多处各自写同一套 `iter().find(|r| r.id == id)` 或 `r.url.trim().to_lowercase()`
+//! 的重复；抽到这里后调用方只用 `find_rule_by_id` / `rule_key` / `disabled_url_key`。
 //!
 //! key 契约：`SourcesConfig::toggle_disabled` 写 set 时同样 `trim + to_lowercase`，`disabled_url_key` 必须与之
 //! 完全一致，否则禁用状态读不回。
@@ -21,7 +21,7 @@ pub fn rule_key(rule: &Rule) -> String {
 }
 
 /// 把任意 URL 字符串标准化为 `SourcesConfig.disabled_urls` 用的键。
-/// 等价于 `toggle_disabled` 的内部归一逻辑；导出给三端调用方，避免各自再写一遍。
+/// 等价于 `toggle_disabled` 的内部归一逻辑；导出给两端调用方，避免各自再写一遍。
 pub fn disabled_url_key(url: &str) -> String {
     url.trim().to_lowercase()
 }
@@ -29,18 +29,6 @@ pub fn disabled_url_key(url: &str) -> String {
 /// 在规则列表里按 ID 找（返回借用，生命周期绑到 `rules`）。
 pub fn find_rule_by_id(rules: &[Rule], id: i32) -> Option<&Rule> {
     rules.iter().find(|r| r.id == id)
-}
-
-/// 在规则列表里按 ID 找（返回 owned `Rule`，用于跨锁边界 / `Send`）。
-pub fn find_rule_by_id_cloned(rules: &[Rule], id: i32) -> Option<Rule> {
-    rules.iter().find(|r| r.id == id).cloned()
-}
-
-/// 在规则列表里按 URL 键（`disabled_url_key` 归一）找；找不到返回 `None`。
-/// 规则 URL 的前后空白 / 大小写不一致不影响匹配。
-pub fn find_rule_by_url<'a>(rules: &'a [Rule], url: &str) -> Option<&'a Rule> {
-    let key = disabled_url_key(url);
-    rules.iter().find(|r| rule_key(r) == key)
 }
 
 /// 解析规则文件字节 —— 支持严格 JSON / JSON5，单 Rule 或 Vec<Rule>。
@@ -151,41 +139,6 @@ mod tests {
     #[test]
     fn find_rule_by_id_empty_rules_returns_none() {
         assert!(find_rule_by_id(&[], 1).is_none());
-    }
-
-    #[test]
-    fn find_rule_by_id_cloned_returns_owned() {
-        let rules = vec![rule(1, "https://a", true)];
-        let r = find_rule_by_id_cloned(&rules, 1).unwrap();
-        assert_eq!(r.id, 1);
-        assert!(r.disabled);
-    }
-
-    #[test]
-    fn find_rule_by_url_matches_case_insensitively() {
-        let rules = vec![rule(1, "https://Example.com/Path", false)];
-        let r = find_rule_by_url(&rules, "https://example.com/path").unwrap();
-        assert_eq!(r.id, 1);
-    }
-
-    #[test]
-    fn find_rule_by_url_matches_with_surrounding_whitespace() {
-        let rules = vec![rule(1, "https://example.com", false)];
-        let r = find_rule_by_url(&rules, "  https://example.com  ").unwrap();
-        assert_eq!(r.id, 1);
-    }
-
-    #[test]
-    fn find_rule_by_url_returns_none_when_missing() {
-        let rules = vec![rule(1, "https://a.com", false)];
-        assert!(find_rule_by_url(&rules, "https://b.com").is_none());
-    }
-
-    #[test]
-    fn find_rule_by_url_does_not_falsely_match_disabled() {
-        // rule_key 不看 disabled —— find 只按 url 比对；disabled 由调用方判断
-        let rules = vec![rule(1, "https://a.com", true)];
-        assert!(find_rule_by_url(&rules, "https://a.com").is_some());
     }
 
     #[test]
@@ -426,7 +379,6 @@ mod tests {
         assert_eq!(rule_key(&Rule::default()), "");
         assert_eq!(disabled_url_key(""), "");
         assert!(find_rule_by_id(&[], 0).is_none());
-        assert!(find_rule_by_url(&[], "https://x").is_none());
         assert!(match_source_by_url(&[], "https://x").is_none());
         assert!(parse_rules_bytes(b"", Path::new("empty.json")).is_err());
     }

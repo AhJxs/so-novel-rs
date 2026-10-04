@@ -10,23 +10,23 @@ use gpui_kit::component::{
 };
 use gpui_kit::{App, IntoElement, ParentElement, Styled, div};
 
-use crate::i18n::{ts, ts_fmt};
+use rust_i18n::t;
 
 use super::ctx::PageCtx;
 
 pub(super) fn build(ctx: &PageCtx<'_>, _cx: &App) -> SettingPage {
     let m = ctx.model.clone();
 
-    SettingPage::new(ts("Settings.page.about"))
+    SettingPage::new(t!("Settings.page.about"))
         .resettable(false)
         .default_open(true)
         .groups(vec![
             SettingGroup::new()
-                .title(ts("Settings.group.info"))
+                .title(t!("Settings.group.info"))
                 .items(vec![
                     // 版本（静态文本）
                     SettingItem::new(
-                        ts("Settings.item.version"),
+                        t!("Settings.item.version"),
                         SettingField::render(|_opts, _window, cx| {
                             div()
                                 .text_sm()
@@ -34,10 +34,10 @@ pub(super) fn build(ctx: &PageCtx<'_>, _cx: &App) -> SettingPage {
                                 .child(format!("v{}", env!("CARGO_PKG_VERSION")))
                         }),
                     )
-                    .description(ts("Settings.desc.version")),
+                    .description(t!("Settings.desc.version").to_string()),
                     // 检查更新 / 下载新版
                     SettingItem::new(
-                        ts("Settings.item.check_update"),
+                        t!("Settings.item.check_update"),
                         SettingField::render({
                             let m = m;
                             move |_opts, _window, cx| {
@@ -54,11 +54,8 @@ pub(super) fn build(ctx: &PageCtx<'_>, _cx: &App) -> SettingPage {
                                     return Button::new("check-update")
                                         .icon(Icon::new(IconName::ExternalLink))
                                         .label(
-                                            ts_fmt(
-                                                "Settings.download_new_version_button",
-                                                &[("ver", ver)],
-                                            )
-                                            .to_string(),
+                                            t!("Settings.download_new_version_button", ver = ver)
+                                                .to_string(),
                                         )
                                         .small()
                                         .on_click(|_ev, _window, cx| {
@@ -70,7 +67,7 @@ pub(super) fn build(ctx: &PageCtx<'_>, _cx: &App) -> SettingPage {
                                 }
                                 Button::new("check-update")
                                     .icon(Icon::new(IconName::Loader))
-                                    .label(ts("Settings.check_update_button"))
+                                    .label(t!("Settings.check_update_button"))
                                     .small()
                                     .disabled(checking)
                                     .loading(checking)
@@ -86,21 +83,21 @@ pub(super) fn build(ctx: &PageCtx<'_>, _cx: &App) -> SettingPage {
                             }
                         }),
                     )
-                    .description(ts("Settings.desc.check_update")),
+                    .description(t!("Settings.desc.check_update").to_string()),
                     // 项目主页
                     SettingItem::new(
-                        ts("Settings.item.open_github"),
+                        t!("Settings.item.open_github"),
                         SettingField::render(|_opts, _window, _cx| {
                             Button::new("open-github")
                                 .icon(Icon::new(IconName::Globe))
-                                .label(ts("Settings.open_github_button"))
+                                .label(t!("Settings.open_github_button"))
                                 .small()
                                 .on_click(|_ev, _window, cx| {
                                     cx.open_url("https://github.com/AhJxs/so-novel-rs");
                                 })
                         }),
                     )
-                    .description(ts("Settings.desc.open_github")),
+                    .description(t!("Settings.desc.open_github").to_string()),
                 ]),
         ])
 }

@@ -12,8 +12,8 @@ use gpui_kit::{App, Entity, IntoElement, ParentElement, SharedString, Styled, Wi
 
 use crate::desktop::components::truncate;
 use crate::desktop::model::TocState;
-use crate::i18n::{ts, ts_fmt};
 use crate::models::Chapter;
+use rust_i18n::t;
 
 use super::SearchPage;
 
@@ -45,14 +45,14 @@ pub(super) fn content(
                 div()
                     .text_sm()
                     .text_color(cx.theme().muted_foreground)
-                    .child(ts("Search.range.loading")),
+                    .child(t!("Search.range.loading")),
             )
             .into_any_element(),
         Some(TocState::Failed(msg)) => div()
             .py_4()
             .text_sm()
             .text_color(cx.theme().danger_foreground)
-            .child(format!("{}: {msg}", ts("Search.range.failed")))
+            .child(format!("{}: {msg}", t!("Search.range.failed")))
             .into_any_element(),
         Some(TocState::Loaded(_book, chapters)) => {
             let n = chapters.len();
@@ -104,7 +104,7 @@ pub(super) fn content(
                     div()
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
-                        .child(ts_fmt("Search.range.total", &[("n", &n.to_string())])),
+                        .child(t!("Search.range.total", n = &n.to_string())),
                 )
                 .child(
                     h_flex()
@@ -118,7 +118,7 @@ pub(super) fn content(
                                     div()
                                         .text_xs()
                                         .text_color(cx.theme().muted_foreground)
-                                        .child(ts("Search.range.start")),
+                                        .child(t!("Search.range.start")),
                                 )
                                 // 宽 160px：minus/plus 各 ~28px，留 ~100px 给数字。
                                 // 数字左对齐是组件限制（Input/NumberInput 无水平居中 API，
@@ -133,7 +133,7 @@ pub(super) fn content(
                                     div()
                                         .text_xs()
                                         .text_color(cx.theme().muted_foreground)
-                                        .child(ts("Search.range.end")),
+                                        .child(t!("Search.range.end")),
                                 )
                                 .child(NumberInput::new(&page.read(cx).range_end_input).w(px(160.0))),
                         ),
@@ -148,9 +148,9 @@ pub(super) fn content(
                                 .text_color(cx.theme().muted_foreground)
                                 .child(format!(
                                     "{} ({} {})",
-                                    ts("Search.range.preview"),
+                                    t!("Search.range.preview"),
                                     count,
-                                    ts("Search.source_status.format")
+                                    t!("Search.source_status.format")
                                 )),
                         )
                         .child(
@@ -183,7 +183,7 @@ fn chapter_title_display(chapters: &[Chapter], n: usize) -> SharedString {
         Some(c) if !c.title.trim().is_empty() => {
             SharedString::from(format!("{}. {}", n, truncate(&c.title, 40)))
         }
-        _ => SharedString::from(format!("{}. {}", n, ts("Search.range.no_title"))),
+        _ => SharedString::from(format!("{}. {}", n, t!("Search.range.no_title"))),
     }
 }
 

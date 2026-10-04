@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use crate::i18n::{ts, ts_fmt};
+use rust_i18n::t;
 
 use super::{AppModel, ops};
 
@@ -25,9 +25,7 @@ impl AppModel {
             path,
         ) {
             Ok(result) => {
-                let msg =
-                    crate::i18n::ts_fmt("Sources.import.result", &[("filename", &result.filename)])
-                        .to_string();
+                let msg = t!("Sources.import.result", filename = &result.filename).to_string();
                 self.sources_state.clear_health();
                 // 导入的就是当前活跃文件 → rule 集合已被重载, 旧结果的 `source_id`
                 // 可能指向错源（同 `switch_active_file` 的清理逻辑）。
@@ -60,9 +58,9 @@ impl AppModel {
             source_url,
         ) {
             Ok(true) => {
-                self.push_success(ts_fmt("Toasts.delete_source_ok", &[("url", source_url)]));
+                self.push_success(t!("Toasts.delete_source_ok", url = source_url));
             }
-            Ok(false) => self.push_warning(ts("Toasts.delete_source_missing")),
+            Ok(false) => self.push_warning(t!("Toasts.delete_source_missing")),
             Err(e) => self.push_error(e.message()),
         }
     }
@@ -83,10 +81,7 @@ impl AppModel {
                 self.search.clear_results_and_caches();
                 // 同理清 list_cache（也顺带避免 stale 占用）。
                 self.list_cache.clear();
-                self.push_success(ts_fmt(
-                    "Toasts.switch_source_file_ok",
-                    &[("filename", filename)],
-                ));
+                self.push_success(t!("Toasts.switch_source_file_ok", filename = filename));
                 self.save_sources_config();
             }
             Err(e) => self.push_error(e.message()),

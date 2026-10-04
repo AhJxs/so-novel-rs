@@ -9,8 +9,7 @@
 
 use gpui_kit::component::IconName;
 use gpui_kit::{App, KeyBinding, SharedString};
-
-use crate::i18n::ts;
+use rust_i18n::t;
 
 // `actions!` 宏在 `crate::desktop` (mod.rs) 调用, 生成的 action 类型位于 `desktop::*`,
 // 这里只 re-export 给 root.rs 用。
@@ -34,7 +33,7 @@ pub enum NavPage {
 }
 
 impl NavPage {
-    /// `NavPage` → i18n key (`i18n::tr` 用)。
+    /// `NavPage` → i18n key (`t!` 用)。
     pub(super) const fn label_key(self) -> &'static str {
         match self {
             Self::Search => "Nav.search",
@@ -48,7 +47,7 @@ impl NavPage {
     /// 当前应用语言下的用户可见 label —— `t!` 走全局 locale (语言切换时由
     /// `gpui_kit::component::set_locale` 同步), 所以这里不需要 `lang` 参数。
     pub(super) fn label(self) -> SharedString {
-        ts(self.label_key())
+        t!(self.label_key()).into()
     }
 
     pub(super) const fn icon(self) -> IconName {

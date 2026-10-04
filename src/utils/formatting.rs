@@ -5,6 +5,8 @@
 //!   `YYYY-MM-DD HH:MM`（0 / 解析失败 / 格式化失败各走独立 i18n fallback）。
 //! - [`format_size`] / [`format_duration`] 分别 re-export 自 [`super::fs`] / [`super::time`]。
 
+use rust_i18n::t;
+
 pub use super::fs::format_size;
 pub use super::time::format_duration;
 
@@ -48,15 +50,15 @@ pub fn format_local_unix_secs(
     use time::format_description::well_known::Rfc3339;
 
     if secs <= 0 {
-        return crate::i18n::ts(unknown_key).to_string();
+        return t!(unknown_key).to_string();
     }
     let Ok(dt) = OffsetDateTime::from_unix_timestamp(secs) else {
-        return crate::i18n::ts(invalid_key).to_string();
+        return t!(invalid_key).to_string();
     };
     let local =
         dt.to_offset(time::UtcOffset::current_local_offset().unwrap_or(time::UtcOffset::UTC));
     local.format(&Rfc3339).ok().map_or_else(
-        || crate::i18n::ts(format_failed_key).to_string(),
+        || t!(format_failed_key).to_string(),
         |s| s[..16].replace('T', " "),
     )
 }

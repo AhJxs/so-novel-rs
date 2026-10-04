@@ -14,7 +14,7 @@
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey)](#-快速开始)
 [![GitHub stars](https://img.shields.io/github/stars/Ahjxs/so-novel-rs?style=flat)](https://github.com/Ahjxs/so-novel-rs/stargazers)
 
-[功能](#-功能) · [安装](#-安装) · [技术栈](#-技术栈) · [快速开始](#-快速开始) · [CLI](#-cli-用法) · [快捷键](#-快捷键) · [免责声明](./DISCLAIMER.md)
+[功能](#-功能) · [安装](#-安装) · [技术栈](#-技术栈) · [快速开始](#-快速开始) · [快捷键](#-快捷键) · [免责声明](./DISCLAIMER.md)
 
 </div>
 
@@ -22,15 +22,15 @@
 
 ## 📸 截图
 
-> ⚠️ 旧截图已随 Web 前端迁移 shadcn 失效，待重新截图替换。
+> ⚠️ 截图为旧版界面，待重新截图替换。
 
 | 搜索 | 任务 |
 |:---:|:---:|
-| ![搜索](screenshots/search.png) | ![任务](screenshots/task.png) |
+| ![搜索](docs/screenshots/search.png) | ![任务](docs/screenshots/task.png) |
 
 | 书库 | 设置 |
 |:---:|:---:|
-| ![书库](screenshots/library.png) | ![设置](screenshots/settings.png) |
+| ![书库](docs/screenshots/library.png) | ![设置](docs/screenshots/settings.png) |
 
 ## ✨ 功能
 
@@ -43,7 +43,6 @@
 | 📄 **多格式导出** | EPUB / TXT（多编码）/ HTML（zip 打包）/ **PDF**（DocumentBuilder 直接构建，CJK 字体嵌入） |
 | 🎨 **主题系统** | 38 个可用主题，文件 watcher 热重载，无需重启 |
 | 🌐 **多语言** | 简体中文 / 繁体中文 / English，UI 即时切换 |
-| 💻 **CLI 模式** | `search` / `download` / `sources` 子命令，`--json` 机器可读输出 |
 | 🔄 **更新检查** | 自动检测 GitHub Release，有新版时一键跳转下载 |
 
 ## 🛠 技术栈
@@ -66,19 +65,18 @@
 
 ```
 so-novel-rs/
-├── assets/                # logo
-├── bundle/rules/          # 默认书源 JSON + 模板（首次启动复制到 ~/.sonovel/rules/）
-├── bundle/web/            # 解析测试样例（章节页 / 封面 / JS）
-├── docs/                  # CLI / 书源 / 部署等长文档
+├── assets/                # 编译期嵌入的静态资源
+│   ├── logo.*             # 图标（build.rs 嵌 exe 资源段 + 侧栏 logo）
+│   ├── chapter_*.tmpl     # HTML / EPUB 导出模板
+│   └── rules/             # 默认书源 JSON + 模板（首次启动复制到 ~/.sonovel/rules/）
+├── docs/                  # 长文档 + 截图 + 历史设计记录
+│   └── screenshots/
 ├── locales/app.yml        # i18n 翻译（zh-CN / zh-TW / en）
-├── web-ui/                # Turborepo + Bun monorepo（apps/web + packages/ui，shadcn base-nova）
+├── tests/fixtures/web/    # 书源解析样例（章节页 / 封面 / JS）
 └── src/
     ├── main.rs / lib.rs   # 入口 + crate 根
-    ├── startup/           # 启动层（mode 判定 / console attach）
-    ├── cli/               # CLI 子命令（search / download / sources / ...）
-    ├── core/              # 业务层（桌面 / Web / CLI 三端共享）
+    ├── core/              # 业务层（与 GUI 解耦）
     ├── desktop/           # GPUI 桌面 GUI（components / model / pages / themes/）
-    ├── web/               # Web 服务（axum + 任务轮询）
     ├── parser/            # HTML 解析（book / chapter / toc / dom 子模块）
     ├── crawler/           # 搜索 / 下载 / 重试 / 健康检测
     ├── export/            # EPUB / TXT / HTML / PDF（含 pdf/ 子模块）
@@ -88,7 +86,7 @@ so-novel-rs/
     ├── logger.rs utils/   # tracing 初始化 + 工具函数
 ```
 
-**分层**: `core/` 提供与 GUI / Web 解耦的业务逻辑,`desktop/` 是 GPUI 渲染层,`web/` 是 axum + 任务轮询 API 层（搜索 / 下载均「建任务 → 轮询」，无 SSE）,三端共享同一份核心代码。Web handler 通过 `Locale` extractor + `WebError::into_response_for_locale` 按 per-request locale 翻译错误,无全局 mutation。
+**分层**: `core/` 提供与 GUI 解耦的业务逻辑,`desktop/` 是 GPUI 渲染层,共享同一份核心代码。桌面端的文案与错误提示统一走 `rust_i18n` 的 `t!` 宏按全局 locale 翻译。
 
 ## 📥 安装
 
@@ -127,36 +125,14 @@ cargo run
 | 路径 | 用途 |
 |------|------|
 | `config.toml` | 用户配置（保留注释） |
-| `rules/` | 书源规则文件（JSON，首次启动从 bundle 复制） |
+| `rules/` | 书源规则文件（JSON，首次启动从内置资源复制） |
 | `sources_config.json` | 书源配置（当前选中的规则文件 + 禁用列表） |
 | `tasks.json` | 下载任务记录（自动清理超额的已完成任务） |
 | `themes/` | 用户主题目录（JSON，热重载） |
 
-### 💻 CLI 用法
-
-不带子命令启动 GUI，带子命令走 CLI：
-
-```sh
-# 搜索（与 GUI 一致：自动按相似度过滤 + 排序）
-so-novel-rs search "斗破苍穹"
-so-novel-rs search "斗破苍穹" --source 1 --limit 10 --json | jq length
-
-# 下载
-so-novel-rs download "https://example.com/book/123" --format epub
-so-novel-rs download "https://example.com/book/123" --output D:\novels --format txt
-
-# 列出书源
-so-novel-rs sources --json
-```
-
-`--help` / `-h` / 子命令 help 跟随 `~/.sonovel/config.toml [global].language`
-显示对应语言（zh-CN / zh-TW / en），与 GUI 同步。
-
-📖 完整 CLI 用法、子命令参数、注意事项、故障排查见 [docs/CLI.md](./docs/CLI.md)。
-
 ### 📚 书源
 
-仓库自带 6 套书源规则（位于 `bundle/rules/`，首次运行复制到 `~/.sonovel/rules/`）：
+仓库自带 6 套书源规则（位于 `assets/rules/`，首次运行复制到 `~/.sonovel/rules/`）：
 
 - `main.json` — 默认书源（12 个，均支持搜索、大陆 IP）
 - `proxy-required.json` — 需要代理的书源（4 个，非大陆 IP）
@@ -171,42 +147,6 @@ so-novel-rs sources --json
 
 📖 完整书源表（IP 要求 / 注意事项）、CF 绕过部署步骤、排查指引见
 [docs/BOOK_SOURCES.md](./docs/BOOK_SOURCES.md)。
-
-### 🌐 Web 模式
-
-启动 Web 服务器，通过浏览器访问：
-
-```sh
-# 先构建（web 是可选 feature，默认构建不含）
-cargo build --features web
-./target/debug/so-novel-rs --web --host 0.0.0.0 --port 9000
-
-# 或一步构建并启动
-cargo run --features web -- --web
-
-# 环境变量（Docker 友好）
-SO_NOVEL_WEB=1 ./target/debug/so-novel-rs
-```
-
-浏览器打开 `http://localhost:8080` 即可使用。支持手机、平板、桌面多端响应式。
-
-> **默认绑定 `127.0.0.1:8080`，仅本机访问。** 如果需要在局域网或 Docker
-> 容器中对外服务，显式传 `--host 0.0.0.0`。
-
-### 🐳 Docker 部署
-
-```sh
-# 构建镜像
-docker build -t so-novel .
-
-# 运行（挂载数据目录）
-docker run -d -p 8080:8080 -v so-novel-data:/home/so-novel/.sonovel --name so-novel so-novel
-
-# 自定义端口
-docker run -d -p 9000:8080 -e SO_NOVEL_WEB=1 so-novel
-```
-
-`config.toml` 存放在 `/home/so-novel/.sonovel/config.toml`（容器内），数据目录与 Dockerfile 的非 root 用户保持一致。
 
 ### 📦 打包
 
@@ -231,10 +171,10 @@ cargo build --release --target aarch64-unknown-linux-gnu    # Linux ARM64
 
 欢迎 PR！本项目采用 AGPL-3.0 协议,贡献即同意按该协议授权。
 
-* 提交前跑 `cargo fmt --all -- --check` + `cargo clippy --all-features --all-targets -- -D warnings` + `cargo test --lib`
+* 提交前跑 `cargo fmt --all -- --check` + `cargo clippy --all-targets -- -D warnings` + `cargo test --lib`
 * 新增 / 改动 UI 文案 → 同步 `locales/app.yml` 三语
-* 新增书源 → 走 `bundle/rules/` JSON,规则语法见 `rule-template.json5`(如存在)
-* 业务函数返回错误 → 用 `AppResult<T>` + `?` 透传;边界(CLI / Web)才转 `anyhow`
+* 新增书源 → 走 `assets/rules/` JSON,规则语法见 `rule-template.json5`(如存在)
+* 业务函数返回错误 → 用 `AppResult<T>` + `?` 透传;边界才转 `anyhow`
 
 ## 🙏 致谢
 

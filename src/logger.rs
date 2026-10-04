@@ -4,7 +4,7 @@
 //!   生产/容器环境用，便于聚合栈 (Loki / ELK) parse
 //! - env filter 走 `RUST_LOG`（默认 `info,so_novel_rs=debug`）
 //! - **`tracing_subscriber::init` 全局唯一，二次 init 会 panic**，须由 caller 自行保证：
-//!   `cli::run`（`--verbose`）与 `startup::dispatch`（Web / Gui 路径）已分流、各自只调一次
+//!   `main` 只在启动时调一次 `logger::init()`
 //!
 //! tracing macro 本身与 `TraceId` 链路（`app::trace`）不在本模块。
 
@@ -92,18 +92,6 @@ pub fn init_with_format(format: LogFormat) -> Result<(), String> {
     Ok(())
 }
 
-/// 旧 `init_tracing` 别名, 保留给 cli 启动期调用。二次 init 静默 no-op (而非 panic), 可放心多次调。
-pub fn init_compat_legacy() {
-    let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("info,so_novel_rs=debug"));
-
-    let layer = fmt::layer().with_target(false);
-    let _ = tracing_subscriber::registry()
-        .with(filter)
-        .with(layer)
-        .try_init();
-}
-
 #[cfg(test)]
 mod tests {
     #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
@@ -126,16 +114,5 @@ mod tests {
     #[test]
     fn log_format_rejects_unknown() {
         assert!("xml".parse::<LogFormat>().is_err());
-    }
-
-    #[test]
-    fn init_compat_legacy_does_not_panic() {
-        // set_default 限定在当前线程, 测试结束自动恢复。
-        let _ = tracing_subscriber::registry()
-            .with(EnvFilter::new("off"))
-            .with(fmt::layer().with_target(false))
-            .set_default();
-        init_compat_legacy();
-        init_compat_legacy();
     }
 }

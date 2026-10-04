@@ -3,7 +3,7 @@
 # 用法：bash scripts/package-linux.sh [target]（默认 x86_64，可传 aarch64-unknown-linux-gnu）。
 # 构建工具：Linux 主机（如 CI runner）用原生 `cargo`，否则用 `cross`（容器化交叉编译，需装
 # Docker + cross）；`FORCE_CROSS=1` / `FORCE_CARGO=1` 可强制指定。
-# 产物：dist/so-novel-rs-<version>-linux-<arch>.tar.gz（可执行文件 + README + bundle/rules/）。
+# 产物：dist/so-novel-rs-<version>-linux-<arch>.tar.gz（可执行文件 + README + assets/rules/）。
 
 set -euo pipefail
 
@@ -71,7 +71,7 @@ mkdir -p "$OUTDIR"
 
 cp "$BIN" "$OUTDIR/"
 chmod +x "$OUTDIR/${NAME}"
-cp -r bundle/rules "$OUTDIR/rules"
+cp -r assets/rules "$OUTDIR/rules"
 
 cat > "$OUTDIR/README.md" <<'EOF'
 # So Novel — Linux 包
@@ -79,9 +79,7 @@ cat > "$OUTDIR/README.md" <<'EOF'
 ## 运行
 
 ```bash
-./so-novel-rs              # GUI 模式
-./so-novel-rs sources      # 列书源（CLI）
-./so-novel-rs --help       # 看更多子命令
+./so-novel-rs              # 启动 GUI
 ```
 
 首次启动会在 exe 同目录生成 `config.toml` + `sonovel.db`。

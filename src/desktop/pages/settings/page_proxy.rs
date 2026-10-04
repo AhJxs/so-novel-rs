@@ -8,8 +8,7 @@ use gpui_kit::component::{
     setting::{NumberFieldOptions, SettingField, SettingGroup, SettingItem, SettingPage},
 };
 use gpui_kit::{App, SharedString, Styled, px};
-
-use crate::i18n::ts;
+use rust_i18n::t;
 
 use super::ctx::PageCtx;
 use super::fields::{bool_field, number_field_u16, string_field};
@@ -17,34 +16,34 @@ use super::fields::{bool_field, number_field_u16, string_field};
 pub(super) fn build(ctx: &PageCtx<'_>, _cx: &App) -> SettingPage {
     let m = ctx.model.clone();
 
-    SettingPage::new(ts("Settings.page.proxy"))
+    SettingPage::new(t!("Settings.page.proxy"))
         .resettable(false)
         .default_open(true)
         .groups(vec![
             // ============ HTTP 代理 ============
             SettingGroup::new()
-                .title(ts("Settings.group.http_proxy"))
+                .title(t!("Settings.group.http_proxy"))
                 .items(vec![
                     SettingItem::new(
-                        ts("Settings.item.proxy_enabled"),
+                        t!("Settings.item.proxy_enabled"),
                         bool_field(
                             &m,
                             move |model| model.config.proxy.proxy_enabled,
                             move |model, val| model.config.proxy.proxy_enabled = val,
                         ),
                     )
-                    .description(ts("Settings.desc.proxy_enabled")),
+                    .description(t!("Settings.desc.proxy_enabled").to_string()),
                     SettingItem::new(
-                        ts("Settings.item.proxy_host"),
+                        t!("Settings.item.proxy_host"),
                         string_field(
                             &m,
                             move |model| SharedString::from(model.config.proxy.proxy_host.clone()),
                             move |model, s| model.config.proxy.proxy_host = s,
                         ),
                     )
-                    .description(ts("Settings.desc.proxy_host")),
+                    .description(t!("Settings.desc.proxy_host").to_string()),
                     SettingItem::new(
-                        ts("Settings.item.proxy_port"),
+                        t!("Settings.item.proxy_port"),
                         number_field_u16(
                             &m,
                             NumberFieldOptions {
@@ -56,16 +55,16 @@ pub(super) fn build(ctx: &PageCtx<'_>, _cx: &App) -> SettingPage {
                             move |model, v| model.config.proxy.proxy_port = v,
                         ),
                     )
-                    .description(ts("Settings.desc.proxy_port")),
+                    .description(t!("Settings.desc.proxy_port").to_string()),
                 ]),
             // ============ Cookie ============
             // 起点 cookie 必须是**多行 textarea**（`Cookie:` 头是一整段多对 `k=v`），
             // 所以走 `SettingField::render` 挂 owner-cached 的 TextareaState。
             SettingGroup::new()
-                .title(ts("Settings.group.cookie"))
+                .title(t!("Settings.group.cookie"))
                 .items(vec![
                     SettingItem::new(
-                        ts("Settings.item.qidian_cookie"),
+                        t!("Settings.item.qidian_cookie"),
                         SettingField::render({
                             let qidian_cookie_input = ctx.qidian_cookie_input.clone();
                             move |options, _window, _cx| {
@@ -85,7 +84,7 @@ pub(super) fn build(ctx: &PageCtx<'_>, _cx: &App) -> SettingPage {
                             }
                         }),
                     )
-                    .description(ts("Settings.desc.qidian_cookie")),
+                    .description(t!("Settings.desc.qidian_cookie").to_string()),
                 ]),
         ])
 }

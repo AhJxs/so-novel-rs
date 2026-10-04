@@ -5,10 +5,10 @@ use gpui_kit::component::{
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{App, Entity, IntoElement, ParentElement, SharedString, Styled, div, px};
+use rust_i18n::t;
 
 use crate::crawler::health::{HealthStatus, SourceHealth};
 use crate::desktop::components::{StatusBadge, StatusKind, truncate};
-use crate::i18n::ts_cached;
 use crate::models::Rule;
 
 use super::SourcesPage;
@@ -65,7 +65,7 @@ pub(super) fn render(
                                 .child(Tag::secondary().small().child(lang_display))
                                 .when(need_proxy, |d| {
                                     d.child(
-                                        Tag::secondary().small().child(ts_cached("Sources.tag.proxy")),
+                                        Tag::secondary().small().child(t!("Sources.tag.proxy")),
                                     )
                                 }),
                         ),
@@ -87,7 +87,7 @@ pub(super) fn render(
         // ---- 健康状态 Badge ----
         .child(div().w(px(150.)).justify_end().child({
             let (badge_kind, label) = health.map_or_else(
-                || (StatusKind::Neutral, ts_cached("Sources.health.not_tested").to_string()),
+                || (StatusKind::Neutral, t!("Sources.health.not_tested").to_string()),
                 |h| (health_status_kind_from(h.classify()), h.label()),
             );
             StatusBadge::new(badge_kind, label)

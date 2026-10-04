@@ -1,7 +1,7 @@
 # 书源集说明
 
-本文档对应 `bundle/rules/` 下的书源文件。**书源规则文件均位于
-`bundle/rules/xx.json`**（首次运行会复制到 `~/.sonovel/rules/`）。
+本文档对应 `assets/rules/` 下的书源文件。**书源规则文件均位于
+`assets/rules/xx.json`**（首次运行会复制到 `~/.sonovel/rules/`）。
 
 | 书源文件 | 用途 | 数量 |
 |---|---|---|
@@ -116,7 +116,7 @@
 
 ## 切换书源集
 
-`bundle/rules/` 下的 5 个书源 JSON 都是**可选的活跃文件**。切换有 3 种方式：
+`assets/rules/` 下的 5 个书源 JSON 都是**可选的活跃文件**。切换有 3 种方式：
 
 ### 方式 1：GUI 书源管理页（推荐）
 
@@ -144,13 +144,12 @@ sed -i 's/"active_file": "main.json"/"active_file": "proxy-required.json"/' \
   ~/.sonovel/sources_config.json
 ```
 
-> 这个文件 GUI / Web / CLI **三处共享写**（都用
-> [`SourcesConfig::save`](../src/persistent/sources_config.rs) 原子写）。
-> 同一时刻别两个进程同时写，会 last-write-wins。
+> 这个文件由 GUI 原子写入
+> （用 [`SourcesConfig::save`](../src/persistent/sources_config.rs)）。
 
 ### 方式 3：复制新书源文件到 `~/.sonovel/rules/`
 
-GUI / Web UI 都支持从文件导入书源（"添加"按钮选 JSON 文件），导入后自动
+GUI 支持从文件导入书源（"添加"按钮选 JSON 文件），导入后自动
 出现在活跃文件下拉里。
 
 > ⚠️ **注意**：`config.toml` 里**没有** `active-rules` 字段 —— Java 时代的
@@ -162,8 +161,8 @@ GUI / Web UI 都支持从文件导入书源（"添加"按钮选 JSON 文件）�
 ## 自定义书源
 
 参考：
-- [`bundle/rules/rule-template.json5`](../bundle/rules/rule-template.json5) — 模板文件，含字段说明
-- [`bundle/rules/main.json`](../bundle/rules/main.json) — 实际书源集，看真实例子
+- [`assets/rules/rule-template.json5`](../assets/rules/rule-template.json5) — 模板文件，含字段说明
+- [`assets/rules/main.json`](../assets/rules/main.json) — 实际书源集，看真实例子
 
 支持语法：**css selector** / **xpath** / **javascript** / **regex**。
 书源格式由 [`src/models/rule.rs`](../src/models/rule.rs) 的 `Rule` struct 定义。
@@ -175,8 +174,6 @@ GUI / Web UI 都支持从文件导入书源（"添加"按钮选 JSON 文件）�
 ## 进一步阅读
 
 - [README.md](../README.md) — 项目总览
-- [CLI.md](./CLI.md) — CLI 用法
-- [WEB.md](./WEB.md) — Web / Docker 部署
 - [CHANGELOG.md](./CHANGELOG.md) — 最新 release
 - 书源规则定义：[`src/models/rule.rs`](../src/models/rule.rs)
 - 书源持久化（`disabled_urls`）：[`src/persistent/sources_config.rs`](../src/persistent/sources_config.rs)

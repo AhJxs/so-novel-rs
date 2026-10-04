@@ -1,9 +1,9 @@
-//! 三端共用的"搜索前准备"逻辑：选书源 / 算 `cf_bypass` / 算 limit。
+//! CLI / desktop 共用的"搜索前准备"逻辑：选书源 / 算 `cf_bypass` / 算 limit。
 //!
-//! 之前 cli / web / desktop 三处近乎字面量重复同一套实现，抽出来后调用方收敛为
+//! 之前 cli / desktop 两处近乎字面量重复同一套实现，抽出来后调用方收敛为
 //! `select_sources(&rules, &cfg, source_id)` + `cf_bypass(&cfg)` + `effective_limit(limit, &cfg)`。
 //!
-//! `select_sources` 以 `&[Rule]` 入参并要求传入**完整**规则列表（web / desktop 直接传全量，
+//! `select_sources` 以 `&[Rule]` 入参并要求传入**完整**规则列表（desktop 直接传全量，
 //! cli 自己先 `filter(!disabled)`），内部再判断 `is_search_enabled`；这样 core 不需要知道
 //! "调用方有没有预过滤"的歧义。
 
@@ -41,7 +41,7 @@ pub fn select_sources(rules: &[Rule], cfg: &AppConfig, source_id: Option<i32>) -
 /// 计算最终搜索结果上限，优先级：显式 `explicit`（caller 已做过 `max(0)` + `>0` 校验）→
 /// `cfg.source.search_limit`（`Option<i32>`，≤0 视作未设）→ `None`（调用方兜底：书源自带 / 不限）。
 ///
-/// web query param 的校验属于 HTTP 层，仍在 web handler 里做。
+/// query param 的校验属于各前端自己的输入层，不在此处做。
 pub fn effective_limit(explicit: Option<usize>, cfg: &AppConfig) -> Option<usize> {
     explicit.or_else(|| {
         cfg.source

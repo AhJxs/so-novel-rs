@@ -1,6 +1,6 @@
 [package]
 name = "so-novel-rs"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2024"
 rust-version = "1.95"
 description = "So Novel — Rust desktop client (gpui-kit 0.7)."
@@ -11,32 +11,13 @@ publish = false
 name = "so-novel-rs"
 path = "src/main.rs"
 
-[features]
-default = ["gui"]
-# GUI 桌面特性：GPUI 栈 + 文件对话框；默认开启（主入口是 GUI）。
-gui = [
-    "dep:gpui-kit",
-    "dep:rfd",
-]
-# Web 服务特性：axum 栈 + SSE 工具。`--no-default-features --features web`
-# 得到不链接任何 GPUI 系统库（xcb/wayland/egl/mesa/vulkan）的二进制，Dockerfile 走这条。
-web = [
-    "dep:rust-embed",
-    "dep:mime_guess",
-    "dep:axum",
-    "dep:axum_session",
-    "dep:tower-http",
-    "dep:async-stream",
-    "dep:futures",
-]
-
 [dependencies]
-gpui-kit = { version = "0.7.0", optional = true }
+gpui-kit = "0.7.0"
 # 国际化 —— 复用 gpui-kit 组件库内部用的同一套 rust-i18n 机制。
 rust-i18n = "4.2.4"
 
 # Async runtime
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "fs", "signal"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "fs"] }
 
 # smol：gpui 的 `cx.spawn` 跑在 smol executor 上（不是 tokio），其 future 内部**不能**用
 # `tokio::time::sleep` / `tokio::sync::mpsc::channel`（没有 tokio reactor，会 panic），
@@ -83,7 +64,7 @@ chardetng = "1"
 
 # JavaScript 引擎（书源规则 @js: 后处理 + quanben5 加密）。
 # 选 boa 而非 rquickjs：纯 Rust 无 C 工具链依赖，规则用到的 ES5/ES6 子集它都支持。
-boa_engine = "0.21"
+boa_engine = "0.22"
 
 # rand（UA 池等）。惰性初始化改用 std::sync::LazyLock，不再需要 once_cell。
 rand = "0.10"
@@ -104,26 +85,10 @@ epub-builder = "0.8"
 # 减少 Windows MSVC 编译时对 cl.exe 的依赖。
 zip = { version = "8", default-features = false, features = ["deflate-flate2"] }
 
-# CLI 子命令。
-clap = { version = "4", features = ["derive"] }
-
-# Web 前端资源嵌入（web feature 专属）。
-# `include-exclude` 按 #[folder] 的 .gitignore 规则过滤（跳过 .map / node_modules / src 等）。
-rust-embed = { version = "8", features = ["include-exclude"], optional = true }
-# MIME 推导，给 rust-embed 的静态文件设置 Content-Type。
-mime_guess = { version = "2", optional = true }
-# Web 服务：axum + tower-http CORS。（web feature 专属）
-axum = { version = "0.8", features = ["macros"], optional = true }
-axum_session = { version = "0.20", optional = true }
-async-stream = { version = "0.3", optional = true }
-futures = { version = "0.3", optional = true }
-tower-http = { version = "0.7", features = ["cors"], optional = true }
-
-
 # 原生文件选择对话框（书源管理「添加」按钮：选 JSON 文件导入）。
 # 用 xdg-portal 而非默认 GTK3，避免引入 gtk3 系统依赖；它自带 pollster，
 # 不再需要 ashpd / tokio runtime。AsyncFileDialog 返回 impl Future，由调用方 executor 驱动。
-rfd = { version = "^0.17.2", default-features = false, features = ["xdg-portal"], optional = true }
+rfd = { version = "^0.17.2", default-features = false, features = ["xdg-portal"] }
 
 # 读系统本地时区（UtcOffset::current_local_offset）；local-offset 在三个平台各自调 OS API。
 time = { version = "0.3", default-features = false, features = ["local-offset"] }
@@ -135,19 +100,10 @@ pdf_oxide = { version = "0.3.77" }
 # LRU 缓存（`SearchState::cover_cache` 用有界 LRU 替代无界 HashMap，避免长会话累积封面字节）。
 lru = "0.18"
 
-# 当前只保留 CLI 模式需要的 console attach feature（DWM 圆角 / 暗色标题栏未在 GPUI 路径启用）。
-[target.'cfg(target_os = "windows")'.dependencies]
-windows-sys = { version = "0.61", features = [
-    # CLI 启动时把 stdio 附到父进程控制台（cmd / PowerShell），让 GUI subsystem 的 exe 也能输出。
-    "Win32_System_Console",
-] }
-
 [dev-dependencies]
 tempfile = "3"
 # 构造最小 PNG 验证 cover_entry_from_bytes。
 image = "0.25"
-# axum Router 在测试里走 tower::ServiceExt::oneshot。
-tower = { version = "0.5", features = ["util"] }
 
 # 在 Windows 上把 assets/logo.ico 嵌入 exe 资源段（build.rs 调用，仅 Windows 需要）。
 [target.'cfg(target_os = "windows")'.build-dependencies]

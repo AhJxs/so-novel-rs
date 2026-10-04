@@ -1,7 +1,7 @@
 //! Library 页工具栏：文件名过滤 Input + 7 个文件类型过滤 Button。
 //!
 //! 不用 SelectState：它把选项的翻译字段存在 State 里，切语言后失效；Button 的 label
-//! 在 render 里现取 `ts(...)`，切语言自动同步。扩展名不译（技术名词）。
+//! 在 render 里现取 `t!(...)`，切语言自动同步。扩展名不译（技术名词）。
 
 use gpui_kit::Context;
 use gpui_kit::component::{
@@ -11,8 +11,7 @@ use gpui_kit::component::{
     input::{Input, InputState},
 };
 use gpui_kit::{Entity, IntoElement, ParentElement, Styled, px};
-
-use crate::i18n::ts;
+use rust_i18n::t;
 
 /// 输入行：文件名过滤 Input + ext 过滤按钮组。
 pub(super) fn render(
@@ -41,7 +40,7 @@ fn ext_filter_buttons(
     h_flex().gap_1().items_center().children(vec![
         ext_button(
             "ext-all",
-            ts("Library.filter_option_all"),
+            t!("Library.filter_option_all").into(),
             None,
             current_ext,
             cx,

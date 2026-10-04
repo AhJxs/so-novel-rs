@@ -194,7 +194,7 @@ pub fn load_config(path: &Path) -> Result<AppConfig> {
 ///
 /// # Examples
 ///
-/// 设置页保存路径见 `web::handlers::settings` / `desktop::model::ops::settings`。
+/// 设置页保存路径见 `desktop::model::ops::settings`。
 ///
 /// # Errors
 ///

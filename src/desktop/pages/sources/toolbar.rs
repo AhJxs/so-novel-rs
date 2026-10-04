@@ -1,7 +1,7 @@
 //! Sources 页工具栏：名字过滤 Input + 活跃书源文件下拉 + 3-Button 状态过滤组。
 //!
 //! 状态过滤不走 SelectState（options 的翻译字段冻在 state 里，切语言失效），改用
-//! 3 个 Button：label 在 render 里现取 `ts(...)`，`selected` style 标记当前项。
+//! 3 个 Button：label 在 render 里现取 `t!(...)`，`selected` style 标记当前项。
 //! 名字过滤的 placeholder 只能设在 `InputState` 上，见 `mod.rs` 里的 sentinel 刷新。
 
 use gpui_kit::component::{
@@ -12,9 +12,9 @@ use gpui_kit::component::{
     select::{SearchableVec, Select, SelectState},
 };
 use gpui_kit::{Context, Entity, IntoElement, ParentElement, Styled, div, px};
+use rust_i18n::t;
 
 use crate::desktop::model::SourcesFilterStatus;
-use crate::i18n::ts;
 
 use super::SourcesPage;
 
@@ -43,7 +43,7 @@ pub(super) fn render(
                     div()
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
-                        .child(ts("Sources.active_file.label")),
+                        .child(t!("Sources.active_file.label")),
                 )
                 .child(Select::new(rule_file_select).w(px(200.0))),
         )
@@ -60,21 +60,21 @@ fn status_filter_buttons(
         .items_center()
         .child(status_button(
             "status-all",
-            ts("Sources.status.all"),
+            t!("Sources.status.all").into(),
             SourcesFilterStatus::All,
             current_status,
             cx,
         ))
         .child(status_button(
             "status-enabled",
-            ts("Sources.status.enabled"),
+            t!("Sources.status.enabled").into(),
             SourcesFilterStatus::Enabled,
             current_status,
             cx,
         ))
         .child(status_button(
             "status-disabled",
-            ts("Sources.status.disabled"),
+            t!("Sources.status.disabled").into(),
             SourcesFilterStatus::Disabled,
             current_status,
             cx,

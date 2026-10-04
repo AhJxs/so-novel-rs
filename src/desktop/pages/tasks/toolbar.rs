@@ -1,6 +1,6 @@
 //! Tasks 页工具栏：5 个状态过滤 Button。
 //!
-//! label 在 render 里现取 `ts(...)` + 当前 counts，切语言自动同步。
+//! label 在 render 里现取 `t!(...)` + 当前 counts，切语言自动同步。
 
 use gpui_kit::component::{
     Selectable, Sizable,
@@ -8,8 +8,7 @@ use gpui_kit::component::{
     h_flex,
 };
 use gpui_kit::{Context, IntoElement, ParentElement, Styled};
-
-use crate::i18n::ts;
+use rust_i18n::t;
 
 use super::TasksPage;
 use super::summary::TaskFilter;
@@ -24,7 +23,7 @@ pub(super) fn filter_buttons(
         .gap_1()
         .items_center()
         .children(TaskFilter::ALL.iter().enumerate().map(|(i, &f)| {
-            let label = format!("{} {}", ts(f.label_key()), counts[i]);
+            let label = format!("{} {}", t!(f.label_key()), counts[i]);
             Button::new(("task-filter", i as u64))
                 .small()
                 .ghost()

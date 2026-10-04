@@ -31,7 +31,7 @@ static GLOBAL: OnceLock<AppConfig> = OnceLock::new();
 static GLOBAL_VIEW: LazyLock<&'static AppConfig> =
     LazyLock::new(|| GLOBAL.get_or_init(AppConfig::with_defaults));
 
-/// 注入全局配置。仅在启动期（`main` / `startup` 模块）调一次；重复调用返回 `Err`，
+/// 注入全局配置。仅在启动期（`main`）调一次；重复调用返回 `Err`，
 /// 由调用方决定如何处理（panic / warn-and-ignore）。
 pub fn set_global(cfg: AppConfig) -> Result<(), &'static str> {
     GLOBAL

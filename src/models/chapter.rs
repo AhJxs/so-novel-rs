@@ -1,4 +1,4 @@
-//! 章节模型: 下载任务的核心数据单元, 兼 PO (落盘到 `chapters/`) 与 DTO (Web SSE / API 响应)。
+//! 章节模型: 下载任务的核心数据单元, 兼 PO (落盘到 `chapters/`) 与前后端传输格式。
 
 use serde::{Deserialize, Serialize};
 

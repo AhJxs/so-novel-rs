@@ -4,6 +4,7 @@
 //! 函数重读 live cache，从占位自动切到真实内容。详情字段只有详情请求才完整，所以优先
 //! `detail_cache` 的 Book，未回来时用 `SearchResult` 兜底。
 
+use rust_i18n::t;
 use std::io::Cursor;
 use std::sync::Arc;
 
@@ -17,7 +18,6 @@ use gpui_kit::{
 };
 
 use crate::desktop::model::{CoverEntry, DetailState};
-use crate::i18n::ts;
 use crate::models::SearchResult;
 
 use super::SearchPage;
@@ -49,7 +49,7 @@ pub(super) fn content(
 
     // source_name / word_count 只有 SearchResult 有（Book 不带），永远用 r。
     let source_val = if r.source_name.is_empty() {
-        ts("Search.detail.unknown").to_string()
+        t!("Search.detail.unknown").to_string()
     } else {
         r.source_name.clone()
     };
@@ -77,7 +77,7 @@ pub(super) fn content(
 
     // 链接行：label + 可点击 Link（自带 link 色 / 下划线 / hover）。
     let url_display = if r.url.trim().is_empty() {
-        ts("Search.detail.unknown")
+        t!("Search.detail.unknown").into()
     } else {
         SharedString::from(r.url.clone())
     };
@@ -90,7 +90,7 @@ pub(super) fn content(
                 .flex_shrink_0()
                 .text_xs()
                 .text_color(cx.theme().muted_foreground)
-                .child(ts("Search.detail.field.url")),
+                .child(t!("Search.detail.field.url")),
         )
         .child(
             // URL 无空格不会自动换行，overflow_x_hidden 截断超长部分。
@@ -109,49 +109,49 @@ pub(super) fn content(
     let fields = v_flex()
         .gap_2()
         .child(detail_row(
-            ts("Search.detail.field.book_name"),
+            t!("Search.detail.field.book_name").into(),
             SharedString::from(book_name),
             None,
             cx,
         ))
         .child(detail_row(
-            ts("Search.detail.field.author"),
+            t!("Search.detail.field.author").into(),
             author,
             None,
             cx,
         ))
         .child(detail_row(
-            ts("Search.detail.field.source"),
+            t!("Search.detail.field.source").into(),
             SharedString::from(source_val),
             None,
             cx,
         ))
         .child(detail_row(
-            ts("Search.detail.field.category"),
+            t!("Search.detail.field.category").into(),
             detail_opt(category),
             None,
             cx,
         ))
         .child(detail_row(
-            ts("Search.detail.field.status"),
+            t!("Search.detail.field.status").into(),
             detail_opt(status),
             None,
             cx,
         ))
         .child(detail_row(
-            ts("Search.detail.field.latest_chapter"),
+            t!("Search.detail.field.latest_chapter").into(),
             detail_opt(latest),
             None,
             cx,
         ))
         .child(detail_row(
-            ts("Search.detail.field.last_update"),
+            t!("Search.detail.field.last_update").into(),
             detail_opt(last_update),
             None,
             cx,
         ))
         .child(detail_row(
-            ts("Search.detail.field.intro"),
+            t!("Search.detail.field.intro").into(),
             detail_opt(intro),
             // 长简介（数千字）会把 Dialog body 顶出视口 → 内滚上限 ~10 行（200px）。
             Some(200.0),
@@ -170,7 +170,7 @@ pub(super) fn content(
 fn detail_opt(v: Option<&str>) -> SharedString {
     match v {
         Some(s) if !s.trim().is_empty() => SharedString::from(s.to_string()),
-        _ => ts("Search.detail.unknown"),
+        _ => t!("Search.detail.unknown").into(),
     }
 }
 
@@ -342,7 +342,7 @@ fn render_detail_cover(
                     div()
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
-                        .child(ts("Search.detail.cover.loading")),
+                        .child(t!("Search.detail.cover.loading")),
                 ),
         ),
         CoverView::Failed => container.child(
@@ -351,13 +351,13 @@ fn render_detail_cover(
                 .text_center()
                 .text_xs()
                 .text_color(cx.theme().muted_foreground)
-                .child(ts("Search.detail.cover.failed")),
+                .child(t!("Search.detail.cover.failed")),
         ),
         CoverView::None => container.child(
             div()
                 .text_xs()
                 .text_color(cx.theme().muted_foreground)
-                .child(ts("Search.detail.cover.none")),
+                .child(t!("Search.detail.cover.none")),
         ),
     }
 }

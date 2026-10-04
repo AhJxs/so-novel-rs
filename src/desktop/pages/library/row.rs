@@ -10,10 +10,10 @@ use gpui_kit::component::{
     tag::Tag,
 };
 use gpui_kit::{App, Entity, IntoElement, ParentElement, Styled, div, px};
+use rust_i18n::t;
 
 use crate::desktop::components::truncate;
 use crate::desktop::model::LibraryEntry;
-use crate::i18n::ts_cached;
 use crate::utils::system::{open_path, reveal_in_folder};
 
 use super::LibraryPage;
@@ -121,7 +121,7 @@ pub(super) fn render_row(
                         .small()
                         .outline()
                         .icon(Icon::new(IconName::ExternalLink))
-                        .label(ts_cached("Library.action_open"))
+                        .label(t!("Library.action_open"))
                         // 「打开」：系统默认程序打开文件（util/system.rs::open_path）。
                         .on_click(move |_, _window, _cx| {
                             if let Err(e) = open_path(&path_open) {
@@ -134,7 +134,7 @@ pub(super) fn render_row(
                         .small()
                         .outline()
                         .icon(Icon::new(IconName::Folder))
-                        .label(ts_cached("Library.action_reveal"))
+                        .label(t!("Library.action_reveal"))
                         // 「位置」：文件管理器打开所在目录并选中该文件（util/system.rs）。
                         .on_click(move |_, _window, _cx| {
                             if let Err(e) = reveal_in_folder(&path_reveal) {
@@ -147,7 +147,7 @@ pub(super) fn render_row(
                         .small()
                         .danger()
                         .icon(Icon::new(IconName::Delete))
-                        .label(ts_cached("Library.action_delete"))
+                        .label(t!("Library.action_delete"))
                         .on_click(move |_, window, cx| {
                             // on_click 是 Fn → 每次点击 clone 一份 owned path 给内层闭包。
                             let path_for_click = path_del.clone();

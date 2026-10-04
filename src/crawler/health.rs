@@ -10,6 +10,8 @@ use reqwest::header::{ACCEPT, USER_AGENT};
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 
+use rust_i18n::t;
+
 use crate::http::HttpClients;
 use crate::http::ua::random_ua;
 use crate::models::Rule;
@@ -56,28 +58,24 @@ impl SourceHealth {
     /// 本地化显示文本: 延迟 2xx 只显示 ms, 4xx/5xx 同时显示状态码 + 延迟, 失败 / 无响应各走独立 i18n key。
     pub fn label(&self) -> String {
         if self.error.is_some() {
-            return crate::i18n::ts("Sources.health.error").to_string();
+            return t!("Sources.health.error").to_string();
         }
         match self.http_status {
             // 2xx —— 测速最关心的是延迟，状态码冗余。
-            Some(s) if (200..300).contains(&s) => crate::i18n::ts_fmt(
-                "Sources.health.latency",
-                &[("ms", &self.delay_ms.to_string())],
-            )
-            .to_string(),
+            Some(s) if (200..300).contains(&s) => {
+                t!("Sources.health.latency", ms = &self.delay_ms.to_string()).to_string()
+            }
             // 3xx/4xx/5xx: 状态码 + 延迟并存, 方便区分「慢但通(3xx 跳转)」和「真的失败(4xx/5xx)」;
-            // 必须走 `ts_fmt` 占位符替换, 直接 `format!` 拼接在切语言后顺序会乱。
-            Some(s) => crate::i18n::ts_fmt(
+            // 必须走 `t!` 占位符替换, 直接 `format!` 拼接在切语言后顺序会乱。
+            Some(s) => t!(
                 "Sources.health.http_status",
-                &[
-                    ("status", &s.to_string()),
-                    ("ms", &self.delay_ms.to_string()),
-                ],
+                status = &s.to_string(),
+                ms = &self.delay_ms.to_string()
             )
             .to_string(),
             // 源错误但没 HTTP 响应 (DNS / 超时): 调试输出太长塞不进 StatusBadge, 用一句"网络错误"代替
             // (`format!("{:?}", h.error)` 会把 anyhow 整条 chain 展开, 对用户没意义)。
-            None => crate::i18n::ts("Sources.health.network_error").to_string(),
+            None => t!("Sources.health.network_error").to_string(),
         }
     }
 }

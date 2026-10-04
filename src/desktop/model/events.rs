@@ -7,10 +7,9 @@
 //!
 //! GPUI 侧的 100ms 循环在 `desktop::drain_loop::spawn_drain_loop`。
 
-// `drain` 函数体要用这两条, 跟 `drain` 一起 gate, 否则 web-only 构建触发 unused_imports。
-#[cfg(feature = "gui")]
+use rust_i18n::t;
+
 use super::AppModel;
-#[cfg(feature = "gui")]
 use super::UpdateOutcome;
 
 /// 唤醒信号 handle。**仅在 GPUI/smol executor 上使用** —— `cx.spawn` 跑在 smol
@@ -55,7 +54,6 @@ pub fn new_wakeup() -> (WakeupHandle, WakeupReceiver) {
 ///
 /// 副作用: 更新 search / tasks / `sources_state` / `update_state`; 保存刚结束的任务;
 /// 派发 `pending_cover_prefetch`; 把 `update_state` 结果推成 `UIEvent`。
-#[cfg(feature = "gui")]
 pub fn drain(model: &mut AppModel) -> bool {
     let mut any = false;
 
@@ -100,25 +98,13 @@ pub fn drain(model: &mut AppModel) -> bool {
             let book_name = crate::utils::formatting::truncate(book_name, 50);
             let event = match &t.finished {
                 Some(Ok(_)) => UIEvent::Success(
-                    crate::i18n::ts_fmt(
-                        "Tasks.download_finished.completed",
-                        &[("book_name", &book_name)],
-                    )
-                    .to_string(),
+                    t!("Tasks.download_finished.completed", book_name = &book_name).to_string(),
                 ),
                 Some(Err(reason)) if reason.is_cancelled() => UIEvent::Info(
-                    crate::i18n::ts_fmt(
-                        "Tasks.download_finished.cancelled",
-                        &[("book_name", &book_name)],
-                    )
-                    .to_string(),
+                    t!("Tasks.download_finished.cancelled", book_name = &book_name).to_string(),
                 ),
                 Some(Err(_)) => UIEvent::Error(
-                    crate::i18n::ts_fmt(
-                        "Tasks.download_finished.failed",
-                        &[("book_name", &book_name)],
-                    )
-                    .to_string(),
+                    t!("Tasks.download_finished.failed", book_name = &book_name).to_string(),
                 ),
                 None => continue, // 不该进这分支
             };
@@ -147,26 +133,21 @@ pub fn drain(model: &mut AppModel) -> bool {
     if let Some(outcome) = model.update_state.drain() {
         use UpdateOutcome::{Failed, NewVersion, UpToDate};
         match outcome {
-            UpToDate => model.push_success(crate::i18n::ts("Toasts.update_up_to_date")),
+            UpToDate => model.push_success(t!("Toasts.update_up_to_date")),
             NewVersion(latest) => model.push_open_link(
-                crate::i18n::ts_fmt("Toasts.update_new_version", &[("ver", &latest)]),
+                t!("Toasts.update_new_version", ver = &latest),
                 "https://github.com/AhJxs/so-novel-rs/releases/latest",
             ),
-            Failed(err) => model.push_error(crate::i18n::ts_fmt(
-                "Toasts.update_failed",
-                &[("err", &err)],
-            )),
+            Failed(err) => model.push_error(t!("Toasts.update_failed", err = &err)),
         }
     }
 
     any
 }
 
-// 跟 `drain` 一起 gate, 否则 web-only 构建会触发 unused import warning。
-#[cfg(feature = "gui")]
 use crate::desktop::model::UIEvent;
 
-#[cfg(all(test, feature = "gui"))]
+#[cfg(test)]
 mod tests {
     #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
     use super::*;

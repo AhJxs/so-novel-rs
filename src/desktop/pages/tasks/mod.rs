@@ -25,7 +25,7 @@ use gpui_kit::{
 use crate::desktop::components::{EmptyState, PageHeader, Pagination, compute_page_window};
 use crate::desktop::model::AppModel;
 use crate::desktop::model::tasks::DeleteTaskResult;
-use crate::i18n::{ts, ts_fmt};
+use rust_i18n::t;
 
 use self::delegate::TasksDelegate;
 pub use self::summary::TaskSummary;
@@ -95,7 +95,7 @@ impl TasksPage {
         let model_id = model.entity_id();
         // 书名兜底：空时用 i18n fallback。
         let name: String = if book_name.trim().is_empty() {
-            ts("Tasks.fallback_unknown_book").to_string()
+            t!("Tasks.fallback_unknown_book").to_string()
         } else {
             book_name
         };
@@ -107,28 +107,19 @@ impl TasksPage {
             let model_id_for_ok = model_id;
 
             alert
-                .title(ts("Tasks.delete_dialog.title"))
-                .description(ts_fmt(
-                    "Tasks.delete_dialog.message",
-                    &[("book_name", &name_for_ok)],
-                ))
+                .title(t!("Tasks.delete_dialog.title"))
+                .description(t!("Tasks.delete_dialog.message", book_name = &name_for_ok))
                 // 顶层 dialog builder 负责单个按钮（见 `library/mod.rs` 同处注释）。
-                .ok_text(ts("Tasks.delete_dialog.confirm_button"))
-                .cancel_text(ts("Tasks.delete_dialog.cancel_button"))
+                .ok_text(t!("Tasks.delete_dialog.confirm_button"))
+                .cancel_text(t!("Tasks.delete_dialog.cancel_button"))
                 .ok_variant(ButtonVariant::Danger)
                 .confirm()
                 .on_ok(move |_ev: &ClickEvent, _window, cx| {
                     model_for_ok.update(cx, |m, _cx| match m.delete_task(task_id) {
-                        DeleteTaskResult::Deleted => m.push_success(ts_fmt(
-                            "Toasts.delete_task_ok",
-                            &[("book_name", &name_for_ok)],
-                        )),
-                        DeleteTaskResult::StillRunning => m.push_warning(ts_fmt(
-                            "Toasts.delete_task_still_running",
-                            &[("book_name", &name_for_ok)],
-                        )),
+                        DeleteTaskResult::Deleted => m.push_success(t!("Toasts.delete_task_ok", book_name = &name_for_ok)),
+                        DeleteTaskResult::StillRunning => m.push_warning(t!("Toasts.delete_task_still_running", book_name = &name_for_ok)),
                         DeleteTaskResult::Missing => {
-                            m.push_warning(ts("Toasts.delete_task_missing"));
+                            m.push_warning(t!("Toasts.delete_task_missing"));
                         }
                     });
                     cx.notify(model_id_for_ok);
@@ -148,7 +139,7 @@ impl TasksPage {
     ) {
         // 书名兜底：空时用 i18n fallback。
         let name: String = if book_name.trim().is_empty() {
-            ts("Tasks.fallback_unknown_book").to_string()
+            t!("Tasks.fallback_unknown_book").to_string()
         } else {
             book_name
         };
@@ -159,10 +150,7 @@ impl TasksPage {
             let failures_for_list = failures.clone();
             // 宽 640px + 不调 `.alert()`/`.confirm()`，保留默认 close_button + overlay / Esc 关闭。
             dialog
-                .title(ts_fmt(
-                    "Tasks.failures_dialog.title",
-                    &[("book_name", &name_for_title)],
-                ))
+                .title(t!("Tasks.failures_dialog.title", book_name = &name_for_title))
                 .w(px(640.))
                 // 失败章节可能很多 —— 限高 + 纵向滚动。`overflow_y_scrollbar` 是 terminal
                 // builder（返回 `Scrollable<Div>`），必须放链尾。
@@ -180,14 +168,8 @@ impl TasksPage {
                                 .map(|(idx, title, reason)| {
                                     div().gap_1().child(div().child(format!(
                                         "{} · {}",
-                                        ts_fmt(
-                                            "Tasks.card.failure_chapter",
-                                            &[("idx", &idx.to_string()), ("title", title)],
-                                        ),
-                                        ts_fmt(
-                                            "Tasks.card.failure_reason",
-                                            &[("reason", reason)],
-                                        ),
+                                        t!("Tasks.card.failure_chapter", idx = &idx.to_string(), title = title),
+                                        t!("Tasks.card.failure_reason", reason = reason),
                                     )))
                                 }),
                         )
@@ -239,7 +221,7 @@ impl Render for TasksPage {
             .p_6()
             .gap_4()
             // Header：title + subtitle，**无** action。
-            .child(PageHeader::new(ts("Tasks.page_title")).subtitle(ts("Tasks.subtitle")))
+            .child(PageHeader::new(t!("Tasks.page_title")).subtitle(t!("Tasks.subtitle")))
             // 过滤按钮组：「全部 / 运行中 / 已完成 / 失败 / 已取消」，各带数量。
             .child(toolbar::filter_buttons(self.filter, counts, cx))
             // 列表 / 空态
@@ -250,8 +232,8 @@ impl Render for TasksPage {
                     .items_center()
                     .justify_center()
                     .child(
-                        EmptyState::new(IconName::Inbox, ts(filter.empty_title_key()))
-                            .subtitle(ts(filter.empty_subtitle_key())),
+                        EmptyState::new(IconName::Inbox, t!(filter.empty_title_key()))
+                            .subtitle(t!(filter.empty_subtitle_key())),
                     )
                     .into_any_element()
             } else {

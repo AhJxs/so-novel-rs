@@ -1,8 +1,7 @@
-//! `AppConfig` 的"空字符串视作 None"和"路径校验"helper。
+//! `AppConfig` 的"空字符串视作 None"helper。
 //!
-//! 三端（cli / web / desktop）读 `cf_bypass` / `qidian_cookie` 时统一走"trim 后空 → None"
-//! 语义，集中在这里，避免每个 handler 各写一份判断。
-//! `validate_download_path` 的校验与稳定错误码同样供桌面设置面板与 CLI 复用。
+//! CLI / desktop 读 `cf_bypass` / `qidian_cookie` 时统一走"trim 后空 → None"
+//! 语义，集中在这里，避免每个调用方各写一份判断。
 
 use crate::config::AppConfig;
 
@@ -26,26 +25,6 @@ pub fn qidian_cookie(cfg: &AppConfig) -> Option<String> {
     } else {
         Some(cfg.cookie.qidian_cookie.clone())
     }
-}
-
-/// 校验 `download_path`：非空 + 路径存在 + 是目录。
-///
-/// 返回的错误字符串是稳定契约，调用方靠它映射错误码：空 → `"download_path_empty"`、
-/// 不存在 → `"download_path_not_found"`、是文件不是目录 → `"download_path_not_dir"`。
-/// 返回 `Result<(), String>` 而非 anyhow：web handler 需要稳定短码做 i18n 键，anyhow 的 `{e:#}` 会泄露内部路径。
-pub fn validate_download_path(path: &str) -> Result<(), String> {
-    let trimmed = path.trim();
-    if trimmed.is_empty() {
-        return Err("download_path_empty".to_string());
-    }
-    let p = std::path::Path::new(trimmed);
-    if !p.exists() {
-        return Err("download_path_not_found".to_string());
-    }
-    if !p.is_dir() {
-        return Err("download_path_not_dir".to_string());
-    }
-    Ok(())
 }
 
 #[cfg(test)]
@@ -105,40 +84,5 @@ mod tests {
     fn qidian_cookie_non_empty_returns_some() {
         let cfg = cfg_with_qidian("qidian_sess=abc123");
         assert_eq!(qidian_cookie(&cfg).as_deref(), Some("qidian_sess=abc123"));
-    }
-
-    // ── validate_download_path ─────────────────────────────────
-
-    #[test]
-    fn validate_download_path_empty_string_rejected() {
-        let err = validate_download_path("").unwrap_err();
-        assert_eq!(err, "download_path_empty");
-    }
-
-    #[test]
-    fn validate_download_path_whitespace_only_rejected() {
-        let err = validate_download_path("   \t\n   ").unwrap_err();
-        assert_eq!(err, "download_path_empty");
-    }
-
-    #[test]
-    fn validate_download_path_nonexistent_rejected() {
-        let err = validate_download_path("Z:/definitely/not/a/path/xyz123").unwrap_err();
-        assert_eq!(err, "download_path_not_found");
-    }
-
-    #[test]
-    fn validate_download_path_existing_file_rejected_as_not_dir() {
-        let tmp = tempfile::NamedTempFile::new().expect("create tempfile");
-        let path_str = tmp.path().to_str().expect("utf-8 path");
-        let err = validate_download_path(path_str).unwrap_err();
-        assert_eq!(err, "download_path_not_dir");
-    }
-
-    #[test]
-    fn validate_download_path_existing_dir_accepted() {
-        let tmp = tempfile::tempdir().expect("create tempdir");
-        let path_str = tmp.path().to_str().expect("utf-8 path");
-        assert!(validate_download_path(path_str).is_ok());
     }
 }

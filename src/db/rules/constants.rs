@@ -16,21 +16,21 @@ pub const META_STATUS: &str = r#"meta[property="og:novel:status"]"#;
 /// 编译期嵌入的规则文件列表。`init_rules_dir` 首次启动时把这里的内容
 /// 写到 `~/.sonovel/rules/`, 已存在的文件不覆盖 (尊重用户修改)。
 pub(super) const BUNDLED_RULES: &[(&str, &str)] = &[
-    ("main.json", include_str!("../../../bundle/rules/main.json")),
+    ("main.json", include_str!("../../../assets/rules/main.json")),
     (
         "cloudflare.json",
-        include_str!("../../../bundle/rules/cloudflare.json"),
+        include_str!("../../../assets/rules/cloudflare.json"),
     ),
     (
         "no-search.json",
-        include_str!("../../../bundle/rules/no-search.json"),
+        include_str!("../../../assets/rules/no-search.json"),
     ),
     (
         "rate-limit.json",
-        include_str!("../../../bundle/rules/rate-limit.json"),
+        include_str!("../../../assets/rules/rate-limit.json"),
     ),
     (
         "proxy-required.json",
-        include_str!("../../../bundle/rules/proxy-required.json"),
+        include_str!("../../../assets/rules/proxy-required.json"),
     ),
 ];

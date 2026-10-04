@@ -20,11 +20,11 @@ use gpui_kit::{
     AppContext, Context, Entity, IntoElement, ParentElement, Render, SharedString, Styled, Window,
     div, px,
 };
+use rust_i18n::t;
 
 use crate::db::list_rule_files;
 use crate::desktop::components::{EmptyState, PageHeader, Pagination, compute_page_window};
 use crate::desktop::model::{AppModel, SourcesFilterStatus};
-use crate::i18n::ts;
 use crate::models::Rule;
 
 use self::delegate::SourcesDelegate;
@@ -46,7 +46,7 @@ pub struct SourcesPage {
     current_page: usize,
 
     /// 实时 i18n sentinel：上次 render 时 `Sources.filter.placeholder` 的翻译结果。
-    /// 切语言 → `ts()` 返回新值 → render 里检测到不一致 → `set_placeholder` 刷新。
+    /// 切语言 → `t!()` 返回新值 → render 里检测到不一致 → `set_placeholder` 刷新。
     last_seen_placeholder: SharedString,
 }
 
@@ -54,7 +54,7 @@ impl SourcesPage {
     pub fn new(model: Entity<AppModel>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         // 1. 名字 / URL 过滤 Input。placeholder 只能设在 state 上（gpui-kit API 限制），
         // 后续 render 里用 sentinel 检测切语言。
-        let initial_placeholder = ts("Sources.filter.placeholder");
+        let initial_placeholder: SharedString = t!("Sources.filter.placeholder").into();
         let filter_input =
             cx.new(|cx| InputState::new(window, cx).placeholder(initial_placeholder.clone()));
         cx.subscribe_in(&filter_input, window, |this, _state, ev, _window, cx| {
@@ -111,15 +111,15 @@ impl SourcesPage {
         let model = self.model.clone();
         let page_handle = cx.entity().downgrade();
         cx.spawn(async move |_weak, async_cx| {
-            // 三个标签（对话框标题 + 两个 filter 名字）都走 `ts()` 翻译。
+            // 三个标签（对话框标题 + 两个 filter 名字）都走 `t!()` 翻译。
             // `.as_ref()` 把 `SharedString` → `&str`（rfd 的 `add_filter` / `set_title` 要 `&str`）。
             let file = rfd::AsyncFileDialog::new()
                 .add_filter(
-                    ts("Sources.add_source.filter_json").as_ref(),
+                    t!("Sources.add_source.filter_json").as_ref(),
                     &["json", "json5"],
                 )
-                .add_filter(ts("Sources.add_source.filter_all").as_ref(), &["*"])
-                .set_title(ts("Sources.add_source.dialog_title").as_ref())
+                .add_filter(t!("Sources.add_source.filter_all").as_ref(), &["*"])
+                .set_title(t!("Sources.add_source.dialog_title").as_ref())
                 .pick_file()
                 .await;
             if let Some(file) = file {
@@ -158,7 +158,7 @@ impl Render for SourcesPage {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // 实时 i18n 同步（仅 placeholder）。`set_placeholder` 只通知 InputState 重 render，
         // 而 `Input` 元素是 SourcesPage render 时构造的，故这里额外 `cx.notify()` 强制重 render。
-        let new_placeholder = ts("Sources.filter.placeholder");
+        let new_placeholder: SharedString = t!("Sources.filter.placeholder").into();
         if self.last_seen_placeholder != new_placeholder {
             self.last_seen_placeholder = new_placeholder.clone();
             self.filter_input.update(cx, |state, cx| {
@@ -243,12 +243,12 @@ impl Render for SourcesPage {
             .gap_3()
             // ---- PageHeader：标题 + 副标题 + 右侧 actions ----
             .child(
-                PageHeader::new(ts("Sources.page_title"))
-                    .subtitle(ts("Sources.page_subtitle"))
+                PageHeader::new(t!("Sources.page_title"))
+                    .subtitle(t!("Sources.page_subtitle"))
                     .action(
                         Button::new("add-source")
                             .icon(Icon::new(IconName::Plus))
-                            .label(ts("Sources.action.add"))
+                            .label(t!("Sources.action.add"))
                             .on_click(cx.listener(|this, _, _window, cx| {
                                 this.pick_and_add(cx);
                             })),
@@ -256,7 +256,7 @@ impl Render for SourcesPage {
                     .action(
                         Button::new("health-check")
                             .icon(Icon::new(IconName::Loader))
-                            .label(ts("Sources.action.health_check"))
+                            .label(t!("Sources.action.health_check"))
                             .loading(running)
                             .disabled(running || total_rules == 0)
                             .on_click(cx.listener(|this, _, _window, cx| {
@@ -266,7 +266,7 @@ impl Render for SourcesPage {
             )
             // ---- toolbar: 名字过滤 + 活跃书源文件选择 + 状态过滤 ----
             // 状态过滤用 3 个 Button 而不是 SelectState：后者把 options 的翻译字段冻在 state 里，
-            // 切语言不更新；Button 组在 render 里现取 `ts(...)`。
+            // 切语言不更新；Button 组在 render 里现取 `t!(...)`。
             .child(toolbar::render(
                 &self.filter_input,
                 &self.rule_file_select,
@@ -280,27 +280,27 @@ impl Render for SourcesPage {
                     .items_center()
                     .child(Tag::secondary().small().child(format!(
                         "{} {}",
-                        ts("Sources.stat.total"),
+                        t!("Sources.stat.total"),
                         total_rules
                     )))
                     .when(enabled > 0, |this| {
                         this.child(Tag::success().small().child(format!(
                             "{} {}",
-                            ts("Sources.stat.enabled"),
+                            t!("Sources.stat.enabled"),
                             enabled
                         )))
                     })
                     .when(disabled > 0, |this| {
                         this.child(Tag::warning().small().child(format!(
                             "{} {}",
-                            ts("Sources.stat.disabled"),
+                            t!("Sources.stat.disabled"),
                             disabled
                         )))
                     })
                     .when_some(available_after_check, |this, n| {
                         this.child(Tag::info().small().child(format!(
                             "{} {}",
-                            ts("Sources.stat.available"),
+                            t!("Sources.stat.available"),
                             n
                         )))
                     })
@@ -313,7 +313,7 @@ impl Render for SourcesPage {
                                     "{}/{} {}",
                                     received,
                                     expected,
-                                    ts("Sources.health.progress")
+                                    t!("Sources.health.progress")
                                 )),
                         )
                     }),
@@ -326,7 +326,7 @@ impl Render for SourcesPage {
                         .rounded_md()
                         .bg(cx.theme().danger)
                         .text_color(cx.theme().danger_foreground)
-                        .child(format!("{}: {err}", ts("Sources.error.load_failed"))),
+                        .child(format!("{}: {err}", t!("Sources.error.load_failed"))),
                 )
             })
             // ---- list / 空态 ----
@@ -337,8 +337,8 @@ impl Render for SourcesPage {
                     .items_center()
                     .justify_center()
                     .child(
-                        EmptyState::new(IconName::Globe, ts("Sources.empty.title"))
-                            .subtitle(ts("Sources.empty.subtitle")),
+                        EmptyState::new(IconName::Globe, t!("Sources.empty.title"))
+                            .subtitle(t!("Sources.empty.subtitle")),
                     )
                     .into_any_element()
             } else {

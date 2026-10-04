@@ -19,6 +19,7 @@ use gpui_kit::{
 
 use crate::desktop::model::AppModel;
 use crate::desktop::pages::{LibraryPage, SearchPage, SettingsPage, SourcesPage, TasksPage};
+use rust_i18n::t;
 
 use super::logo::render_logo;
 use super::nav::{KEY_CONTEXT, NavPage};
@@ -135,7 +136,7 @@ impl RootView {
 
         // Header: logo + 全大写细体 app 名。折叠态保留 logo, 文字由 `when(!collapsed)`
         // 隐藏; gpui 无 letter_spacing API, 靠大写 + 细体 + 小字营造 logo 字感。
-        let title_text = crate::i18n::ts("App.title").to_uppercase();
+        let title_text = t!("App.title").to_uppercase();
         let header = div()
             .w_full()
             .flex()

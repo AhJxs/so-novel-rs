@@ -1,27 +1,26 @@
 # Changelog
 
-## [0.4.0] - 2026-09-04
+## [0.5.0] - 2026-10-04
 
-主题：**底层 UI 栈迁移 gpui-kit 0.6.0**（7 commits，经 PR #5 从
-`fix/gpui-kit-0.6-migration` 合入，详见 [`CHANGELOG_ALL.md`](./CHANGELOG_ALL.md)）。
+### Removed
 
-### Changed
+- **Web 端整体移除**：`src/web/`（axum 服务，15 文件）、`web-ui/`（Turborepo + Bun
+  monorepo，80 文件）、`src/startup/web.rs`、`Dockerfile` / `docker-compose.yml` /
+  `.dockerignore` / `.github/workflows/docker-release.yml`、`docs/WEB.md`、
+  `locales/app.yml` 的 `WebErrors:` 段
+- **feature 系统取消**：删 `[features]` 段（`default` / `gui` / `web`），`gpui-kit` 与
+  `rfd` 转为必选依赖，`src/` 内全部 `#[cfg(feature = ...)]` 门控移除
+- **依赖清理**：删 `axum` / `axum_session` / `tower-http` / `rust-embed` /
+  `mime_guess` / `async-stream` / `futures`，dev-dep 删 `tower`
+- **孤儿代码**：`core::library` 删 `extension_to_content_type` / `list_library_entries` /
+  `safe_file_path` / `open_download_file` / `OpenFileError`；`core::sources` 删
+  `find_rule_by_id_cloned` / `find_rule_by_url`；`core::config_helpers` 删
+  `validate_download_path`；`i18n` 删 `WEB_ERROR_KEYS` 常量与 2 个测试；连带删除
+  共 23 个单元测试
+- **CLI 端整体移除**：删 `src/cli/`（6 文件）、`src/startup/`、`src/utils/tty.rs`、
+  `docs/CLI.md`；`src/main.rs` 内联原 `startup/` 启动逻辑；`locales/app.yml` 删 `Cli:` 段
+- **依赖清理**：删 `clap` / `windows-sys`，tokio 摘除 `signal` feature
+- **顶层目录重排**：`bundle/rules/` → `assets/rules/`、`bundle/web/` →
+  `tests/fixtures/web/`、`screenshots/` → `docs/screenshots/`，`bundle/` 目录消失
 
-- **UI 栈整体迁移**：`gpui + gpui-component 0.5.1` → `gpui-kit 0.6.0`
-  （底层 gpui-pre 0.3.3）。适配破坏性 API：确认对话框 `Dialog` → `AlertDialog`
-  （`.confirm()` / `.button_props()` / `.on_ok()` 语义保留）；多行输入
-  `Input::multi_line` → `TextareaState` + `Textarea`；`SliderEvent` 新增 `Release`
-  变体；`Progress::new()` 增加必填 `id`；`Sidebar` / `SidebarToggleButton`
-  `left()` → `new()`；`update_entity` 返回 `R`；`IntoElement` `Component` →
-  `ViewElement`
-- **注释 / 文档术语统一**：gpui-component / GPUI 0.2.2 旧称呼 → gpui-kit 0.6 词汇
-- **pdf_oxide** `0.3.73` → `0.3.77`（连带 office_oxide / fax / taffy / windows 重新解析）
-- **web-ui 前端**：补齐 node_modules 依赖，tsc + vite 构建恢复
-
-### Fixed
-
-- **SidebarToggleButton 点击失效**：gpui-kit 0.6 起 Windows 上组件库 `TitleBar`
-  把 children 行标成 `window_control_area(Drag)`，NCHITTEST 返回 HTCAPTION 让 OS
-  按下即接管为拖窗 → click 丢失（hover 仍正常）；改用 `.occlude()` + mousedown
-  `stop_propagation` 修复
-- **鸟书网书源失效**：域名 `99xs.info` → `99wx.info`
+仓库由此收敛为 **GUI** 单一形态。`cargo test --lib` 由 510 passed 降至 439 passed。

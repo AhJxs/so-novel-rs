@@ -13,13 +13,13 @@ use gpui_kit::component::{
     slider::SliderValue,
 };
 use gpui_kit::{App, Entity, ParentElement, SharedString, Styled, div};
+use rust_i18n::t;
 use tracing;
 
 use crate::config::ExportFormat;
 use crate::config::{Language, ThemeDynMode, ThemeKind};
 use crate::desktop::model::AppModel;
 use crate::desktop::themes;
-use crate::i18n::ts;
 
 use super::ctx::PageCtx;
 use super::fields::{
@@ -35,15 +35,15 @@ pub(super) fn build(ctx: &PageCtx<'_>, cx: &App) -> SettingPage {
     let language_options: Vec<(SharedString, SharedString)> = vec![
         (
             Language::SimplifiedChinese.as_str().into(),
-            ts("Settings.option.language.zh_cn"),
+            t!("Settings.option.language.zh_cn").into(),
         ),
         (
             Language::TraditionalChinese.as_str().into(),
-            ts("Settings.option.language.zh_tw"),
+            t!("Settings.option.language.zh_tw").into(),
         ),
         (
             Language::English.as_str().into(),
-            ts("Settings.option.language.en"),
+            t!("Settings.option.language.en").into(),
         ),
     ];
 
@@ -51,11 +51,11 @@ pub(super) fn build(ctx: &PageCtx<'_>, cx: &App) -> SettingPage {
     let theme_kind_options: Vec<(SharedString, SharedString)> = vec![
         (
             ThemeKind::Dynamic.as_str().into(),
-            ts("Settings.option.theme_kind.dynamic"),
+            t!("Settings.option.theme_kind.dynamic").into(),
         ),
         (
             ThemeKind::Static.as_str().into(),
-            ts("Settings.option.theme_kind.static"),
+            t!("Settings.option.theme_kind.static").into(),
         ),
     ];
 
@@ -74,17 +74,17 @@ pub(super) fn build(ctx: &PageCtx<'_>, cx: &App) -> SettingPage {
         .map(|e| ((*e).into(), (*e).into()))
         .collect();
 
-    SettingPage::new(ts("Settings.page.general"))
+    SettingPage::new(t!("Settings.page.general"))
         .resettable(false)
         .default_open(true)
         .groups(vec![
             // ============ 外观 ============
             SettingGroup::new()
-                .title(ts("Settings.group.appearance"))
+                .title(t!("Settings.group.appearance"))
                 .items(
                     vec![
                         SettingItem::new(
-                            ts("Settings.item.theme_kind"),
+                            t!("Settings.item.theme_kind"),
                             dropdown_field(
                                 theme_kind_options,
                                 &m,
@@ -98,7 +98,7 @@ pub(super) fn build(ctx: &PageCtx<'_>, cx: &App) -> SettingPage {
                                 Some(after_theme_kind),
                             ),
                         )
-                        .description(ts("Settings.desc.theme_kind")),
+                        .description(t!("Settings.desc.theme_kind").to_string()),
                         // 按当前主题模式条件渲染后续 item（theme_mode_items）。
                     ]
                     .into_iter()
@@ -106,7 +106,7 @@ pub(super) fn build(ctx: &PageCtx<'_>, cx: &App) -> SettingPage {
                     .chain(std::iter::once(
                         // -- 界面语言（应用 UI 语言，同时也是下载目标语言）--
                         SettingItem::new(
-                            ts("Settings.item.language"),
+                            t!("Settings.item.language"),
                             dropdown_field(
                                 language_options,
                                 &m,
@@ -130,13 +130,13 @@ pub(super) fn build(ctx: &PageCtx<'_>, cx: &App) -> SettingPage {
                                 Some(after_language),
                             ),
                         )
-                        .description(ts("Settings.desc.language")),
+                        .description(t!("Settings.desc.language").to_string()),
                     ))
                     .chain(std::iter::once(
                         // -- 字号（滑块 12–24px，实时缩放整个 app）--
                         // SliderState 由 `SettingsPage::new` 建一次缓存，右侧标签实时读当前 px。
                         SettingItem::new(
-                            ts("Settings.item.font_size"),
+                            t!("Settings.item.font_size"),
                             SettingField::render({
                                 let font_size_state = ctx.font_size_state.clone();
                                 move |options, _window, cx| {
@@ -162,38 +162,38 @@ pub(super) fn build(ctx: &PageCtx<'_>, cx: &App) -> SettingPage {
                                 }
                             }),
                         )
-                        .description(ts("Settings.desc.font_size")),
+                        .description(t!("Settings.desc.font_size").to_string()),
                     )),
                 ),
             // ============ 网络 ============
             SettingGroup::new()
-                .title(ts("Settings.group.network"))
+                .title(t!("Settings.group.network"))
                 .items(vec![
                     SettingItem::new(
-                        ts("Settings.item.gh_proxy"),
+                        t!("Settings.item.gh_proxy"),
                         string_field(
                             &m,
                             move |model| SharedString::from(model.config.global.gh_proxy.clone()),
                             move |model, s| model.config.global.gh_proxy = s,
                         ),
                     )
-                    .description(ts("Settings.desc.gh_proxy")),
+                    .description(t!("Settings.desc.gh_proxy").to_string()),
                     SettingItem::new(
-                        ts("Settings.item.cf_bypass"),
+                        t!("Settings.item.cf_bypass"),
                         string_field(
                             &m,
                             move |model| SharedString::from(model.config.global.cf_bypass.clone()),
                             move |model, s| model.config.global.cf_bypass = s,
                         ),
                     )
-                    .description(ts("Settings.desc.cf_bypass")),
+                    .description(t!("Settings.desc.cf_bypass").to_string()),
                 ]),
             // ============ 下载 ============
             SettingGroup::new()
-                .title(ts("Settings.group.download"))
+                .title(t!("Settings.group.download"))
                 .items(vec![
                     SettingItem::new(
-                        ts("Settings.item.download_path"),
+                        t!("Settings.item.download_path"),
                         SettingField::render({
                             let download_path_input = ctx.download_path_input.clone();
                             let pick_folder_listener = ctx.pick_folder_listener.clone();
@@ -226,10 +226,10 @@ pub(super) fn build(ctx: &PageCtx<'_>, cx: &App) -> SettingPage {
                             }
                         }),
                     )
-                    .description(ts("Settings.desc.download_path")),
+                    .description(t!("Settings.desc.download_path").to_string()),
                     // -- 默认格式 --
                     SettingItem::new(
-                        ts("Settings.item.default_format"),
+                        t!("Settings.item.default_format"),
                         dropdown_field(
                             ext_options,
                             &m,
@@ -245,10 +245,10 @@ pub(super) fn build(ctx: &PageCtx<'_>, cx: &App) -> SettingPage {
                             None,
                         ),
                     )
-                    .description(ts("Settings.desc.default_format")),
+                    .description(t!("Settings.desc.default_format").to_string()),
                     // -- TXT 编码 --
                     SettingItem::new(
-                        ts("Settings.item.txt_encoding"),
+                        t!("Settings.item.txt_encoding"),
                         dropdown_field(
                             encoding_options,
                             &m,
@@ -261,17 +261,17 @@ pub(super) fn build(ctx: &PageCtx<'_>, cx: &App) -> SettingPage {
                             None,
                         ),
                     )
-                    .description(ts("Settings.desc.txt_encoding")),
+                    .description(t!("Settings.desc.txt_encoding").to_string()),
                     // -- 保留章节缓存 --
                     SettingItem::new(
-                        ts("Settings.item.preserve_chapter_cache"),
+                        t!("Settings.item.preserve_chapter_cache"),
                         bool_field(
                             &m,
                             move |model| model.config.download.preserve_chapter_cache,
                             move |model, val| model.config.download.preserve_chapter_cache = val,
                         ),
                     )
-                    .description(ts("Settings.desc.preserve_chapter_cache")),
+                    .description(t!("Settings.desc.preserve_chapter_cache").to_string()),
                 ]),
         ])
 }
@@ -282,7 +282,7 @@ fn theme_mode_items(ctx: &PageCtx<'_>, kind: ThemeKind, m: &Entity<AppModel>) ->
     match kind {
         ThemeKind::Static => vec![
             SettingItem::new(
-                ts("Settings.item.theme_static"),
+                t!("Settings.item.theme_static"),
                 SettingField::render({
                     let state = ctx.theme_state_static.clone();
                     move |options, _window, _cx| {
@@ -296,24 +296,24 @@ fn theme_mode_items(ctx: &PageCtx<'_>, kind: ThemeKind, m: &Entity<AppModel>) ->
                     }
                 }),
             )
-            .description(ts("Settings.desc.theme_static")),
+            .description(t!("Settings.desc.theme_static").to_string()),
         ],
         ThemeKind::Dynamic => {
             let dyn_mode_item = SettingItem::new(
-                ts("Settings.item.theme_dyn_mode"),
+                t!("Settings.item.theme_dyn_mode"),
                 dropdown_field(
                     vec![
                         (
                             ThemeDynMode::System.as_str().into(),
-                            ts("Settings.option.theme_dyn_mode.system"),
+                            t!("Settings.option.theme_dyn_mode.system").into(),
                         ),
                         (
                             ThemeDynMode::Light.as_str().into(),
-                            ts("Settings.option.theme_dyn_mode.light"),
+                            t!("Settings.option.theme_dyn_mode.light").into(),
                         ),
                         (
                             ThemeDynMode::Dark.as_str().into(),
-                            ts("Settings.option.theme_dyn_mode.dark"),
+                            t!("Settings.option.theme_dyn_mode.dark").into(),
                         ),
                     ],
                     m,
@@ -327,7 +327,7 @@ fn theme_mode_items(ctx: &PageCtx<'_>, kind: ThemeKind, m: &Entity<AppModel>) ->
                     Some(after_theme_kind),
                 ),
             )
-            .description(ts("Settings.desc.theme_dyn_mode"));
+            .description(t!("Settings.desc.theme_dyn_mode").to_string());
 
             let make_select_item = |title: SharedString, desc: SharedString, state: &Entity<_>| {
                 let state = state.clone();
@@ -349,13 +349,13 @@ fn theme_mode_items(ctx: &PageCtx<'_>, kind: ThemeKind, m: &Entity<AppModel>) ->
             vec![
                 dyn_mode_item,
                 make_select_item(
-                    ts("Settings.item.theme_light"),
-                    ts("Settings.desc.theme_light"),
+                    t!("Settings.item.theme_light").into(),
+                    t!("Settings.desc.theme_light").into(),
                     ctx.theme_state_dyn_light,
                 ),
                 make_select_item(
-                    ts("Settings.item.theme_dark"),
-                    ts("Settings.desc.theme_dark"),
+                    t!("Settings.item.theme_dark").into(),
+                    t!("Settings.desc.theme_dark").into(),
                     ctx.theme_state_dyn_dark,
                 ),
             ]
@@ -381,11 +381,11 @@ fn after_language(_m: &Entity<AppModel>, cx: &mut App) {
             let result = handle.update(cx, |_view, window, cx| {
                 window.open_alert_dialog(cx, |alert: AlertDialog, _w, _cx| {
                     alert
-                        .title(ts("Settings.language_restart_dialog.title"))
-                        .description(ts("Settings.language_restart_dialog.message"))
+                        .title(t!("Settings.language_restart_dialog.title"))
+                        .description(t!("Settings.language_restart_dialog.message").to_string())
                         // 单项 builder 取代整包 `DialogButtonProps`。
-                        .ok_text(ts("Settings.language_restart_dialog.restart_button"))
-                        .cancel_text(ts("Settings.language_restart_dialog.later_button"))
+                        .ok_text(t!("Settings.language_restart_dialog.restart_button"))
+                        .cancel_text(t!("Settings.language_restart_dialog.later_button"))
                         .confirm()
                         .on_ok(|_ev, _window, cx| {
                             cx.restart();

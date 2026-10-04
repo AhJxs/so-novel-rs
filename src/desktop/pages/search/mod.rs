@@ -33,9 +33,9 @@ use crate::desktop::components::{
     EmptyState, PageHeader, Pagination, compute_page_window, truncate,
 };
 use crate::desktop::model::{AppModel, TocState};
-use crate::i18n::{ts, ts_fmt};
 use crate::models::SearchResult;
 use crate::models::Source;
+use rust_i18n::t;
 
 use self::delegate::SearchDelegate;
 use range_dialog::clamp_range_value;
@@ -88,7 +88,7 @@ pub struct SearchPage {
 impl SearchPage {
     pub fn new(model: Entity<AppModel>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let keyword = cx.new(|cx| {
-            InputState::new(window, cx).placeholder(ts("Search.filter.placeholder").to_string())
+            InputState::new(window, cx).placeholder(t!("Search.filter.placeholder").to_string())
         });
         cx.subscribe_in(&keyword, window, |this, _state, ev, w, cx| match ev {
             InputEvent::Change => {
@@ -132,7 +132,7 @@ impl SearchPage {
         // URL 输入 Dialog 的 InputState —— PageHeader「下载链接」按钮唤起。
         let url_input = cx.new(|cx| {
             InputState::new(window, cx)
-                .placeholder(ts("Search.url_download.placeholder").to_string())
+                .placeholder(t!("Search.url_download.placeholder").to_string())
         });
 
         // 只在值不同时 set_value：无条件写回会 Change→set_value→Change 死循环，几轮耗尽
@@ -249,8 +249,8 @@ impl SearchPage {
         if !started {
             window.push_notification(
                 Notification::new()
-                    .title(ts("Search.action.search"))
-                    .message(ts("Search.empty.subtitle"))
+                    .title(t!("Search.action.search"))
+                    .message(t!("Search.empty.subtitle"))
                     .with_type(NotificationType::Warning)
                     .autohide(true),
                 cx,
@@ -276,7 +276,7 @@ impl SearchPage {
     /// 选中的源被禁用 / 删除后 `position()` 找不到会回落默认项，而 `spawn_search` 侧的
     /// stale `source_id` 会派发空列表。
     fn sync_source_items(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let aggregate_title = ts("Search.source.aggregate");
+        let aggregate_title = t!("Search.source.aggregate").into();
         let mut items: Vec<SourceSelectItem> = vec![SourceSelectItem {
             value: SharedString::from("all"),
             title: aggregate_title,
@@ -352,7 +352,7 @@ impl SearchPage {
                             Button::new("url-paste")
                                 .small()
                                 .ghost()
-                                .label(ts("Search.url_download.paste_button"))
+                                .label(t!("Search.url_download.paste_button"))
                                 .on_click(move |_, window, cx| {
                                     // 兜底：Dialog 打开后剪贴板被新内容覆盖时，重新读一次。
                                     if let Some(s) =
@@ -373,16 +373,16 @@ impl SearchPage {
                             div()
                                 .text_xs()
                                 .text_color(cx.theme().muted_foreground)
-                                .child(ts("Search.url_download.auto_pasted")),
+                                .child(t!("Search.url_download.auto_pasted")),
                         ),
                 );
             // 复杂 body 走 `.child(body)`；宽用 AlertDialog 的 `.width()`。
             alert
-                .title(ts("Search.url_download.dialog_title"))
+                .title(t!("Search.url_download.dialog_title"))
                 .width(px(520.))
                 .child(body)
-                .ok_text(ts("Search.url_download.confirm"))
-                .cancel_text(ts("Search.url_download.cancel"))
+                .ok_text(t!("Search.url_download.confirm"))
+                .cancel_text(t!("Search.url_download.cancel"))
                 .confirm()
                 .on_ok(move |_ev, _window, cx| {
                     let url = page.read(cx).url_input.read(cx).value().to_string();
@@ -390,7 +390,7 @@ impl SearchPage {
                     if url.is_empty() {
                         page.update(cx, |p, cx| {
                             p.model.update(cx, |m, _cx| {
-                                m.push_warning(ts("Search.url_download.no_match"));
+                                m.push_warning(t!("Search.url_download.no_match"));
                             });
                             cx.notify();
                         });
@@ -409,7 +409,7 @@ impl SearchPage {
                     let Some(source) = source else {
                         page.update(cx, |p, cx| {
                             p.model.update(cx, |m, _cx| {
-                                m.push_warning(ts("Search.url_download.no_match"));
+                                m.push_warning(t!("Search.url_download.no_match"));
                             });
                             cx.notify();
                         });
@@ -431,9 +431,9 @@ impl SearchPage {
                     };
                     page.update(cx, |p, cx| {
                         p.model.update(cx, |m, _cx| {
-                            m.push_success(ts_fmt(
+                            m.push_success(t!(
                                 "Search.url_download.matched_source",
-                                &[("name", &source.name)],
+                                name = &source.name
                             ));
                         });
                         // 不能直接开 range Dialog：on_ok 返回 true 后组件库会 pop 栈顶，
@@ -466,11 +466,11 @@ impl SearchPage {
             let page = page.clone();
             let body = range_dialog::content(&page, window, cx);
             alert
-                .title(ts("Search.range.title"))
+                .title(t!("Search.range.title"))
                 .width(px(520.))
                 .child(body)
-                .ok_text(ts("Search.range.confirm"))
-                .cancel_text(ts("Search.range.cancel"))
+                .ok_text(t!("Search.range.confirm"))
+                .cancel_text(t!("Search.range.cancel"))
                 .confirm()
                 // on_ok 挂 Dialog 上（带 `&mut Window`）；page.update 内部只有 Context，
                 // 所以下载在 update 里派发、通知在这层发，结果用 RangeOutcome 传出。
@@ -480,12 +480,12 @@ impl SearchPage {
                         RangeOutcome::Done { book_name, count } => {
                             window.push_notification(
                                 Notification::new()
-                                    .title(ts("Search.action.download_started"))
+                                    .title(t!("Search.action.download_started"))
                                     .message(format!(
                                         "{} · {} {}",
                                         truncate(&book_name, 50),
                                         count,
-                                        ts("Search.source_status.format")
+                                        t!("Search.source_status.format")
                                     ))
                                     .with_type(NotificationType::Success)
                                     .autohide(true),
@@ -496,8 +496,8 @@ impl SearchPage {
                         RangeOutcome::Invalid => {
                             window.push_notification(
                                 Notification::new()
-                                    .title(ts("Search.range.title"))
-                                    .message(ts("Search.range.invalid"))
+                                    .title(t!("Search.range.title"))
+                                    .message(t!("Search.range.invalid"))
                                     .with_type(NotificationType::Warning)
                                     .autohide(true),
                                 cx,
@@ -641,12 +641,12 @@ impl Render for SearchPage {
             .p_6()
             .gap_4()
             .child(
-                PageHeader::new(ts("Search.page_title"))
-                    .subtitle(ts("Search.page_subtitle"))
+                PageHeader::new(t!("Search.page_title"))
+                    .subtitle(t!("Search.page_subtitle"))
                     .action(
                         Button::new("search-url-download")
                             .icon(Icon::new(IconName::ExternalLink))
-                            .label(ts("Search.url_download.button"))
+                            .label(t!("Search.url_download.button"))
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.open_url_dialog(window, cx);
                             })),
@@ -676,8 +676,8 @@ impl Render for SearchPage {
                     .items_center()
                     .justify_center()
                     .child(
-                        EmptyState::new(IconName::Search, ts("Search.empty.title"))
-                            .subtitle(ts("Search.empty.subtitle")),
+                        EmptyState::new(IconName::Search, t!("Search.empty.title"))
+                            .subtitle(t!("Search.empty.subtitle")),
                     )
                     .into_any_element()
             } else {

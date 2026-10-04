@@ -1,6 +1,6 @@
 //! 详情页解析后的书籍数据。Java 端复用 `Rule.Book` 承载"规则 + 数据", 这里拆开: 规则 →
 //! `crate::models::rule::RuleBook`, 数据 → 本结构体 `Book`。`Book` 兼 PO (落 `task_record`) 与
-//! DTO (Web API `/book` 端点); 字段名沿用 camelCase, 与 web-ui 前端对齐。
+//! 序列化格式 (JSON); 字段名沿用 camelCase, 与既有规则文件 / 任务记录保持一致。
 
 use serde::{Deserialize, Serialize};
 

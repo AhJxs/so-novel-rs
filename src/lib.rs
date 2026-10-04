@@ -39,12 +39,10 @@
 // 但**全局 locale 共享**；`desktop::run` 再用 `rust_i18n::extend!` 把我们的表接到组件后端（先查 app.yml 的 `gpui_component:` 段，再回落 ui.yml）。
 rust_i18n::i18n!("locales");
 
-pub mod cli;
 pub mod config;
 pub mod core;
 pub mod crawler;
 pub mod db;
-#[cfg(feature = "gui")]
 pub mod desktop;
 pub mod error;
 pub mod export;
@@ -54,7 +52,4 @@ pub mod js;
 pub mod logger;
 pub mod models;
 pub mod parser;
-pub mod startup;
 pub mod utils;
-#[cfg(feature = "web")]
-pub mod web;

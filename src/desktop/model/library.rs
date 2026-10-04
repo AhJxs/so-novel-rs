@@ -2,6 +2,8 @@
 
 use std::path::{Path, PathBuf};
 
+use rust_i18n::t;
+
 use super::{AppModel, ops};
 
 impl AppModel {
@@ -55,11 +57,8 @@ impl AppModel {
             let event = match result {
                 Ok(Ok(entries)) => Ok(entries),
                 Ok(Err(io_err)) => {
-                    let i18n_msg = crate::i18n::ts_fmt(
-                        "Toasts.library_scan_failed",
-                        &[("err", &io_err.to_string())],
-                    )
-                    .to_string();
+                    let i18n_msg =
+                        t!("Toasts.library_scan_failed", err = &io_err.to_string()).to_string();
                     Err(crate::error::AppError::internal(i18n_msg))
                 }
                 Err(join_err) => Err(crate::error::AppError::internal(format!(

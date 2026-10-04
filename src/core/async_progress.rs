@@ -1,4 +1,4 @@
-//! 三端共用的 "mpsc 接收端排空" helper。
+//! 桌面 UI 共用的 "mpsc 接收端排空" helper。
 //!
 //! 桌面有 6 处 `mpsc::UnboundedReceiver` 用同形 `try_recv` 循环排空，抽到这里后调用方
 //! 只需提供"应用 ev"的闭包；`running` / `received` 等被 render 直接读的字段仍由调用方维护。

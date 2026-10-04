@@ -14,9 +14,9 @@ use gpui_kit::component::{
 use gpui_kit::{
     App, Context, Entity, IntoElement, ParentElement, Styled, div, prelude::FluentBuilder as _, px,
 };
+use rust_i18n::t;
 
 use crate::desktop::model::{AppModel, SourceStatus};
-use crate::i18n::ts;
 
 use super::source_select::SourceSelectItem;
 
@@ -47,14 +47,14 @@ pub(super) fn toolbar_row(
                     div()
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
-                        .child(ts("Search.source.label")),
+                        .child(t!("Search.source.label")),
                 )
                 .child(Select::new(source_state).w(px(200.0))),
         )
         .child(
             Button::new("search-go")
                 .icon(Icon::new(IconName::Search))
-                .label(ts("Search.action.search"))
+                .label(t!("Search.action.search"))
                 .loading(running)
                 // 关键词空或正在跑时禁用。
                 .disabled(keyword_empty || running)
@@ -84,11 +84,11 @@ pub(super) fn source_status_row(
             match status {
                 SourceStatus::Pending => Tag::secondary()
                     .outline()
-                    .child(format!("{name} {}", ts("Search.source_status.pending"))),
+                    .child(format!("{name} {}", t!("Search.source_status.pending"))),
                 SourceStatus::Ok(n) => Tag::success().outline().child(format!(
                     "{name} {} {}",
                     n,
-                    ts("Search.source_status.format")
+                    t!("Search.source_status.format")
                 )),
                 SourceStatus::Err(_) => Tag::danger().outline().child(name.clone()),
             }

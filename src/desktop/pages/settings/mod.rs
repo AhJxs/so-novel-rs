@@ -20,10 +20,10 @@ use gpui_kit::component::{
     slider::{SliderEvent, SliderState, SliderValue},
 };
 use gpui_kit::{App, AppContext, Context, Entity, IntoElement, Render, SharedString, Window};
+use rust_i18n::t;
 
 use crate::desktop::model::AppModel;
 use crate::desktop::themes;
-use crate::i18n::ts;
 
 use ctx::{PageCtx, PickFolderListener};
 
@@ -113,7 +113,7 @@ impl SettingsPage {
         let initial_download_path = model.read(cx).config.download.download_path.clone();
         let download_path_input = cx.new(|cx| {
             InputState::new(window, cx)
-                .placeholder(ts("Settings.desc.download_path"))
+                .placeholder(t!("Settings.desc.download_path"))
                 .default_value(initial_download_path.clone())
         });
 
@@ -144,7 +144,7 @@ impl SettingsPage {
         let qidian_cookie_input = cx.new(|cx| {
             TextareaState::new(window, cx)
                 .rows(3)
-                .placeholder(ts("Settings.placeholder.qidian_cookie"))
+                .placeholder(t!("Settings.placeholder.qidian_cookie"))
                 .default_value(initial_qidian_cookie.clone())
         });
 
@@ -224,7 +224,7 @@ impl SettingsPage {
     /// apartment + message pump）；同步版丢 worker thread 上会因缺 STA 静默返回 None。
     fn pick_folder(&self, cx: &Context<Self>) {
         let cur = self.model.read(cx).config.download.download_path.clone();
-        let title = ts("Settings.choose_download_dir_dialog_title");
+        let title = t!("Settings.choose_download_dir_dialog_title");
         let model = self.model.clone();
         let page_handle = cx.entity().downgrade();
         cx.spawn(async move |_weak, async_cx| {

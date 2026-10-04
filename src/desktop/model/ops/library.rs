@@ -2,6 +2,8 @@
 
 use std::path::{Path, PathBuf};
 
+use rust_i18n::t;
+
 use super::super::library_state::{LibraryState, scan_library_dir};
 
 /// 扫描 `download_path` 下所有已生成的电子书文件。
@@ -29,10 +31,8 @@ pub fn refresh_library(library: &mut LibraryState, download_path: &str) {
             library.entries = entries;
         }
         Err(e) => {
-            library.last_error = Some(
-                crate::i18n::ts_fmt("Toasts.library_scan_failed", &[("err", &e.to_string())])
-                    .to_string(),
-            );
+            library.last_error =
+                Some(t!("Toasts.library_scan_failed", err = &e.to_string()).to_string());
         }
     }
 }
@@ -55,16 +55,14 @@ pub fn delete_library_entry(
                 .unwrap_or("")
                 .to_string();
             let display = if file_name.is_empty() {
-                crate::i18n::ts("Toasts.library_delete_unknown").to_string()
+                t!("Toasts.library_delete_unknown").to_string()
             } else {
                 crate::utils::formatting::truncate(&file_name, 50)
             };
-            Ok(crate::i18n::ts_fmt("Toasts.library_delete_ok", &[("file", &display)]).to_string())
+            Ok(t!("Toasts.library_delete_ok", file = &display).to_string())
         }
         Err(e) => {
-            let msg =
-                crate::i18n::ts_fmt("Toasts.library_delete_failed", &[("err", &e.to_string())])
-                    .to_string();
+            let msg = t!("Toasts.library_delete_failed", err = &e.to_string()).to_string();
             library.last_error = Some(msg.clone());
             Err(crate::error::AppError::internal(msg))
         }

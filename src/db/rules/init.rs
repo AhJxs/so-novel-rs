@@ -79,7 +79,7 @@ mod tests {
 
     fn repo_rules_dir() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("bundle")
+            .join("assets")
             .join("rules")
     }
 

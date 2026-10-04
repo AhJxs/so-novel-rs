@@ -76,7 +76,7 @@ jobs:
           echo "version=$v" >> "$GITHUB_OUTPUT"
 
       # ---- 打包：Linux 复用 scripts/package-linux.sh（HTML 模板 / logo 已由 include_*! 嵌入二进制，
-      # bundle/rules/ 随包携带）；macOS / Windows 在此就地打 ----
+      # assets/rules/ 随包携带）；macOS / Windows 在此就地打 ----
       - name: Stage artifacts (Linux)
         if: runner.os == 'Linux'
         shell: bash
@@ -92,7 +92,7 @@ jobs:
           mkdir -p "dist/$STAGE"
           cp "$BIN" "dist/$STAGE/"
           chmod +x "dist/$STAGE/so-novel-rs"
-          cp -r bundle/rules "dist/$STAGE/rules"
+          cp -r assets/rules "dist/$STAGE/rules"
           ( cd dist && tar -czf "$STAGE.tar.gz" "$STAGE" )
 
       - name: Stage artifacts (Windows)
@@ -104,7 +104,7 @@ jobs:
           BIN="target/${{ matrix.target }}/release/so-novel-rs.exe"
           mkdir -p "dist/$STAGE"
           cp "$BIN" "dist/$STAGE/"
-          cp -r bundle/rules "dist/$STAGE/rules"
+          cp -r assets/rules "dist/$STAGE/rules"
           ( cd dist && 7z a -tzip "$STAGE.zip" "$STAGE" )
 
       - name: Upload artifacts

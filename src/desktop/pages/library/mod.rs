@@ -31,7 +31,7 @@ use gpui_kit::{
 
 use crate::desktop::components::{EmptyState, PageHeader, Pagination, compute_page_window};
 use crate::desktop::model::{AppModel, LibraryEntry};
-use crate::i18n::{ts, ts_cached, ts_fmt};
+use rust_i18n::t;
 
 use self::delegate::LibraryDelegate;
 
@@ -49,9 +49,8 @@ pub struct LibraryPage {
 
 impl LibraryPage {
     pub fn new(model: Entity<AppModel>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let filter_input = cx.new(|cx| {
-            InputState::new(window, cx).placeholder(crate::i18n::ts("Library.filter_placeholder"))
-        });
+        let filter_input =
+            cx.new(|cx| InputState::new(window, cx).placeholder(t!("Library.filter_placeholder")));
         cx.subscribe_in(&filter_input, window, |this, _state, event, _window, cx| {
             if matches!(event, InputEvent::Change) {
                 let v = this.filter_input.read(cx).value();
@@ -118,7 +117,7 @@ impl LibraryPage {
         // 文件名兜底：空时用 i18n 文案。
         let raw_name = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
         let file_name: String = if raw_name.is_empty() {
-            ts("Library.fallback_unknown_filename").to_string()
+            t!("Library.fallback_unknown_filename").to_string()
         } else {
             raw_name.to_string()
         };
@@ -130,16 +129,13 @@ impl LibraryPage {
             let model_id_for_ok = model_id;
 
             alert
-                .title(ts("Library.delete_dialog.title"))
-                // 占位符必须走 ts_fmt —— 直接 format! 会把占位符也拼进被翻译的字符串。
-                .description(ts_fmt(
-                    "Library.delete_dialog.message",
-                    &[("file_name", &file_name)],
-                ))
+                .title(t!("Library.delete_dialog.title"))
+                // 占位符必须走 t! —— 直接 format! 会把占位符也拼进被翻译的字符串。
+                .description(t!("Library.delete_dialog.message", file_name = &file_name))
                 // 按钮文案 / variant 直接用 AlertDialog 的单项 builder（`ok_text` /
                 // `cancel_text` / `ok_variant`）。调用顺序无关：`confirm()` 不会覆盖已设文案。
-                .ok_text(ts("Library.delete_dialog.confirm_button"))
-                .cancel_text(ts("Library.delete_dialog.cancel_button"))
+                .ok_text(t!("Library.delete_dialog.confirm_button"))
+                .cancel_text(t!("Library.delete_dialog.cancel_button"))
                 .ok_variant(ButtonVariant::Danger)
                 .confirm()
                 .on_ok(move |_ev: &ClickEvent, _window, cx| {
@@ -239,16 +235,16 @@ impl Render for LibraryPage {
             .p_6()
             .gap_3()
             .child(
-                PageHeader::new(ts("Library.page_title"))
+                PageHeader::new(t!("Library.page_title"))
                     .subtitle(format!(
                         "{}: {}",
-                        ts("Library.download_path_label"),
+                        t!("Library.download_path_label"),
                         std::path::Path::new(&download_path).display()
                     ))
                     .action(
                         Button::new("library-refresh")
                             .icon(Icon::new(IconName::Redo))
-                            .label(ts_cached("Library.action_refresh"))
+                            .label(t!("Library.action_refresh"))
                             // 扫描中：禁用 + spinner，manual_refresh 内部也会拦一次。
                             .loading(scan_in_flight)
                             .disabled(scan_in_flight)
@@ -269,7 +265,7 @@ impl Render for LibraryPage {
                         .rounded_md()
                         .bg(cx.theme().danger)
                         .text_color(cx.theme().danger_foreground)
-                        .child(format!("{}: {err}", ts("Library.scan_failed"))),
+                        .child(format!("{}: {err}", t!("Library.scan_failed"))),
                 )
             })
             .child(if total == 0 {
@@ -279,8 +275,8 @@ impl Render for LibraryPage {
                     .items_center()
                     .justify_center()
                     .child(
-                        EmptyState::new(IconName::BookOpen, ts("Library.empty_title"))
-                            .subtitle(ts("Library.empty_subtitle")),
+                        EmptyState::new(IconName::BookOpen, t!("Library.empty_title"))
+                            .subtitle(t!("Library.empty_subtitle")),
                     )
                     .into_any_element()
             } else {

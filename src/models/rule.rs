@@ -1,7 +1,7 @@
 //! 书源规则。对应 Java `model.Rule` 及其内部静态类。
 //!
 //! 字段名沿用规则文件原有的驼峰命名 (`bookName` 等), 靠 `#[serde(rename_all = "camelCase")]` 与
-//! `bundle/rules/*.json` 兼容。Java 端 `Rule.Book` 既当"详情规则"又当"详情数据", Rust 端拆开:
+//! `assets/rules/*.json` 兼容。Java 端 `Rule.Book` 既当"详情规则"又当"详情数据", Rust 端拆开:
 //! `RuleBook` 仅是规则, `crate::models::book::Book` 是数据。
 //!
 //! 所有 bool 字段统一走 [`lenient_bool`]: Java/hutool 容忍字符串 (`no-search.json` 里真实存在

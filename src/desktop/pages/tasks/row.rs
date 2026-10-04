@@ -13,8 +13,8 @@ use gpui_kit::{
 };
 
 use crate::desktop::components::{StatusBadge, StatusKind, truncate};
-use crate::i18n::{ts_cached, ts_fmt};
 use crate::utils::system::{open_path, reveal_in_folder};
+use rust_i18n::t;
 
 use super::TasksPage;
 use super::summary::TaskSummary;
@@ -69,7 +69,7 @@ pub(super) fn render(task: &TaskSummary, page: &Entity<TasksPage>, cx: &App) -> 
     } else {
         "Tasks.card.status.unknown"
     };
-    let status_label: SharedString = ts_cached(status_key);
+    let status_label: SharedString = t!(status_key).into();
 
     // 作者：优先详情拉的 book_meta.author，否则 origin.author；空走 fallback。
     let author_display: SharedString = {
@@ -81,13 +81,13 @@ pub(super) fn render(task: &TaskSummary, page: &Entity<TasksPage>, cx: &App) -> 
                 .filter(|s| !s.trim().is_empty())
         });
         raw.map_or_else(
-            || ts_cached("Tasks.fallback_unknown_author"),
+            || t!("Tasks.fallback_unknown_author").into(),
             |s| SharedString::from(truncate(s, 30)),
         )
     };
     // 书源名：直接用结果自带的 source_name（数据，不译），空走 fallback。
     let source_name_display: SharedString = if task.origin.source_name.trim().is_empty() {
-        ts_cached("Tasks.fallback_unknown_book")
+        t!("Tasks.fallback_unknown_book").into()
     } else {
         SharedString::from(truncate(&task.origin.source_name, 20))
     };
@@ -110,29 +110,22 @@ pub(super) fn render(task: &TaskSummary, page: &Entity<TasksPage>, cx: &App) -> 
                 .child(format!("{author_display} · {source_name_display}")),
         );
 
-    // 进度条上的章节信息：N/M 章 · 失败 n（走 ts_fmt 占位符，避免切语言乱序）。
+    // 进度条上的章节信息：N/M 章 · 失败 n（走 t! 占位符，避免切语言乱序）。
     let chapters_text = if failed_count > 0 {
         format!(
             "{} · {}",
-            ts_fmt(
+            t!(
                 "Tasks.card.meta.chapters",
-                &[
-                    ("completed", &completed.to_string()),
-                    ("total", &total.to_string())
-                ]
+                completed = &completed.to_string(),
+                total = &total.to_string()
             ),
-            ts_fmt(
-                "Tasks.card.meta.failed",
-                &[("n", &failed_count.to_string())]
-            ),
+            t!("Tasks.card.meta.failed", n = &failed_count.to_string()),
         )
     } else {
-        ts_fmt(
+        t!(
             "Tasks.card.meta.chapters",
-            &[
-                ("completed", &completed.to_string()),
-                ("total", &total.to_string()),
-            ],
+            completed = &completed.to_string(),
+            total = &total.to_string()
         )
         .to_string()
     };
@@ -199,7 +192,7 @@ pub(super) fn render(task: &TaskSummary, page: &Entity<TasksPage>, cx: &App) -> 
                                         .text_color(cx.theme().muted_foreground)
                                         .child(format!(
                                             "{} {}",
-                                            ts_cached("Tasks.card.meta.started"),
+                                            t!("Tasks.card.meta.started"),
                                             started_display
                                         )),
                                 ),
@@ -222,9 +215,9 @@ pub(super) fn render(task: &TaskSummary, page: &Entity<TasksPage>, cx: &App) -> 
                                     let task_id = task.id;
                                     let cancelling = task.cancelling;
                                     let label = if cancelling {
-                                        ts_cached("Tasks.card.action.cancelling")
+                                        t!("Tasks.card.action.cancelling")
                                     } else {
-                                        ts_cached("Tasks.card.action.cancel")
+                                        t!("Tasks.card.action.cancel")
                                     };
                                     this.child(
                                         Button::new(("task-cancel", task_id))
@@ -249,7 +242,7 @@ pub(super) fn render(task: &TaskSummary, page: &Entity<TasksPage>, cx: &App) -> 
                                             .small()
                                             .outline()
                                             .icon(Icon::new(IconName::Loader))
-                                            .label(ts_cached("Tasks.card.action.retry"))
+                                            .label(t!("Tasks.card.action.retry"))
                                             .on_click(move |_, _window, cx| {
                                                 page_for_retry.update(cx, |p, cx| {
                                                     p.retry(task_id, cx);
@@ -269,10 +262,7 @@ pub(super) fn render(task: &TaskSummary, page: &Entity<TasksPage>, cx: &App) -> 
                                             .small()
                                             .outline()
                                             .icon(Icon::new(IconName::TriangleAlert))
-                                            .label(ts_fmt(
-                                                "Tasks.card.action.failures",
-                                                &[("n", &fail_count.to_string())],
-                                            ))
+                                            .label(t!("Tasks.card.action.failures", n = &fail_count.to_string()))
                                             .on_click(move |_, window: &mut Window, cx| {
                                                 // 每次点击重新 clone 给 update 闭包。
                                                 let failures = failures.clone();
@@ -292,7 +282,7 @@ pub(super) fn render(task: &TaskSummary, page: &Entity<TasksPage>, cx: &App) -> 
                                             .small()
                                             .outline()
                                             .icon(Icon::new(IconName::ExternalLink))
-                                            .label(ts_cached("Tasks.card.action.open"))
+                                            .label(t!("Tasks.card.action.open"))
                                             .on_click(move |_, _window, _cx| {
                                                 if let Err(e) = open_path(&path_open) {
                                                     tracing::warn!("open_path failed: {e:#}");
@@ -304,7 +294,7 @@ pub(super) fn render(task: &TaskSummary, page: &Entity<TasksPage>, cx: &App) -> 
                                             .small()
                                             .outline()
                                             .icon(Icon::new(IconName::Folder))
-                                            .label(ts_cached("Tasks.card.action.reveal"))
+                                            .label(t!("Tasks.card.action.reveal"))
                                             .on_click(move |_, _window, _cx| {
                                                 if let Err(e) = reveal_in_folder(&path_reveal) {
                                                     tracing::warn!(
@@ -321,7 +311,7 @@ pub(super) fn render(task: &TaskSummary, page: &Entity<TasksPage>, cx: &App) -> 
                                             .small()
                                             .danger()
                                             .icon(Icon::new(IconName::Delete))
-                                            .label(ts_cached("Tasks.card.action.delete"))
+                                            .label(t!("Tasks.card.action.delete"))
                                             .on_click(move |_, window: &mut Window, cx| {
                                                 // `prompt_delete` 要 `&mut Window`，而 page.update 闭包里
                                                 // 只有 `Context<TasksPage>`，故 window 从 on_click 传入。

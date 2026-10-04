@@ -418,7 +418,8 @@ mod tests {
     fn parses_real_chapter_html_resource() {
         use scraper::Selector;
         let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("bundle")
+            .join("tests")
+            .join("fixtures")
             .join("web")
             .join("chapter.html");
         let html = std::fs::read_to_string(&path).unwrap();

@@ -1,7 +1,7 @@
-//! 三端共享的版本更新检查。
+//! CLI / desktop 共享的版本更新检查。
 //!
 //! `check_latest_release` / `classify` / `is_new_version_available` 都是纯业务，无 GUI /
-//! HTTP 状态语义；当前只有 desktop 用，web 想做 `GET /api/update`、CLI 想做 `sonovel update`
+//! HTTP 状态语义；当前只有 desktop 用，CLI 想做 `sonovel update`
 //! 子命令时直接复用即可。
 //!
 //! 网络层通过 [`HttpClients`] 复用同一套共享 client：`gh_proxy` 配了走前向代理（启动期一次
