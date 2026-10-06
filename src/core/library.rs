@@ -1,14 +1,14 @@
-//! 下载文件元数据 + 扩展名常量（GUI / CLI 共享）。
+//! 下载文件元数据 + 扩展名常量。
 //!
-//! 桌面 `model/library_state.rs::scan_library_dir` 与 CLI 导出后的"扫下载目录 / 列条目 /
-//! 算 ext"共用这里的常量，各自维护一份白名单字面量容易漏改一边。
+//! 桌面 `model/library_state.rs::scan_library_dir` 扫描下载目录时用这里的常量，
+//! 白名单集中一处避免漏改。
 
 use std::path::Path;
 use std::time::SystemTime;
 
 use serde::Serialize;
 
-/// GUI + CLI 共用的下载文件扩展名白名单（**单一事实来源**）。
+/// 下载文件扩展名白名单（**单一事实来源**）。
 /// 桌面 `scan_library_dir` 引用这里，新增 / 删除格式只改这一处。
 pub const SUPPORTED_LIBRARY_EXTS: &[&str] = &["epub", "txt", "html", "zip", "pdf", "md"];
 

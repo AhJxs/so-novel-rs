@@ -90,7 +90,7 @@ so-novel-rs/
 
 ## 📥 安装
 
-无需安装 Rust，从 [GitHub Releases](https://github.com/AhJxs/so-novel-rs/releases) 下载对应平台的可运行文件，解压后即可运行（`<版本>` 为最新版本号）：
+无需安装 Rust，从 [GitHub Releases](https://github.com/Ahjxs/so-novel-rs/releases) 下载对应平台的可运行文件，解压后即可运行（`<版本>` 为最新版本号）：
 
 | 平台 | 下载文件 | 运行 |
 |------|---------|------|
@@ -118,7 +118,7 @@ cd so-novel-rs
 cargo run
 ```
 
-> **前置依赖**：Rust 1.95+，Windows / macOS / Linux 均可。Windows 下首次 GPUI 构建需设 `GPUI_FXC_PATH`（详见 [build.rs](./build.rs)）。
+> **前置依赖**：Rust 1.95+，Windows / macOS / Linux 均可。Windows 下首次 GPUI 构建需设 `GPUI_FXC_PATH`（指向 DirectX `fxc.exe`，供 GPUI 编译 shader）。
 
 应用数据存放在 `~/.sonovel/`，首次启动自动创建：
 
@@ -141,7 +141,8 @@ cargo run
 - `cloudflare.json` — 有 Cloudflare 保护的源（3 个）
 - `rule-template.json5` — 自定义书源模板
 
-切换书源集：在 `config.toml` 改 `active-rules` 字段；Cloudflare 保护的书源需要
+切换书源集：在 GUI 的「书源」页右上角下拉选择活跃文件（或直接改
+`~/.sonovel/sources_config.json` 的 `active_file`）。Cloudflare 保护的书源需要
 部署 [CloudflareBypassForScraping](https://github.com/sarperavci/CloudflareBypassForScraping)
 反代并设置 `cf-bypass`。
 

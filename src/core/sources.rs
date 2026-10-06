@@ -1,7 +1,8 @@
-//! CLI / desktop 共用的书源（Rule）查找 + 解析 + URL 键规范化。
+//! 书源（Rule）查找 + 解析 + URL 键规范化。
 //!
-//! 原先 desktop / cli / db 多处各自写同一套 `iter().find(|r| r.id == id)` 或 `r.url.trim().to_lowercase()`
-//! 的重复；抽到这里后调用方只用 `find_rule_by_id` / `rule_key` / `disabled_url_key`。
+//! 原先 desktop / db 多处各自写同一套 `iter().find(|r| r.id == id)` 或
+//! `r.url.trim().to_lowercase()` 的重复；抽到这里后调用方只用 `find_rule_by_id` /
+//! `rule_key` / `disabled_url_key`。
 //!
 //! key 契约：`SourcesConfig::toggle_disabled` 写 set 时同样 `trim + to_lowercase`，`disabled_url_key` 必须与之
 //! 完全一致，否则禁用状态读不回。
@@ -21,7 +22,7 @@ pub fn rule_key(rule: &Rule) -> String {
 }
 
 /// 把任意 URL 字符串标准化为 `SourcesConfig.disabled_urls` 用的键。
-/// 等价于 `toggle_disabled` 的内部归一逻辑；导出给两端调用方，避免各自再写一遍。
+/// 等价于 `toggle_disabled` 的内部归一逻辑；导出给调用方，避免各自再写一遍。
 pub fn disabled_url_key(url: &str) -> String {
     url.trim().to_lowercase()
 }
@@ -66,7 +67,7 @@ pub fn load_active(rules_dir: &Path, sources_config: &SourcesConfig) -> anyhow::
         })
 }
 
-/// 按 URL origin 自动匹配书源（CLI `run_download` 的 "用户给 URL，自动选源" 用）。
+/// 按 URL origin 自动匹配书源（"用户给 URL，自动选源" 的下载路径用）。
 ///
 /// 遍历 `sources`，**不**依赖 `is_search_enabled`（下载场景无视 `search_disabled`），取第一个 origin
 /// 相同的 source（多个匹配按列表顺序）；`url` 或 rule URL 解析失败 → 跳过 / 返回 `None`。

@@ -1,5 +1,25 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- **GPUI 栈升级**：`gpui-kit` 0.7.0 → 0.7.1（连带 `gpui-base` / `gpui-component` /
+  `gpui-component-macros` / `gpui-kit-assets` 升至 0.7.1，`gpui-pre*` 快照升至 0.3.8）。
+  补丁级更新，无 API 变更，业务代码零改动。
+
+### Removed
+
+- **孤儿代码**：删除 `core::download_task` 的 `DownloadTask::apply_to_task` 及其单元测试
+  （原唯一调用方已随 Web 端移除）。
+
+### Fixed
+
+- **文档一致性**：修正 `README.md` 的书源切换教程（删除不存在的 `config.toml`
+  `active-rules` 字段说明）、`docs/BOOK_SOURCES.md` 的源码路径与书源文件数量、
+  `AGENTS.md` 的悬空引用；清理 `src/` 内残留的 CLI / Web / feature 字样注释，
+  并把 `ExportFormat::Pdf` 的"暂不实现"注释改为与实际一致。
+
 ## [0.5.0] - 2026-10-04
 
 ### Removed

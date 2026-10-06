@@ -41,7 +41,7 @@ pub struct LibraryState {
 }
 
 /// 扫描下载目录得到 `LibraryEntry` 列表: 只看**直接子文件**, 只保留
-/// [`crate::core::library::SUPPORTED_LIBRARY_EXTS`] 白名单内的扩展名（桌面和 web 共用同一份）。
+/// [`crate::core::library::SUPPORTED_LIBRARY_EXTS`] 白名单内的扩展名。
 pub fn scan_library_dir(dir: &Path) -> std::io::Result<Vec<LibraryEntry>> {
     use crate::core::library::SUPPORTED_LIBRARY_EXTS;
 

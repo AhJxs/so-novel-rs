@@ -1,6 +1,6 @@
 //! `AppConfig` 的"空字符串视作 None"helper。
 //!
-//! CLI / desktop 读 `cf_bypass` / `qidian_cookie` 时统一走"trim 后空 → None"
+//! desktop 读 `cf_bypass` / `qidian_cookie` 时统一走"trim 后空 → None"
 //! 语义，集中在这里，避免每个调用方各写一份判断。
 
 use crate::config::AppConfig;

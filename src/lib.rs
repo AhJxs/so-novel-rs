@@ -1,7 +1,7 @@
 //! so-novel-rs — Rust 桌面客户端（GPUI）。
 //!
 //! 模块划分：`desktop`（GPUI 入口 + 业务 model + 渲染/主题/导航/通知）；`db` / `crawler` /
-//! `config` / `models` / `parser` / `export` / `http` / `js` / `utils` / `cli` / `core` 为与
+//! `config` / `models` / `parser` / `export` / `http` / `js` / `utils` / `core` 为与
 //! GUI 解耦的业务 + 数据层。
 //! 工程规约：仓库禁止 `unsafe`（确需启用须先过 RFC）；重要 public fn 必带
 //! `#[tracing::instrument]` + `# Errors` + `# Examples`；struct/enum 顶层 doc 由模块 `//!`

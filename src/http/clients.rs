@@ -53,7 +53,7 @@ impl HttpClients {
     /// 兜底空集：两个 client 都是 `reqwest::Client::new()`，`gh_proxy` 为空串。
     ///
     /// `core::bootstrap::load_context` 在 proxy strip 后仍失败时最后兜底用 ——
-    /// 比 panic 友好（前端仍能进 UI，下载页报网络错即可）。日常路径都走 [`Self::new`]。
+    /// 比 panic 友好（UI 仍能进，下载时报网络错即可）。日常路径都走 [`Self::new`]。
     pub fn empty() -> Self {
         let bare = Arc::new(reqwest::Client::new());
         Self {
@@ -119,7 +119,7 @@ impl HttpClients {
     pub fn for_rule(&self, rule: &Rule) -> reqwest::Client {
         rw_read_or("for_rule", &self.clients).map_or_else(
             |_| {
-                // 锁 poison：退路拿 unsafe_ssl（哪怕可能坏，也比 worker panic 拖死整个 web 好）。
+                // 锁 poison：退路拿 unsafe_ssl（哪怕可能坏，也比 worker panic 拖垮整个进程好）。
                 // 二次 read 仍失败则返 reqwest::Client::new() 作 last resort。
                 self.clients.read().map_or_else(
                     |_| {

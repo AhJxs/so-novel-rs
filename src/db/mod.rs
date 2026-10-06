@@ -3,7 +3,7 @@
 //! **错误**: 领域级 `RulesError` 保留路径与原因; 顶层 `DaoError` 统一归一, 业务层 `?` 一步透传到
 //! `AppError`; task 文件字段简单, 暂用 `anyhow::Result`。
 //!
-//! **同步 I/O**: 全用 `std::fs` —— dao 函数被 CLI 启动 / web setup / gpui 启动等同步上下文直接
+//! **同步 I/O**: 全用 `std::fs` —— dao 函数被 gpui 启动等同步上下文直接
 //! 调用; 迁到 `tokio::fs` 是 sync → async 的行为变更, 需全仓 caller 同步改。
 //!
 //! **[`write_atomically`] 是原子写核心**: 写 tmp → fsync → rename, 断电最坏情况"老文件还在"。

@@ -116,15 +116,16 @@
 
 ## 切换书源集
 
-`assets/rules/` 下的 5 个书源 JSON 都是**可选的活跃文件**。切换有 3 种方式：
+`assets/rules/` 下的 5 个书源 JSON（外加 `rule-template.json5` 模板）都是**可选的活跃文件**。
+切换有 3 种方式：
 
 ### 方式 1：GUI 书源管理页（推荐）
 
 GUI 顶栏 → **书源** 标签 → 右上角下拉菜单切换活跃文件。变更立即生效，
 不需要重启。
 
-> 实现：[`src/app/ops/sources.rs::switch_active_file`](../src/app/ops/sources.rs)
-> 改 `SourcesConfig.active_file` 后调 `load_active_rules` 重新加载。
+> 实现：[`src/desktop/model/ops/sources.rs::switch_active_file`](../src/desktop/model/ops/sources.rs)
+> 改 `SourcesConfig.active_file` 后调 `core::sources::load_active` 重新加载。
 
 ### 方式 2：手动改 `~/.sonovel/sources_config.json`
 
@@ -145,7 +146,7 @@ sed -i 's/"active_file": "main.json"/"active_file": "proxy-required.json"/' \
 ```
 
 > 这个文件由 GUI 原子写入
-> （用 [`SourcesConfig::save`](../src/persistent/sources_config.rs)）。
+> （用 [`src/db/sources_config.rs`](../src/db/sources_config.rs)）。
 
 ### 方式 3：复制新书源文件到 `~/.sonovel/rules/`
 
@@ -176,5 +177,5 @@ GUI 支持从文件导入书源（"添加"按钮选 JSON 文件），导入后�
 - [README.md](../README.md) — 项目总览
 - [CHANGELOG.md](./CHANGELOG.md) — 最新 release
 - 书源规则定义：[`src/models/rule.rs`](../src/models/rule.rs)
-- 书源持久化（`disabled_urls`）：[`src/persistent/sources_config.rs`](../src/persistent/sources_config.rs)
+- 书源持久化（`disabled_urls`）：[`src/db/sources_config.rs`](../src/db/sources_config.rs)
 - [CloudflareBypassForScraping](https://github.com/sarperavci/CloudflareBypassForScraping) — CF 绕过服务

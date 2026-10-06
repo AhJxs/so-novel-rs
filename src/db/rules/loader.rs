@@ -54,7 +54,8 @@ pub fn load_rules_from_path(path: &Path) -> Result<Vec<Rule>, RulesError> {
 }
 
 /// 从 `rules_dir` 加载 `sources_config.active_file` 指定的规则, 并合并 `sources_config.disabled_urls`
-/// 设 `Rule.disabled`。主入口 (`app.rs` / `cli.rs`); `load_rules_from_path` 已填默认值, 这里不重复填。
+/// 设 `Rule.disabled`。主入口是 `core::bootstrap` / `core::sources::load_active`;
+/// `load_rules_from_path` 已填默认值, 这里不重复填。
 ///
 /// # Errors
 ///

@@ -10,7 +10,7 @@ pub enum ExportFormat {
     Epub,
     Txt,
     Html,
-    /// 暂不实现 PDF 导出，仅保留枚举以兼容旧配置；UI 选择 PDF 时会提示并降级。
+    /// PDF 导出（DocumentBuilder 直接构建，嵌入 CJK 字体）。
     Pdf,
     /// Markdown 单文件输出（`.md`），UTF-8 only。详见 docs/superpowers/specs/2026-07-11-markdown-export-design.md。
     Markdown,
