@@ -12,7 +12,7 @@ name = "so-novel-rs"
 path = "src/main.rs"
 
 [dependencies]
-gpui-kit = "0.7.0"
+gpui-kit = "0.7.1"
 # 国际化 —— 复用 gpui-kit 组件库内部用的同一套 rust-i18n 机制。
 rust-i18n = "4.2.4"
 
