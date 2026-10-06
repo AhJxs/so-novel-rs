@@ -1,6 +1,5 @@
 //! 一个正在跑的下载任务（由搜索页"下载"按钮触发，下载页/任务页消费）。
 
-use std::sync::Mutex;
 use std::time::Duration;
 use tokio::sync::mpsc;
 
@@ -70,7 +69,7 @@ pub struct DownloadTask {
 }
 
 impl DownloadTask {
-    /// 把单条进度事件应用到任务字段。web 的 per-task drain 也复用这同一套语义。
+    /// 把单条进度事件应用到任务字段。
     pub fn apply_progress(&mut self, ev: Progress) {
         match ev {
             Progress::BookResolved {
@@ -190,22 +189,6 @@ impl DownloadTask {
                 Duration::from_secs(end_u.saturating_sub(started))
             })
         }
-    }
-
-    /// web drain 闭包里"锁 + 按 id 找 + `apply_progress`"的可复用形式。
-    ///
-    /// web 的 `spawn_task_drain` 仍是阻塞式（要阻塞到 crawler 退出，与桌面 `try_recv` 语义不同），
-    /// 只是把"找到 task → `apply_progress`"这段抽出来复用。
-    /// 锁毒化时返回 false（与 [`crate::utils::lock::mutex_or`] 一致），调用方据此 abort drain 任务。
-    pub fn apply_to_task(tasks: &Mutex<Vec<Self>>, task_id: u64, ev: Progress) -> bool {
-        use crate::utils::lock::mutex_or;
-        let Ok(mut guard) = mutex_or("apply_to_task", tasks) else {
-            return false;
-        };
-        if let Some(task) = guard.iter_mut().find(|t| t.id == task_id) {
-            task.apply_progress(ev);
-        }
-        true
     }
 
     /// 转成可持久化的 record（不含 rx/cancel）。
@@ -389,65 +372,5 @@ mod tests {
             task.finished_at_unix.is_some(),
             "Finished 事件应触发 finished_at_unix 兜底"
         );
-    }
-
-    #[test]
-    fn apply_to_task_updates_correct_task_by_id() {
-        use std::sync::Mutex;
-        let mut t1 = DownloadTask {
-            id: 1,
-            origin: search_result_dummy(),
-            rx: None,
-            cancel: None,
-            cancelling: false,
-            started_at_unix: 0,
-            finished_at_unix: None,
-            book_meta: None,
-            total_chapters: 0,
-            completed: 0,
-            failed: 0,
-            last_chapter_title: String::new(),
-            finished: None,
-            failures: Vec::new(),
-            version: 0,
-        };
-        let mut t2 = DownloadTask {
-            id: 2,
-            origin: search_result_dummy(),
-            rx: None,
-            cancel: None,
-            cancelling: false,
-            started_at_unix: 0,
-            finished_at_unix: None,
-            book_meta: None,
-            total_chapters: 0,
-            completed: 0,
-            failed: 0,
-            last_chapter_title: String::new(),
-            finished: None,
-            failures: Vec::new(),
-            version: 0,
-        };
-        t1.last_chapter_title = "preset-1".into();
-        t2.last_chapter_title = "preset-2".into();
-        let tasks = Mutex::new(vec![t1, t2]);
-        let ok = DownloadTask::apply_to_task(
-            &tasks,
-            2,
-            Progress::ChapterDone {
-                index: 1,
-                title: "first".into(),
-            },
-        );
-        assert!(ok);
-        let (t1_title, t2_title) = {
-            let guard = tasks.lock().expect("lock");
-            (
-                guard[0].last_chapter_title.clone(),
-                guard[1].last_chapter_title.clone(),
-            )
-        };
-        assert_eq!(t1_title, "preset-1");
-        assert_eq!(t2_title, "first");
     }
 }
