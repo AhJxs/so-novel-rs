@@ -14,25 +14,24 @@ use anyhow::{Context, Result};
 
 use crate::config::AppConfig;
 #[cfg(test)]
-use crate::config::{GlobalCfg, ProxyCfg};
+use crate::config::{GlobalCfg, ProxyCfg, ProxyMode};
 use crate::http::client::{ClientOptions, build_async_client};
 use crate::models::Rule;
 use crate::utils::lock::{mutex_or, rw_read_or, rw_write_or};
 
-/// 当前生效的 proxy 配置快照。`rebuild_proxy` 用它判断"配置是否真的变了"。
+/// 当前生效的 proxy 快照。`rebuild_proxy` 用它判断"配置是否真的变了"。
+///
+/// 存**解析后的 URL** 而不是原始字段：`System` 模式下 host / port 字段根本没动，
+/// 但注册表里的值可能刚被 Clash 改过 —— 只比对字段会漏掉这种真实变化。
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ProxySignature {
-    enabled: bool,
-    host: String,
-    port: u16,
+    resolved: Option<String>,
 }
 
 impl ProxySignature {
     fn from_cfg(cfg: &AppConfig) -> Self {
         Self {
-            enabled: cfg.proxy.proxy_enabled,
-            host: cfg.proxy.proxy_host.clone(),
-            port: cfg.proxy.proxy_port,
+            resolved: crate::http::system_proxy::resolve_proxy_url(&cfg.proxy),
         }
     }
 }
@@ -59,11 +58,7 @@ impl HttpClients {
         Self {
             clients: RwLock::new((Arc::clone(&bare), Arc::clone(&bare))),
             gh_proxy: Mutex::new((String::new(), bare)),
-            proxy_signature: Mutex::new(ProxySignature {
-                enabled: false,
-                host: String::new(),
-                port: 0,
-            }),
+            proxy_signature: Mutex::new(ProxySignature { resolved: None }),
         }
     }
 
@@ -233,7 +228,7 @@ mod tests {
         // rebuild 后 for_rule 仍正常工作
         let new_cfg = AppConfig {
             proxy: ProxyCfg {
-                proxy_enabled: true,
+                proxy_mode: ProxyMode::Manual,
                 proxy_host: "127.0.0.1".into(),
                 proxy_port: 9999,
             },
@@ -251,7 +246,7 @@ mod tests {
 
         let new_cfg = AppConfig {
             proxy: ProxyCfg {
-                proxy_enabled: true,
+                proxy_mode: ProxyMode::Manual,
                 proxy_host: "127.0.0.1".into(),
                 proxy_port: 8080,
             },
@@ -311,5 +306,24 @@ mod tests {
         let clients2 = HttpClients::new(&cfg_with_proxy).unwrap();
         let (url2, _client2) = clients2.gh_proxy_pair();
         assert_eq!(url2, "https://ghproxy.example.com/");
+    }
+
+    #[test]
+    fn rebuild_proxy_from_mode_none_to_blank_host_manual_is_noop() {
+        // None 模式与「Manual + 空 host」解析结果都是 None —— signature 相等，
+        // 不该白重建 client（这也是 `empty()` 之后第一次 rebuild 不再重建的原因）。
+        let clients = HttpClients::new(&default_cfg()).unwrap();
+        let before = clients.safe_client_ptr().unwrap();
+
+        let cfg = AppConfig {
+            proxy: ProxyCfg {
+                proxy_mode: ProxyMode::Manual,
+                proxy_host: String::new(),
+                proxy_port: 7890,
+            },
+            ..default_cfg()
+        };
+        clients.rebuild_proxy(&cfg).unwrap();
+        assert_eq!(before, clients.safe_client_ptr().unwrap());
     }
 }

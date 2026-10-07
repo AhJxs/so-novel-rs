@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use crate::config::{AppConfig, ConfigPaths};
+use crate::config::{AppConfig, ConfigPaths, ProxyMode};
 use crate::db::{SourcesConfig, init_rules_dir, load_active_rules};
 use crate::http::HttpClients;
 use crate::models::Rule;
@@ -77,7 +77,7 @@ pub fn load_context() -> AppContext {
         Err(e) => {
             tracing::warn!("HttpClients init failed: {e:#}，尝试关闭 proxy 后重试");
             let mut cfg_no_proxy = config.clone();
-            cfg_no_proxy.proxy.proxy_enabled = false;
+            cfg_no_proxy.proxy.proxy_mode = ProxyMode::None;
             match HttpClients::new(&cfg_no_proxy) {
                 Ok(c) => Arc::new(c),
                 Err(e2) => {

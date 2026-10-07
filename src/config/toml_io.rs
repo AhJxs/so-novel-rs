@@ -11,7 +11,9 @@ use anyhow::{Context, Result};
 use toml_edit::{DocumentMut, Item, Table, value};
 
 use super::defaults::default_template_doc;
-use super::types::{AppConfig, ExportFormat, Language, ThemeDynMode, ThemeKind, ThemePref};
+use super::types::{
+    AppConfig, ExportFormat, Language, ProxyMode, ThemeDynMode, ThemeKind, ThemePref,
+};
 
 /// 从 TOML 文档中取 `table.key` 对应的 `Item`。
 fn t_item<'a>(doc: &'a DocumentMut, table: &str, key: &str) -> Option<&'a Item> {
@@ -165,8 +167,16 @@ pub fn load_config(path: &Path) -> Result<AppConfig> {
         cfg.cookie.qidian_cookie = v;
     }
 
-    if let Some(v) = t_bool(&doc, "proxy", "enabled") {
-        cfg.proxy.proxy_enabled = v;
+    // 旧键 `[proxy].enabled`（bool）迁移到新键 `[proxy].mode`（字符串）：`mode` 优先。
+    // 两个键都在时以 `mode` 为准（用户手改过 mode 说明他知道新键）。
+    if let Some(v) = t_str(&doc, "proxy", "mode") {
+        cfg.proxy.proxy_mode = ProxyMode::parse(&v);
+    } else if let Some(v) = t_bool(&doc, "proxy", "enabled") {
+        cfg.proxy.proxy_mode = if v {
+            ProxyMode::Manual
+        } else {
+            ProxyMode::None
+        };
     }
     if let Some(v) = t_str(&doc, "proxy", "host") {
         cfg.proxy.proxy_host = v;
@@ -354,7 +364,9 @@ pub fn save_config(path: &Path, cfg: &AppConfig) -> Result<()> {
         &cfg.cookie.qidian_cookie,
     );
 
-    set_bool(&mut doc, "proxy", "enabled", cfg.proxy.proxy_enabled);
+    set_str(&mut doc, "proxy", "mode", cfg.proxy.proxy_mode.as_str());
+    // 旧键删掉，避免 config.toml 里同时留着 enabled / mode 两份真值。
+    unset(&mut doc, "proxy", "enabled");
     set_str(&mut doc, "proxy", "host", &cfg.proxy.proxy_host);
     set_int(&mut doc, "proxy", "port", cfg.proxy.proxy_port as i64);
 

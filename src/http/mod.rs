@@ -7,6 +7,7 @@ pub mod client;
 pub mod clients;
 pub mod encoding;
 pub mod fetch;
+pub mod system_proxy;
 pub mod ua;
 pub mod url_join;
 pub mod util;
@@ -17,6 +18,10 @@ pub use clients::HttpClients;
 pub use encoding::decode_response_bytes;
 pub use fetch::{
     CfFallbackError, FetchRequest, FetchResponse, HttpMethod, fetch, fetch_with_cf_fallback,
+};
+// `detect` 在本模块内重命名为 `detect_system_proxy`：`crate::http::detect()` 看不出在探什么。
+pub use system_proxy::{
+    AbsentReason, SystemProxy, detect as detect_system_proxy, resolve_proxy_url,
 };
 pub use ua::random_ua;
 pub use url_join::{abs_url, origin_or_self};

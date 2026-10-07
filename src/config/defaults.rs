@@ -77,7 +77,9 @@ retry-max-interval = 4000
 qidian-cookie = ""
 
 [proxy]
-enabled = false
+# 代理模式：none = 直连；manual = 用下面的 host / port；system = 读系统代理
+# （Windows 读注册表 WinINET，即 Clash / v2ray 的「系统代理」开关；其它平台读 HTTPS_PROXY 环境变量）
+mode = "none"
 host = "127.0.0.1"
 port = 7890
     "#;

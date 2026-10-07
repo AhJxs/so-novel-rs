@@ -48,7 +48,7 @@ use crate::config::{AppConfig, ConfigPaths};
 use crate::core::DownloadTask;
 use crate::core::bootstrap::load_context;
 use crate::db::{SourcesConfig, load_tasks_from_file};
-use crate::http::HttpClients;
+use crate::http::{HttpClients, SystemProxy, detect_system_proxy};
 use crate::models::Rule;
 use events::{WakeupHandle, WakeupReceiver};
 use ops::OpsCtx;
@@ -68,6 +68,12 @@ pub struct AppModel {
     /// 共享 HTTP client 集合。复用连接池 + TLS session cache; 改 proxy / `unsafe_ssl` 时
     /// `HttpClients::rebuild_proxy` 整体替换实例。
     pub http: Arc<HttpClients>,
+
+    /// 最近一次系统代理探测结果（设置页展示用）。
+    ///
+    /// 启动时探一次，之后由 [`Self::refresh_system_proxy`] 在「改代理模式」和「进入设置页」
+    /// 两处刷新 —— 不做后台轮询，用户在 Clash 里改完要下次触发才生效。
+    pub system_proxy: SystemProxy,
 
     pub search: SearchState,
 
@@ -106,6 +112,10 @@ impl AppModel {
         let rules = ctx.rules;
         let http = ctx.http;
 
+        // 启动快照。**不需要** rebuild：`HttpClients::new` 构造时已经按
+        // `resolve_proxy_url` 把系统代理算进去了，这里只是给 UI 留一份可读结果。
+        let system_proxy = detect_system_proxy();
+
         let runtime = build_shared_runtime()?;
 
         let (tasks, next_task_id) = load_tasks_from_file(&paths.tasks_file);
@@ -122,6 +132,7 @@ impl AppModel {
             sources_config,
             runtime,
             http,
+            system_proxy,
             search: SearchState::default(),
             tasks,
             next_task_id,
@@ -133,6 +144,21 @@ impl AppModel {
             wakeup,
         };
         Ok((model, rx))
+    }
+
+    /// 重新探测系统代理，并让共享 HTTP client 跟上新结果。
+    ///
+    /// 触发点三处：启动（`new_with_wakeup` 快照，不重建）、改代理模式（`page_proxy`）、
+    /// 进入设置页（`RootView::navigate`）。
+    pub fn refresh_system_proxy(&mut self) {
+        self.system_proxy = detect_system_proxy();
+        // 结果变了的话，已构造的 client 里还钉着旧 proxy，必须整体换掉。
+        // `rebuild_proxy` 按解析后的 URL 比对，没变即 no-op，所以多调不亏。
+        if let Err(e) = self.http.rebuild_proxy(&self.config) {
+            let msg = format!("HTTP client 重建失败: {e}");
+            tracing::warn!("{msg}");
+            self.push_error(msg);
+        }
     }
 
     /// 内部：把一条 [`UIEvent`] 推入待处理队列。

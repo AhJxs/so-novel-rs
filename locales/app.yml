@@ -170,10 +170,10 @@ Settings:
       en: Retry
       zh-CN: 重试
       zh-TW: 重試
-    http_proxy:
-      en: "HTTP proxy"
-      zh-CN: "HTTP 代理"
-      zh-TW: "HTTP 代理"
+    proxy:
+      en: Proxy
+      zh-CN: 代理
+      zh-TW: 代理
     cookie:
       en: Cookie
       zh-CN: Cookie
@@ -271,10 +271,14 @@ Settings:
       en: "Retry interval max (ms)"
       zh-CN: 重试间隔最大 (ms)
       zh-TW: 重試間隔最大 (ms)
-    proxy_enabled:
-      en: "Enable HTTP proxy"
-      zh-CN: 启用 HTTP 代理
-      zh-TW: 啟用 HTTP 代理
+    proxy_mode:
+      en: "Proxy mode"
+      zh-CN: 代理模式
+      zh-TW: 代理模式
+    system_proxy_status:
+      en: "System proxy"
+      zh-CN: 系统代理
+      zh-TW: 系統代理
     proxy_host:
       en: "Proxy host"
       zh-CN: 代理 Host
@@ -388,18 +392,22 @@ Settings:
       en: "See the previous item."
       zh-CN: 见上一项。
       zh-TW: 見上一項。
-    proxy_enabled:
-      en: "Route all outbound requests through this proxy (source fetch + health check)."
-      zh-CN: 所有出站请求都走此代理（书源 fetch + 测速）。
-      zh-TW: 所有出站請求都走此代理（書源 fetch + 測速）。
+    proxy_mode:
+      en: "Direct, a manually configured HTTP proxy, or the OS proxy settings."
+      zh-CN: 直连、手动配置的 HTTP 代理，或读取操作系统代理设置。
+      zh-TW: 直連、手動設定的 HTTP 代理，或讀取作業系統代理設定。
+    system_proxy_status:
+      en: "Read from the Windows registry (WinINET), or from HTTPS_PROXY on other platforms."
+      zh-CN: Windows 下读注册表 WinINET；其它平台读 HTTPS_PROXY 环境变量。
+      zh-TW: Windows 下讀登錄檔 WinINET；其它平台讀 HTTPS_PROXY 環境變數。
     proxy_host:
-      en: "Proxy server address (IP or domain)."
-      zh-CN: 代理服务器地址（IP 或域名）。
-      zh-TW: 代理伺服器地址（IP 或域名）。
+      en: "Proxy server address (IP or domain). Used in Manual mode only."
+      zh-CN: 代理服务器地址（IP 或域名）。仅在「手动配置」模式下生效。
+      zh-TW: 代理伺服器地址（IP 或域名）。僅在「手動設定」模式下生效。
     proxy_port:
-      en: "Proxy server port (1-65535)."
-      zh-CN: 代理服务器端口（1-65535）。
-      zh-TW: 代理伺服器埠（1-65535）。
+      en: "Proxy server port (1-65535). Used in Manual mode only."
+      zh-CN: 代理服务器端口（1-65535）。仅在「手动配置」模式下生效。
+      zh-TW: 代理伺服器埠（1-65535）。僅在「手動設定」模式下生效。
     qidian_cookie:
       en: "Required for qidian.com / qidian overseas sites; can be ignored for other sources."
       zh-CN: 起点中文网 / 起点海外站点需要；其它书源可忽略。
@@ -476,6 +484,49 @@ Settings:
         en: Dark
         zh-CN: 深色
         zh-TW: 深色
+    proxy_mode:
+      none:
+        en: Disabled
+        zh-CN: 不使用
+        zh-TW: 不使用
+      manual:
+        en: "Manual"
+        zh-CN: 手动配置
+        zh-TW: 手動設定
+      system:
+        en: "Use system proxy"
+        zh-CN: 使用系统代理
+        zh-TW: 使用系統代理
+  proxy_status:
+    detected:
+      en: "Detected: %{url}"
+      zh-CN: "已检测到：%{url}"
+      zh-TW: "已偵測到：%{url}"
+    not_detected:
+      en: "Not detected"
+      zh-CN: "未检测到系统代理"
+      zh-TW: "未偵測到系統代理"
+    reason:
+      not_enabled:
+        en: "the system proxy switch is off"
+        zh-CN: 系统代理开关是关闭的
+        zh-TW: 系統代理開關是關閉的
+      pac_only:
+        en: "only a PAC script is configured, which this app cannot use"
+        zh-CN: 只配置了 PAC 脚本，本应用无法使用
+        zh-TW: 只設定了 PAC 指令碼，本應用無法使用
+      socks_only:
+        en: "only a SOCKS proxy is configured, which this app does not support"
+        zh-CN: 只配置了 SOCKS 代理，本应用不支持
+        zh-TW: 只設定了 SOCKS 代理，本應用不支援
+      env_unset:
+        en: "no HTTPS_PROXY / HTTP_PROXY environment variable is set"
+        zh-CN: 未设置 HTTPS_PROXY / HTTP_PROXY 环境变量
+        zh-TW: 未設定 HTTPS_PROXY / HTTP_PROXY 環境變數
+      read_failed:
+        en: "system proxy settings could not be read"
+        zh-CN: 读取系统代理设置失败
+        zh-TW: 讀取系統代理設定失敗
   language_restart_dialog:
     title:
       en: "Restart to apply"

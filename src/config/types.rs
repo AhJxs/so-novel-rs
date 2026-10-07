@@ -274,13 +274,47 @@ pub struct CookieCfg {
     pub qidian_cookie: String,
 }
 
-/// `[proxy]` 章节。HTTP 代理配置。
+/// 代理模式。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ProxyMode {
+    /// 直连，不用代理。
+    #[default]
+    None,
+    /// 用下面的 `proxy_host` / `proxy_port` 手动配置的 HTTP 代理。
+    Manual,
+    /// 读操作系统代理设置：Windows 读 `WinINET` 注册表（Clash / v2ray 的「系统代理」
+    /// 开关写的就是它），其它平台读 `HTTPS_PROXY` / `HTTP_PROXY` 环境变量。
+    System,
+}
+
+impl ProxyMode {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Manual => "manual",
+            Self::System => "system",
+        }
+    }
+
+    /// 解析 TOML 里的字符串。无法识别（含空串）→ [`Self::None`]，与 `ThemeKind::parse` 风格一致。
+    pub fn parse(s: &str) -> Self {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "manual" => Self::Manual,
+            "system" => Self::System,
+            _ => Self::None,
+        }
+    }
+}
+
+/// `[proxy]` 章节。代理模式 + 手动代理地址。
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ProxyCfg {
-    pub proxy_enabled: bool,
-    /// 代理主机地址。
+    /// 代理模式。决定 `crate::http::resolve_proxy_url` 的行为。
+    pub proxy_mode: ProxyMode,
+    /// 仅 `Manual` 模式使用的代理主机地址。
     pub proxy_host: String,
-    /// 代理端口。
+    /// 仅 `Manual` 模式使用的代理端口。
     pub proxy_port: u16,
 }
 
@@ -322,7 +356,7 @@ impl AppConfig {
                 qidian_cookie: String::new(),
             },
             proxy: ProxyCfg {
-                proxy_enabled: false,
+                proxy_mode: ProxyMode::None,
                 proxy_host: "127.0.0.1".to_string(),
                 proxy_port: 7890,
             },

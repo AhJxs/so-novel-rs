@@ -12,7 +12,7 @@ use std::path::PathBuf;
 
 use crate::config::{
     AppConfig, CookieCfg, CrawlCfg, DownloadCfg, ExportFormat, GlobalCfg, LangType, Language,
-    ProxyCfg, SourceCfg, ThemeDynMode, ThemeKind, ThemePref, load_config, save_config,
+    ProxyCfg, ProxyMode, SourceCfg, ThemeDynMode, ThemeKind, ThemePref, load_config, save_config,
 };
 
 #[test]
@@ -76,7 +76,7 @@ fn round_trip_through_save_and_load() {
             ..CrawlCfg::default()
         },
         proxy: ProxyCfg {
-            proxy_enabled: true,
+            proxy_mode: ProxyMode::Manual,
             proxy_host: "10.0.0.1".to_string(),
             proxy_port: 1080,
         },
@@ -98,7 +98,7 @@ fn round_trip_through_save_and_load() {
     );
     assert_eq!(loaded.source.search_limit, cfg.source.search_limit);
     assert_eq!(loaded.crawl.concurrency, cfg.crawl.concurrency);
-    assert_eq!(loaded.proxy.proxy_enabled, cfg.proxy.proxy_enabled);
+    assert_eq!(loaded.proxy.proxy_mode, cfg.proxy.proxy_mode);
     assert_eq!(loaded.proxy.proxy_host, cfg.proxy.proxy_host);
     assert_eq!(loaded.proxy.proxy_port, cfg.proxy.proxy_port);
     assert_eq!(loaded.cookie.qidian_cookie, cfg.cookie.qidian_cookie);
@@ -255,4 +255,71 @@ fn export_format_parse_is_case_insensitive_for_markdown() {
 fn export_format_parse_falls_back_to_epub_for_unknown() {
     assert_eq!(ExportFormat::parse("not-a-format"), ExportFormat::Epub);
     assert_eq!(ExportFormat::parse(""), ExportFormat::Epub);
+}
+
+#[test]
+fn legacy_proxy_enabled_key_migrates_to_mode() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+
+    std::fs::write(
+        &path,
+        "[proxy]\nenabled = true\nhost = \"1.2.3.4\"\nport = 8080\n",
+    )
+    .unwrap();
+    let cfg = load_config(&path).unwrap();
+    assert_eq!(cfg.proxy.proxy_mode, ProxyMode::Manual);
+    assert_eq!(cfg.proxy.proxy_host, "1.2.3.4");
+    assert_eq!(cfg.proxy.proxy_port, 8080);
+
+    std::fs::write(&path, "[proxy]\nenabled = false\n").unwrap();
+    assert_eq!(
+        load_config(&path).unwrap().proxy.proxy_mode,
+        ProxyMode::None
+    );
+}
+
+#[test]
+fn proxy_mode_key_wins_over_legacy_enabled() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    std::fs::write(&path, "[proxy]\nmode = \"system\"\nenabled = false\n").unwrap();
+    assert_eq!(
+        load_config(&path).unwrap().proxy.proxy_mode,
+        ProxyMode::System
+    );
+}
+
+#[test]
+fn save_rewrites_legacy_proxy_enabled_key() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    std::fs::write(
+        &path,
+        "[proxy]\nenabled = true\nhost = \"127.0.0.1\"\nport = 7890\n",
+    )
+    .unwrap();
+
+    // 默认 config 是 ProxyMode::None → 写回后旧键必须消失，新键为 "none"。
+    save_config(&path, &AppConfig::default()).unwrap();
+
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(
+        !text.contains("enabled ="),
+        "旧键 enabled 应被 unset：\n{text}"
+    );
+    assert!(
+        text.contains("mode = \"none\""),
+        "新键 mode 应写入：\n{text}"
+    );
+}
+
+#[test]
+fn proxy_mode_parse_is_lenient() {
+    assert_eq!(ProxyMode::parse(" system "), ProxyMode::System);
+    assert_eq!(ProxyMode::parse("MANUAL"), ProxyMode::Manual);
+    assert_eq!(ProxyMode::parse("none"), ProxyMode::None);
+    // 认不出来的一律直连，不 panic
+    assert_eq!(ProxyMode::parse(""), ProxyMode::None);
+    assert_eq!(ProxyMode::parse("garbage"), ProxyMode::None);
 }

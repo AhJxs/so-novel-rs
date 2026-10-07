@@ -4,6 +4,12 @@
 
 ### Changed
 
+- **代理设置改为三态「代理模式」**：`[proxy].enabled`（bool）→ `[proxy].mode`
+  （`"none"` / `"manual"` / `"system"`）。新增「使用系统代理」——Windows 读 WinINET
+  注册表（Clash / v2ray 的「系统代理」开关写的就是它），其它平台读 `HTTPS_PROXY` /
+  `HTTP_PROXY`。探测不到时静默退化为直连，并在设置页显示原因（开关关闭 / 只有 PAC /
+  只有 SOCKS / 环境变量未设 / 读取失败）。旧键在首次保存配置时自动迁移并删除，
+  手动改过 `config.toml` 的用户无需任何操作。
 - **GPUI 栈升级**：`gpui-kit` 0.7.0 → 0.7.1（连带 `gpui-base` / `gpui-component` /
   `gpui-component-macros` / `gpui-kit-assets` 升至 0.7.1，`gpui-pre*` 快照升至 0.3.8）。
   补丁级更新，无 API 变更，业务代码零改动。

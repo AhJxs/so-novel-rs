@@ -30,7 +30,7 @@ impl AppModel {
         tracing::debug!("config.toml 自动保存成功");
 
         // proxy / unsafe_ssl 改了 → 重建共享 HTTP client。`rebuild_proxy` 按
-        // `(proxy_enabled, proxy_host, proxy_port)` 比对, 未变即 no-op。
+        // **解析后的代理 URL** 比对（见 `HttpClients::rebuild_proxy`），未变即 no-op。
         // 重建失败时 config 已写盘但客户端还是旧配置, 推 error 让用户知道。
         if let Err(e) = self.http.rebuild_proxy(&self.config) {
             let msg = format!("HTTP client 重建失败（配置已保存）: {e}");

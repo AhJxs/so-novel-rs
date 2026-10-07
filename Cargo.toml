@@ -105,6 +105,12 @@ tempfile = "3"
 # 构造最小 PNG 验证 cover_entry_from_bytes。
 image = "0.25"
 
+# Windows 系统代理探测：读 WinINET 注册表
+# （HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings）。
+# 版本与 Cargo.lock 里已有的 winreg 一致，不引入新下载。
+[target.'cfg(target_os = "windows")'.dependencies]
+winreg = "0.55"
+
 # 在 Windows 上把 assets/logo.ico 嵌入 exe 资源段（build.rs 调用，仅 Windows 需要）。
 [target.'cfg(target_os = "windows")'.build-dependencies]
 winres = "0.1"

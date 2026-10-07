@@ -16,7 +16,7 @@ pub use paths::ConfigPaths;
 pub use toml_io::{load_config, save_config};
 pub use types::{
     AppConfig, ConfigError, CookieCfg, CrawlCfg, DownloadCfg, ExportFormat, GlobalCfg, LangType,
-    Language, ProxyCfg, SourceCfg, ThemeDynMode, ThemeKind, ThemePref,
+    Language, ProxyCfg, ProxyMode, SourceCfg, ThemeDynMode, ThemeKind, ThemePref,
 };
 
 use std::sync::{LazyLock, OnceLock};

@@ -7551,6 +7551,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "url",
+ "winreg",
  "winres",
  "zhconv",
  "zip 8.6.0",

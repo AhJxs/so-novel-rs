@@ -78,6 +78,11 @@ impl RootView {
     fn navigate(&mut self, page: NavPage, cx: &mut Context<Self>) {
         if self.current_page != page {
             self.current_page = page;
+            // 进设置页时重读系统代理：用户可能刚在 Clash 里切过开关，打开设置页
+            // 就是为了看到最新探测结果（也顺手让 client 跟上）。
+            if page == NavPage::Settings {
+                self.model.update(cx, |m, _| m.refresh_system_proxy());
+            }
             cx.notify();
         }
     }
