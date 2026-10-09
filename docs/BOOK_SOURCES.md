@@ -5,15 +5,16 @@
 
 | 书源文件 | 用途 | 数量 |
 |---|---|---|
-| `main.json` | 默认书源，均支持搜索、大陆 IP | 12 |
+| `main.json` | 默认书源，均支持搜索、大陆 IP | 17 |
 | `proxy-required.json` | 需要代理的书源（必须是非大陆 IP），需在 `config.toml` 设置 `cf-bypass` | 4 |
 | `rate-limit.json` | 下载限流的书源 | 4 |
 | `no-search.json` | 不支持搜索的书源，需要输入书籍详情页地址下载 | 2 |
-| `cloudflare.json` | 有 Cloudflare 保护的书源，需在 `config.toml` 设置 `cf-bypass` | 3 |
+| `cloudflare.json` | 有 Cloudflare 保护的书源，需在 `config.toml` 设置 `cf-bypass` | 4 |
 | `rule-template.json5` | 书源规则模板文件（自定义书源参考） | — |
 
 > **⚠️ IP 要求仅供参考，不保证完全准确**。根据需要决定是否在
 > `config.toml` 中设置 HTTP 代理（TUN 模式、路由级代理无需设置）。
+> 标 `—` 的格子**未实测**（新增书源在非大陆 IP 下的表现未经验证）。
 
 ---
 
@@ -29,12 +30,17 @@
 | [鸟书网](http://www.99xs.info/) | ✅ | ❌ | 搜索限流 |
 | [笔趣阁22](https://www.22biqu.com/) | ✅ | ✅ | |
 | [笔尖中文](http://www.xbiquzw.net/) | ✅ | ❌ | |
-| [书林文学](http://www.shu009.com/) | ✅ | ✅ | 源站目录有重复、缺章的情况。目录每页只有 20 章，翻页速度很慢 |
 | [悠久小说网](http://www.ujxsw.org/) | ✅ | ❌ | |
 | [阅读库](http://www.yeudusk.com/) | ✅ | ❌ | |
 | [顶点小说](https://www.wxsy.net/) | ✅ | ❌ | 搜索、详情限流 |
 | [笔趣阁365](https://www.biquge365.net/) | ✅ | ✅ | 搜索间隔 15 秒 |
 | [燃文小说网](https://www.ranwen8.cc/) | ✅ | ❌ | |
+| [第八中文网](https://www.d8zw.com/) | ✅ | — | 搜索、目录自动翻页（每页 100 章）；偶尔 502，建议线程数 ≤ 5 |
+| [笔趣阁52](https://www.52bqg.com/) | ✅ | — | 目录/章节链接为 JS onclick（规则已用 `@js` 重写为绝对链接）；正文 base64，分页章节用 `nextPageInJs` 解析 |
+| [新笔趣阁](https://www.xbiquge.cc/) | ✅ | — | 目录/章节链接为 JS onclick、正文 base64；该站对本程序连接不稳定（connect timed out），失败请重试 |
+| [少年小说网](https://www.snxsw.com/) | ✅ | — | 与笔趣阁52同款 CMS（搜索需带 submit 字段）；目录含隐藏 li、正文 base64、章节多页 |
+| [新笔趣阁info](https://www.xbiquge.info/) | ✅ | — | 与第八中文网同款 CMS 的镜像站；目录分页、正文 `article.font_max`，章节分页需翻页 |
+| [笔趣阁info](https://www.bqg.info/) | ✅ | — | Bootstrap 模板；详情页直接含完整目录（无独立目录页），章内分页 |
 
 ---
 
@@ -84,6 +90,7 @@
 | [黄易天地](http://www.xhytd.com/) | ✅ | ✅ | 非大陆 IP 可能速度较慢 |
 | [96读书](https://www.96dushu.com/) | ✅ | ✅ | 章节 JS 加密 |
 | [东滩小说](http://www.dongtanxs.com/) | ✅ | ✅ | |
+| [哔哩轻小说](https://www.linovelib.com/) | ✅ | — | 搜索 POST `/S6/`、正文 `#mlfy_main_text`，章节单页 |
 
 ---
 
