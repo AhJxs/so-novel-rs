@@ -28,6 +28,12 @@
 
 _version: 2
 
+AppMenu:
+  quit:
+    en: Quit So Novel
+    zh-CN: 退出 So Novel
+    zh-TW: 結束 So Novel
+
 Nav:
   search:
     en: Search

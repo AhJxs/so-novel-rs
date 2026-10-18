@@ -19,6 +19,7 @@ use crate::desktop::model::AppModel;
 actions!(
     desktop,
     [
+        Quit,
         ShowSearch,
         ShowTasks,
         ShowLibrary,
@@ -30,6 +31,7 @@ actions!(
     ]
 );
 // 为 actions! 生成的 PartialEq 单元结构体补充 Eq 实现。
+impl Eq for Quit {}
 impl Eq for ShowSearch {}
 impl Eq for ShowTasks {}
 impl Eq for ShowLibrary {}
@@ -71,9 +73,13 @@ use crate::i18n::locale_for;
 /// # Panics
 ///
 /// `cx.open_window` 失败时（仅在 `WindowOptions` 非法或 GPU 已满载时）弹错误对话框后
-/// 直接 `return`, 不会 panic; 显式处理是为了避免用户看到空白窗口以为还在加载。
+/// 退出应用, 不会 panic; 显式处理是为了避免用户看到空白窗口以为还在加载。
 pub fn run() -> Result<()> {
-    let app = gpui_kit::application().with_assets(gpui_kit::assets::Assets);
+    // This single-window application has no background/tray mode. On macOS,
+    // GPUI's default leaves the process running after the last window closes.
+    let app = gpui_kit::application()
+        .with_quit_mode(gpui_kit::QuitMode::LastWindowClosed)
+        .with_assets(gpui_kit::assets::Assets);
     app.run(move |cx: &mut App| {
         // rust-i18n 扩展注册 —— **必须在 `component::init` 之前**, 且只调一次。
         // 方向: 组件查 key 时先查我们的 `app.yml`, 查不到再回落组件内置 `ui.yml`（反向不成立）。
@@ -85,6 +91,10 @@ pub fn run() -> Result<()> {
 
         // 必须在第一个窗口前调用。
         gpui_kit::component::init(cx);
+
+        // Keep quit handling at application scope: no focused view is required.
+        cx.on_action(|_: &Quit, cx| cx.quit());
+        cx.bind_keys([gpui_kit::KeyBinding::new("cmd-q", Quit, None)]);
 
         // 1. 创建 AppModel。启动期致命错误 → 弹原生对话框后退出 GPUI 循环, 不开窗口。
         let (model, wakeup_rx) = match AppModel::new_with_wakeup() {
@@ -98,6 +108,7 @@ pub fn run() -> Result<()> {
                     ))
                     .set_level(rfd::MessageLevel::Error)
                     .show();
+                cx.quit();
                 return;
             }
         };
@@ -120,6 +131,14 @@ pub fn run() -> Result<()> {
         // 5. 把 `AppConfig.language` 同步给 gpui_kit::component, 必须在开窗**前**调,
         //    否则首帧用错 fallback locale。
         gpui_kit::component::set_locale(locale_for(model.read(cx).config.global.language));
+
+        #[cfg(target_os = "macos")]
+        cx.set_menus([
+            gpui_kit::Menu::new("So Novel").items([gpui_kit::MenuItem::action(
+                rust_i18n::t!("AppMenu.quit").to_string(),
+                Quit,
+            )]),
+        ]);
 
         let window_size = size(px(1200.0), px(800.0));
         let min_size = size(px(900.0), px(600.0));
@@ -154,6 +173,7 @@ pub fn run() -> Result<()> {
                 .set_description(format!("无法打开主窗口：\n\n{e:#}"))
                 .set_level(rfd::MessageLevel::Error)
                 .show();
+            cx.quit();
         }
     });
 
