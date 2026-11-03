@@ -45,21 +45,20 @@
     "comment": "完本很全，搜索限流，搜索需逆向加密参数b",
     "needProxy": true,
     "search": {
-      "url": "@js:var s=\"PXhw7UT1B0a9kQDKZsjIASmOezxYG4CHo5Jyfg2b8FLpEvRr3WtVnlqMidu6cN\";var kw=encodeURI(r);var e=\"\";for(var i=0;i<kw.length;i++){var n=s.indexOf(kw[i]);var c=n==-1?kw[i]:s[(n+3)%62];var n1=parseInt(Math.random()*62,10);var n2=parseInt(Math.random()*62,10);e+=s[n1]+c+s[n2];}return 'https://quanben5.com?c=book&a=search.json&callback=search&t='+Date.now()+'&keywords='+encodeURIComponent(r)+'&b='+encodeURI(e);",
+      "url": "@js:var s=\"PXhw7UT1B0a9kQDKZsjIASmOezxYG4CHo5Jyfg2b8FLpEvRr3WtVnlqMidu6cN\";var kw=encodeURI(r);var e=\"\";for(var i=0;i<kw.length;i++){var n=s.indexOf(kw[i]);var c=n==-1?kw[i]:s[(n+3)%62];var n1=parseInt(Math.random()*62,10);var n2=parseInt(Math.random()*62,10);e+=s[n1]+c+s[n2];}return 'https://quanben5.com/?c=book&a=search.json&callback=search&keywords='+r+'&b='+encodeURI(e);",
       "method": "get",
       "result": ".pic_txt_list@js:var m=r.match(/search\\((.+)\\)/);if(!m)return r;var o=JSON.parse(m[1]);return o.content.replace(/\\r/g,'').replace(/\\n/g,'').replace(/\\t/g,'');",
       "bookName": "h3 > a",
-      "author": "p.info > span",
-      "referer": "https://quanben5.com/search.html"
+      "author": "p.info > span"
     },
     "book": {
       "url": "https://quanben5.com/n/(.*?)/",
       "bookName": "h3 > span",
-      "author": ".pic_txt_list .author",
-      "intro": "div.description",
-      "category": ".pic_txt_list p:nth-child(4) > span",
-      "coverUrl": ".pic_txt_list .pic > img@src",
-      "status": ".pic_txt_list p:nth-child(5) > span"
+      "author": "body > div.row > div > div:nth-child(1) > div.pic_txt_list > p:nth-child(3) > span",
+      "intro": "body > div.row > div > div:nth-child(1) > div.description",
+      "category": "body > div.row > div > div:nth-child(1) > div.pic_txt_list > p:nth-child(4) > span",
+      "coverUrl": "body > div.row > div > div:nth-child(1) > div.pic_txt_list > div > img",
+      "status": "body > div.row > div > div:nth-child(1) > div.pic_txt_list > p:nth-child(5) > span"
     },
     "toc": {
       "url": "https://quanben5.com/n/%s/xiaoshuo.html",
@@ -134,6 +133,45 @@
       "paragraphTag": "<br>+",
       "filterTxt": "\\(本章完\\)",
       "filterTag": "div"
+    }
+  },
+  {
+    "url": "https://www.fsshu.com/",
+    "name": "笔趣屋",
+    "comment": "与新笔趣阁info同款CMS(fsshu镜像)；搜索GET、目录20页、正文article.font_max、章节内分页",
+    "search": {
+      "url": "https://www.fsshu.com/search.php?q=%s",
+      "method": "get",
+      "result": ".box.hot dl",
+      "bookName": "dd > h3 > a@js:r=r.replace(/^\\[[^\\]]*\\]/,'')",
+      "author": "dd.book_other > span",
+      "latestChapter": "dd.book_other a"
+    },
+    "book": {
+      "url": "https://www.fsshu.com/biquge/(\\d+/\\d+)/"
+    },
+    "toc": {
+      "url": "https://www.fsshu.com/biquge/%s/index_1.html",
+      "baseUri": "https://www.fsshu.com/biquge/%s/",
+      "item": ".book_list2 > ul > li > a",
+      "nextPage": ".pagination li.page-item.active + li > a"
+    },
+    "chapter": {
+      "title": "h1",
+      "content": "article.font_max",
+      "paragraphTagClosed": false,
+      "paragraphTag": "<br>+",
+      "filterTxt": "第\\(\\d+/\\d+\\)页|正在手打中，请稍等片刻|内容更新后，请重新刷新页面，即可获取最新更新！",
+      "filterTag": "script",
+      "nextPage": "#next1"
+    },
+    "crawl": {
+      "concurrency": 3,
+      "minInterval": 400,
+      "maxInterval": 1000,
+      "maxAttempts": 3,
+      "retryMinInterval": 1500,
+      "retryMaxInterval": 3000
     }
   }
 ]

@@ -2,6 +2,7 @@
 //! 场景下不能共享同一个; 而创建 Context 只是分配一组 vec/map, 开销远小于一次 HTTP 请求。
 
 use anyhow::{Context as _, Result};
+use base64::Engine as _;
 use boa_engine::vm::RuntimeLimits;
 use boa_engine::{Context, Source};
 use std::fmt::Write as _;
@@ -56,6 +57,34 @@ pub fn post_process(body: &str, input: &str) -> Result<String> {
         .map_err(|e| anyhow::anyhow!("js value to_string failed: {e}"))?;
     s.to_std_string()
         .context("js result is not valid UTF-16 → UTF-8")
+}
+
+/// 执行规则里的 `@java:` 后处理步骤。等价 Java `dsl.executor.impl.JavaExecutor`。
+///
+/// 上游只用到 `base64.decode()`：把输入按行 trim、过滤空行后逐行解码再拼接
+/// （章节内容是逐行 base64 的 `writeln('...')` 片段）。其它 code 原样返回，
+/// 与上游未命中分支的行为一致。
+///
+/// # Errors
+///
+/// `base64.decode()` 遇到非法 base64 或解码结果非 UTF-8 时返回错误。
+pub fn apply_java_step(code: &str, input: &str) -> Result<String> {
+    match code.trim() {
+        "base64.decode()" => {
+            let mut out = String::new();
+            for line in input.lines().map(str::trim).filter(|line| !line.is_empty()) {
+                let bytes = base64::engine::general_purpose::STANDARD
+                    .decode(line)
+                    .with_context(|| format!("base64 decode failed: {line:?}"))?;
+                out.push_str(
+                    &String::from_utf8(bytes)
+                        .with_context(|| format!("base64 decoded bytes are not UTF-8: {line:?}"))?,
+                );
+            }
+            Ok(out)
+        }
+        _ => Ok(input.to_string()),
+    }
 }
 
 /// 加载一个 JS 文件 (含全局函数定义), 调用其中某个函数, 返回字符串结果。
@@ -190,6 +219,27 @@ mod tests {
         let body = "while(true){}";
         let result = post_process(body, "x");
         assert!(result.is_err(), "infinite loop must error, got {result:?}");
+    }
+
+    // ---------- apply_java_step（@java: 后处理）----------
+
+    #[test]
+    fn java_base64_decode_multiline() {
+        // 与上游 JavaExecutor 一致：按行 trim → 过滤空行 → 逐行解码 → 拼接。
+        let out = apply_java_step("base64.decode()", "5L2g5aW9\n\n  5LiW55WM  ").unwrap();
+        assert_eq!(out, "你好世界");
+    }
+
+    #[test]
+    fn java_unknown_step_is_noop() {
+        let out = apply_java_step("string.replace('a','b')", "原文").unwrap();
+        assert_eq!(out, "原文");
+    }
+
+    #[test]
+    fn java_base64_decode_invalid_input_errors() {
+        let result = apply_java_step("base64.decode()", "!!!not-base64!!!");
+        assert!(result.is_err(), "invalid base64 must error, got {result:?}");
     }
 
     // ---------- eval_function（独立 JS 文件 + 函数调用）----------

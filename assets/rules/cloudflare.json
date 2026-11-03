@@ -1,5 +1,39 @@
 [
   {
+    "url": "https://www.wxsy.net/",
+    "name": "顶点小说",
+    "comment": "搜索有cf，搜索、详情、章节限流。目录乱序、正文段落被base64编码",
+    "search": {
+      "url": "https://www.wxsy.net/search.html",
+      "method": "post",
+      "data": "{s: %s}",
+      "result": "body > div.container > div:nth-child(1) > div > ul > li",
+      "bookName": "span.s2 > a",
+      "author": "span.s3 > a",
+      "category": "span.s1",
+      "latestChapter": "span.s4 > a",
+      "lastUpdateTime": "span.s5"
+    },
+    "book": {
+      "url": "https://www.wxsy.net/novel/(.*?)/",
+      "coverUrl": ".imgbox > img"
+    },
+    "toc": {
+      "url": "https://www.wxsy.net/novel/%s/chapter_1.html",
+      "list": "/html@js:const childRegex=/\\.section-list\\.ycxsid>li:nth-child\\(\\d+\\){display:none}/g;const lastChildRegex=/\\.section-list\\.ycxsid>li:nth-last-child\\(\\d+\\){display:none}/g;const preHiddenCount=[...r.matchAll(childRegex)].length;const afterHiddenCount=[...r.matchAll(lastChildRegex)].length;r=r.replace(/<ul[^>]*class=\"[^\"]*\\bsection-list\\b[^\"]*\\bycxsid\\b[^\"]*\"[^>]*>([\\s\\S]*?)<\\/ul>/g,(match,liContent)=>{const lis=liContent.match(/<li[\\s\\S]*?<\\/li>/g)||[];const newLis=lis.slice(preHiddenCount,lis.length-afterHiddenCount);return match.replace(liContent,newLis.join(''))});",
+      "item": ".biqunaicc > div:nth-child(2) > div > ul > li > a",
+      "nextPage": ".biqunaicc > div:nth-child(2) > div > div:nth-child(2) > select > option"
+    },
+    "chapter": {
+      "title": "h3",
+      "content": ".row-detail > div > div@js:r=r.replace(/<script>\\s*document\\.writeln\\(qsbs\\.bb\\('([^']+)'\\)\\);\\s*<\\/script>/g,function(a,b){return b});@java:base64.decode()",
+      "paragraphTagClosed": true,
+      "filterTxt": "请勿开启浏览器阅读模式，否则将导致章节内容缺失及无法阅读下一章。|\\(本章完\\)",
+      "filterTag": "h3, div, p[style=font-size:12px;]",
+      "nextPage": ".row.row-detail > div > div > div:nth-child(2) > a:nth-child(4)"
+    }
+  },
+  {
     "url": "http://www.xhytd.com/",
     "name": "黄易天地",
     "comment": "非大陆IP可能速度较慢",
@@ -53,7 +87,7 @@
     },
     "chapter": {
       "title": "#mlfy_main_text > h1",
-      "content": "#content@js:var qsbs={_keyStr:\"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=\",bb:function(a){var b=\"\",d,c,i,e,f,h,j,g=0;a=a.replace(/[^A-Za-z0-9+\\/=]/g,\"\");while(g<a.length){e=this._keyStr.indexOf(a.charAt(g++));f=this._keyStr.indexOf(a.charAt(g++));h=this._keyStr.indexOf(a.charAt(g++));j=this._keyStr.indexOf(a.charAt(g++));d=(e<<2)|(f>>4);c=((f&15)<<4)|(h>>2);i=((h&3)<<6)|j;b+=String.fromCharCode(d);if(h!=64)b+=String.fromCharCode(c);if(j!=64)b+=String.fromCharCode(i)}return this._utf8_decode(b)},_utf8_encode:function(a){a=a.replace(/\\r\\n/g,\"\\n\");var b=\"\";for(var d=0;d<a.length;d++){var c=a.charCodeAt(d);if(c<128){b+=String.fromCharCode(c)}else if(c<2048){b+=String.fromCharCode((c>>6)|192);b+=String.fromCharCode((c&63)|128)}else{b+=String.fromCharCode((c>>12)|224);b+=String.fromCharCode(((c>>6)&63)|128);b+=String.fromCharCode((c&63)|128)}}return b},_utf8_decode:function(a){var b=\"\",d=0,c=0,i=0,e=0,f=0;while(d<a.length){c=a.charCodeAt(d);if(c<128){b+=String.fromCharCode(c);d++}else if(c<224){e=a.charCodeAt(d+1);b+=String.fromCharCode(((c&31)<<6)|(e&63));d+=2}else{e=a.charCodeAt(d+1);f=a.charCodeAt(d+2);b+=String.fromCharCode(((c&15)<<12)|((e&63)<<6)|(f&63));d+=3}}return b}};r=r.replace(/<script>\\s*document\\.writeln\\(qsbs\\.bb\\('([^']+)'\\)\\);\\s*<\\/script>/g,function(a,b){return qsbs.bb(b)});",
+      "content": "#content@js:r=r.replace(/<script>\\s*document\\.writeln\\(qsbs\\.bb\\('([^']+)'\\)\\);\\s*<\\/script>/g,function(a,b){return b});@java:base64.decode()",
       "paragraphTagClosed": true,
       "filterTxt": "\\((继续下一页|本章完)\\)|最⊥新⊥小⊥说⊥在⊥六⊥9⊥⊥书⊥⊥吧⊥⊥首⊥发！",
       "filterTag": "",

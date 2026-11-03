@@ -49,7 +49,7 @@
 
 | 领域 | 选型 |
 |------|------|
-| 🎨 GUI | [gpui-kit 0.7](https://crates.io/crates/gpui-kit)（底层 [GPUI](https://gpui.rs) ） |
+| 🎨 GUI | [gpui-kit 0.9](https://crates.io/crates/gpui-kit)（底层 [GPUI](https://gpui.rs) ） |
 | ⚡ 异步 | [tokio 1](https://tokio.rs) (rt-multi-thread) |
 | 🌐 HTTP | [reqwest 0.13](https://docs.rs/reqwest) (rustls，无 OpenSSL) |
 | 🔍 HTML 解析 | scraper 0.27 + regex |
@@ -134,11 +134,11 @@ cargo run
 
 仓库自带 6 套书源规则（位于 `assets/rules/`，首次运行复制到 `~/.sonovel/rules/`）：
 
-- `main.json` — 默认书源（12 个，均支持搜索、大陆 IP）
-- `proxy-required.json` — 需要代理的书源（4 个，非大陆 IP）
+- `main.json` — 默认书源（13 个，均支持搜索、大陆 IP）
+- `proxy-required.json` — 需要代理的书源（5 个，非大陆 IP）
 - `rate-limit.json` — 下载限流的源（4 个）
-- `no-search.json` — 不支持搜索的源（2 个）
-- `cloudflare.json` — 有 Cloudflare 保护的源（3 个）
+- `no-search.json` — 不支持搜索的源（3 个）
+- `cloudflare.json` — 有 Cloudflare 保护的源（5 个）
 - `rule-template.json5` — 自定义书源模板
 
 切换书源集：在 GUI 的「书源」页右上角下拉选择活跃文件（或直接改

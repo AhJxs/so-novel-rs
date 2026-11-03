@@ -15,6 +15,8 @@ pub enum SelectError {
     XPathNotSupported(String),
     #[error("JS 后处理失败: {0}")]
     JsFailed(String),
+    #[error("Java 后处理失败: {0}")]
+    JavaFailed(String),
 }
 
 /// 用于一次"选 + 抽 + 可选 JS 后处理"的统一入口。
@@ -70,13 +72,24 @@ fn select_and_invoke_js_impl(
     }
     let (query, content_type) = strip_at_suffix(query, content_type);
     let (selector_part, js_body) = split_js(query);
+    // `@java:` 可以单独出现，也可以串在 `@js:` 之后（上游 DSL 两种写法都有）。
+    let (selector_part, java_only) =
+        js_body.map_or_else(|| split_java(selector_part), |_| (selector_part, None));
+    let (js_body, java_body) = js_body.map_or((None, java_only), |body| {
+        let (js, java) = split_java(body);
+        (Some(js), java)
+    });
     let selector_norm = normalize_selector(selector_part)?;
     let raw = select(&selector_norm, content_type)?;
-    match js_body {
-        Some(body) => {
-            crate::js::post_process(body, &raw).map_err(|e| SelectError::JsFailed(format!("{e:#}")))
-        }
-        None => Ok(raw),
+    let processed = match js_body {
+        Some(body) => crate::js::post_process(body, &raw)
+            .map_err(|e| SelectError::JsFailed(format!("{e:#}")))?,
+        None => raw,
+    };
+    match java_body {
+        Some(code) => crate::js::apply_java_step(code, &processed)
+            .map_err(|e| SelectError::JavaFailed(format!("{e:#}"))),
+        None => Ok(processed),
     }
 }
 
@@ -156,6 +169,13 @@ fn strip_at_suffix(query: &str, ct: ContentType) -> (&str, ContentType) {
 pub fn split_js(query: &str) -> (&str, Option<&str>) {
     query.find("@js:").map_or((query, None), |idx| {
         (&query[..idx], Some(&query[idx + 4..]))
+    })
+}
+
+/// 拆 `<sel-or-js>@java:<code>` 这两段。`@java:` 是 JS 之后的后处理步骤。
+fn split_java(query: &str) -> (&str, Option<&str>) {
+    query.find("@java:").map_or((query, None), |idx| {
+        (&query[..idx], Some(&query[idx + "@java:".len()..]))
     })
 }
 
@@ -431,5 +451,30 @@ mod tests {
         let p_sel = Selector::parse("p").unwrap();
         let count = h.select(&p_sel).count();
         assert!(count >= 4, "p count: {count}");
+    }
+
+    #[test]
+    fn applies_java_base64_decode_after_js() {
+        // 上游 DSL：<sel>@js:<code>@java:base64.decode()
+        let h = doc("<html><body><div class=\"a\">5L2g5aW9\n5LiW55WM</div></body></html>");
+        let q = r".a@js:r=r.trim()@java:base64.decode()";
+        let s = select_and_invoke_js(&h, q, ContentType::Text).unwrap();
+        assert_eq!(s, "你好世界");
+    }
+
+    #[test]
+    fn applies_java_base64_decode_without_js() {
+        let h = doc(r#"<html><body><div class="a">5L2g5aW9</div></body></html>"#);
+        let q = r".a@java:base64.decode()";
+        let s = select_and_invoke_js(&h, q, ContentType::Text).unwrap();
+        assert_eq!(s, "你好");
+    }
+
+    #[test]
+    fn unknown_java_step_keeps_input() {
+        let h = doc(r#"<html><body><div class="a">原文</div></body></html>"#);
+        let q = r".a@java:unknown()";
+        let s = select_and_invoke_js(&h, q, ContentType::Text).unwrap();
+        assert_eq!(s, "原文");
     }
 }

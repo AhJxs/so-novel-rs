@@ -7,4 +7,4 @@
 
 mod runtime;
 
-pub use runtime::{eval_function_returning_string, post_process};
+pub use runtime::{apply_java_step, eval_function_returning_string, post_process};

@@ -5,11 +5,11 @@
 
 | 书源文件 | 用途 | 数量 |
 |---|---|---|
-| `main.json` | 默认书源，均支持搜索、大陆 IP | 17 |
-| `proxy-required.json` | 需要代理的书源（必须是非大陆 IP），需在 `config.toml` 设置 `cf-bypass` | 4 |
+| `main.json` | 默认书源，均支持搜索、大陆 IP | 13 |
+| `proxy-required.json` | 需要代理的书源（必须是非大陆 IP），需在 `config.toml` 设置 `cf-bypass` | 5 |
 | `rate-limit.json` | 下载限流的书源 | 4 |
-| `no-search.json` | 不支持搜索的书源，需要输入书籍详情页地址下载 | 2 |
-| `cloudflare.json` | 有 Cloudflare 保护的书源，需在 `config.toml` 设置 `cf-bypass` | 4 |
+| `no-search.json` | 不支持搜索的书源，需要输入书籍详情页地址下载 | 3 |
+| `cloudflare.json` | 有 Cloudflare 保护的书源，需在 `config.toml` 设置 `cf-bypass` | 5 |
 | `rule-template.json5` | 书源规则模板文件（自定义书源参考） | — |
 
 > **⚠️ IP 要求仅供参考，不保证完全准确**。根据需要决定是否在
@@ -24,22 +24,18 @@
 
 | 书源名称 | 大陆 IP | 非大陆 IP | ⚠️ 需要注意 |
 |---|---|---|---|
-| [香书小说](http://www.xbiqugu.la/) | ✅ | ❌ | |
+| [香书小说](http://www.ibiqugu.net/) | ✅ | ❌ | |
 | [书海阁小说网](https://www.shuhaige.net/) | ✅ | ✅ | 搜索限流 |
-| [梦书中文](http://www.mcxs.info/) | ✅ | ❌ | 搜索限流 |
-| [鸟书网](http://www.99xs.info/) | ✅ | ❌ | 搜索限流 |
-| [笔趣阁22](https://www.22biqu.com/) | ✅ | ✅ | |
-| [笔尖中文](http://www.xbiquzw.net/) | ✅ | ❌ | |
+| [梦书中文](http://www.mcxs.la/) | ✅ | ❌ | 搜索限流 |
+| [鸟书网](http://www.99wx.info/) | ✅ | ❌ | 搜索限流 |
+| [笔尖中文](http://www.xbiquwk.com/) | ✅ | ❌ | |
 | [悠久小说网](http://www.ujxsw.org/) | ✅ | ❌ | |
 | [阅读库](http://www.yeudusk.com/) | ✅ | ❌ | |
-| [顶点小说](https://www.wxsy.net/) | ✅ | ❌ | 搜索、详情限流 |
 | [笔趣阁365](https://www.biquge365.net/) | ✅ | ✅ | 搜索间隔 15 秒 |
-| [燃文小说网](https://www.ranwen8.cc/) | ✅ | ❌ | |
 | [第八中文网](https://www.d8zw.com/) | ✅ | — | 搜索、目录自动翻页（每页 100 章）；偶尔 502，建议线程数 ≤ 5 |
 | [笔趣阁52](https://www.52bqg.com/) | ✅ | — | 目录/章节链接为 JS onclick（规则已用 `@js` 重写为绝对链接）；正文 base64，分页章节用 `nextPageInJs` 解析 |
-| [新笔趣阁](https://www.xbiquge.cc/) | ✅ | — | 目录/章节链接为 JS onclick、正文 base64；该站对本程序连接不稳定（connect timed out），失败请重试 |
 | [少年小说网](https://www.snxsw.com/) | ✅ | — | 与笔趣阁52同款 CMS（搜索需带 submit 字段）；目录含隐藏 li、正文 base64、章节多页 |
-| [新笔趣阁info](https://www.xbiquge.info/) | ✅ | — | 与第八中文网同款 CMS 的镜像站；目录分页、正文 `article.font_max`，章节分页需翻页 |
+| [新笔趣阁小说网](https://www.xbiquge.info/) | ✅ | — | 与第八中文网同款 CMS 的镜像站；目录分页、正文 `article.font_max`，章节分页需翻页 |
 | [笔趣阁info](https://www.bqg.info/) | ✅ | — | Bootstrap 模板；详情页直接含完整目录（无独立目录页），章内分页 |
 
 ---
@@ -55,6 +51,7 @@
 | [全本小说网](https://quanben5.com/) | ✅ | 完本很全，连载基本搜不到；同 quanben5.io / big5.quanben5.com / quanben-xiaoshuo.com |
 | [大熊猫文学](https://www.dxmwx.org/) | ✅ | |
 | [101看书](https://101kks.com/) | ✅ | 章节页有 CF，推荐线程数 ≤ 5，UI 同 69 |
+| [笔趣屋](https://www.fsshu.com/) | ✅ | 与新笔趣阁小说网同款 CMS 的镜像站；搜索 GET、目录分页、正文 `article.font_max`、章节内分页 |
 
 ---
 
@@ -62,10 +59,10 @@
 
 | 书源名称 | 大陆 IP | 非大陆 IP | 支持搜索 | ⚠️ 需要注意 |
 |---|---|---|---|---|
-| [新天禧小说](https://www.tianxibook.com/) | ✅ | ❌ | ✅ | 下载过快会导致章节内容为空，建议线程数 ≤ 5 |
+| [新天禧小说](https://www.xtxxs9.com/) | ✅ | ❌ | ✅ | 下载过快会导致章节内容为空，建议线程数 ≤ 5 |
 | [零点小说](https://www.0xs.net/) | ✅ | ✅ | ✅ | 限流程度和 69 相似，爬取过快会封 IP 且获取不到正文 |
-| [老幺小说网](https://www.laoyaoxs.org/) | ✅ | ❌ | ✅ | 章节限流，正文段落会乱序 |
-| [速读谷](https://www.sudugu.org/) | ✅ | ✅ | ✅ | 章节限流，线程数 1 |
+| [速读谷](https://www.suduguu.com/) | ✅ | ✅ | ✅ | 章节限流，线程数 1 |
+| [笔趣阁中文网](https://www.xbiquge.cc/) | ✅ | — | ✅ | 目录/章节链接为 JS onclick、正文 base64；该站对本程序连接不稳定（connect timed out），失败请重试 |
 
 ---
 
@@ -75,8 +72,9 @@
 
 | 书源名称 | 大陆 IP | 非大陆 IP | ⚠️ 需要注意 |
 |---|---|---|---|
+| [小说虎](https://www.xiaoshuohu.com/) | ✅ | ✅ | 正文广告较多，需手动过滤 |
 | [天天看小说](https://cn.ttkan.co/) | ✅ | ✅ | 曾经可以搜索 |
-| [小说虎](https://www.xshbook.com/) | ✅ | ✅ | 正文广告较多，需手动过滤 |
+| [小说之家](https://xszj.org/) | ✅ | ✅ | |
 
 ---
 
@@ -87,6 +85,7 @@
 
 | 书源名称 | 大陆 IP | 非大陆 IP | ⚠️ 需要注意 |
 |---|---|---|---|
+| [顶点小说](https://www.wxsy.net/) | ✅ | ❌ | 搜索页有 CF；搜索、详情、章节限流，目录乱序、正文 base64 |
 | [黄易天地](http://www.xhytd.com/) | ✅ | ✅ | 非大陆 IP 可能速度较慢 |
 | [96读书](https://www.96dushu.com/) | ✅ | ✅ | 章节 JS 加密 |
 | [东滩小说](http://www.dongtanxs.com/) | ✅ | ✅ | |

@@ -1,9 +1,9 @@
 [package]
 name = "so-novel-rs"
-version = "0.5.0"
+version = "0.5.1"
 edition = "2024"
 rust-version = "1.95"
-description = "So Novel — Rust desktop client (gpui-kit 0.7)."
+description = "So Novel — Rust desktop client (gpui-kit 0.9)."
 license = "AGPL-3.0-only"
 publish = false
 
@@ -12,7 +12,7 @@ name = "so-novel-rs"
 path = "src/main.rs"
 
 [dependencies]
-gpui-kit = "0.7.1"
+gpui-kit = "0.9.0"
 # 国际化 —— 复用 gpui-kit 组件库内部用的同一套 rust-i18n 机制。
 rust-i18n = "4.2.4"
 
@@ -65,6 +65,9 @@ chardetng = "1"
 # JavaScript 引擎（书源规则 @js: 后处理 + quanben5 加密）。
 # 选 boa 而非 rquickjs：纯 Rust 无 C 工具链依赖，规则用到的 ES5/ES6 子集它都支持。
 boa_engine = "0.22"
+
+# 上游书源 DSL 的 `@java:base64.decode()` 后处理（少年小说网 / 新笔趣阁等）。
+base64 = "0.22"
 
 # rand（UA 池等）。惰性初始化改用 std::sync::LazyLock，不再需要 once_cell。
 rand = "0.10"
