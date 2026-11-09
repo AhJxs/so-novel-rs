@@ -1425,7 +1425,6 @@ git commit -m "test: add context to non-obvious assertions"
 #![cfg_attr(test, allow(clippy::wildcard_imports))]
 #![allow(
     clippy::module_name_repetitions,
-    clippy::missing_errors_doc,
     clippy::cast_possible_truncation,
     clippy::cast_lossless,
     clippy::cast_sign_loss,
@@ -1435,7 +1434,7 @@ git commit -m "test: add context to non-obvious assertions"
 )]
 ```
 
-删除 `clippy::must_use_candidate` allow，按 clippy 输出为纯函数/关键返回值补 `#[must_use]`。
+删除 `clippy::must_use_candidate`、`clippy::missing_errors_doc` allow，按 clippy 输出为纯函数/关键返回值补 `#[must_use]`，为返回 `Result` 的公开函数补 `# Errors`。
 测试模块已有的 `#![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]` 保留。
 
 - [ ] **Step 2: `clippy.toml`**
