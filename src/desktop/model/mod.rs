@@ -38,5 +38,5 @@ pub use search_state::{
 pub use sources_state::SourcesState;
 pub use ui_event::UIEvent;
 pub use update_state::{
-    UpdateCheckResult, UpdateOutcome, UpdateState, check_github_latest_release,
+    UpdateCheckResult, UpdateError, UpdateOutcome, UpdateState, check_github_latest_release,
 };

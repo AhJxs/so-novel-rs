@@ -11,14 +11,20 @@ use serde_json::Value;
 use crate::http::{GhProxy, HttpClients};
 use crate::models::Rule;
 
-/// 后台更新检查的结果。`latest_version` 和 `error` 互斥：成功时前者 Some，
-/// 失败时后者 Some —— 由 [`check_latest_release`] 自身保证。
-pub struct UpdateCheckResult {
-    /// GitHub 上最新的版本号；成功时才有值。
-    pub latest_version: Option<String>,
-    /// 检查失败的原因；失败时才有值。
-    pub error: Option<String>,
+/// 更新检查失败原因。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UpdateError(pub String);
+
+impl std::fmt::Display for UpdateError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
 }
+impl std::error::Error for UpdateError {}
+
+/// 后台更新检查的结果：成功时 `Ok` 携带 GitHub 上最新 release 的 tag（可能解析不到，
+/// 此时为 `Ok(None)`），失败时 `Err` 携带原因。
+pub type UpdateCheckResult = Result<Option<String>, UpdateError>;
 
 /// `classify` / `UpdateState::drain` 报告的语义化跃迁：把"通道刚返回了一条 result"
 /// 翻译成"用户应该听到什么"，调用方拿到后只管 push notification，不再自己 `if let` 串字段。
@@ -34,18 +40,16 @@ pub enum UpdateOutcome {
 
 /// 把后台回报的 [`UpdateCheckResult`] 分类成 [`UpdateOutcome`]。
 ///
-/// **优先级**：error > `latest_version`（后台 contract 保证两者不会同时为 Some）；两者都空
-/// 兜底成 `Failed("(empty result)")`，避免静默丢事件（通常意味着 GitHub 响应 schema 变了）。
+/// `Err` 原样翻译成 `Failed`；成功但解析不到 tag 时兜底成 `Failed("(empty result)")`，
+/// 避免静默丢事件（通常意味着 GitHub 响应 schema 变了）。
 pub fn classify(result: &UpdateCheckResult) -> UpdateOutcome {
-    if let Some(err) = &result.error {
-        return UpdateOutcome::Failed(err.clone());
-    }
-    match &result.latest_version {
-        Some(latest) if latest.trim_start_matches('v') == env!("CARGO_PKG_VERSION") => {
+    match result {
+        Err(e) => UpdateOutcome::Failed(e.to_string()),
+        Ok(Some(latest)) if latest.trim_start_matches('v') == env!("CARGO_PKG_VERSION") => {
             UpdateOutcome::UpToDate
         }
-        Some(latest) => UpdateOutcome::NewVersion(latest.clone()),
-        None => UpdateOutcome::Failed("(empty result)".into()),
+        Ok(Some(latest)) => UpdateOutcome::NewVersion(latest.clone()),
+        Ok(None) => UpdateOutcome::Failed("(empty result)".into()),
     }
 }
 
@@ -59,8 +63,8 @@ pub fn is_new_version_available(latest: &str) -> bool {
 /// 向 GitHub API 查询最新 release 版本号。
 ///
 /// 代理优先级：`gh_proxy_pair()` URL 非空 → 预构建的 GH 镜像前向代理 client（已含 proxy + UA），否则复用共享
-/// `safe` client（已含 CONNECT 代理 / TLS cache / 默认 headers）；失败写进 `error`，解析不到 `tag_name` 则由 [`classify`] 兜底。
-/// 网络错误只走 `tracing::warn!`，不把 debug 字符串写进 `error`（避免泄漏到 UI 文案）。
+/// `safe` client（已含 CONNECT 代理 / TLS cache / 默认 headers）；失败返回 [`UpdateError`]，解析不到 `tag_name` 则由 [`classify`] 兜底。
+/// 网络错误只走 `tracing::warn!`，不把 debug 字符串写进错误文案（避免泄漏到 UI 文案）。
 pub async fn check_latest_release(http: &HttpClients) -> UpdateCheckResult {
     const URL: &str = "https://api.github.com/repos/AhJxs/so-novel-rs/releases/latest";
 
@@ -89,10 +93,10 @@ pub async fn check_latest_release(http: &HttpClients) -> UpdateCheckResult {
     match result {
         Ok(resp) => {
             if !resp.status().is_success() {
-                return UpdateCheckResult {
-                    latest_version: None,
-                    error: Some(format!("GitHub API 返回 HTTP {}", resp.status())),
-                };
+                return Err(UpdateError(format!(
+                    "GitHub API 返回 HTTP {}",
+                    resp.status()
+                )));
             }
             match resp.text().await {
                 Ok(body) => {
@@ -104,21 +108,12 @@ pub async fn check_latest_release(http: &HttpClients) -> UpdateCheckResult {
                     if tag.is_none() {
                         tracing::warn!("GitHub release response 无 tag_name: {body}");
                     }
-                    UpdateCheckResult {
-                        latest_version: tag,
-                        error: None,
-                    }
+                    Ok(tag)
                 }
-                Err(e) => UpdateCheckResult {
-                    latest_version: None,
-                    error: Some(format!("读取响应失败: {e}")),
-                },
+                Err(e) => Err(UpdateError(format!("读取响应失败: {e}"))),
             }
         }
-        Err(e) => UpdateCheckResult {
-            latest_version: None,
-            error: Some(format!("请求失败: {e}")),
-        },
+        Err(e) => Err(UpdateError(format!("请求失败: {e}"))),
     }
 }
 
@@ -128,50 +123,34 @@ mod tests {
     use super::*;
 
     #[test]
-    fn classify_failed_takes_precedence_over_latest() {
-        // 后台 contract：error / latest_version 互斥。但防御性写：error 优先
-        let r = UpdateCheckResult {
-            latest_version: Some("9.9.9".into()),
-            error: Some("net".into()),
-        };
-        assert!(matches!(classify(&r), UpdateOutcome::Failed(ref m) if m == "net"));
+    fn classify_failure_returns_failed() {
+        let r: UpdateCheckResult = Err(UpdateError("boom".into()));
+        assert!(matches!(classify(&r), UpdateOutcome::Failed(msg) if msg == "boom"));
     }
 
     #[test]
     fn classify_up_to_date_strips_leading_v() {
-        let r = UpdateCheckResult {
-            latest_version: Some(format!("v{}", env!("CARGO_PKG_VERSION"))),
-            error: None,
-        };
+        let r: UpdateCheckResult = Ok(Some(format!("v{}", env!("CARGO_PKG_VERSION"))));
         assert!(matches!(classify(&r), UpdateOutcome::UpToDate));
     }
 
     #[test]
     fn classify_up_to_date_without_v_prefix() {
         // tag 可能没 v 前缀（自己 fork 时常见）
-        let r = UpdateCheckResult {
-            latest_version: Some(env!("CARGO_PKG_VERSION").to_string()),
-            error: None,
-        };
+        let r: UpdateCheckResult = Ok(Some(env!("CARGO_PKG_VERSION").to_string()));
         assert!(matches!(classify(&r), UpdateOutcome::UpToDate));
     }
 
     #[test]
-    fn classify_new_version_when_differs() {
-        let r = UpdateCheckResult {
-            latest_version: Some("999.0.0".into()),
-            error: None,
-        };
-        assert!(matches!(classify(&r), UpdateOutcome::NewVersion(ref v) if v == "999.0.0"));
+    fn classify_new_version_returns_new_version() {
+        let r: UpdateCheckResult = Ok(Some("v999.0.0".into()));
+        assert!(matches!(classify(&r), UpdateOutcome::NewVersion(v) if v == "v999.0.0"));
     }
 
     #[test]
-    fn classify_empty_result_becomes_failed() {
-        let r = UpdateCheckResult {
-            latest_version: None,
-            error: None,
-        };
-        assert!(matches!(classify(&r), UpdateOutcome::Failed(_)));
+    fn classify_missing_tag_returns_empty_failure() {
+        let r: UpdateCheckResult = Ok(None);
+        assert!(matches!(classify(&r), UpdateOutcome::Failed(msg) if msg == "(empty result)"));
     }
 
     #[test]
