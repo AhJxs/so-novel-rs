@@ -17,7 +17,7 @@ use serde_json::Value;
 use tracing::warn;
 use url::Url;
 
-use crate::http::ua::random_ua;
+use crate::http::user_agent::random_user_agent;
 use crate::models::Book;
 
 /// 起点 CDN 的占位默认封面，规则里没给 coverUrl / `CoverUpdater` 全部失败时用。
@@ -146,7 +146,7 @@ async fn fetch_qidian(client: &Client, book: &Book, cookie: &str) -> Option<Stri
     let url = format!("https://www.qidian.com/so/{}.html", book.book_name);
     let resp = client
         .get(&url)
-        .header(reqwest::header::USER_AGENT, random_ua())
+        .header(reqwest::header::USER_AGENT, random_user_agent())
         .header(reqwest::header::COOKIE, cookie)
         .timeout(Duration::from_secs(TIMEOUT_SECS))
         .send()
@@ -184,7 +184,7 @@ async fn fetch_zongheng(client: &Client, book: &Book) -> Option<String> {
     ];
     let resp = client
         .get("https://search.zongheng.com/search/book")
-        .header(reqwest::header::USER_AGENT, random_ua())
+        .header(reqwest::header::USER_AGENT, random_user_agent())
         .query(&form)
         .timeout(Duration::from_secs(TIMEOUT_SECS))
         .send()
@@ -215,7 +215,7 @@ async fn fetch_qimao(client: &Client, book: &Book) -> Option<String> {
     ];
     let resp = client
         .get("https://www.qimao.com/qimaoapi/api/search/result")
-        .header(reqwest::header::USER_AGENT, random_ua())
+        .header(reqwest::header::USER_AGENT, random_user_agent())
         .query(&form)
         .timeout(Duration::from_secs(TIMEOUT_SECS))
         .send()
@@ -295,7 +295,7 @@ fn strip_tags(s: &str) -> String {
 async fn measure_resolution(client: &Client, url: &str) -> Option<u64> {
     let resp = client
         .get(url)
-        .header(reqwest::header::USER_AGENT, random_ua())
+        .header(reqwest::header::USER_AGENT, random_user_agent())
         .timeout(Duration::from_secs(TIMEOUT_SECS))
         .send()
         .await

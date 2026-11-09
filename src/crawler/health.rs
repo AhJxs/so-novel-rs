@@ -12,7 +12,7 @@ use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 
 use crate::http::HttpClients;
-use crate::http::ua::random_ua;
+use crate::http::user_agent::random_user_agent;
 use crate::models::Rule;
 
 /// 单源探测结果。
@@ -119,7 +119,7 @@ async fn probe_one(http: &HttpClients, rule: &Rule) -> SourceHealth {
     let result = client
         .head(&rule.url)
         .timeout(Duration::from_secs(5))
-        .header(USER_AGENT, random_ua())
+        .header(USER_AGENT, random_user_agent())
         .header(
             ACCEPT,
             "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",

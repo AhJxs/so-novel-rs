@@ -13,7 +13,7 @@ use anyhow::{Context, Result};
 use reqwest::Client;
 use reqwest::header::{ACCEPT, COOKIE, REFERER, USER_AGENT};
 
-use crate::http::{encoding, ua, url_join};
+use crate::http::{encoding, url_join, user_agent};
 
 /// 一次抓取的入参。
 pub struct FetchRequest<'a> {
@@ -75,7 +75,7 @@ pub async fn fetch(client: &Client, req: &FetchRequest<'_>) -> Result<FetchRespo
         || url_join::origin_or_self(req.url),
         std::string::ToString::to_string,
     );
-    let ua = ua::random_ua();
+    let ua = user_agent::random_user_agent();
 
     let mut builder = match req.method {
         HttpMethod::Get => client.get(req.url),

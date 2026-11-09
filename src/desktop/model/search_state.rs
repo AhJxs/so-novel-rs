@@ -312,7 +312,7 @@ impl SearchState {
         runtime.spawn(async move {
             let key_send = (source_id_send, url_owned.clone());
             let referer = crate::http::origin_or_self(&url_owned);
-            let ua = crate::http::ua::random_ua();
+            let ua = crate::http::user_agent::random_user_agent();
             let result: Option<Vec<u8>> = match client
                 .get(&url_owned)
                 .timeout(Duration::from_secs(15))
