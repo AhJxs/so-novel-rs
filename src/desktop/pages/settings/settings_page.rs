@@ -36,6 +36,20 @@ pub struct SettingsPage {
     pick_folder_listener: PickFolderListener,
 }
 
+/// 构造一个可搜索的主题 `SelectState`。用函数而不是闭包：闭包捕获 `window: &mut Window`
+/// 后只能调一次，三个 `SelectState` 各需独立借用。
+fn make_state(
+    names: &[SharedString],
+    current: &str,
+    window: &mut Window,
+    cx: &mut Context<SettingsPage>,
+) -> Entity<SelectState<SearchableVec<SharedString>>> {
+    let items: SearchableVec<SharedString> = names.to_vec().into();
+    let sel = SharedString::from(current.to_string());
+    let pos = <SearchableVec<SharedString> as SelectDelegate>::position(&items, &sel);
+    cx.new(|cx| SelectState::new(items, pos, window, cx).searchable(true))
+}
+
 impl SettingsPage {
     pub fn new(model: Entity<AppModel>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         // 主题 SelectState ×3：静态槽全量、动态浅/深槽按 mode 过滤（可搜索）。
@@ -45,19 +59,9 @@ impl SettingsPage {
         let initial_dark = themes::list_theme_names_by_mode(cx, themes::ThemeVariant::Dark);
 
         let pref0 = model.read(cx).config.global.theme_pref.clone();
-        // 用宏而不是闭包：闭包捕获 `window: &mut Window` 后只能调一次，三个 `SelectState`
-        // 各需独立借用 → 宏在调用处展开。
-        macro_rules! make_state {
-            ($names:expr, $cur:expr) => {{
-                let items: SearchableVec<SharedString> = ($names).to_vec().into();
-                let sel = SharedString::from($cur.to_string());
-                let pos = <SearchableVec<SharedString> as SelectDelegate>::position(&items, &sel);
-                cx.new(|cx| SelectState::new(items, pos, window, cx).searchable(true))
-            }};
-        }
-        let theme_state_static = make_state!(&initial_names, &pref0.static_name);
-        let theme_state_dyn_light = make_state!(&initial_light, &pref0.dyn_light);
-        let theme_state_dyn_dark = make_state!(&initial_dark, &pref0.dyn_dark);
+        let theme_state_static = make_state(&initial_names, &pref0.static_name, window, cx);
+        let theme_state_dyn_light = make_state(&initial_light, &pref0.dyn_light, window, cx);
+        let theme_state_dyn_dark = make_state(&initial_dark, &pref0.dyn_dark, window, cx);
 
         // 三个 Select 各订阅 Confirm → 写 config + persist + apply_theme_pref。
         // `apply_theme_pref` 要 `Option<&mut Window>`，订阅 handler 拿不到 → 传 None

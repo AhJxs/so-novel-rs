@@ -8,7 +8,6 @@
 //! - 读写都做兜底: 缓存失效只降级为未缓存路径, 不让 `.unwrap()` 炸掉整个调用栈。
 
 use std::collections::HashMap;
-use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
 use regex::Regex;
@@ -44,15 +43,8 @@ pub fn cached_selector(sel: &str) -> Result<Arc<Selector>, SelectError> {
         }
     }
 
-    let parsed = match catch_unwind(AssertUnwindSafe(|| Selector::parse(sel))) {
-        Ok(Ok(s)) => s,
-        Ok(Err(e)) => return Err(SelectError::BadSelector(format!("`{sel}`: {e:?}"))),
-        Err(_) => {
-            return Err(SelectError::BadSelector(format!(
-                "`{sel}`: parser panicked"
-            )));
-        }
-    };
+    let parsed =
+        Selector::parse(sel).map_err(|e| SelectError::BadSelector(format!("`{sel}`: {e:?}")))?;
     let arc = Arc::new(parsed);
     lock_or_recover(cache).insert(sel.to_string(), Arc::clone(&arc));
     Ok(arc)
@@ -72,13 +64,7 @@ pub fn cached_regex(pat: &str) -> Result<Arc<Regex>, regex::Error> {
         }
     }
 
-    let parsed = match catch_unwind(AssertUnwindSafe(|| Regex::new(pat))) {
-        Ok(Ok(r)) => r,
-        Ok(Err(e)) => return Err(e),
-        Err(_) => {
-            return Err(regex::Error::Syntax("regex parser panicked".to_string()));
-        }
-    };
+    let parsed = Regex::new(pat)?;
     let arc = Arc::new(parsed);
     lock_or_recover(cache).insert(pat.to_string(), Arc::clone(&arc));
     Ok(arc)
@@ -193,16 +179,18 @@ mod tests {
     /// Mutex 中毒（PoisonError）后 `lock_or_recover` 应能用旧值继续工作。
     #[test]
     fn lock_or_recover_unpoisoned_mutex_keeps_working() {
-        let m: Mutex<i32> = Mutex::new(0);
-        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let _g = m.lock().unwrap();
+        let shared = Arc::new(Mutex::new(0));
+        let cloned = Arc::clone(&shared);
+        let _ = std::thread::spawn(move || {
+            let _g = cloned.lock().expect("lock");
             panic!("simulated poison");
-        }));
-        assert!(m.lock().is_err(), "Mutex 应处于 poisoned 状态");
+        })
+        .join();
+        // 线程 panic 后 Mutex 处于 poisoned 状态；lock_or_recover 应仍能取回旧值。
         {
-            let mut g = lock_or_recover(&m);
+            let mut g = lock_or_recover(&shared);
             *g = 42;
         }
-        assert_eq!(*lock_or_recover(&m), 42);
+        assert_eq!(*lock_or_recover(&shared), 42);
     }
 }

@@ -71,7 +71,11 @@ pub fn apply_java_step(code: &str, input: &str) -> Result<String> {
     match code.trim() {
         "base64.decode()" => {
             let mut out = String::new();
-            for line in input.lines().map(str::trim).filter(|line| !line.is_empty()) {
+            for raw in input.lines() {
+                let line = raw.trim();
+                if line.is_empty() {
+                    continue;
+                }
                 let bytes = base64::engine::general_purpose::STANDARD
                     .decode(line)
                     .with_context(|| format!("base64 decode failed: {line:?}"))?;

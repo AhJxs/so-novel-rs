@@ -87,8 +87,9 @@ mode = "none"
 host = "127.0.0.1"
 port = 7890
     "#;
-    match template.parse() {
+    let doc: DocumentMut = match template.parse() {
         Ok(doc) => doc,
         Err(e) => panic!("default template must parse: {e}"),
-    }
+    };
+    doc
 }

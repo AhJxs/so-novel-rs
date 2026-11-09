@@ -90,11 +90,8 @@ impl SearchPage {
         cx.subscribe_in(&source_state, window, |this, _state, ev, _w, cx| {
             if let SelectEvent::Confirm(Some(value)) = ev {
                 let v = value.to_string();
-                let new_source_id = if v == "all" {
-                    None
-                } else {
-                    v.strip_prefix("rule:").and_then(|s| s.parse().ok())
-                };
+                let new_source_id: Option<i32> =
+                    v.strip_prefix("rule:").and_then(|s| s.parse().ok());
                 this.model.update(cx, |m, _cx| {
                     m.search.source_id = new_source_id;
                 });
@@ -265,13 +262,10 @@ impl SearchPage {
             value: SharedString::from("all"),
             title: aggregate_title,
         }];
-        for r in self
-            .model
-            .read(cx)
-            .rules
-            .iter()
-            .filter(|r| r.is_search_enabled())
-        {
+        for r in &self.model.read(cx).rules {
+            if !r.is_search_enabled() {
+                continue;
+            }
             // 名字兜底：空时显 "(no name)"，否则 truncate 到 30 字符避免长名字撑爆下拉。
             let name_disp = if r.name.is_empty() {
                 SharedString::from("(no name)")
