@@ -6,6 +6,7 @@
 use super::AppModel;
 
 impl AppModel {
+    /// 把书源选择状态写回 `sources_config.json`；失败仅记日志。
     pub fn save_sources_config(&self) {
         if let Err(e) = self.sources_config.save(&self.paths.sources_config) {
             tracing::warn!("保存书源配置失败: {e:#}");

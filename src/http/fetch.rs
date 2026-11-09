@@ -17,7 +17,9 @@ use crate::http::{encoding, url_join, user_agent};
 
 /// 一次抓取的入参。
 pub struct FetchRequest<'request> {
+    /// 目标地址。
     pub url: &'request str,
+    /// 请求方法与（POST 时的）表单数据。
     pub method: HttpMethod<'request>,
     /// 形如 `"k=v;k2=v2"` 的 cookie 字符串（与 Java 端规则字段直接拼）。
     pub cookies: Option<&'request str>,
@@ -27,15 +29,21 @@ pub struct FetchRequest<'request> {
     pub referer: Option<&'request str>,
 }
 
+/// 抓取使用的 HTTP 方法。
 pub enum HttpMethod<'raw> {
+    /// 无请求体的 GET。
     Get,
+    /// 带表单键值对的 POST。
     Post(&'raw [(String, String)]),
 }
 
 /// 抓取结果：解码后的 HTML、最终 URL（处理重定向后的）、状态码。
 pub struct FetchResponse {
+    /// 按响应头 charset 解码后的 HTML。
     pub html: String,
+    /// 跟随重定向后的最终地址。
     pub final_url: String,
+    /// HTTP 状态码。
     pub status: u16,
 }
 
@@ -220,6 +228,8 @@ pub async fn fetch_with_cf_fallback(
 /// `fetch_with_cf_fallback` 的错误类型。
 #[derive(Debug)]
 pub enum CfFallbackError {
+    /// 常规请求阶段失败。
     Http(String),
+    /// 命中 Cloudflare 且 bypass 也失败。
     Cloudflare(String),
 }

@@ -1,5 +1,5 @@
 //! 搜索页工具栏，拆成两个子区域：`toolbar_row`（关键词 Input + 书源 Select + 搜索 Button）
-//! 和 `source_status_row`（每个源的 status badge + 进度 spinner），由 `mod.rs::impl Render`
+//! 和 `source_status_row`（每个源的 status badge + 进度 spinner），由 `search_page.rs::impl Render`
 //! 依次挂上。
 
 use gpui_kit::component::button::Button;

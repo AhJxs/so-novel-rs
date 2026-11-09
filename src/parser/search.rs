@@ -23,20 +23,27 @@ use crate::http::{
 use crate::models::{ContentType, Rule, SearchResult};
 use crate::parser::dom::{SelectError, select_and_invoke_js_within, split_js};
 
+/// 单源搜索错误。
 #[derive(Debug, Error)]
 pub enum SearchError {
+    /// 书源的 `search.disabled` 为 true。
     #[error("书源未启用搜索")]
     SearchDisabled,
+    /// 整个书源被禁用。
     #[error("书源已被禁用")]
     SourceDisabled,
+    /// 搜索请求失败。
     #[error("HTTP 错误: {0}")]
     Http(String),
     #[error(
         "命中 Cloudflare 验证页，未配置 cf-bypass 旁路（请在 config.toml [global] cf-bypass 填地址）: {0}"
     )]
+    /// 命中 Cloudflare 验证页且未配置 bypass。
     Cloudflare(String),
+    /// HTML 结构解析失败。
     #[error("HTML 解析失败: {0}")]
     Parse(String),
+    /// CSS 选择器或 `@js:` 后处理失败。
     #[error("选择器/JS 执行失败: {0}")]
     Selector(#[from] SelectError),
 }

@@ -5,7 +5,7 @@
 //!
 //! - `value`: `"all"` = 聚合搜索（= `None`），`"rule:{id}"` = 单源。
 //! - `title`: 用户可见文本（聚合标题或 `format!("{name} ({LANG})")`）。
-//! - `Value` = `SharedString`，`Confirm(Some(value))` 的解析逻辑见 `mod.rs` 的订阅。
+//! - `Value` = `SharedString`，`Confirm(Some(value))` 的解析逻辑见 `search_page.rs` 的订阅。
 
 use gpui_kit::SharedString;
 use gpui_kit::component::select::SelectItem;

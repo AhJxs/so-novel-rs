@@ -2,6 +2,7 @@
 
 use std::path::PathBuf;
 
+/// `~/.sonovel/` 下应用依赖的各文件/目录路径。
 #[derive(Debug, Clone)]
 pub struct ConfigPaths {
     /// `config.toml` 路径。

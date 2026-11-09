@@ -10,20 +10,27 @@ use super::pagination::fetch_paginated_content;
 use crate::models::{Chapter, ContentType, Rule};
 use crate::parser::dom::{SelectError, select_and_invoke_js};
 
+/// 章节正文抓取 / 解析错误。
 #[derive(Debug, Error)]
 pub enum ChapterError {
+    /// 书源规则里没有 `chapter` 段，无法抓正文。
     #[error("书源没有 chapter 规则")]
     ChapterRuleMissing,
+    /// 章节页请求失败。
     #[error("HTTP 错误: {0}")]
     Http(String),
     #[error(
         "命中 Cloudflare 验证页，未配置 cf-bypass 旁路或旁路失败（请在 config.toml [global] cf-bypass 填地址）: {0}"
     )]
+    /// 命中 Cloudflare 验证页且 bypass 不可用。
     Cloudflare(String),
+    /// 解析出的正文为空。
     #[error("正文为空: {0}")]
     EmptyContent(String),
+    /// HTML 结构解析失败。
     #[error("HTML 解析失败: {0}")]
     Parse(String),
+    /// CSS 选择器或 `@js:` 后处理失败。
     #[error("选择器/JS 执行失败: {0}")]
     Selector(#[from] SelectError),
 }

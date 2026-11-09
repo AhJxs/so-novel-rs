@@ -13,10 +13,15 @@ use crate::models::Rule;
 /// 启动期公共资源聚合（`paths` + `config` + `sources_config` + `rules` + `http`）。
 /// desktop 拿它加 `tasks / runtime / wakeup` 拼 state。
 pub struct AppContext {
+    /// 解析好的配置文件与目录路径。
     pub paths: ConfigPaths,
+    /// 已加载的应用配置（读取失败时为默认值）。
     pub config: AppConfig,
+    /// 活跃书源文件与禁用列表。
     pub sources_config: SourcesConfig,
+    /// 从活跃书源文件加载出的规则集合。
     pub rules: Vec<Rule>,
+    /// 供各处复用的共享 HTTP 客户端。
     pub http: Arc<HttpClients>,
 }
 

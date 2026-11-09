@@ -43,7 +43,7 @@ impl std::str::FromStr for LogFormat {
 ///
 /// 切到 JSON: `LOG_FORMAT=json so-novel-rs ...`.
 ///
-/// # Errors
+/// # Panics
 ///
 /// `LOG_FORMAT` 是无效值时 panic；需非 panic 路径用 `init_with_format`。
 pub fn init() {

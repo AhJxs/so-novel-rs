@@ -2,7 +2,7 @@
 //!
 //! 状态过滤不走 SelectState（options 的翻译字段冻在 state 里，切语言失效），改用
 //! 3 个 Button：label 在 render 里现取 `t!(...)`，`selected` style 标记当前项。
-//! 名字过滤的 placeholder 只能设在 `InputState` 上，见 `mod.rs` 里的 sentinel 刷新。
+//! 名字过滤的 placeholder 只能设在 `InputState` 上，见 `sources_page.rs` 里的 sentinel 刷新。
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputState};

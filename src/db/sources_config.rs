@@ -5,6 +5,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
+/// 书源选择状态，持久化为 `~/.sonovel/sources_config.json`。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SourcesConfig {
     /// 当前选中的书源 JSON 文件名（相对于 `~/.sonovel/rules/`）。

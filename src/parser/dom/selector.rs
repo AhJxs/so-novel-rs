@@ -7,14 +7,19 @@ use thiserror::Error;
 
 pub use crate::models::ContentType;
 
+/// CSS 选择器 / `@js:` 后处理错误。
 #[derive(Debug, Error)]
 pub enum SelectError {
+    /// CSS 选择器语法错误。
     #[error("无效的 CSS 选择器: {0}")]
     BadSelector(String),
+    /// 规则用了尚未实现的 `XPath`。
     #[error("XPath 选择器暂不支持（阶段 2a），原始查询: {0}")]
     XPathNotSupported(String),
+    /// `@js:` 后处理返回错误。
     #[error("JS 后处理失败: {0}")]
     JsFailed(String),
+    /// `@java:` 后处理无法执行（本项目不提供 Java 运行时）。
     #[error("Java 后处理失败: {0}")]
     JavaFailed(String),
 }

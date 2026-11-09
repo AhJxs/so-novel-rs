@@ -9,14 +9,18 @@ pub enum DaoError {
     /// IO 错误 (读 / 写 / 文件锁 / 权限)。
     #[error("dao IO 错误 {path}: {source}")]
     Io {
+        /// 出问题的文件路径。
         path: PathBuf,
+        /// 底层 IO 错误。
         #[source]
         source: std::io::Error,
     },
     /// JSON 反序列化失败。
     #[error("dao JSON 错误 {path}: {source}")]
     Json {
+        /// 出问题的文件路径。
         path: PathBuf,
+        /// 底层 serde 错误。
         #[source]
         source: serde_json::Error,
     },

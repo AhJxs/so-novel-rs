@@ -15,7 +15,6 @@
 // ---------------------------------------------------------------------------
 
 #![deny(unsafe_code)]
-#![allow(missing_docs)]
 #![warn(dead_code)]
 #![warn(invalid_value)]
 #![warn(rustdoc::broken_intra_doc_links)]

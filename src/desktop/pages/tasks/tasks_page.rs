@@ -94,7 +94,7 @@ impl TasksPage {
             alert
                 .title(t!("Tasks.delete_dialog.title"))
                 .description(t!("Tasks.delete_dialog.message", book_name = &name_for_ok))
-                // 顶层 dialog builder 负责单个按钮（见 `library/mod.rs` 同处注释）。
+                // 顶层 dialog builder 负责单个按钮（见 `library/library_page.rs` 同处注释）。
                 .ok_text(t!("Tasks.delete_dialog.confirm_button"))
                 .cancel_text(t!("Tasks.delete_dialog.cancel_button"))
                 .ok_variant(ButtonVariant::Danger)

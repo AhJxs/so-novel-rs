@@ -18,11 +18,15 @@ use crate::models::Rule;
 /// 单源探测结果。
 #[derive(Debug, Clone)]
 pub struct SourceHealth {
+    /// 被探测书源的规则 ID。
     pub source_id: i32,
+    /// 被探测书源的显示名。
     pub source_name: String,
+    /// 首页响应的状态码；网络层失败时为空。
     pub http_status: Option<u16>,
     /// 完整往返延迟（毫秒）。请求失败时仍记录已耗费时间。
     pub delay_ms: u64,
+    /// 失败原因；成功时为 `None`。
     pub error: Option<String>,
 }
 
@@ -30,9 +34,11 @@ pub struct SourceHealth {
 /// `crawler` 不应依赖 `desktop`；`sources` page 拿到后做 1 行 match 转 `StatusKind`。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HealthStatus {
+    /// 首页返回 2xx。
     Ok,
     /// 3xx：源在跳转，浏览器能跟、爬虫可能不能跟。给用户一个"看似 OK 但要警惕"的状态。
     Redirect,
+    /// 有响应但状态码既非 2xx 也非 3xx（4xx / 5xx）。
     BadResponse,
     /// 探活函数本身报告了 error（如 Client 构建失败）。
     ProbeError,

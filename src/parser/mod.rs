@@ -1,5 +1,5 @@
-//! HTML 解析层。dom 提供 CSS 选择器 + @js: 后处理；search/book/toc/chapter
-//! `各对应一类页面解析，filter/formatter/search_filter` 是结果后处理。
+//! HTML 解析层。`dom` 提供 CSS 选择器 + `@js:` 后处理；`search`/`book`/`toc`/`chapter`
+//! 各对应一类页面解析，`filter`/`formatter`/`search_filter` 是结果后处理。
 
 pub mod book;
 pub mod cache;

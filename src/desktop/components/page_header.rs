@@ -15,6 +15,7 @@ pub struct PageHeader {
 }
 
 impl PageHeader {
+    /// 以标题构造，副标题与右侧动作默认为空。
     pub fn new(title: impl Into<SharedString>) -> Self {
         Self {
             title: title.into(),
@@ -24,6 +25,7 @@ impl PageHeader {
     }
 
     #[must_use]
+    /// 追加副标题文字。
     pub fn subtitle(mut self, subtitle: impl Into<SharedString>) -> Self {
         self.subtitle = Some(subtitle.into());
         self

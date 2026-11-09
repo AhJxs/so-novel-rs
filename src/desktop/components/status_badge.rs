@@ -12,9 +12,13 @@ use gpui_kit::{
 /// 业务状态的 4 个语义色（与 gpui-kit 组件库的主题色对齐）。
 #[derive(Debug, Clone, Copy)]
 pub enum StatusKind {
+    /// 提示色（蓝）。
     Info,
+    /// 成功色（绿）。
     Success,
+    /// 警告色（黄）。
     Warning,
+    /// 错误色（红）。
     Error,
     /// 中性 / 默认 — 没有特定语义，用 `muted_foreground` 兜底。
     Neutral,
@@ -40,6 +44,7 @@ pub struct StatusBadge {
 }
 
 impl StatusBadge {
+    /// 以语义色和标签文本构造徽章。
     pub fn new(kind: StatusKind, label: impl Into<SharedString>) -> Self {
         Self {
             kind,

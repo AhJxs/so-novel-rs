@@ -5,10 +5,14 @@ use std::time::SystemTime;
 
 use crate::error::AppResult;
 
+/// 书库中的单个下载文件。
 #[derive(Debug, Clone)]
 pub struct LibraryEntry {
+    /// 文件完整路径。
     pub path: PathBuf,
+    /// 文件名字（不含目录）。
     pub file_name: String,
+    /// 文件大小（字节）。
     pub size_bytes: u64,
     /// 文件修改时间 (Unix 时间戳, 秒); 获取失败为 0。
     pub modified_unix_secs: u64,
@@ -19,12 +23,14 @@ pub struct LibraryEntry {
 /// 后台扫描完成事件。Err 装 [`AppError`], drain 时调 `e.message()` 拿 i18n 文案。
 pub type LibraryScanEvent = AppResult<Vec<LibraryEntry>>;
 
+/// 书库页状态：扫描结果与当前过滤条件。
 #[derive(Default)]
 pub struct LibraryState {
     /// 当前扫描结果（已按修改时间倒序）。
     pub entries: Vec<LibraryEntry>,
     /// `entries` 改动的单调递增版本号, 供 UI 缓存过滤/分页。
     pub entries_version: u64,
+    /// 文件名过滤关键词。
     pub filter_text: String,
     /// 用户选的格式过滤（None = 全部）。
     pub filter_ext: Option<String>,

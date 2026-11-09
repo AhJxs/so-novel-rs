@@ -23,6 +23,10 @@ pub fn default_download_path() -> String {
 /// 第一次启动 / 模板 / 文件被破坏时使用的默认 TOML 文档。模板是源码内 `&'static str`
 /// 字面量，解析失败只可能是源码写错 → `panic!` 把程序员错误尽早暴露在启动期，避免
 /// 后续读到半残 `DocumentMut` 引发更难诊断的二次失败。
+///
+/// # Panics
+///
+/// 若模板字面量本身不是合法 TOML（只可能是源码写错）。
 #[allow(
     clippy::panic,
     reason = "static template literal must parse; failure = programmer error"

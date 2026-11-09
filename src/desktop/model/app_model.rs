@@ -17,14 +17,20 @@ use crate::models::Rule;
 
 /// 应用整体状态。UI 中立 —— 不依赖任何 GUI 框架, 由 `desktop` 层渲染。
 pub struct AppModel {
+    /// 配置与数据文件路径。
     pub paths: ConfigPaths,
+    /// 已加载的应用配置。
     pub config: AppConfig,
+    /// 当前活跃的书源规则。
     pub rules: Vec<Rule>,
+    /// 书源加载失败的原因；成功时为 `None`。
     pub rule_load_error: Option<String>,
+    /// 配置读取失败的原因；成功时为 `None`。
     pub config_load_error: Option<String>,
 
     /// 书源配置：活跃文件选择 + 禁用列表。
     pub sources_config: SourcesConfig,
+    /// 后台抓取共用的 Tokio 运行时。
     pub runtime: &'static Runtime,
 
     /// 共享 HTTP client 集合。复用连接池 + TLS session cache; 改 proxy / `unsafe_ssl` 时
@@ -37,22 +43,27 @@ pub struct AppModel {
     /// 两处刷新 —— 不做后台轮询，用户在 Clash 里改完要下次触发才生效。
     pub system_proxy: SystemProxy,
 
+    /// 搜索页状态。
     pub search: SearchState,
 
     /// 活动 / 已完成的下载任务。最新加在末尾。
     pub tasks: Vec<DownloadTask>,
     pub(super) next_task_id: u64,
 
+    /// 下载文件库页状态。
     pub library: LibraryState,
 
     /// 书源管理页状态（连通性检测结果）。
     pub sources_state: SourcesState,
+    /// 版本更新检查状态。
     pub update_state: UpdateState,
 
     /// 业务层 → UI 层的 [`UIEvent`] 队列, 由 `RootView::render` 排空并翻译成 notification。
     pub(crate) pending_ui_events: Vec<UIEvent>,
 
+    /// 各列表的渲染缓存。
     pub list_cache: ListCache,
+    /// 后台线程唤醒 UI 的句柄。
     pub wakeup: WakeupHandle,
 }
 
@@ -128,18 +139,22 @@ impl AppModel {
         self.pending_ui_events.push(ev);
     }
 
+    /// 排入一条普通信息通知。
     pub fn push_info(&mut self, msg: impl Into<String>) {
         self.push_event(UIEvent::Info(msg.into()));
     }
 
+    /// 排入一条成功通知。
     pub fn push_success(&mut self, msg: impl Into<String>) {
         self.push_event(UIEvent::Success(msg.into()));
     }
 
+    /// 排入一条警告通知。
     pub fn push_warning(&mut self, msg: impl Into<String>) {
         self.push_event(UIEvent::Warning(msg.into()));
     }
 
+    /// 排入一条错误通知。
     pub fn push_error(&mut self, msg: impl Into<String>) {
         self.push_event(UIEvent::Error(msg.into()));
     }

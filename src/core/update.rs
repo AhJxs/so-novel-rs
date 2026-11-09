@@ -14,7 +14,9 @@ use crate::models::Rule;
 /// 后台更新检查的结果。`latest_version` 和 `error` 互斥：成功时前者 Some，
 /// 失败时后者 Some —— 由 [`check_latest_release`] 自身保证。
 pub struct UpdateCheckResult {
+    /// GitHub 上最新的版本号；成功时才有值。
     pub latest_version: Option<String>,
+    /// 检查失败的原因；失败时才有值。
     pub error: Option<String>,
 }
 

@@ -1,34 +1,57 @@
 //! 21 个主题 JSON 编译期嵌入 + 列表助手。`include_str!` 要求字面量路径, 所以每个主题一个 const;
-//! 内容走 [`embedded_themes`] 的 `(文件名, JSON 字符串)` 列表, 由
-//! [`super::user_dir::ensure_user_themes_dir`] 同步到 `~/.sonovel/themes/`。
+//! 内容走 `embedded_themes` 的 `(文件名, JSON 字符串)` 列表, 由
+//! `super::user_dir::ensure_user_themes_dir` 同步到 `~/.sonovel/themes/`。
 
 /// 字号范围 (px)。gpui-kit 组件库默认 16; 设置页 slider 的 min/max 复用这两个常量。
 pub const FONT_SIZE_MIN: f32 = 12.0;
+/// 字号上限 (px)。
 pub const FONT_SIZE_MAX: f32 = 24.0;
+/// 默认字号 (px)。
 pub const FONT_SIZE_DEFAULT: f32 = 16.0;
 
 // ----- 21 个主题 JSON embed (`include_str!` 路径必须字面量) -----
 
+/// Adventure 主题（light + dark 变体）JSON。
 pub const THEME_ADVENTURE: &str = include_str!("data/adventure.json");
+/// Alduin 主题（light + dark 变体）JSON。
 pub const THEME_ALDUIN: &str = include_str!("data/alduin.json");
+/// Asciinema 主题（light + dark 变体）JSON。
 pub const THEME_ASCIINEMA: &str = include_str!("data/asciinema.json");
+/// Ayu 主题（light + dark 变体）JSON。
 pub const THEME_AYU: &str = include_str!("data/ayu.json");
+/// Catppuccin 主题（Latte 浅色 + Mocha 深色）JSON。
 pub const THEME_CATPPUCCIN: &str = include_str!("data/catppuccin.json");
+/// Everforest 主题（light + dark 变体）JSON。
 pub const THEME_EVERFOREST: &str = include_str!("data/everforest.json");
+/// Fahrenheit 主题（light + dark 变体）JSON。
 pub const THEME_FAHRENHEIT: &str = include_str!("data/fahrenheit.json");
+/// Flexoki 主题（light + dark 变体）JSON。
 pub const THEME_FLEXOKI: &str = include_str!("data/flexoki.json");
+/// Gruvbox 主题（light + dark 变体）JSON。
 pub const THEME_GRUVBOX: &str = include_str!("data/gruvbox.json");
+/// Harper 主题（light + dark 变体）JSON。
 pub const THEME_HARPER: &str = include_str!("data/harper.json");
+/// Hybrid 主题（light + dark 变体）JSON。
 pub const THEME_HYBRID: &str = include_str!("data/hybrid.json");
+/// Jellybeans 主题（light + dark 变体）JSON。
 pub const THEME_JELLYBEANS: &str = include_str!("data/jellybeans.json");
+/// Kibble 主题（light + dark 变体）JSON。
 pub const THEME_KIBBLE: &str = include_str!("data/kibble.json");
+/// macOS Classic 主题（light + dark 变体）JSON。
 pub const THEME_MACOS_CLASSIC: &str = include_str!("data/macos-classic.json");
+/// Matrix 主题（light + dark 变体）JSON。
 pub const THEME_MATRIX: &str = include_str!("data/matrix.json");
+/// Mellifluous 主题（light + dark 变体）JSON。
 pub const THEME_MELLIFLUOUS: &str = include_str!("data/mellifluous.json");
+/// Molokai 主题（light + dark 变体）JSON。
 pub const THEME_MOLOKAI: &str = include_str!("data/molokai.json");
+/// Solarized 主题（light + dark 变体）JSON。
 pub const THEME_SOLARIZED: &str = include_str!("data/solarized.json");
+/// Spaceduck 主题（light + dark 变体）JSON。
 pub const THEME_SPACEDUCK: &str = include_str!("data/spaceduck.json");
+/// Tokyo Night 主题（light + dark 变体）JSON。
 pub const THEME_TOKYONIGHT: &str = include_str!("data/tokyonight.json");
+/// Twilight 主题（light + dark 变体）JSON。
 pub const THEME_TWILIGHT: &str = include_str!("data/twilight.json");
 
 /// `(file_name, json_content)` 列表。init 时按需写到用户 themes 目录。

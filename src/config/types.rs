@@ -6,9 +6,12 @@ use serde::{Deserialize, Serialize};
 /// 导出文件格式。EPUB / TXT / HTML / PDF / Markdown。
 #[derive(Debug, Copy, Clone, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub enum ExportFormat {
+    /// EPUB 电子书，带章节与内嵌资源。
     #[default]
     Epub,
+    /// 纯文本单文件。
     Txt,
+    /// HTML 单文件。
     Html,
     /// PDF 导出（DocumentBuilder 直接构建，嵌入 CJK 字体）。
     Pdf,
@@ -17,6 +20,7 @@ pub enum ExportFormat {
 }
 
 impl ExportFormat {
+    /// 小写名字，用作导出文件扩展名与 TOML 取值。
     pub const fn as_lower(self) -> &'static str {
         match self {
             Self::Epub => "epub",
@@ -27,6 +31,7 @@ impl ExportFormat {
         }
     }
 
+    /// 解析 TOML 里的格式名；无法识别时回落到 [`Self::Epub`]。
     pub fn parse(s: &str) -> Self {
         match s.trim().to_ascii_lowercase().as_str() {
             "txt" => Self::Txt,
@@ -42,12 +47,16 @@ impl ExportFormat {
 /// `ZhCn` 简体中文 / `ZhTw` 繁體中文（台灣）/ `ZhHant` 繁體中文（通用 / Hant）。
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub enum LangType {
+    /// 简体中文（`zh-CN`）。
     ZhCn,
+    /// 台灣繁體（`zh-TW`）。
     ZhTw,
+    /// 通用繁體（`zh-Hant`）。
     ZhHant,
 }
 
 impl LangType {
+    /// zhconv 接受的语言标签。
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::ZhCn => "zh-CN",
@@ -56,6 +65,7 @@ impl LangType {
         }
     }
 
+    /// 从语言标签解析；接受下划线写法与简体/繁体别名，未知标签返回 `None`。
     pub fn parse(s: &str) -> Option<Self> {
         match s.trim() {
             "zh_CN" | "zh-CN" | "zh-Hans" | "zh_Hans" => Some(Self::ZhCn),
@@ -74,13 +84,17 @@ impl LangType {
 /// 内部 `t!("...")` 文案，同时也决定下载章节正文的目标语言（见 [`Self::to_book_target_lang`]）。
 #[derive(Debug, Copy, Clone, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub enum Language {
+    /// 简体中文界面，下载正文转为简体。
     #[default]
     SimplifiedChinese,
+    /// 繁體中文界面，下载正文转为台灣繁體。
     TraditionalChinese,
+    /// English 界面，下载正文保持简体。
     English,
 }
 
 impl Language {
+    /// 存进 TOML / 系统语言 API 的 BCP-47 标签。
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::SimplifiedChinese => "zh-CN",
@@ -89,6 +103,7 @@ impl Language {
         }
     }
 
+    /// 从语言标签解析界面语言；未知标签返回 `None`。
     pub fn parse(s: &str) -> Option<Self> {
         match s.trim() {
             "zh-CN" | "zh_CN" | "zh-cn" | "zh-Hans" | "zh_Hans" => Some(Self::SimplifiedChinese),
@@ -115,12 +130,15 @@ impl Language {
 /// `Static` 固定用 `static_name` 一个主题，不跟随系统明暗。
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize, Deserialize, Default)]
 pub enum ThemeKind {
+    /// 明暗两套主题随系统切换。
     #[default]
     Dynamic,
+    /// 固定使用单一主题。
     Static,
 }
 
 impl ThemeKind {
+    /// 存进 TOML 的模式名。
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Dynamic => "dynamic",
@@ -128,6 +146,7 @@ impl ThemeKind {
         }
     }
 
+    /// 解析 TOML 里的模式名；无法识别时回落到 [`Self::Dynamic`]。
     pub fn parse(s: &str) -> Self {
         match s.trim() {
             "static" => Self::Static,
@@ -139,13 +158,17 @@ impl ThemeKind {
 /// 动态主题的明暗切换方式：跟随系统 / 强制浅色 / 强制深色（仅 [`ThemeKind::Dynamic`] 生效）。
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize, Deserialize, Default)]
 pub enum ThemeDynMode {
+    /// 跟随操作系统的明暗设置。
     #[default]
     System,
+    /// 始终使用动态模式里选定的浅色主题。
     Light,
+    /// 始终使用动态模式里选定的深色主题。
     Dark,
 }
 
 impl ThemeDynMode {
+    /// 存进 TOML 的模式名。
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::System => "system",
@@ -154,6 +177,7 @@ impl ThemeDynMode {
         }
     }
 
+    /// 解析 TOML 里的模式名；无法识别时回落到 [`Self::System`]。
     pub fn parse(s: &str) -> Self {
         match s.trim() {
             "light" => Self::Light,
@@ -171,6 +195,7 @@ impl ThemeDynMode {
 /// 把深色主题选进浅色槽。
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ThemePref {
+    /// 当前生效的主题模式。
     pub kind: ThemeKind,
     /// 静态模式用的主题变体名。
     pub static_name: String,
@@ -192,21 +217,27 @@ pub struct AppConfig {
     /// 配置 schema 版本。`env!("CARGO_PKG_VERSION")` 在 `new` 时填。
     pub version: String,
 
+    /// 界面与外观（`[global]`）。
     #[serde(default)]
     pub global: GlobalConfig,
 
+    /// 下载与导出（`[download]`）。
     #[serde(default)]
     pub download: DownloadConfig,
 
+    /// 书源搜索（`[source]`）。
     #[serde(default)]
     pub source: SourceConfig,
 
+    /// 抓取节奏（`[crawl]`）。
     #[serde(default)]
     pub crawl: CrawlConfig,
 
+    /// 站点 Cookie（`[cookie]`）。
     #[serde(default)]
     pub cookie: CookieConfig,
 
+    /// 网络代理（`[proxy]`）。
     #[serde(default)]
     pub proxy: ProxyConfig,
 }
@@ -214,7 +245,9 @@ pub struct AppConfig {
 /// `[global]` 章节。主题偏好 / 应用语言 / GitHub 代理 / Cloudflare bypass / 侧栏折叠 / 字号。
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct GlobalConfig {
+    /// 主题偏好，含静态/动态两种模式的选项。
     pub theme_pref: ThemePref,
+    /// 界面语言，同时决定下载正文的简繁目标。
     pub language: Language,
     /// GitHub raw 代理前缀 (留空 = 直连)。
     pub gh_proxy: String,
@@ -258,6 +291,7 @@ pub struct CrawlConfig {
     pub min_interval: u32,
     /// 两次抓取的最大间隔 (ms)。运行时在 [min, max] 间随机。
     pub max_interval: u32,
+    /// 章节抓取失败后是否自动重试。
     pub enable_retry: bool,
     /// 单个书源的最大重试次数。
     pub max_retries: u32,
@@ -289,6 +323,7 @@ pub enum ProxyMode {
 }
 
 impl ProxyMode {
+    /// 存进 TOML 的模式名。
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::None => "none",
@@ -407,23 +442,36 @@ impl AppConfig {
 /// 配置校验错误
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
+    /// 某个配置值落在允许区间之外。
     #[error("配置字段 `{field}` = {value} 超出合法范围 [{min}, {max}]")]
     OutOfRange {
+        /// 出问题的配置键路径（如 `global.font_size`）。
         field: &'static str,
+        /// 实际读到的值。
         value: f64,
+        /// 允许的下界。
         min: f64,
+        /// 允许的上界。
         max: f64,
     },
 
+    /// 区间上下界本身倒置（`min > max`）。
     #[error("配置字段 `{field}` 范围非法: min={min} > max={max}")]
     InvalidRange {
+        /// 出问题的配置键路径。
         field: &'static str,
+        /// 声明的下界。
         min: u64,
+        /// 声明的上界。
         max: u64,
     },
 
+    /// 必填配置为空串。
     #[error("配置字段 `{field}` 不能为空")]
-    Empty { field: &'static str },
+    Empty {
+        /// 出问题的配置键路径。
+        field: &'static str,
+    },
 }
 
 impl Default for AppConfig {

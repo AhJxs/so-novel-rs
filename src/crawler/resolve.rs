@@ -40,17 +40,22 @@ pub enum CrawlerError {
     /// 目录解析失败 (HTTP / CF / Parse / Selector 4 子类)。
     #[error("目录解析失败: {0}")]
     Toc(#[from] TocError),
+    /// 目录解析成功但章节数为 0，整本无法下载。
     #[error("章节抓取全部失败 — 目录返回 0 章")]
     EmptyToc,
+    /// 构造本书源专用 HTTP 客户端失败。
     #[error("HTTP 客户端构造失败: {0}")]
     Client(String),
     /// 标准库 IO 错误 (写盘 / `create_dir_all` 等)。
     #[error("IO 错误: {0}")]
     Io(#[from] std::io::Error),
+    /// 导出阶段失败（写盘 / 排版）。
     #[error("导出失败: {0}")]
     Export(#[from] crate::export::ExportError),
+    /// 用户主动取消，未产出文件。
     #[error("用户取消")]
     Cancelled,
+    /// 请求的章节范围非法（越界或起止颠倒）。
     #[error("章节范围非法: {0}")]
     InvalidRange(String),
 }

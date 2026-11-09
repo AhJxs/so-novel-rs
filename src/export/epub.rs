@@ -19,6 +19,7 @@ use crate::export::exporter::{ExportError, Exporter, sort_chapter_files, unique_
 use crate::models::Book;
 use crate::utils::fs;
 
+/// 把章节缓存目录打包成 EPUB。
 pub struct EpubExporter;
 
 impl Exporter for EpubExporter {

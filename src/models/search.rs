@@ -12,6 +12,7 @@ pub struct SearchResult {
     pub source_name: String,
     /// 详情页 URL (点击进 detail 用)。
     pub url: String,
+    /// 搜索结果里的书名。
     pub book_name: String,
     /// 作者 (部分书源搜索结果不显示作者, 缺失时为 `None`)。
     pub author: Option<String>,

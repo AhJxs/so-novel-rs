@@ -15,9 +15,13 @@ pub const SUPPORTED_LIBRARY_EXTS: &[&str] = &["epub", "txt", "html", "zip", "pdf
 /// 单条 library 条目。
 #[derive(Debug, Clone, Serialize)]
 pub struct LibraryEntry {
+    /// 文件名字（不含目录）。
     pub filename: String,
+    /// 小写扩展名，用于图标与打开方式。
     pub ext: String,
+    /// 最后修改时间的 Unix 秒。
     pub modified_unix: i64,
+    /// 文件大小（字节）。
     pub size_bytes: u64,
 }
 

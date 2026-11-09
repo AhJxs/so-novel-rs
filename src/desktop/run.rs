@@ -13,9 +13,9 @@ use gpui_kit::{Menu, MenuItem};
 use super::actions::Quit;
 use super::model::AppModel;
 use super::{RootView, drain_loop, register_key_bindings, themes};
-/// 把 `AppConfig.language`（应用语言）映射到 `gpui_kit::component` 接受的 locale 字符串。
-///
-/// **只**对应"应用 UI 语言"（`Language`），跟"书源语言"（`LangType`）无关。
+// 把 `AppConfig.language`（应用语言）映射到 `gpui_kit::component` 接受的 locale 字符串。
+//
+// **只**对应"应用 UI 语言"（`Language`），跟"书源语言"（`LangType`）无关。
 use crate::i18n;
 
 /// 启动 GPUI 应用。`main.rs` 在无参数分支调用。

@@ -19,13 +19,18 @@ pub const PAGE_SIZE: usize = 30;
 /// [`compute_page_window`] 兜底回卷，永远 `start < end <= total`。
 #[derive(Debug, Clone, Copy)]
 pub struct PageSlice {
+    /// 本页第一条元素的下标（含）。
     pub start: usize,
+    /// 本页末条元素的下标（排他）。
     pub end: usize,
+    /// 过滤后的元素总数。
     pub total: usize,
+    /// 总页数。
     pub page_count: usize,
 }
 
 impl PageSlice {
+    /// 本页是否没有任何元素。
     pub const fn is_empty(&self) -> bool {
         self.start >= self.end
     }

@@ -4,7 +4,7 @@ use std::path::Path;
 
 use super::constants::BUNDLED_RULES;
 
-/// 初始化规则目录: 创建目录 + 补齐 [`BUNDLED_RULES`] 缺失的规则文件, 返回新创建的数量;
+/// 初始化规则目录: 创建目录 + 补齐 `BUNDLED_RULES` 缺失的规则文件, 返回新创建的数量;
 /// 已存在的文件**不覆盖** (尊重用户修改)。
 ///
 /// # Examples

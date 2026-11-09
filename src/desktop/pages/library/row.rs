@@ -1,6 +1,6 @@
 //! Library 行渲染（序号 / 书名 + tag / 时间 / 操作 列）。
 //!
-//! 删除按钮经 `page.update(|p| p.prompt_delete(...))` 转发到 `mod.rs` 的
+//! 删除按钮经 `page.update(|p| p.prompt_delete(...))` 转发到 `library_page.rs` 的
 //! `LibraryPage::prompt_delete`。
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};

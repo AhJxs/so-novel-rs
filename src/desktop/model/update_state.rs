@@ -29,7 +29,7 @@ pub struct UpdateState {
 }
 
 impl UpdateState {
-    /// 排空通道; 只在状态刚跃迁到终态时返回 [`Some(UpdateOutcome)`], 否则 `None`。
+    /// 排空通道; 只在状态刚跃迁到终态时返回 `Some(UpdateOutcome)`, 否则 `None`。
     pub fn drain(&mut self) -> Option<UpdateOutcome> {
         let mut outcome = None;
         let result = try_drain_all(&mut self.rx, |res: UpdateCheckResult| {

@@ -17,20 +17,27 @@ use crate::http::{
 use crate::models::{Book, Rule};
 use crate::parser::dom::{SelectError, select_and_invoke_js};
 
+/// 详情页抓取 / 解析错误。
 #[derive(Debug, Error)]
 pub enum BookError {
+    /// 书源规则里没有 `book` 段，无法解析详情。
     #[error("书源没有 book 规则")]
     BookRuleMissing,
+    /// 详情页请求失败。
     #[error("HTTP 错误: {0}")]
     Http(String),
     #[error(
         "命中 Cloudflare 验证页, 未配置 cf-bypass 旁路 (请在 config.toml [global] cf-bypass 填地址): {0}"
     )]
+    /// 命中 Cloudflare 验证页且未配置 bypass。
     Cloudflare(String),
+    /// 解析出的书名或作者为空。
     #[error("详情页书名或作者为空")]
     MissingTitleOrAuthor,
+    /// HTML 结构解析失败。
     #[error("HTML 解析失败: {0}")]
     Parse(String),
+    /// CSS 选择器或 `@js:` 后处理失败。
     #[error("选择器/JS 执行失败: {0}")]
     Selector(#[from] SelectError),
 }

@@ -18,6 +18,7 @@ use crate::http::system_proxy;
 /// （rate-limit.json 里 `0xs.net` 的 `ignoreSsl: true`）。
 #[derive(Debug, Clone, Default)]
 pub struct ClientOptions {
+    /// 关闭 SSL 证书校验；仅用于声明了 `ignoreSsl` 的老书源。
     pub unsafe_ssl: bool,
 }
 

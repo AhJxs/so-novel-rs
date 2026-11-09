@@ -83,42 +83,52 @@ pub type AppResult<T> = Result<T, AppError>;
 
 // 构造函数 —— 比直接写 `AppError::Xxx(s.to_string())` 干净。
 impl AppError {
+    /// 配置加载 / 校验失败。
     pub fn config(msg: impl Into<String>) -> Self {
         Self::Config(msg.into())
     }
 
+    /// HTTP 请求或响应异常。
     pub fn http(msg: impl Into<String>) -> Self {
         Self::Http(msg.into())
     }
 
+    /// 页面解析失败。
     pub fn parse(msg: impl Into<String>) -> Self {
         Self::Parse(msg.into())
     }
 
+    /// 数据读写（DAO / 文件）失败。
     pub fn db(msg: impl Into<String>) -> Self {
         Self::Db(msg.into())
     }
 
+    /// `@js:` 脚本执行失败。
     pub fn js(msg: impl Into<String>) -> Self {
         Self::Js(msg.into())
     }
 
+    /// 业务规则不满足。
     pub fn business(msg: impl Into<String>) -> Self {
         Self::Business(msg.into())
     }
 
+    /// 调用方参数非法。
     pub fn invalid(msg: impl Into<String>) -> Self {
         Self::InvalidArgument(msg.into())
     }
 
+    /// 请求的资源不存在。
     pub fn not_found(msg: impl Into<String>) -> Self {
         Self::NotFound(msg.into())
     }
 
+    /// 状态冲突（重复操作等）。
     pub fn conflict(msg: impl Into<String>) -> Self {
         Self::Conflict(msg.into())
     }
 
+    /// 未归类的内部错误。
     pub fn internal(msg: impl Into<String>) -> Self {
         Self::Internal(msg.into())
     }

@@ -20,21 +20,27 @@ pub enum SourcesFilterStatus {
     Disabled,
 }
 
+/// 书源管理页状态：探测结果与过滤条件。
 #[derive(Default)]
 pub struct SourcesState {
     /// `source_id` → 探测结果（按到达顺序覆盖, 不要求全部到齐）。
     pub health: HashMap<i32, SourceHealth>,
     /// 是否正在跑探测（true 时禁用按钮 + 显示 spinner）。
     pub running: bool,
+    /// 本轮预计探测的书源数。
     pub expected: usize,
+    /// 已收到探测结果的书源数。
     pub received: usize,
     /// 后台推送的接收端, 由 `drain` 排空。
     pub rx: Option<mpsc::UnboundedReceiver<SourceHealth>>,
+    /// 书源名过滤关键词。
     pub filter_text: String,
+    /// 按健康状态过滤的选项。
     pub filter_status: SourcesFilterStatus,
 }
 
 impl SourcesState {
+    /// 清空探测结果与进度计数，回到未探测状态。
     pub fn clear_health(&mut self) {
         self.health.clear();
         self.received = 0;

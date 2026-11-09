@@ -9,6 +9,7 @@ use crate::core::DownloadTask;
 use crate::models::FinishedReason;
 use crate::utils::time;
 
+/// 读取历史任务并还原成运行时任务；同时返回已用过的最大 ID，供新任务续号。
 pub fn load_tasks_from_file(path: &Path) -> (Vec<DownloadTask>, u64) {
     let records = crate::db::load_tasks(path);
     let now = time::now_unix_secs();

@@ -54,12 +54,16 @@ impl<W: Write> TxtEncodedWriter<W> {
     }
 }
 
+/// 把章节缓存目录合并成单个纯文本文件。
 pub struct TxtExporter {
+    /// 目标字符编码。
     encoding: &'static Encoding,
+    /// 规范化后的编码名，用于日志与文件头。
     encoding_label: String,
 }
 
 impl TxtExporter {
+    /// 按编码名构造；未知编码降级为 UTF-8。
     pub fn new(label: &str) -> Self {
         let label = label.trim();
         let label = if label.is_empty() { "UTF-8" } else { label };

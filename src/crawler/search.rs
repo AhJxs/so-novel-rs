@@ -21,8 +21,11 @@ fn compute_search_concurrency(source_count: usize) -> usize {
 /// 单源搜索的输出条目（绑定到原 Source，便于 UI 出错提示）。
 #[derive(Debug)]
 pub struct SourceSearchOutcome {
+    /// 发起搜索的书源 ID。
     pub source_id: i32,
+    /// 书源显示名，用于错误归属提示。
     pub source_name: String,
+    /// 该源的搜索结果或失败原因。
     pub result: Result<Vec<SearchResult>, SearchError>,
 }
 

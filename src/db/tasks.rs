@@ -10,6 +10,7 @@ use crate::models::DownloadTaskRecord;
 /// 已完成任务的最大保留数量, 超出后按完成时间从旧到新删除; 运行中的任务不受限制。
 const MAX_COMPLETED_TASKS: usize = 1000;
 
+/// 从 JSON 文件读取历史任务；文件缺失或损坏时返回空列表。
 pub fn load(path: &Path) -> Vec<DownloadTaskRecord> {
     if !path.exists() {
         return Vec::new();

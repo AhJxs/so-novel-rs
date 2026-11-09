@@ -1,3 +1,5 @@
+//! 搜索页运行时状态：结果列表、详情/目录预取缓存、封面缓存与各后台通道。
+
 use std::collections::{HashMap, HashSet};
 use std::num::NonZeroUsize;
 use std::time::Duration;
@@ -21,50 +23,74 @@ const COVER_CACHE_CAPACITY: NonZeroUsize = match NonZeroUsize::new(64) {
 /// TOC 预取加载状态。
 #[derive(Debug, Clone)]
 pub enum TocState {
+    /// 预取尚未返回。
     Pending,
+    /// 已拿到书籍详情与章节目录。
     Loaded(Box<Book>, Vec<Chapter>),
+    /// 预取失败，附错误文本。
     Failed(String),
 }
 
 /// TOC 预取后台 → UI 通道事件。
 #[derive(Debug)]
 pub struct TocEvent {
+    /// 完成预取的书源 ID。
     pub source_id: i32,
+    /// 该书的详情页 URL，作为缓存 key 的另一半。
     pub url: String,
+    /// 预取结果状态。
     pub state: TocState,
 }
 
 /// 搜索页状态（含后台通道）。
 pub struct SearchState {
+    /// 输入框里当前的关键词。
     pub keyword: String,
     /// `None` = 聚合搜索；`Some(rule_id)` = 仅当前书源。
     pub source_id: Option<i32>,
 
+    /// 上一次真正提交的关键词，用于判断是否重复搜索。
     pub last_keyword: Option<String>,
+    /// 当前展示的搜索结果列表。
     pub results: Vec<SearchResult>,
+    /// 结果集版本号，UI 列表缓存用它作 key 的一部分。
     pub results_version: u64,
     /// 各源搜索状态 (true = 跑完), 让 UI 显示哪个源还在等。
     pub source_status: Vec<(i32, String, SourceStatus)>,
+    /// 是否有搜索正在进行。
     pub running: bool,
+    /// 最近一次搜索的整体错误。
     pub last_error: Option<String>,
 
     /// 后台搜索通过此通道汇报"单源完成"。
     pub rx: Option<mpsc::UnboundedReceiver<SourceSearchEvent>>,
+    /// 本次搜索预计返回的源数量。
     pub expected: usize,
+    /// 已收到结果的源数量。
     pub received: usize,
 
+    /// 结果列表中当前选中的行下标。
     pub selected: Option<usize>,
+    /// 每个 (源 ID, 书 URL) 的详情加载状态。
     pub detail_cache: HashMap<(i32, String), DetailState>,
+    /// 详情预取的后台通道。
     pub detail_rx: Option<mpsc::UnboundedReceiver<DetailEvent>>,
 
+    /// 搜索结束后是否自动执行结果过滤。
     pub filter_after_done: bool,
 
+    /// 每个 (源 ID, 书 URL) 的目录预取状态。
     pub toc_cache: HashMap<(i32, String), TocState>,
+    /// 目录预取的后台通道。
     pub toc_rx: Option<mpsc::UnboundedReceiver<TocEvent>>,
+    /// 下载章节范围的下界（含）。
     pub chapter_range_start: u32,
+    /// 下载章节范围的上界（含）。
     pub chapter_range_end: u32,
 
+    /// 封面下载任务的发送端。
     pub cover_tx: Option<mpsc::UnboundedSender<CoverEvent>>,
+    /// 封面下载完成的接收端。
     pub cover_rx: Option<mpsc::UnboundedReceiver<CoverEvent>>,
     /// 封面结果缓存; 上限 `COVER_CACHE_CAPACITY`, 切 active rule 时整表 `clear()`。
     pub cover_cache: LruCache<(i32, String), CoverEntry>,
@@ -108,8 +134,11 @@ impl Default for SearchState {
 /// 详情面板加载状态。
 #[derive(Debug, Clone)]
 pub enum DetailState {
+    /// 详情尚未返回。
     Pending,
+    /// 已拿到书籍详情。
     Loaded(Box<Book>),
+    /// 详情抓取失败，附错误文本。
     Failed(String),
 }
 
@@ -126,23 +155,31 @@ impl DetailState {
 /// 详情后台 → UI 通道事件。
 #[derive(Debug)]
 pub struct DetailEvent {
+    /// 完成预取的书源 ID。
     pub source_id: i32,
+    /// 该书的详情页 URL，作为缓存 key 的另一半。
     pub url: String,
+    /// 预取结果状态。
     pub state: DetailState,
 }
 
 /// 封面下载完成事件。后台 HTTP 下载 → UI 构造 `CoverEntry`。
 #[derive(Debug)]
 pub struct CoverEvent {
+    /// 封面所属书源 ID。
     pub source_id: i32,
+    /// 封面图片的 URL。
     pub url: String,
     /// 下载成功：Some(bytes)；失败：None。
     pub bytes: Option<Vec<u8>>,
 }
 
+/// 单个书源在本次聚合搜索中的进度状态。
 #[derive(Debug, Clone)]
 pub enum SourceStatus {
+    /// 请求已派发，结果未回。
     Pending,
+    /// 成功，附该源返回的结果条数。
     Ok(usize),
     /// 错误简短文案
     Err(String),
@@ -151,7 +188,9 @@ pub enum SourceStatus {
 /// 后台聚合搜索向 UI 推送的事件（每源 1 条）。
 #[derive(Debug)]
 pub struct SourceSearchEvent {
+    /// 完成搜索的书源 ID。
     pub source_id: i32,
+    /// 书源显示名，用于状态条与错误归属。
     pub source_name: String,
     /// 单源搜索结果。`AppError` 承载 [`crate::parser::SearchError`] / 任务异常退出;
     /// 调用方用 `e.message()` 拿 i18n 渲染文本。

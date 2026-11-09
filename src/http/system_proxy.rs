@@ -16,7 +16,10 @@ pub enum SystemProxy {
     /// 探测到可用代理，值是可直接喂给 `reqwest::Proxy::all` 的 URL。
     Found(String),
     /// 没有可用代理。`reason` 用于设置页说明「为什么没生效」。
-    Absent { reason: AbsentReason },
+    Absent {
+        /// 判定为「无可用代理」的具体依据。
+        reason: AbsentReason,
+    },
 }
 
 /// [`SystemProxy::Absent`] 的原因。平台各自只会产生其中一个子集

@@ -8,6 +8,7 @@
 //!
 //! `OpenLink` 承载"可点 toast": `Info` / `Success` / `Warning` / `Error` 都是不可点
 //! 纯文本, 表达不了"点一下跳 release 页"这类交互。
+/// 业务层向 UI 推送的一条通知。
 #[derive(Debug, Clone)]
 pub enum UIEvent {
     /// 普通提示，蓝色 icon。例："已是最新版本"。
@@ -20,7 +21,12 @@ pub enum UIEvent {
     Error(String),
     /// 可点击 toast —— 消息用 `message` 渲染, 点击触发 `cx.open_url(url)`
     /// （`on_click` 由 `desktop::root::ui_event_to_notification` 挂）。
-    OpenLink { message: String, url: String },
+    OpenLink {
+        /// 展示给用户的文本。
+        message: String,
+        /// 点击后由系统浏览器打开的地址。
+        url: String,
+    },
 }
 
 #[cfg(test)]

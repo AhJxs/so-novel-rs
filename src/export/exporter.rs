@@ -15,18 +15,25 @@ use crate::config::ExportFormat;
 use crate::models::Book;
 use crate::utils::fs;
 
+/// 导出阶段的统一错误。
 #[derive(Debug, Error)]
 pub enum ExportError {
+    /// 待导出的章节缓存目录为空或不存在。
     #[error("章节缓存目录为空: {0}")]
     EmptyChaptersDir(PathBuf),
+    /// 读写章节文件或输出文件失败。
     #[error("IO 错误: {0}")]
     Io(#[from] std::io::Error),
+    /// EPUB 构建失败。
     #[error("EPUB 生成失败: {0}")]
     Epub(String),
+    /// ZIP 容器打包失败。
     #[error("ZIP 打包失败: {0}")]
     Zip(String),
+    /// 目标编码不支持或转换失败。
     #[error("编码转换失败: {0}")]
     Encoding(String),
+    /// PDF 排版 / 生成失败。
     #[error("PDF 生成失败: {0}")]
     Pdf(String),
 }
@@ -165,8 +172,11 @@ pub fn build_book_dir_name(book: &Book, format: ExportFormat) -> String {
 /// `title` 是 `ChapterFilter` 重写过的最终标题。
 #[derive(Debug, Clone)]
 pub struct RenderedChapter {
+    /// 章节顺序号（1-based），决定输出文件排序。
     pub order: u32,
+    /// 经过 `ChapterFilter` 重写后的最终标题。
     pub title: String,
+    /// 渲染后的正文 HTML / 文本。
     pub body: String,
 }
 

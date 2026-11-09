@@ -1,4 +1,4 @@
-//! 单章分页正文抓取: [`fetch_paginated_content`] 循环抓 + 拼 + 判定终止。入口 [`super::parse::parse_chapter`]。
+//! 单章分页正文抓取: `fetch_paginated_content` 循环抓 + 拼 + 判定终止。入口 [`super::parse::parse_chapter`]。
 
 use std::sync::LazyLock;
 use std::time::Instant;

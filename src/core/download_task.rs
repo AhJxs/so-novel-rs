@@ -34,6 +34,7 @@ impl Clone for DownloadTask {
     }
 }
 
+/// 单个下载任务的运行时状态；持久化时裁剪为 [`DownloadTaskRecord`]。
 pub struct DownloadTask {
     /// 任务唯一 id（递增）。
     pub id: u64,
@@ -54,10 +55,15 @@ pub struct DownloadTask {
     /// 任务结束的 unix 时间戳（秒）；None = 还没结束。给 UI 算"耗时"。
     pub finished_at_unix: Option<i64>,
 
+    /// 抓取到的书籍详情；详情页失败时为空。
     pub book_meta: Option<Book>,
+    /// 目录解析出的章节总数。
     pub total_chapters: usize,
+    /// 已成功下载的章节数。
     pub completed: u32,
+    /// 下载失败的章节数。
     pub failed: u32,
+    /// 最近完成章节的标题，供进度条展示。
     pub last_chapter_title: String,
     /// `Some(Ok(path))` 完成；`Some(Err(reason))` 失败 / 取消；`None` 还在跑。
     pub finished: Option<Result<std::path::PathBuf, FinishedReason>>,
@@ -150,6 +156,7 @@ impl DownloadTask {
         any
     }
 
+    /// 任务尚未结束（成功、失败、取消均算结束）。
     pub const fn is_running(&self) -> bool {
         self.finished.is_none()
     }
@@ -172,6 +179,7 @@ impl DownloadTask {
         )
     }
 
+    /// 展示用书名：优先详情页抓到的名字，回落到搜索结果的标题。
     pub fn book_name(&self) -> &str {
         self.book_meta
             .as_ref()

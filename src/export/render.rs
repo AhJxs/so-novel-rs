@@ -14,8 +14,11 @@ use crate::parser::{filter, formatter};
 /// 渲染目标。是 `ExportFormat` 的解析友好别名（避免 `export` 模块直接耦合 config）。
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum RenderTarget {
+    /// 纯文本输出。
     Txt,
+    /// HTML 输出。
     Html,
+    /// EPUB 输出。
     Epub,
     /// 章节文件沿用 Html 模板写到 `chapters_dir`，由 `PdfExporter` 读取并合成 PDF。
     Pdf,

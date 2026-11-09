@@ -25,17 +25,31 @@ pub enum Progress {
         total_chapters: usize,
     },
     /// 一章完成 (成功), index 是 1-based 顺序号。
-    ChapterDone { index: u32, title: String },
+    ChapterDone {
+        /// 章节顺序号（1-based）。
+        index: u32,
+        /// 章节标题。
+        title: String,
+    },
     /// 一章失败 (已用尽重试, 但不中断整本下载)。
     ChapterFailed {
+        /// 章节顺序号（1-based）。
         index: u32,
+        /// 章节标题。
         title: String,
+        /// 失败原因。
         reason: String,
     },
     /// 导出完成, 文件已落盘。
-    Finished { output_path: PathBuf },
+    Finished {
+        /// 导出文件路径。
+        output_path: PathBuf,
+    },
     /// 用户取消 (在某章完成 / 失败之后的下一次检查点观测到)。
     Cancelled,
     /// 下载失败 (详情/目录/写盘/导出等终态错误)。让 UI 能区分"取消"与"失败"。
-    Failed { reason: String },
+    Failed {
+        /// 终态错误描述。
+        reason: String,
+    },
 }

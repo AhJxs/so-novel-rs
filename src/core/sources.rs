@@ -6,7 +6,7 @@
 //!
 //! key 契约：`SourcesConfig::toggle_disabled` 写 set 时同样 `trim + to_lowercase`，`disabled_url_key` 必须与之
 //! 完全一致，否则禁用状态读不回。
-//! `parse_rules_bytes` 是"纯字节 → Vec<Rule>"薄壳（4 步 fallback），刻意不复用按后缀分流、走 `RulesError` 的 `parse_one_file`。
+//! `parse_rules_bytes` 是"纯字节 → `Vec<Rule>`"薄壳（4 步 fallback），刻意不复用按后缀分流、走 `RulesError` 的 `parse_one_file`。
 
 use std::path::Path;
 
@@ -34,7 +34,7 @@ pub fn find_rule_by_id(rules: &[Rule], id: i32) -> Option<&Rule> {
     rules.iter().find(|r| r.id == id)
 }
 
-/// 解析规则文件字节 —— 支持严格 JSON / JSON5，单 Rule 或 Vec<Rule>。
+/// 解析规则文件字节 —— 支持严格 JSON / JSON5，单 `Rule` 或 `Vec<Rule>`。
 ///
 /// 4 步 fallback：`serde_json` Vec → 单 Rule → `json5` Vec → 单 Rule。**不做** `apply_default_rule`
 /// 与 ID 分配（那是 `db::load_rules_from_path`），只做"字节能解析成 Rule"的内容校验。

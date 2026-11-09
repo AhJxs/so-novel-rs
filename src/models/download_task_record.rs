@@ -15,7 +15,10 @@ pub enum FinishedReason {
     /// 应用重启 / 进程被杀时正在跑的任务，重新打开 app 时识别为此状态。
     AppRestarted,
     /// 真正失败（网络 / parser / 后台异常）。消息展示给用户，UI 走 i18n。
-    Failed { message: String },
+    Failed {
+        /// 面向用户的失败描述。
+        message: String,
+    },
 }
 
 impl FinishedReason {
@@ -37,20 +40,28 @@ impl FinishedReason {
 /// 运行时字段（rx / cancel / `started_at` Instant）不存。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DownloadTaskRecord {
+    /// 任务唯一 ID。
     pub id: u64,
+    /// 触发任务时的搜索结果（书源 / 书名 / 详情页 URL 等）。
     pub origin: SearchResult,
     /// 任务开始 unix 时间戳（秒）。比 `Instant` 多一个语义：可序列化 / 跨重启。
     pub started_at_unix: i64,
     /// 任务结束 unix 时间戳（秒）。None = 还在跑。
     pub finished_at_unix: Option<i64>,
+    /// 抓取到的书籍详情；未完成详情抓取时为空。
     pub book_meta: Option<Book>,
+    /// 目录解析出的章节总数。
     pub total_chapters: usize,
+    /// 已成功下载的章节数。
     pub completed: u32,
+    /// 下载失败的章节数。
     pub failed: u32,
+    /// 最近完成章节的标题。
     pub last_chapter_title: String,
     /// `Some(Ok(path))` = 完成；`Some(Err(reason))` = 失败 / 取消（语义分类见 `FinishedReason`）；
     /// `None` = 还在跑。
     pub finished: Option<Result<PathBuf, FinishedReason>>,
+    /// 失败章节明细。
     pub failures: Vec<FailureRecord>,
 }
 
@@ -58,8 +69,11 @@ pub struct DownloadTaskRecord {
 /// `{"index":..., "title":..., "reason":...}`, 人类可读且加字段不破坏老数据。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FailureRecord {
+    /// 章节顺序号（1-based）。
     pub index: u32,
+    /// 章节标题。
     pub title: String,
+    /// 失败原因。
     pub reason: String,
 }
 

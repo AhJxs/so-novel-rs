@@ -11,6 +11,7 @@ use crate::export::exporter::{
 use crate::models::Book;
 use crate::utils::fs;
 
+/// 把章节缓存目录合并成单个 Markdown 文件。
 pub struct MdExporter;
 
 impl Exporter for MdExporter {

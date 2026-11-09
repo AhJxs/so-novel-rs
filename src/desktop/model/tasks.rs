@@ -17,6 +17,7 @@ pub enum DeleteTaskResult {
 }
 
 impl AppModel {
+    /// 移除所有已结束的任务（成功、失败、取消）。
     pub fn clear_finished_tasks(&mut self) {
         let before = self.tasks.len();
         ops::clear_finished_tasks(&mut self.tasks);

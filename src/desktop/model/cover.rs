@@ -8,12 +8,14 @@ use image::ImageReader;
 /// 封面缓存条目。`Ready` 持有 `Vec<u8>` (已校验为有效图片的原始字节);
 /// `Failed` 保留错误文案, 以便 UI 给出可见反馈而非静默。
 pub enum CoverEntry {
+    /// 下载并解码成功。
     Ready {
         /// 原始图片字节（PNG / JPEG / WebP 等）。
         bytes: Vec<u8>,
         /// 唯一 URI（`cover://{source_id}/{hash}`），用于 GPUI 端做纹理缓存去重。
         uri: String,
     },
+    /// 下载或解码失败，附展示用文案。
     Failed(String),
 }
 

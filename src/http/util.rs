@@ -26,6 +26,7 @@ fn compile_static_re(pattern: &'static str) -> Regex {
     }
 }
 
+/// 把规则里的 `key: value` 模板（可含 `{0}` 占位）展开成表单键值对。
 pub fn build_form_data(template: &str, args: &[&str]) -> Vec<(String, String)> {
     static KV: LazyLock<Regex> = LazyLock::new(|| {
         // 形如 `key: value`，value 直到下一个 `,` 或 `}`；容忍两侧可选引号。

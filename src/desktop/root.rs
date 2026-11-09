@@ -45,6 +45,7 @@ pub struct RootView {
 }
 
 impl RootView {
+    /// 建根视图，并实例化五个页面各自持有同一个 `AppModel`。
     pub fn new(model: Entity<AppModel>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let focus = cx.focus_handle();
         // `Window::focus` 传 `cx` (Context 自动 deref 成 `&mut App`)。
