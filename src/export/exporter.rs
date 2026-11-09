@@ -13,7 +13,7 @@ use thiserror::Error;
 
 use crate::config::ExportFormat;
 use crate::models::Book;
-use crate::utils::fs::sanitize_filename;
+use crate::utils::fs;
 
 #[derive(Debug, Error)]
 pub enum ExportError {
@@ -91,7 +91,7 @@ pub fn write_chapter_files(
 
     for ch in rendered {
         let order = pad_zero(ch.order, digit_count);
-        let safe_title = sanitize_filename(&ch.title);
+        let safe_title = fs::sanitize_filename(&ch.title);
         let filename = match format {
             ExportFormat::Html | ExportFormat::Pdf => format!("{order}_.html"),
             ExportFormat::Txt => format!("{order}_{safe_title}.txt"),
@@ -117,7 +117,7 @@ pub fn write_single_chapter(
 ) -> std::io::Result<PathBuf> {
     let digit_count = total_chapters.to_string().len().max(3);
     let order_str = pad_zero(order, digit_count);
-    let safe_title = sanitize_filename(title);
+    let safe_title = fs::sanitize_filename(title);
     let filename = match format {
         ExportFormat::Html | ExportFormat::Pdf => format!("{order_str}_.html"),
         ExportFormat::Txt => format!("{order_str}_{safe_title}.txt"),
@@ -157,7 +157,7 @@ pub fn build_book_dir_name(book: &Book, format: ExportFormat) -> String {
         book.author,
         format.as_lower().to_uppercase()
     );
-    sanitize_filename(&raw)
+    fs::sanitize_filename(&raw)
 }
 
 /// 单个已渲染章节。

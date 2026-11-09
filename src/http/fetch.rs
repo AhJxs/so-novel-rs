@@ -13,9 +13,7 @@ use anyhow::{Context, Result};
 use reqwest::Client;
 use reqwest::header::{ACCEPT, COOKIE, REFERER, USER_AGENT};
 
-use crate::http::encoding::decode_response_bytes;
-use crate::http::ua::random_ua;
-use crate::http::url_join::origin_or_self;
+use crate::http::{encoding, ua, url_join};
 
 /// 一次抓取的入参。
 pub struct FetchRequest<'a> {
@@ -73,11 +71,11 @@ pub struct FetchResponse {
     )
 )]
 pub async fn fetch(client: &Client, req: &FetchRequest<'_>) -> Result<FetchResponse> {
-    let referer = req
-        .referer
-        .filter(|s| !s.trim().is_empty())
-        .map_or_else(|| origin_or_self(req.url), std::string::ToString::to_string);
-    let ua = random_ua();
+    let referer = req.referer.filter(|s| !s.trim().is_empty()).map_or_else(
+        || url_join::origin_or_self(req.url),
+        std::string::ToString::to_string,
+    );
+    let ua = ua::random_ua();
 
     let mut builder = match req.method {
         HttpMethod::Get => client.get(req.url),
@@ -117,7 +115,7 @@ pub async fn fetch(client: &Client, req: &FetchRequest<'_>) -> Result<FetchRespo
         .await
         .with_context(|| format!("read body failed: {}", req.url))?;
 
-    let html = decode_response_bytes(&bytes, content_type.as_deref());
+    let html = encoding::decode_response_bytes(&bytes, content_type.as_deref());
 
     Ok(FetchResponse {
         html,

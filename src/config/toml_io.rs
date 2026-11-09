@@ -10,7 +10,7 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use toml_edit::{DocumentMut, Item, Table, value};
 
-use super::defaults::default_template_doc;
+use super::defaults;
 use super::types::{
     AppConfig, ExportFormat, Language, ProxyMode, ThemeDynMode, ThemeKind, ThemePref,
 };
@@ -215,9 +215,9 @@ pub fn save_config(path: &Path, cfg: &AppConfig) -> Result<()> {
         std::fs::read_to_string(path)
             .with_context(|| format!("读取 {}", path.display()))?
             .parse()
-            .unwrap_or_else(|_| default_template_doc())
+            .unwrap_or_else(|_| defaults::default_template_doc())
     } else {
-        default_template_doc()
+        defaults::default_template_doc()
     };
 
     // 写一行 (table, key, value)。`value()` 自动处理 toml 类型。

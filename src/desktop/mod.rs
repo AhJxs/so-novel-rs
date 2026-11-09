@@ -56,7 +56,7 @@ pub use root::RootView;
 /// 把 `AppConfig.language`（应用语言）映射到 `gpui_kit::component` 接受的 locale 字符串。
 ///
 /// **只**对应"应用 UI 语言"（`Language`），跟"书源语言"（`LangType`）无关。
-use crate::i18n::locale_for;
+use crate::i18n;
 
 /// 启动 GPUI 应用。`main.rs` 在无参数分支调用。
 ///
@@ -130,7 +130,7 @@ pub fn run() -> Result<()> {
 
         // 5. 把 `AppConfig.language` 同步给 gpui_kit::component, 必须在开窗**前**调,
         //    否则首帧用错 fallback locale。
-        gpui_kit::component::set_locale(locale_for(model.read(cx).config.global.language));
+        gpui_kit::component::set_locale(i18n::locale_for(model.read(cx).config.global.language));
 
         #[cfg(target_os = "macos")]
         cx.set_menus([

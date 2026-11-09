@@ -11,7 +11,7 @@ use anyhow::{Context, Result};
 use crate::config::AppConfig;
 #[cfg(test)]
 use crate::config::{ProxyCfg, ProxyMode};
-use crate::http::system_proxy::resolve_proxy_url;
+use crate::http::system_proxy;
 
 /// 控制 client 行为的小参数。`unsafe_ssl` 用于关闭 SSL 校验的老书源
 /// （rate-limit.json 里 `0xs.net` 的 `ignoreSsl: true`）。
@@ -43,7 +43,7 @@ pub fn build_async_client(cfg: &AppConfig, opts: &ClientOptions) -> Result<reqwe
 
     // 三态模式在 `resolve_proxy_url` 里展开：`None` = 直连，所以这里不需要 match。
     // 手动模式 host 为空、或系统模式探测不到代理，都返回 `None`（静默直连，不阻断 client 构造）。
-    if let Some(proxy_url) = resolve_proxy_url(&cfg.proxy) {
+    if let Some(proxy_url) = system_proxy::resolve_proxy_url(&cfg.proxy) {
         let proxy = reqwest::Proxy::all(&proxy_url)
             .with_context(|| format!("invalid proxy URL: {proxy_url}"))?;
         builder = builder.proxy(proxy);

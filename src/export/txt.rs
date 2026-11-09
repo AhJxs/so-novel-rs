@@ -14,7 +14,7 @@ use crate::export::exporter::{
     ExportError, Exporter, sort_chapter_files, strip_html_tags, unique_path,
 };
 use crate::models::Book;
-use crate::utils::fs::sanitize_filename;
+use crate::utils::fs;
 
 /// 流式转码写入器：将 UTF-8 `&str` 片段即时转码为目标编码写入底层 writer，
 /// 避免整本小说先拼成一个大 `String` 再统一编码。
@@ -91,7 +91,7 @@ impl Exporter for TxtExporter {
         }
 
         std::fs::create_dir_all(out_dir)?;
-        let filename = sanitize_filename(&format!("{}({}).txt", book.book_name, book.author));
+        let filename = fs::sanitize_filename(&format!("{}({}).txt", book.book_name, book.author));
         let out_path = unique_path(out_dir, &filename);
         let file = std::fs::File::create(&out_path)?;
         let mut writer =

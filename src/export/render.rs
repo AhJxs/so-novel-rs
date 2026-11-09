@@ -9,8 +9,7 @@
 
 use crate::config::{ExportFormat, LangType};
 use crate::models::{Chapter, RuleChapter};
-use crate::parser::filter::filter_chapter;
-use crate::parser::formatter::format_chapter;
+use crate::parser::{filter, formatter};
 
 /// 渲染目标。是 `ExportFormat` 的解析友好别名（避免 `export` 模块直接耦合 config）。
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -50,8 +49,8 @@ pub fn render_chapter(
     source_lang_raw: &str,
     target_lang: LangType,
 ) -> (String, String) {
-    let filtered = filter_chapter(chapter, rule_chapter);
-    let formatted_html = format_chapter(&filtered.content, rule_chapter);
+    let filtered = filter::filter_chapter(chapter, rule_chapter);
+    let formatted_html = formatter::format_chapter(&filtered.content, rule_chapter);
 
     let body = match target {
         RenderTarget::Txt => render_txt(&filtered.title, &formatted_html),

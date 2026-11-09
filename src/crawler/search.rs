@@ -10,7 +10,7 @@ use tokio::task::JoinSet;
 
 use crate::http::HttpClients;
 use crate::models::{SearchResult, Source};
-use crate::parser::{SearchError, search_one};
+use crate::parser::{self, SearchError};
 
 const DEFAULT_SEARCH_CONCURRENCY: usize = 8;
 
@@ -116,7 +116,7 @@ fn spawn_search_tasks(
             };
             let client = http.for_rule(&src.rule);
             let cf_borrow: Option<&str> = cf.as_ref().as_ref().map(std::string::String::as_str);
-            let result = search_one(&client, &src.rule, kw.as_str(), limit, cf_borrow).await;
+            let result = parser::search_one(&client, &src.rule, kw.as_str(), limit, cf_borrow).await;
             drop(permit);
             SourceSearchOutcome {
                 source_id,

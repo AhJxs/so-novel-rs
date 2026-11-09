@@ -16,7 +16,7 @@ use zip::write::SimpleFileOptions;
 
 use crate::export::exporter::{ExportError, Exporter, sort_chapter_files, unique_path};
 use crate::models::Book;
-use crate::utils::fs::sanitize_filename;
+use crate::utils::fs;
 
 pub struct HtmlExporter;
 
@@ -51,7 +51,7 @@ impl Exporter for HtmlExporter {
         std::fs::write(&toc_path, toc_lines.join("\n"))?;
 
         std::fs::create_dir_all(out_dir)?;
-        let zip_name = sanitize_filename(&format!("{}({}).zip", book.book_name, book.author));
+        let zip_name = fs::sanitize_filename(&format!("{}({}).zip", book.book_name, book.author));
         let zip_path = unique_path(out_dir, &zip_name);
         zip_directory(chapters_dir, &zip_path)?;
 

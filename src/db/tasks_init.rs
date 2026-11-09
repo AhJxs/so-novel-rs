@@ -7,11 +7,11 @@ use std::path::Path;
 
 use crate::core::DownloadTask;
 use crate::models::FinishedReason;
-use crate::utils::time::now_unix_secs;
+use crate::utils::time;
 
 pub fn load_tasks_from_file(path: &Path) -> (Vec<DownloadTask>, u64) {
     let records = crate::db::load_tasks(path);
-    let now = now_unix_secs();
+    let now = time::now_unix_secs();
     let mut max_id: u64 = 0;
     let mut tasks = Vec::with_capacity(records.len());
     let mut need_rewrite = false;

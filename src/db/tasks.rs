@@ -4,7 +4,6 @@
 
 use std::path::Path;
 
-use super::write_atomically;
 use crate::core::DownloadTask;
 use crate::models::DownloadTaskRecord;
 
@@ -39,7 +38,7 @@ fn save_records(path: &Path, records: &[DownloadTaskRecord]) -> anyhow::Result<(
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).ok();
     }
-    write_atomically(path, content.as_bytes())?;
+    super::write_atomically(path, content.as_bytes())?;
     Ok(())
 }
 

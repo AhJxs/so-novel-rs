@@ -10,7 +10,7 @@
 
 use std::path::Path;
 
-use crate::db::{SourcesConfig, load_active_rules};
+use crate::db::{self, SourcesConfig};
 use crate::models::{Rule, Source};
 
 /// 把 `Rule.url` 标准化为书源查找键（`trim` + `to_lowercase`）。
@@ -58,7 +58,7 @@ pub fn parse_rules_bytes(bytes: &[u8], path: &Path) -> anyhow::Result<Vec<Rule>>
 ///
 /// `RulesError::*` → `db` 层 IO / 解析 / 资源不存在错误。
 pub fn load_active(rules_dir: &Path, sources_config: &SourcesConfig) -> anyhow::Result<Vec<Rule>> {
-    load_active_rules(rules_dir, sources_config)
+    db::load_active_rules(rules_dir, sources_config)
         .map_err(|e| anyhow::anyhow!("{e}"))
         .map_err(|e: anyhow::Error| {
             // 保留路径信息（db::DaoError::Rules 来源的 RulesError::Io 已含 path）

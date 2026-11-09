@@ -13,7 +13,6 @@ use crate::export::exporter::{
     ExportError, Exporter, sort_chapter_files, strip_html_tags, unique_path,
 };
 use crate::models::Book;
-use crate::utils::fs::sanitize_filename;
 
 /// PDF 导出器 (实现 [`Exporter`] trait)。
 pub struct PdfExporter;
@@ -56,7 +55,10 @@ impl Exporter for PdfExporter {
         }
 
         std::fs::create_dir_all(out_dir)?;
-        let out_name = sanitize_filename(&format!("{}({}).pdf", book.book_name, book.author));
+        let out_name = crate::utils::fs::sanitize_filename(&format!(
+            "{}({}).pdf",
+            book.book_name, book.author
+        ));
         let out_path = unique_path(out_dir, &out_name);
 
         // CJK 字体: 找到则量宽用 EmbeddedFont 并注册到 builder;

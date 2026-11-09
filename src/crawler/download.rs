@@ -16,7 +16,7 @@ use super::progress::Progress;
 use super::resolve::{CrawlerError, resolve_book};
 use super::retry as retry_mod;
 use crate::config::AppConfig;
-use crate::export::{RenderTarget, build_book_dir_name, exporter_for, write_single_chapter};
+use crate::export::{self, RenderTarget};
 use crate::models::{Book, Chapter, Source};
 use crate::parser::{ChapterError, TocError, parse_chapter};
 
@@ -134,7 +134,7 @@ pub async fn download_chapters(
     let rule = Arc::new(source.rule.clone());
     let cf_bypass_owned: Option<Arc<str>> = cf_bypass.map(Arc::from);
 
-    let book_dir_name = build_book_dir_name(book, cfg.download.ext_name);
+    let book_dir_name = export::build_book_dir_name(book, cfg.download.ext_name);
     let chapters_dir = std::path::Path::new(&cfg.download.download_path).join(&book_dir_name);
     std::fs::create_dir_all(&chapters_dir)?;
 
@@ -253,14 +253,14 @@ pub async fn download_chapters(
 
             match result {
                 Ok(parsed) => {
-                    let (final_title, body) = crate::export::render_chapter(
+                    let (final_title, body) = export::render_chapter(
                         &parsed,
                         &rule_chapter,
                         render_target,
                         &rule_lang,
                         target_lang,
                     );
-                    if let Err(e) = write_single_chapter(
+                    if let Err(e) = export::write_single_chapter(
                         &ch_dir,
                         order,
                         &final_title,
@@ -355,7 +355,7 @@ pub async fn download_chapters(
         None
     };
 
-    let exporter = exporter_for(cfg.download.ext_name, &cfg.download.txt_encoding);
+    let exporter = export::exporter_for(cfg.download.ext_name, &cfg.download.txt_encoding);
     let out_dir = std::path::Path::new(&cfg.download.download_path);
     let final_path =
         exporter.merge_with_cover(book, &chapters_dir, out_dir, cover_bytes.as_deref())?;

@@ -5,8 +5,6 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use super::write_atomically;
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SourcesConfig {
     /// 当前选中的书源 JSON 文件名（相对于 `~/.sonovel/rules/`）。
@@ -49,7 +47,7 @@ impl SourcesConfig {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).ok();
         }
-        write_atomically(path, content.as_bytes())?;
+        super::write_atomically(path, content.as_bytes())?;
         Ok(())
     }
 
