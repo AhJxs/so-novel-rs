@@ -13,8 +13,8 @@ use super::super::trace::{TraceId, sub};
 use crate::config::AppConfig;
 use crate::core::DownloadTask;
 use crate::crawler::{
-    CancelToken, CrawlerError, DownloadOptions, Progress, download_book, download_chapters,
-    resolve_book,
+    CancelToken, CrawlerError, DownloadOptions, Progress, ResolvedBook, download_book,
+    download_chapters, resolve_book,
 };
 use crate::desktop::model::search_state::TocState;
 use crate::http::HttpClients;
@@ -64,7 +64,7 @@ pub fn spawn_resolve_toc(
                 let cancel = CancelToken::new();
                 let client = http.for_rule(&source.rule);
                 match resolve_book(&cfg, &client, &source, &book_url, &cancel).await {
-                    Ok((book, chapters)) => {
+                    Ok(ResolvedBook { book, chapters }) => {
                         tracing::info!(
                             book = %book.book_name,
                             chapters = chapters.len(),

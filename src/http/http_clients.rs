@@ -43,6 +43,14 @@ impl From<&AppConfig> for ProxySignature {
     }
 }
 
+/// `gh_proxy` 专用 URL + client（更新检查用）。
+pub struct GhProxy {
+    /// 配置的 GitHub 代理前缀；空串表示未配置。
+    pub url: String,
+    /// 与该前缀配套的 `reqwest::Client`。
+    pub client: reqwest::Client,
+}
+
 /// 共享 HTTP client 集合。构造代价一次性（启动时），之后每个爬取只 `Arc::clone`。
 pub struct HttpClients {
     /// safe / `unsafe_ssl` 两个 client：`for_rule` 只 read，`rebuild_proxy` 用 write 换 Arc。
@@ -141,9 +149,9 @@ impl HttpClients {
         )
     }
 
-    /// `gh_proxy` 专用 client（更新检查用）。返回 `(gh_proxy_url, Arc<client>)`，
-    /// 调用方需自行判断 `gh_proxy_url.is_empty()` 决定是否改走 `for_rule`。
-    pub fn gh_proxy_pair(&self) -> (String, Arc<Client>) {
+    /// `gh_proxy` 专用 URL + client（更新检查用）。调用方需自行判断
+    /// [`GhProxy::url`] 是否为空决定是否改走 [`Self::for_rule`]。
+    pub fn gh_proxy_pair(&self) -> GhProxy {
         // 锁 poison：返空配置 + safe client（调用方看到空 url 会走 for_rule 路径，
         // 不会用坏掉的 gh_proxy client）。
         mutex_or("gh_proxy_pair", &self.gh_proxy).map_or_else(
@@ -152,10 +160,16 @@ impl HttpClients {
                     .clients
                     .read()
                     .ok()
-                    .map_or_else(|| Arc::new(Client::new()), |g| Arc::clone(&g.0));
-                (String::new(), fallback)
+                    .map_or_else(Client::new, |g| g.0.as_ref().clone());
+                GhProxy {
+                    url: String::new(),
+                    client: fallback,
+                }
             },
-            |guard| (guard.0.clone(), Arc::clone(&guard.1)),
+            |guard| GhProxy {
+                url: guard.0.clone(),
+                client: guard.1.as_ref().clone(),
+            },
         )
     }
     /// proxy 配置变了 → 重建 safe + `unsafe_ssl` 两个 client（`gh_proxy` 不受 proxy 影响）。
@@ -299,8 +313,8 @@ mod tests {
     fn gh_proxy_pair_returns_configured_url() {
         let cfg = AppConfig::default();
         let clients = HttpClients::new(&cfg).unwrap();
-        let (url, _client) = clients.gh_proxy_pair();
-        assert!(url.is_empty(), "default gh_proxy is empty");
+        let gh_proxy = clients.gh_proxy_pair();
+        assert!(gh_proxy.url.is_empty(), "default gh_proxy is empty");
 
         // 配了 gh_proxy 的 cfg 应该构造带代理的 client
         let cfg_with_proxy = AppConfig {
@@ -311,8 +325,8 @@ mod tests {
             ..default_cfg()
         };
         let clients2 = HttpClients::new(&cfg_with_proxy).unwrap();
-        let (url2, _client2) = clients2.gh_proxy_pair();
-        assert_eq!(url2, "https://ghproxy.example.com/");
+        let gh_proxy2 = clients2.gh_proxy_pair();
+        assert_eq!(gh_proxy2.url, "https://ghproxy.example.com/");
     }
 
     #[test]

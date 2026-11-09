@@ -38,6 +38,7 @@ pub enum HttpMethod<'raw> {
 }
 
 /// 抓取结果：解码后的 HTML、最终 URL（处理重定向后的）、状态码。
+#[derive(Debug, Clone)]
 pub struct FetchResponse {
     /// 按响应头 charset 解码后的 HTML。
     pub html: String,

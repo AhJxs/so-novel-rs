@@ -1,7 +1,21 @@
 //! `AppConfig` 类型定义与 enum 解析：结构 / serde 派生 / 默认值 / 校验。
 //! TOML 读写流程在 `toml_io.rs`，默认路径与模板在 `defaults.rs`。
 
+use std::str::FromStr;
+
 use serde::{Deserialize, Serialize};
+
+/// 配置字符串无法解析成对应枚举时的错误。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ParseConfigValueError;
+
+impl std::fmt::Display for ParseConfigValueError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("无效的配置值")
+    }
+}
+
+impl std::error::Error for ParseConfigValueError {}
 
 /// 导出文件格式。EPUB / TXT / HTML / PDF / Markdown。
 #[derive(Debug, Copy, Clone, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -43,6 +57,14 @@ impl ExportFormat {
     }
 }
 
+impl FromStr for ExportFormat {
+    type Err = std::convert::Infallible;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self::parse(s))
+    }
+}
+
 /// zhconv 用的目标语言变体（影响下载章节正文的简繁转换目标）：
 /// `ZhCn` 简体中文 / `ZhTw` 繁體中文（台灣）/ `ZhHant` 繁體中文（通用 / Hant）。
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Serialize, Deserialize)]
@@ -67,11 +89,19 @@ impl LangType {
 
     /// 从语言标签解析；接受下划线写法与简体/繁体别名，未知标签返回 `None`。
     pub fn parse(s: &str) -> Option<Self> {
+        s.parse().ok()
+    }
+}
+
+impl FromStr for LangType {
+    type Err = ParseConfigValueError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.trim() {
-            "zh_CN" | "zh-CN" | "zh-Hans" | "zh_Hans" => Some(Self::ZhCn),
-            "zh_TW" | "zh-TW" => Some(Self::ZhTw),
-            "zh_Hant" | "zh-Hant" => Some(Self::ZhHant),
-            _ => None,
+            "zh_CN" | "zh-CN" | "zh-Hans" | "zh_Hans" => Ok(Self::ZhCn),
+            "zh_TW" | "zh-TW" => Ok(Self::ZhTw),
+            "zh_Hant" | "zh-Hant" => Ok(Self::ZhHant),
+            _ => Err(ParseConfigValueError),
         }
     }
 }
@@ -105,12 +135,7 @@ impl Language {
 
     /// 从语言标签解析界面语言；未知标签返回 `None`。
     pub fn parse(s: &str) -> Option<Self> {
-        match s.trim() {
-            "zh-CN" | "zh_CN" | "zh-cn" | "zh-Hans" | "zh_Hans" => Some(Self::SimplifiedChinese),
-            "zh-TW" | "zh_TW" | "zh-tw" | "zh-Hant" | "zh_Hant" => Some(Self::TraditionalChinese),
-            "en" | "en-US" | "English" => Some(Self::English),
-            _ => None,
-        }
+        s.parse().ok()
     }
 
     /// 把界面语言映射到下载书籍的目标语言（zhconv 用的 [`LangType`]）：简体 / 英文 → `ZhCn`，
@@ -122,6 +147,19 @@ impl Language {
         match self {
             Self::SimplifiedChinese | Self::English => LangType::ZhCn,
             Self::TraditionalChinese => LangType::ZhTw,
+        }
+    }
+}
+
+impl FromStr for Language {
+    type Err = ParseConfigValueError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.trim() {
+            "zh-CN" | "zh_CN" | "zh-cn" | "zh-Hans" | "zh_Hans" => Ok(Self::SimplifiedChinese),
+            "zh-TW" | "zh_TW" | "zh-tw" | "zh-Hant" | "zh_Hant" => Ok(Self::TraditionalChinese),
+            "en" | "en-US" | "English" => Ok(Self::English),
+            _ => Err(ParseConfigValueError),
         }
     }
 }
@@ -155,6 +193,14 @@ impl ThemeKind {
     }
 }
 
+impl FromStr for ThemeKind {
+    type Err = std::convert::Infallible;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self::parse(s))
+    }
+}
+
 /// 动态主题的明暗切换方式：跟随系统 / 强制浅色 / 强制深色（仅 [`ThemeKind::Dynamic`] 生效）。
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize, Deserialize, Default)]
 pub enum ThemeDynMode {
@@ -184,6 +230,14 @@ impl ThemeDynMode {
             "dark" => Self::Dark,
             _ => Self::System,
         }
+    }
+}
+
+impl FromStr for ThemeDynMode {
+    type Err = std::convert::Infallible;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self::parse(s))
     }
 }
 
@@ -342,6 +396,14 @@ impl ProxyMode {
     }
 }
 
+impl FromStr for ProxyMode {
+    type Err = std::convert::Infallible;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self::parse(s))
+    }
+}
+
 /// `[proxy]` 章节。代理模式 + 手动代理地址。
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ProxyConfig {
@@ -440,7 +502,7 @@ impl AppConfig {
 }
 
 /// 配置校验错误
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, Copy, Clone, PartialEq)]
 pub enum ConfigError {
     /// 某个配置值落在允许区间之外。
     #[error("配置字段 `{field}` = {value} 超出合法范围 [{min}, {max}]")]

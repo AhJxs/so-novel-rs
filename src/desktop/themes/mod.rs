@@ -13,6 +13,8 @@ pub mod embedded;
 pub mod init;
 pub mod user_dir;
 
-pub use apply::{apply_font_size, apply_theme_pref, list_theme_names, list_theme_names_by_mode};
+pub use apply::{
+    ThemeVariant, apply_font_size, apply_theme_pref, list_theme_names, list_theme_names_by_mode,
+};
 pub use embedded::{FONT_SIZE_DEFAULT, FONT_SIZE_MAX, FONT_SIZE_MIN};
 pub use init::init;

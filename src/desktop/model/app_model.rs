@@ -11,7 +11,7 @@ use super::{
 use crate::config::{AppConfig, ConfigPaths};
 use crate::core::DownloadTask;
 use crate::core::bootstrap::load_context;
-use crate::db::{SourcesConfig, load_tasks_from_file};
+use crate::db::{LoadedTasks, SourcesConfig, load_tasks_from_file};
 use crate::http::{HttpClients, SystemProxy, detect_system_proxy};
 use crate::models::Rule;
 
@@ -91,8 +91,9 @@ impl AppModel {
 
         let runtime = build_shared_runtime()?;
 
-        let (tasks, next_task_id) = load_tasks_from_file(&paths.tasks_file);
+        let LoadedTasks { tasks, max_id } = load_tasks_from_file(&paths.tasks_file)?;
         tracing::info!("从文件加载 {} 个历史下载任务", tasks.len());
+        let next_task_id = max_id + 1;
 
         let (wakeup, rx) = events::new_wakeup();
 

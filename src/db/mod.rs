@@ -24,4 +24,4 @@ pub use rules::{
 };
 pub use sources_config::SourcesConfig;
 pub use tasks::{load as load_tasks, save as save_tasks, save_with_trim};
-pub use tasks_init::load_tasks_from_file;
+pub use tasks_init::{LoadedTasks, load_tasks_from_file};

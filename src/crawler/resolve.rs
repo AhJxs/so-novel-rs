@@ -60,12 +60,20 @@ pub enum CrawlerError {
     InvalidRange(String),
 }
 
+/// 阶段一结果：书籍元信息 + 目录章节列表。
+pub struct ResolvedBook {
+    /// 详情页解析并完成简繁转换的书籍元信息。
+    pub book: Book,
+    /// 目录解析出的章节列表。
+    pub chapters: Vec<Chapter>,
+}
+
 /// 阶段一: 获取书籍元信息 + 章节列表 (不开始下载)。
 ///
 /// # Examples
 ///
 /// ```ignore
-/// let (book, chapters) = resolve_book(&cfg, &client, &source, &url, &cancel).await?;
+/// let ResolvedBook { book, chapters } = resolve_book(&cfg, &client, &source, &url, &cancel).await?;
 /// println!("{}: {} 章", book.book_name, chapters.len());
 /// ```
 ///
@@ -88,7 +96,7 @@ pub async fn resolve_book(
     source: &Source,
     book_url: &str,
     cancel: &CancelToken,
-) -> Result<(Book, Vec<Chapter>), CrawlerError> {
+) -> Result<ResolvedBook, CrawlerError> {
     let cf_bypass = if cfg.global.cf_bypass.trim().is_empty() {
         None
     } else {
@@ -179,5 +187,8 @@ pub async fn resolve_book(
     let target_lang = cfg.global.language.to_book_target_lang();
     let book = convert_book_meta(&book, &source.rule.language, &target_lang);
 
-    Ok((book, toc))
+    Ok(ResolvedBook {
+        book,
+        chapters: toc,
+    })
 }

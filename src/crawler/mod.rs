@@ -20,4 +20,4 @@ pub mod search;
 pub use download::{download_book, download_chapters};
 pub use download_options::{CancelToken, DownloadOptions};
 pub use progress::Progress;
-pub use resolve::{CrawlerError, resolve_book};
+pub use resolve::{CrawlerError, ResolvedBook, resolve_book};

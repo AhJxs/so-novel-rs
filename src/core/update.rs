@@ -8,7 +8,7 @@
 
 use serde_json::Value;
 
-use crate::http::HttpClients;
+use crate::http::{GhProxy, HttpClients};
 use crate::models::Rule;
 
 /// 后台更新检查的结果。`latest_version` 和 `error` 互斥：成功时前者 Some，
@@ -64,7 +64,10 @@ pub fn is_new_version_available(latest: &str) -> bool {
 pub async fn check_latest_release(http: &HttpClients) -> UpdateCheckResult {
     const URL: &str = "https://api.github.com/repos/AhJxs/so-novel-rs/releases/latest";
 
-    let (gh_proxy_url, gh_proxy_client) = http.gh_proxy_pair();
+    let GhProxy {
+        url: gh_proxy_url,
+        client: gh_proxy_client,
+    } = http.gh_proxy_pair();
 
     // GitHub API 对无 UA 的请求返回 403；gh_proxy client 构造时已设 UA，
     // safe client 分支需显式带 UA header。

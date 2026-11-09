@@ -14,7 +14,7 @@ use tokio::sync::Semaphore;
 
 use super::download_options::DownloadOptions;
 use super::progress::Progress;
-use super::resolve::{CrawlerError, resolve_book};
+use super::resolve::{CrawlerError, ResolvedBook, resolve_book};
 use super::retry as retry_mod;
 use crate::config::AppConfig;
 use crate::export::{self, RenderTarget};
@@ -57,7 +57,10 @@ pub async fn download_book(
     let progress = opts.progress.clone();
     let notify = opts.notify.clone();
 
-    let (book, toc) = resolve_book(cfg, client, source, book_url, &cancel).await?;
+    let ResolvedBook {
+        book,
+        chapters: toc,
+    } = resolve_book(cfg, client, source, book_url, &cancel).await?;
 
     if toc.is_empty() {
         // 真实失败: 书源返回 0 章, 无法继续。warn 让 trace_id 里有原因可查。

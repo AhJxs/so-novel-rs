@@ -41,8 +41,8 @@ impl SettingsPage {
         // 主题 SelectState ×3：静态槽全量、动态浅/深槽按 mode 过滤（可搜索）。
         // items 初始可能缺项（async 加载未完），render 里 `sync_theme_items` 会补齐 + 重定位选中。
         let initial_names = themes::list_theme_names(cx);
-        let initial_light = themes::list_theme_names_by_mode(cx, false);
-        let initial_dark = themes::list_theme_names_by_mode(cx, true);
+        let initial_light = themes::list_theme_names_by_mode(cx, themes::ThemeVariant::Light);
+        let initial_dark = themes::list_theme_names_by_mode(cx, themes::ThemeVariant::Dark);
 
         let pref0 = model.read(cx).config.global.theme_pref.clone();
         // 用宏而不是闭包：闭包捕获 `window: &mut Window` 后只能调一次，三个 `SelectState`
@@ -250,7 +250,7 @@ impl SettingsPage {
             self.last_theme_names = new_names;
         }
 
-        let new_light = themes::list_theme_names_by_mode(cx, false);
+        let new_light = themes::list_theme_names_by_mode(cx, themes::ThemeVariant::Light);
         if new_light != self.last_light_names {
             let items: SearchableVec<SharedString> = new_light.clone().into();
             let cur = SharedString::from(pref.dyn_light.clone());
@@ -262,7 +262,7 @@ impl SettingsPage {
             self.last_light_names = new_light;
         }
 
-        let new_dark = themes::list_theme_names_by_mode(cx, true);
+        let new_dark = themes::list_theme_names_by_mode(cx, themes::ThemeVariant::Dark);
         if new_dark != self.last_dark_names {
             let items: SearchableVec<SharedString> = new_dark.clone().into();
             let cur = SharedString::from(pref.dyn_dark);

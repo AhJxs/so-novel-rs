@@ -77,13 +77,20 @@ pub struct FailureRecord {
     pub reason: String,
 }
 
-impl From<(u32, String, String)> for FailureRecord {
-    fn from((index, title, reason): (u32, String, String)) -> Self {
+impl FailureRecord {
+    /// 用章节顺序号、标题与失败原因构造一条明细。
+    pub const fn new(index: u32, title: String, reason: String) -> Self {
         Self {
             index,
             title,
             reason,
         }
+    }
+}
+
+impl From<(u32, String, String)> for FailureRecord {
+    fn from((index, title, reason): (u32, String, String)) -> Self {
+        Self::new(index, title, reason)
     }
 }
 

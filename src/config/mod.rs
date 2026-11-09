@@ -19,7 +19,8 @@ pub use paths::ConfigPaths;
 pub use toml_io::{load_config, save_config};
 pub use types::{
     AppConfig, ConfigError, CookieConfig, CrawlConfig, DownloadConfig, ExportFormat, GlobalConfig,
-    LangType, Language, ProxyConfig, ProxyMode, SourceConfig, ThemeDynMode, ThemeKind, ThemePref,
+    LangType, Language, ParseConfigValueError, ProxyConfig, ProxyMode, SourceConfig, ThemeDynMode,
+    ThemeKind, ThemePref,
 };
 
 #[cfg(test)]

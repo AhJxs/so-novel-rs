@@ -18,7 +18,7 @@ pub use encoding::decode_response_bytes;
 pub use fetch::{
     CfFallbackError, FetchRequest, FetchResponse, HttpMethod, fetch, fetch_with_cf_fallback,
 };
-pub use http_clients::HttpClients;
+pub use http_clients::{GhProxy, HttpClients};
 // `detect` 在本模块内重命名为 `detect_system_proxy`：`crate::http::detect()` 看不出在探什么。
 pub use system_proxy::{
     AbsentReason, SystemProxy, detect as detect_system_proxy, resolve_proxy_url,

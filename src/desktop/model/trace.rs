@@ -16,6 +16,11 @@ static NEXT: AtomicU64 = AtomicU64::new(1);
 pub struct TraceId(u64);
 
 impl TraceId {
+    /// 用给定数值构造追踪 ID。
+    pub const fn new(value: u64) -> Self {
+        Self(value)
+    }
+
     /// 分配一个新的全局唯一 ID。线程安全，单调递增。
     pub(crate) fn mint() -> Self {
         Self(NEXT.fetch_add(1, Ordering::Relaxed))
@@ -35,7 +40,7 @@ impl std::fmt::Display for TraceId {
 
 impl From<u64> for TraceId {
     fn from(v: u64) -> Self {
-        Self(v)
+        Self::new(v)
     }
 }
 

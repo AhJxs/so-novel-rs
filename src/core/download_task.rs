@@ -216,11 +216,7 @@ impl DownloadTask {
             failures: self
                 .failures
                 .iter()
-                .map(|(i, t, r)| FailureRecord {
-                    index: *i,
-                    title: t.clone(),
-                    reason: r.clone(),
-                })
+                .map(|(i, t, r)| FailureRecord::new(*i, t.clone(), r.clone()))
                 .collect(),
         }
     }

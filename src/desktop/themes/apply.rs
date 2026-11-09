@@ -128,6 +128,15 @@ pub fn apply_theme_pref(pref: &ThemePref, window: Option<&mut Window>, cx: &mut 
     // `sync_base` + `refresh_windows`。
 }
 
+/// 主题变体：浅色 / 深色。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ThemeVariant {
+    /// 浅色主题。
+    Light,
+    /// 深色主题。
+    Dark,
+}
+
 /// 列出当前可用的所有主题变体名 (按 name 字典序)。`HashMap` 迭代顺序不稳定, 必须显式排序才能给
 /// Select 稳定选项顺序。
 pub fn list_theme_names(cx: &App) -> Vec<SharedString> {
@@ -136,13 +145,14 @@ pub fn list_theme_names(cx: &App) -> Vec<SharedString> {
     names
 }
 
-/// 列出指定模式 (light / dark) 的主题变体名 (按 name 字典序)。
-/// 动态模式选浅/深主题时用: 过滤掉与目标 mode 不符的变体, 避免用户把深色主题选进浅色槽。
-pub fn list_theme_names_by_mode(cx: &App, dark: bool) -> Vec<SharedString> {
+/// 列出指定变体 (浅色 / 深色) 的主题名 (按 name 字典序)。
+/// 动态模式选浅/深主题时用: 过滤掉与目标变体不符的主题, 避免用户把深色主题选进浅色槽。
+pub fn list_theme_names_by_mode(cx: &App, variant: ThemeVariant) -> Vec<SharedString> {
+    let want_dark = matches!(variant, ThemeVariant::Dark);
     let mut names: Vec<SharedString> = ThemeRegistry::global(cx)
         .themes()
         .iter()
-        .filter(|(_, cfg)| cfg.mode.is_dark() == dark)
+        .filter(|(_, cfg)| cfg.mode.is_dark() == want_dark)
         .map(|(n, _)| n.clone())
         .collect();
     names.sort_by_key(|a| a.to_lowercase());
