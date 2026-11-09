@@ -11,8 +11,8 @@ use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
 use regex::Regex;
-use zip::CompressionMethod;
 use zip::write::SimpleFileOptions;
+use zip::{CompressionMethod, ZipWriter};
 
 use crate::export::exporter::{ExportError, Exporter, sort_chapter_files, unique_path};
 use crate::models::Book;
@@ -90,7 +90,7 @@ fn extract_title(html: &str) -> Option<String> {
 fn zip_directory(src: &Path, dst: &Path) -> Result<(), ExportError> {
     let file = File::create(dst)
         .map_err(|e| ExportError::Zip(format!("create {} failed: {e}", dst.display())))?;
-    let mut writer = zip::ZipWriter::new(file);
+    let mut writer = ZipWriter::new(file);
     let options = SimpleFileOptions::default()
         .compression_method(CompressionMethod::Deflated)
         .unix_permissions(0o644);
@@ -125,6 +125,8 @@ fn zip_directory(src: &Path, dst: &Path) -> Result<(), ExportError> {
 mod tests {
     #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
     use std::io::Read;
+
+    use zip::ZipArchive;
 
     use super::*;
     use crate::config::ExportFormat;
@@ -176,7 +178,7 @@ mod tests {
         );
 
         let f = File::open(&zip_path).unwrap();
-        let mut zr = zip::ZipArchive::new(f).unwrap();
+        let mut zr = ZipArchive::new(f).unwrap();
         let names: Vec<String> = (0..zr.len())
             .map(|i| zr.by_index(i).unwrap().name().to_string())
             .collect();

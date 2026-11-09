@@ -8,11 +8,11 @@
 //! (`!rule.need_proxy` 时); 失败策略 **soft-skip**: 3 站都没拿到有效候选时原样返回详情页的 `coverUrl` (空则 `DEFAULT_COVER`), 不会让整本解析失败。
 
 use std::io::Cursor;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use image::ImageReader;
 use reqwest::Client;
-use scraper::{Html, Selector};
+use scraper::{ElementRef, Html, Selector};
 use serde_json::Value;
 use tracing::warn;
 use url::Url;
@@ -52,7 +52,7 @@ pub async fn fetch_cover(
     fallback_cover_url: Option<&str>,
     qidian_cookie: &str,
 ) -> String {
-    let started = std::time::Instant::now();
+    let started = Instant::now();
     let fallback = normalize_fallback(fallback_cover_url);
     let qidian_enabled = !qidian_cookie.trim().is_empty();
 
@@ -238,7 +238,7 @@ async fn fetch_qimao(client: &Client, book: &Book) -> Option<String> {
 }
 
 /// 同步从选中元素抽文本（多 text node 自动拼）。`Selector` 解析失败 → 空串。
-fn extract_text(el: &scraper::ElementRef, sel: &str) -> String {
+fn extract_text(el: &ElementRef, sel: &str) -> String {
     let Ok(s) = Selector::parse(sel) else {
         return String::new();
     };
@@ -249,7 +249,7 @@ fn extract_text(el: &scraper::ElementRef, sel: &str) -> String {
 }
 
 /// 同步从选中元素抽属性值。`Selector` 解析失败 / 元素无该属性 → 空串。
-fn extract_attr(el: &scraper::ElementRef, sel: &str, attr: &str) -> String {
+fn extract_attr(el: &ElementRef, sel: &str, attr: &str) -> String {
     let Ok(s) = Selector::parse(sel) else {
         return String::new();
     };

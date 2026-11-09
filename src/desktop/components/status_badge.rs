@@ -5,7 +5,9 @@
 
 use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::component::badge::Badge;
-use gpui_kit::{App, IntoElement, ParentElement, RenderOnce, SharedString, Styled, Window, div};
+use gpui_kit::{
+    App, Hsla, IntoElement, ParentElement, RenderOnce, SharedString, Styled, Window, div,
+};
 
 /// 业务状态的 4 个语义色（与 gpui-kit 组件库的主题色对齐）。
 #[derive(Debug, Clone, Copy)]
@@ -19,7 +21,7 @@ pub enum StatusKind {
 }
 
 impl StatusKind {
-    fn color(self, cx: &App) -> gpui_kit::Hsla {
+    fn color(self, cx: &App) -> Hsla {
         match self {
             Self::Info => cx.theme().info,
             Self::Success => cx.theme().success,

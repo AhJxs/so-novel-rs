@@ -21,7 +21,7 @@ fn t_item<'a>(doc: &'a DocumentMut, table: &str, key: &str) -> Option<&'a Item> 
 }
 
 /// 从 TOML 文档中取 `table` 对应的 `Table`。
-pub fn t_table<'a>(doc: &'a DocumentMut, table: &str) -> Option<&'a toml_edit::Table> {
+pub fn t_table<'a>(doc: &'a DocumentMut, table: &str) -> Option<&'a Table> {
     doc.get(table).and_then(|t| t.as_table())
 }
 
@@ -34,11 +34,11 @@ fn t_str(doc: &DocumentMut, table: &str, key: &str) -> Option<String> {
 }
 
 fn t_bool(doc: &DocumentMut, table: &str, key: &str) -> Option<bool> {
-    t_item(doc, table, key).and_then(toml_edit::Item::as_bool)
+    t_item(doc, table, key).and_then(Item::as_bool)
 }
 
 fn t_int(doc: &DocumentMut, table: &str, key: &str) -> Option<i64> {
-    t_item(doc, table, key).and_then(toml_edit::Item::as_integer)
+    t_item(doc, table, key).and_then(Item::as_integer)
 }
 
 /// 读浮点（兼容 TOML 里写成整数 `16` 或浮点 `16.0` 两种形式）。

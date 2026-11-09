@@ -1,10 +1,11 @@
 //! 单章分页正文抓取: [`fetch_paginated_content`] 循环抓 + 拼 + 判定终止。入口 [`super::parse::parse_chapter`]。
 
 use std::sync::LazyLock;
+use std::time::Instant;
 
 use regex::Regex;
 use reqwest::Client;
-use scraper::Html;
+use scraper::{ElementRef, Html};
 
 use super::parse::{ChapterError, fetch_with_cf_fallback};
 use crate::http::abs_url;
@@ -28,7 +29,7 @@ pub(super) async fn fetch_paginated_content(
     let mut buf = String::new();
     let mut current_url = start_url.to_string();
     let mut pages = 0usize;
-    let started = std::time::Instant::now();
+    let started = Instant::now();
 
     for _ in 0..50 {
         let html =
@@ -53,7 +54,7 @@ pub(super) async fn fetch_paginated_content(
             } else {
                 crate::parser::cache::cached_selector(&chapter_rule.next_page).ok()
             };
-            let next_els: Vec<scraper::ElementRef<'_>> = next_sel
+            let next_els: Vec<ElementRef<'_>> = next_sel
                 .as_ref()
                 .map_or_else(Vec::new, |s| document.select(s).collect());
 
@@ -100,7 +101,7 @@ enum NextStep {
 /// `chapter.nextPage` 选元素的 `href`。
 pub(super) fn resolve_next_url(
     document: &Html,
-    next_els: &[scraper::ElementRef<'_>],
+    next_els: &[ElementRef<'_>],
     chapter_rule: &RuleChapter,
     current_url: &str,
 ) -> Result<Option<String>, ChapterError> {
@@ -124,7 +125,7 @@ pub(super) fn resolve_next_url(
 /// 2. 兜底: URL 不再像 `*[-_]数字.html`, 且按钮文本含 `下一章/没有了/>>/书末页`。
 pub(super) fn is_last_page(
     candidate: Option<&str>,
-    next_els: &[scraper::ElementRef<'_>],
+    next_els: &[ElementRef<'_>],
     chapter_rule: &RuleChapter,
 ) -> bool {
     let Some(next_url) = candidate else {

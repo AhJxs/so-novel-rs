@@ -128,10 +128,7 @@ fn extract_from_elements(els: &[ElementRef<'_>], content_type: ContentType) -> S
                 .collect();
             parts.join(" ")
         }
-        ContentType::Html => els
-            .iter()
-            .map(scraper::ElementRef::inner_html)
-            .collect::<String>(),
+        ContentType::Html => els.iter().map(ElementRef::inner_html).collect::<String>(),
         ContentType::AttrSrc | ContentType::AttrHref => {
             // 只取原始 attr 值; 与 jsoup `absUrl` 等价的拼绝对路径由 parser 层
             // 拿到 baseUri 后用 `url::Url::join` 完成。该臂只覆盖 attr 类型,

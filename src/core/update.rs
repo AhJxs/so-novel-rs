@@ -6,6 +6,8 @@
 //! 网络层通过 [`HttpClients`] 复用同一套共享 client：`gh_proxy` 配了走前向代理（启动期一次
 //! 性 build），否则走 `safe` client。
 
+use serde_json::Value;
+
 use crate::http::HttpClients;
 use crate::models::Rule;
 
@@ -91,7 +93,7 @@ pub async fn check_latest_release(http: &HttpClients) -> UpdateCheckResult {
                 Ok(body) => {
                     // GitHub 返回压缩 JSON（无换行），必须用 serde_json 取 tag_name；
                     // 按行匹配 pretty-print 格式会永远找不到 → 误报 "(empty result)"。
-                    let tag = serde_json::from_str::<serde_json::Value>(&body)
+                    let tag = serde_json::from_str::<Value>(&body)
                         .ok()
                         .and_then(|v| v.get("tag_name").and_then(|t| t.as_str()).map(String::from));
                     if tag.is_none() {
@@ -190,7 +192,7 @@ mod tests {
     fn parse_tag_name_from_actual_github_response() {
         // 真实 /releases/latest 响应（压缩格式，无换行）。
         let body = r#"{"url":"https://api.github.com/repos/AhJxs/so-novel-rs/releases/341144353","html_url":"https://github.com/AhJxs/so-novel-rs/releases/tag/v0.2.3","id":341144353,"author":{"login":"github-actions[bot]","id":41898282},"node_id":"RE_kwDOS6YKu84UVXMh","tag_name":"v0.2.3","target_commitish":"master","name":"v0.2.3","draft":false,"immutable":false,"prerelease":false,"created_at":"2026-06-18T03:12:36Z","updated_at":"2026-06-18T03:28:50Z","published_at":"2026-06-18T03:28:50Z","assets":[],"tarball_url":"x","zipball_url":"y","body":"x"}"#;
-        let tag = serde_json::from_str::<serde_json::Value>(body)
+        let tag = serde_json::from_str::<Value>(body)
             .ok()
             .and_then(|v| v.get("tag_name").and_then(|t| t.as_str()).map(String::from));
         assert_eq!(tag.as_deref(), Some("v0.2.3"));
@@ -199,7 +201,7 @@ mod tests {
     #[test]
     fn parse_tag_name_missing_yields_none() {
         let body = r#"{"html_url":"x","name":"v0.2.3"}"#;
-        let tag = serde_json::from_str::<serde_json::Value>(body)
+        let tag = serde_json::from_str::<Value>(body)
             .ok()
             .and_then(|v| v.get("tag_name").and_then(|t| t.as_str()).map(String::from));
         assert!(tag.is_none());

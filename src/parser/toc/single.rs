@@ -3,7 +3,7 @@
 
 use anyhow::Result;
 use reqwest::Client;
-use scraper::{Html, Selector};
+use scraper::{ElementRef, Html, Selector};
 
 use super::paginated::{collect_pagination_urls, fetch_with_cf_fallback};
 use super::utils::{TocError, extract_book_id, format_with_id, resolve_base_for_join};
@@ -165,7 +165,7 @@ pub fn parse_one_toc_page(
         .map_err(|e| TocError::Parse(format!("无效的 item 选择器 `{}`: {e:?}", toc_rule.item)))?;
 
     // 配了 toc.list 时 (极少数书源), 先把 list 的 inner_html 当新文档处理 (同 Java 端)。
-    let elements: Vec<scraper::ElementRef<'_>> = if toc_rule.list.is_empty() {
+    let elements: Vec<ElementRef<'_>> = if toc_rule.list.is_empty() {
         document.select(&item_selector).collect()
     } else {
         let inner = select_and_invoke_js(&document, &toc_rule.list, ContentType::Html)?;
@@ -206,7 +206,7 @@ fn parse_items_from_fragment(
 }
 
 fn push_chapter(
-    el: &scraper::ElementRef<'_>,
+    el: &ElementRef<'_>,
     base_for_href: &str,
     order_counter: &mut u32,
     out: &mut Vec<Chapter>,

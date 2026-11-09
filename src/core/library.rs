@@ -86,7 +86,7 @@ mod tests {
         p.push(format!(
             "sonovel-core-library-{name}-{}-{}",
             std::process::id(),
-            std::time::SystemTime::now()
+            SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
                 .unwrap()
                 .as_nanos()

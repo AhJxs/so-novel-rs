@@ -1,6 +1,6 @@
 //! 共享 HTTP client 集合。
 //!
-//! `reqwest::Client` 持有连接池 + TLS session cache，每次 `build()` 都是全新实例 =
+//! `Client` 持有连接池 + TLS session cache，每次 `build()` 都是全新实例 =
 //! 重置 keep-alive + 重做 TLS 握手。故按"配置维度"维护固定实例：`safe` /
 //! `unsafe_ssl`（`Rule.ignore_ssl=true` 的老书源）/ `gh_proxy`（更新检查专用）。
 //!
@@ -11,6 +11,7 @@ use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 
 use anyhow::{Context, Result};
+use reqwest::Client;
 
 use crate::config::AppConfig;
 #[cfg(test)]
@@ -39,22 +40,22 @@ impl ProxySignature {
 /// 共享 HTTP client 集合。构造代价一次性（启动时），之后每个爬取只 `Arc::clone`。
 pub struct HttpClients {
     /// safe / `unsafe_ssl` 两个 client：`for_rule` 只 read，`rebuild_proxy` 用 write 换 Arc。
-    /// clone ≈ `Arc::clone`（`reqwest::Client` 内部本就是 Arc）。
-    clients: RwLock<(Arc<reqwest::Client>, Arc<reqwest::Client>)>,
+    /// clone ≈ `Arc::clone`（`Client` 内部本就是 Arc）。
+    clients: RwLock<(Arc<Client>, Arc<Client>)>,
     /// `gh_proxy` 字符串 + 对应 `client。gh_proxy` 为空时不用它但保留 ——
     /// 用户从有 → 无切换时不会出现"没 client 可用"的窗口。
-    gh_proxy: Mutex<(String, Arc<reqwest::Client>)>,
+    gh_proxy: Mutex<(String, Arc<Client>)>,
     /// 当前生效的 proxy 元组；用于短路"没真改就不重建"。
     proxy_signature: Mutex<ProxySignature>,
 }
 
 impl HttpClients {
-    /// 兜底空集：两个 client 都是 `reqwest::Client::new()`，`gh_proxy` 为空串。
+    /// 兜底空集：两个 client 都是 `Client::new()`，`gh_proxy` 为空串。
     ///
     /// `core::bootstrap::load_context` 在 proxy strip 后仍失败时最后兜底用 ——
     /// 比 panic 友好（UI 仍能进，下载时报网络错即可）。日常路径都走 [`Self::new`]。
     pub fn empty() -> Self {
-        let bare = Arc::new(reqwest::Client::new());
+        let bare = Arc::new(Client::new());
         Self {
             clients: RwLock::new((Arc::clone(&bare), Arc::clone(&bare))),
             gh_proxy: Mutex::new((String::new(), bare)),
@@ -81,7 +82,7 @@ impl HttpClients {
                     .context("构造 gh_proxy HTTP client 失败")?,
             )
         } else {
-            let mut builder = reqwest::Client::builder()
+            let mut builder = Client::builder()
                 .connect_timeout(Duration::from_secs(10))
                 .timeout(Duration::from_secs(15))
                 .redirect(reqwest::redirect::Policy::limited(5))
@@ -111,15 +112,15 @@ impl HttpClients {
     /// 返回 owned 而非 `&`：底层是 `RwLock`，`RwLockReadGuard` 不能泄漏出引用；
     /// clone 只做 refcount bump，几乎零开销。
     #[inline]
-    pub fn for_rule(&self, rule: &Rule) -> reqwest::Client {
+    pub fn for_rule(&self, rule: &Rule) -> Client {
         rw_read_or("for_rule", &self.clients).map_or_else(
             |_| {
                 // 锁 poison：退路拿 unsafe_ssl（哪怕可能坏，也比 worker panic 拖垮整个进程好）。
-                // 二次 read 仍失败则返 reqwest::Client::new() 作 last resort。
+                // 二次 read 仍失败则返 Client::new() 作 last resort。
                 self.clients.read().map_or_else(
                     |_| {
-                        tracing::error!("for_rule: 二次 read 仍失败，返回 reqwest::Client::new()");
-                        reqwest::Client::new()
+                        tracing::error!("for_rule: 二次 read 仍失败，返回 Client::new()");
+                        Client::new()
                     },
                     |g| g.1.as_ref().clone(),
                 )
@@ -136,7 +137,7 @@ impl HttpClients {
 
     /// `gh_proxy` 专用 client（更新检查用）。返回 `(gh_proxy_url, Arc<client>)`，
     /// 调用方需自行判断 `gh_proxy_url.is_empty()` 决定是否改走 `for_rule`。
-    pub fn gh_proxy_pair(&self) -> (String, Arc<reqwest::Client>) {
+    pub fn gh_proxy_pair(&self) -> (String, Arc<Client>) {
         // 锁 poison：返空配置 + safe client（调用方看到空 url 会走 for_rule 路径，
         // 不会用坏掉的 gh_proxy client）。
         mutex_or("gh_proxy_pair", &self.gh_proxy).map_or_else(
@@ -145,7 +146,7 @@ impl HttpClients {
                     .clients
                     .read()
                     .ok()
-                    .map_or_else(|| Arc::new(reqwest::Client::new()), |g| Arc::clone(&g.0));
+                    .map_or_else(|| Arc::new(Client::new()), |g| Arc::clone(&g.0));
                 (String::new(), fallback)
             },
             |guard| (guard.0.clone(), Arc::clone(&guard.1)),
@@ -191,7 +192,7 @@ impl HttpClients {
 
     /// 仅测试用：拿 `safe` client 的 Arc 内部指针，用于断言"rebuild 真的换了实例"。
     #[cfg(test)]
-    fn safe_client_ptr(&self) -> Result<*const reqwest::Client, anyhow::Error> {
+    fn safe_client_ptr(&self) -> Result<*const Client, anyhow::Error> {
         // 测试路径上锁不会 poison；panic 立即可见，比静默返错更易调试。
         let guard = self
             .clients

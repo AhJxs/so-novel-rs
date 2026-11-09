@@ -10,9 +10,10 @@ use std::io::Cursor;
 use std::sync::{Arc, LazyLock};
 
 use gpui_kit::{
-    AnyElement, ImageSource, IntoElement, ObjectFit, RenderImage, Styled as _, StyledImage as _,
-    div, img,
+    AnyElement, ImageSource, IntoElement, ObjectFit, Pixels, RenderImage, Styled as _,
+    StyledImage as _, div, img,
 };
+use image::{Frame, ImageReader};
 
 /// Sidebar header 用的小 logo (assets/logo.png 编译期嵌入)。
 const LOGO_PNG: &[u8] = include_bytes!("../../assets/logo.png");
@@ -23,7 +24,7 @@ pub(super) static LOGO_IMAGE: LazyLock<Option<Arc<RenderImage>>> =
 
 /// 解码 PNG 字节 → `RenderImage`。流程同 `decode_cover_image`, 但 logo 是静态资源 → `Lazy` 缓存。
 fn decode_logo_image(bytes: &[u8]) -> Option<Arc<RenderImage>> {
-    let reader = image::ImageReader::new(Cursor::new(bytes))
+    let reader = ImageReader::new(Cursor::new(bytes))
         .with_guessed_format()
         .ok()?;
     let dynamic = reader.decode().ok()?;
@@ -32,14 +33,14 @@ fn decode_logo_image(bytes: &[u8]) -> Option<Arc<RenderImage>> {
     for pixel in rgba.as_chunks_mut::<4>().0 {
         pixel.swap(0, 2);
     }
-    let frame = image::Frame::new(rgba);
+    let frame = Frame::new(rgba);
     Some(Arc::new(RenderImage::new(vec![frame])))
 }
 
 /// 渲染 logo 图片元素 (正方形, object-fit contain)。解码失败 → 空 div 占位, 不让 UI 崩。
 ///
 /// `size` 走 `px()` 显式像素而非 rem: logo 是图标资源, 不跟字号缩放。
-pub(super) fn render_logo(size: gpui_kit::Pixels) -> AnyElement {
+pub(super) fn render_logo(size: Pixels) -> AnyElement {
     LOGO_IMAGE.as_ref().map_or_else(
         || div().size(size).flex_shrink_0().into_any_element(),
         |rendered| {

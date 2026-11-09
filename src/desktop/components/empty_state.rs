@@ -5,7 +5,9 @@
 
 use gpui_kit::component::{ActiveTheme as _, Icon, IconName, Sizable};
 use gpui_kit::prelude::FluentBuilder as _;
-use gpui_kit::{App, IntoElement, ParentElement, RenderOnce, SharedString, Styled, Window, div};
+use gpui_kit::{
+    App, FontWeight, IntoElement, ParentElement, RenderOnce, SharedString, Styled, Window, div,
+};
 
 /// 空态展示。`RenderOnce` — 没有内部状态，构造即可用。
 #[derive(IntoElement)]
@@ -48,7 +50,7 @@ impl RenderOnce for EmptyState {
             .child(
                 div()
                     .text_base()
-                    .font_weight(gpui_kit::FontWeight::MEDIUM)
+                    .font_weight(FontWeight::MEDIUM)
                     .text_color(cx.theme().foreground)
                     .child(self.title),
             )

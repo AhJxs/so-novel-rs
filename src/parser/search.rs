@@ -9,7 +9,7 @@
 
 use anyhow::Result;
 use reqwest::Client;
-use scraper::Html;
+use scraper::{ElementRef, Html};
 use thiserror::Error;
 
 #[cfg(test)]
@@ -192,7 +192,7 @@ pub fn parse_search_results(
 
 /// 从单个搜索结果元素中提取字段并推入结果列表。
 fn push_search_result(
-    el: scraper::ElementRef<'_>,
+    el: ElementRef<'_>,
     s: &crate::models::RuleSearch,
     base_url: &str,
     source_id: i32,
@@ -235,7 +235,7 @@ fn push_search_result(
 }
 
 /// 提取可选字段：选择器/JS 失败时静默返回 `None`（搜索结果容错，不阻断整条）。
-fn optional_field(el: scraper::ElementRef<'_>, query: &str) -> Option<String> {
+fn optional_field(el: ElementRef<'_>, query: &str) -> Option<String> {
     if query.trim().is_empty() {
         return None;
     }

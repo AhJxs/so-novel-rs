@@ -9,7 +9,7 @@
 
 use std::sync::LazyLock;
 
-use regex::Regex;
+use regex::{Captures, Regex};
 
 use crate::models::RuleChapter;
 use crate::parser::dom::clear_all_attributes;
@@ -49,7 +49,7 @@ pub fn format_chapter(content: &str, rule_chapter: &RuleChapter) -> String {
 /// 处理闭合标签模式：把成对开闭标签全部改写为 `<p>...</p>`（含 `<p>` 自身）。
 fn format_closed(html: &str) -> String {
     NON_P_PAIR_RE
-        .replace_all(html, |caps: &regex::Captures<'_>| {
+        .replace_all(html, |caps: &Captures<'_>| {
             let inner = caps.get(2).map_or("", |m| m.as_str());
             format!("<p>{inner}</p>")
         })

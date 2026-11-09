@@ -10,7 +10,7 @@
 use std::rc::Rc;
 
 use gpui_kit::component::pagination::Pagination as ComponentPagination;
-use gpui_kit::{App, Empty, IntoElement, RenderOnce, Styled, Window};
+use gpui_kit::{App, Empty, IntoElement, RenderOnce, Styled, ViewElement, Window};
 
 /// 统一的列表分页大小。4 个 page（library / sources / tasks / search）共用。
 pub const PAGE_SIZE: usize = 30;
@@ -86,10 +86,10 @@ impl Pagination {
 // `#[derive(IntoElement)]` 也能用于单态类型；手写等价产物更显式
 // （derive 产物是 `ViewElement<Self>`，`RenderOnce` 经 blanket impl 自动成为 `View`）。
 impl IntoElement for Pagination {
-    type Element = gpui_kit::ViewElement<Self>;
+    type Element = ViewElement<Self>;
 
     fn into_element(self) -> Self::Element {
-        gpui_kit::ViewElement::new(self)
+        ViewElement::new(self)
     }
 }
 

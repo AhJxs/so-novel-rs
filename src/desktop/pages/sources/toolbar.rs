@@ -8,7 +8,7 @@ use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::component::select::{SearchableVec, Select, SelectState};
 use gpui_kit::component::{ActiveTheme as _, Icon, IconName, Selectable, Sizable, h_flex};
-use gpui_kit::{Context, Entity, IntoElement, ParentElement, Styled, div, px};
+use gpui_kit::{Context, Entity, IntoElement, ParentElement, SharedString, Styled, div, px};
 use rust_i18n::t;
 
 use super::SourcesPage;
@@ -80,7 +80,7 @@ fn status_filter_buttons(
 /// 单个 status 过滤 Button：点击 → `set_status_filter(new_status)`。
 fn status_button(
     id: &'static str,
-    label: gpui_kit::SharedString,
+    label: SharedString,
     value: SourcesFilterStatus,
     current_status: SourcesFilterStatus,
     cx: &Context<'_, SourcesPage>,

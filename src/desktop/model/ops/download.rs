@@ -2,6 +2,7 @@
 
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Instant;
 
 use tokio::sync::mpsc;
 use tracing::Instrument;
@@ -57,7 +58,7 @@ pub fn spawn_resolve_toc(
 
     ctx.runtime.spawn(
         async move {
-            let started = std::time::Instant::now();
+            let started = Instant::now();
             let state = if let Some(rule) = rule {
                 let source = Source::from(rule, &cfg);
                 let cancel = CancelToken::new();
@@ -102,7 +103,7 @@ pub fn spawn_resolve_toc(
 fn log_download_outcome(
     result: Result<PathBuf, CrawlerError>,
     book_name: &str,
-    started: std::time::Instant,
+    started: Instant,
     label: &str,
     tx_for_failure: &mpsc::UnboundedSender<Progress>,
 ) {
@@ -179,7 +180,7 @@ pub fn spawn_download_range(
         total_chapters = total,
     );
     let span_for_instrument = span;
-    let started = std::time::Instant::now();
+    let started = Instant::now();
     let book_name = target.book_name.clone();
 
     drop(tx);
@@ -262,7 +263,7 @@ pub fn spawn_download(
         %book_url,
     );
     let span_for_instrument = span;
-    let started = std::time::Instant::now();
+    let started = Instant::now();
     let book_name = target.book_name.clone();
     let wakeup_inner = ctx.wakeup.clone();
 

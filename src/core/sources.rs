@@ -10,6 +10,8 @@
 
 use std::path::Path;
 
+use url::Url;
+
 use crate::db::{self, SourcesConfig};
 use crate::models::{Rule, Source};
 
@@ -72,11 +74,11 @@ pub fn load_active(rules_dir: &Path, sources_config: &SourcesConfig) -> anyhow::
 /// 遍历 `sources`，**不**依赖 `is_search_enabled`（下载场景无视 `search_disabled`），取第一个 origin
 /// 相同的 source（多个匹配按列表顺序）；`url` 或 rule URL 解析失败 → 跳过 / 返回 `None`。
 pub fn match_source_by_url<'a>(sources: &'a [Source], url: &str) -> Option<&'a Source> {
-    let parsed = url::Url::parse(url).ok()?;
+    let parsed = Url::parse(url).ok()?;
     let origin = parsed.origin();
     sources
         .iter()
-        .find(|s| url::Url::parse(&s.rule.url).is_ok_and(|u| u.origin() == origin))
+        .find(|s| Url::parse(&s.rule.url).is_ok_and(|u| u.origin() == origin))
 }
 
 #[cfg(test)]

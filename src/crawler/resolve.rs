@@ -6,6 +6,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use reqwest::Client;
 use thiserror::Error;
 
 use super::download_options::CancelToken;
@@ -78,7 +79,7 @@ pub enum CrawlerError {
 )]
 pub async fn resolve_book(
     cfg: &AppConfig,
-    client: &reqwest::Client,
+    client: &Client,
     source: &Source,
     book_url: &str,
     cancel: &CancelToken,

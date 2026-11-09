@@ -9,6 +9,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use rand::RngExt;
+use reqwest::Client;
 use tokio::sync::Semaphore;
 
 use super::download_options::DownloadOptions;
@@ -47,7 +48,7 @@ use crate::parser::{ChapterError, TocError, parse_chapter};
 )]
 pub async fn download_book(
     cfg: &AppConfig,
-    client: &reqwest::Client,
+    client: &Client,
     source: &Source,
     book_url: &str,
     opts: DownloadOptions,
@@ -109,7 +110,7 @@ pub async fn download_book(
 )]
 pub async fn download_chapters(
     cfg: &AppConfig,
-    client: &reqwest::Client,
+    client: &Client,
     source: &Source,
     book: &Book,
     chapters: Vec<Chapter>,
@@ -217,7 +218,7 @@ pub async fn download_chapters(
             let title = chapter.title.clone();
 
             // 把章节抓取整段 (含重试) 和 cancel 信号 race; cancel 一来 future
-            // 立刻被 drop, reqwest::Client::send 关闭底层连接 — 真·零延迟。
+            // 立刻被 drop, Client::send 关闭底层连接 — 真·零延迟。
             let fetch_future = retry_mod::retry_with_backoff(
                 |_attempt| {
                     let client = client.clone();
@@ -432,7 +433,7 @@ fn cleanup_chapters_dir_if_empty(dir: &std::path::Path) {
 }
 
 /// 下载封面字节 (EPUB 专属), 失败 soft-skip。
-async fn download_cover(client: &reqwest::Client, cover_url: Option<&str>) -> Option<Vec<u8>> {
+async fn download_cover(client: &Client, cover_url: Option<&str>) -> Option<Vec<u8>> {
     let url = cover_url?.trim();
     if url.is_empty() {
         return None;

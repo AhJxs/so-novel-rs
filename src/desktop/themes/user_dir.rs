@@ -40,6 +40,8 @@ pub(super) fn ensure_user_themes_dir(path: &Path) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
+    use serde_json::Value;
+
     use super::*;
 
     #[test]
@@ -62,7 +64,7 @@ mod tests {
         for entry in std::fs::read_dir(&path).unwrap().flatten() {
             let p = entry.path();
             let s = std::fs::read_to_string(&p).expect("read back");
-            let _: serde_json::Value =
+            let _: Value =
                 serde_json::from_str(&s).unwrap_or_else(|e| panic!("bad json {p:?}: {e}"));
         }
     }

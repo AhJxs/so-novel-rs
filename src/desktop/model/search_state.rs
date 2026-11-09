@@ -1,7 +1,9 @@
 use std::collections::{HashMap, HashSet};
 use std::num::NonZeroUsize;
+use std::time::Duration;
 
 use lru::LruCache;
+use reqwest::Client;
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
 
@@ -279,7 +281,7 @@ impl SearchState {
         &mut self,
         source_id: i32,
         url: &str,
-        client: &reqwest::Client,
+        client: &Client,
         runtime: &Runtime,
     ) {
         let url = url.trim();
@@ -304,7 +306,7 @@ impl SearchState {
 
         let url_owned = url.to_string();
         let source_id_send = source_id;
-        // `client` 借自 caller 不能跨 `.await` move; `reqwest::Client::clone` 是廉价
+        // `client` 借自 caller 不能跨 `.await` move; `Client::clone` 是廉价
         // Arc clone (共享连接池), 正是"跨任务复用"要的语义。
         let client = client.clone();
         runtime.spawn(async move {
@@ -313,7 +315,7 @@ impl SearchState {
             let ua = crate::http::ua::random_ua();
             let result: Option<Vec<u8>> = match client
                 .get(&url_owned)
-                .timeout(std::time::Duration::from_secs(15))
+                .timeout(Duration::from_secs(15))
                 .header(reqwest::header::USER_AGENT, ua)
                 .header(reqwest::header::REFERER, referer)
                 .header(reqwest::header::ACCEPT, "image/*,*/*;q=0.8")
@@ -370,7 +372,7 @@ mod search_state_tests {
         assert!(s.pending_cover_prefetch.is_empty());
     }
 
-    fn make_test_client() -> reqwest::Client {
+    fn make_test_client() -> Client {
         crate::http::client::build_async_client(
             &AppConfig::default(),
             &crate::http::client::ClientOptions::default(),
@@ -434,7 +436,7 @@ mod search_state_tests {
         let mut s = SearchState::default();
 
         s.spawn_cover_download(1, "https://example.com/cover.png", &client, &rt);
-        std::thread::sleep(std::time::Duration::from_millis(500));
+        std::thread::sleep(Duration::from_millis(500));
         drop(rt);
     }
 

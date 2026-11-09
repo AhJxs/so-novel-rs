@@ -12,9 +12,10 @@ use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::{ActiveTheme as _, Sizable, h_flex, v_flex};
 use gpui_kit::{
-    App, Entity, ImageSource, IntoElement, ObjectFit, ParentElement, RenderImage, SharedString,
-    Styled, StyledImage, div, img, px,
+    AnyElement, App, Entity, ImageSource, IntoElement, ObjectFit, ParentElement, RenderImage,
+    SharedString, Styled, StyledImage, div, img, px,
 };
+use image::{Frame, ImageReader};
 use rust_i18n::t;
 
 use super::SearchPage;
@@ -199,7 +200,7 @@ fn detail_row(
 
     // `overflow_y_scrollbar` 是 terminal builder（返回 `Scrollable<Div>`，类型不是 `Div`），
     // 所以只能按 max_h 分支构造两种 element，不能链在 `when_some` 里。
-    let value_el: gpui_kit::AnyElement = if let Some(h) = max_h {
+    let value_el: AnyElement = if let Some(h) = max_h {
         value_inner
             .max_h(px(h))
             .overflow_y_scrollbar()
@@ -221,7 +222,7 @@ fn detail_row(
 /// 失败返回 `None` 而非 panic —— 调用方缓存负面结果，避免每帧重试解码。
 fn decode_cover_image(bytes: &[u8]) -> Option<Arc<RenderImage>> {
     // with_guessed_format 让 image crate 按 magic bytes 推断格式（PNG/JPEG/WebP/…）。
-    let reader = image::ImageReader::new(Cursor::new(bytes))
+    let reader = ImageReader::new(Cursor::new(bytes))
         .with_guessed_format()
         .ok()?;
     // 二次保险：CoverEntry::Ready 下载时已 probe 过，但缓存可能跨进程，这里再 probe 一次。
@@ -241,7 +242,7 @@ fn decode_cover_image(bytes: &[u8]) -> Option<Arc<RenderImage>> {
 
     // `Frame` 指 `image::Frame`。**别**写成 `gpui_kit::Frame` —— 那是 window 模块的
     // dispatch tree Frame，pub(crate) 且类型对不上。
-    let frame = image::Frame::new(rgba);
+    let frame = Frame::new(rgba);
     Some(Arc::new(RenderImage::new(vec![frame])))
 }
 

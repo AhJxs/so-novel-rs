@@ -1,6 +1,7 @@
 //! 详情页 HTML 解析 + 主流程: [`parse_book_detail`] 抓 + 解析 + `CoverUpdater`。封面 URL 处理在 [`super::cover`]。
 
 use std::sync::LazyLock;
+use std::time::Instant;
 
 use anyhow::Result;
 use regex::Regex;
@@ -65,7 +66,7 @@ pub async fn parse_book_detail(
     cf_bypass_base: Option<&str>,
     qidian_cookie: Option<&str>,
 ) -> Result<Book, BookError> {
-    let started = std::time::Instant::now();
+    let started = Instant::now();
     let book_rule = rule.book.as_ref().ok_or(BookError::BookRuleMissing)?;
 
     let response = fetch(

@@ -6,7 +6,7 @@ use gpui_kit::component::button::Button;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::notification::{Notification, NotificationType};
 use gpui_kit::component::{ActiveTheme as _, Icon, IconName, Sizable, WindowExt, h_flex, v_flex};
-use gpui_kit::{App, Entity, IntoElement, ParentElement, Styled, div, px};
+use gpui_kit::{App, Entity, FontWeight, IntoElement, ParentElement, Styled, div, px};
 use rust_i18n::t;
 
 use super::{SearchPage, detail_dialog};
@@ -74,7 +74,7 @@ pub(super) fn render(
                 .child(
                     div()
                         .text_sm()
-                        .font_weight(gpui_kit::FontWeight::MEDIUM)
+                        .font_weight(FontWeight::MEDIUM)
                         .text_color(cx.theme().foreground)
                         .child(div().whitespace_nowrap().text_ellipsis().child(name)),
                 )

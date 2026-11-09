@@ -2,6 +2,7 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 use pdf_oxide::writer::{DocumentBuilder, DocumentMetadata, EmbeddedFont, PageSize};
 
@@ -106,7 +107,7 @@ impl Exporter for PdfExporter {
             "Helvetica"
         };
         let total_chapters = chapters.len();
-        let started = std::time::Instant::now();
+        let started = Instant::now();
         {
             let mut pg = Paginator::new(&mut builder, &measurer, font_name);
             pg.render_cover(book);

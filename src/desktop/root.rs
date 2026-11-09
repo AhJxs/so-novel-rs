@@ -11,8 +11,8 @@ use gpui_kit::component::sidebar::{Sidebar, SidebarMenu, SidebarMenuItem, Sideba
 use gpui_kit::component::{ActiveTheme as _, Icon, TitleBar, WindowExt as _};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::{
-    AnyElement, AppContext, ClickEvent, Context, Entity, FontWeight, InteractiveElement,
-    IntoElement, MouseButton, ParentElement, Render, Styled, Window, div, px,
+    AnyElement, AppContext, ClickEvent, Context, Div, Entity, FocusHandle, FontWeight,
+    InteractiveElement, IntoElement, MouseButton, ParentElement, Render, Styled, Window, div, px,
 };
 use rust_i18n::t;
 
@@ -34,7 +34,7 @@ pub struct RootView {
     sidebar_collapsed: bool,
     /// `new()` 里 `window.focus(&focus)` 让 `RootView` 拥有初始焦点 —— 否则
     /// `KEY_CONTEXT` 快捷键依赖 focus 落到哪个子元素, 不稳定。
-    focus: gpui_kit::FocusHandle,
+    focus: FocusHandle,
 
     // 5 个 page entity 一次性创建, 跨切换保持内部状态 (输入框 / 滚动位置)。
     library_page: Entity<LibraryPage>,
@@ -209,7 +209,7 @@ impl RootView {
     }
 
     /// 8 个导航 action 的 listener 挂到传入的 div 上。
-    fn bind_nav_actions(root: gpui_kit::Div, cx: &Context<Self>) -> gpui_kit::Div {
+    fn bind_nav_actions(root: Div, cx: &Context<Self>) -> Div {
         root.on_action(
             cx.listener(|this, _: &ShowSearch, _, cx| this.navigate(NavPage::Search, cx)),
         )

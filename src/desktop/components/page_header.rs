@@ -3,7 +3,7 @@
 use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    App, Div, IntoElement, ParentElement, RenderOnce, SharedString, Styled, Window, div,
+    App, Div, FontWeight, IntoElement, ParentElement, RenderOnce, SharedString, Styled, Window, div,
 };
 
 /// 页面顶栏。最常见的 `<h1> + 副标题 + 右侧按钮组` 模式。
@@ -56,7 +56,7 @@ impl RenderOnce for PageHeader {
                     .child(
                         div()
                             .text_lg()
-                            .font_weight(gpui_kit::FontWeight::BOLD)
+                            .font_weight(FontWeight::BOLD)
                             .text_color(cx.theme().foreground)
                             .child(self.title),
                     )

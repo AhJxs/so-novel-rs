@@ -6,7 +6,7 @@
 
 use std::sync::LazyLock;
 
-use regex::Regex;
+use regex::{Captures, Regex};
 
 use super::fonts::Measurer;
 
@@ -74,7 +74,7 @@ pub fn decode_entities(s: &str) -> String {
     static ENT_RE: LazyLock<Regex> =
         LazyLock::new(|| compile_static_re(r"&#(x?)([0-9a-fA-F]+);|&([a-zA-Z]+);"));
     ENT_RE
-        .replace_all(s, |caps: &regex::Captures| {
+        .replace_all(s, |caps: &Captures| {
             if let (Some(hex), Some(num)) = (caps.get(1), caps.get(2)) {
                 let radix = if hex.as_str().eq_ignore_ascii_case("x") {
                     16

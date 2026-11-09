@@ -6,7 +6,7 @@
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::component::{ActiveTheme as _, Icon, IconName, Selectable, Sizable, h_flex};
-use gpui_kit::{Context, Entity, IntoElement, ParentElement, Styled, px};
+use gpui_kit::{Context, Entity, IntoElement, ParentElement, SharedString, Styled, px};
 use rust_i18n::t;
 
 /// 输入行：文件名过滤 Input + ext 过滤按钮组。
@@ -53,7 +53,7 @@ fn ext_filter_buttons(
 /// 单个 ext 过滤 Button：点击 → `set_ext_filter(value)`。
 fn ext_button(
     id: &'static str,
-    label: gpui_kit::SharedString,
+    label: SharedString,
     value: Option<&'static str>,
     current_ext: Option<&str>,
     cx: &Context<'_, super::LibraryPage>,

@@ -7,11 +7,16 @@
 //! 本模块仅依赖 gpui-kit + 业务模块（`crate::desktop::model`）。
 
 use anyhow::Result;
+#[cfg(target_os = "linux")]
+use gpui_kit::WindowDecorations;
+use gpui_kit::assets::Assets;
 use gpui_kit::component::TitleBar;
 use gpui_kit::{
-    App, AppContext, Bounds, WindowBackgroundAppearance, WindowBounds, WindowOptions, actions, px,
-    size,
+    App, AppContext, Bounds, KeyBinding, QuitMode, WindowBackgroundAppearance, WindowBounds,
+    WindowOptions, actions, px, size,
 };
+#[cfg(target_os = "macos")]
+use gpui_kit::{Menu, MenuItem};
 
 use crate::desktop::model::AppModel;
 
@@ -78,8 +83,8 @@ pub fn run() -> Result<()> {
     // This single-window application has no background/tray mode. On macOS,
     // GPUI's default leaves the process running after the last window closes.
     let app = gpui_kit::application()
-        .with_quit_mode(gpui_kit::QuitMode::LastWindowClosed)
-        .with_assets(gpui_kit::assets::Assets);
+        .with_quit_mode(QuitMode::LastWindowClosed)
+        .with_assets(Assets);
     app.run(move |cx: &mut App| {
         // rust-i18n 扩展注册 —— **必须在 `component::init` 之前**, 且只调一次。
         // 方向: 组件查 key 时先查我们的 `app.yml`, 查不到再回落组件内置 `ui.yml`（反向不成立）。
@@ -94,7 +99,7 @@ pub fn run() -> Result<()> {
 
         // Keep quit handling at application scope: no focused view is required.
         cx.on_action(|_: &Quit, cx| cx.quit());
-        cx.bind_keys([gpui_kit::KeyBinding::new("cmd-q", Quit, None)]);
+        cx.bind_keys([KeyBinding::new("cmd-q", Quit, None)]);
 
         // 1. 创建 AppModel。启动期致命错误 → 弹原生对话框后退出 GPUI 循环, 不开窗口。
         let (model, wakeup_rx) = match AppModel::new_with_wakeup() {
@@ -133,12 +138,10 @@ pub fn run() -> Result<()> {
         gpui_kit::component::set_locale(i18n::locale_for(model.read(cx).config.global.language));
 
         #[cfg(target_os = "macos")]
-        cx.set_menus([
-            gpui_kit::Menu::new("So Novel").items([gpui_kit::MenuItem::action(
-                rust_i18n::t!("AppMenu.quit").to_string(),
-                Quit,
-            )]),
-        ]);
+        cx.set_menus([Menu::new("So Novel").items([MenuItem::action(
+            rust_i18n::t!("AppMenu.quit").to_string(),
+            Quit,
+        )])]);
 
         let window_size = size(px(1200.0), px(800.0));
         let min_size = size(px(900.0), px(600.0));
@@ -159,7 +162,7 @@ pub fn run() -> Result<()> {
         // 让 GPU shader 渲染的 CSD 圆角 alpha 能穿透。
         #[cfg(target_os = "linux")]
         {
-            opts.window_decorations = Some(gpui_kit::WindowDecorations::Client);
+            opts.window_decorations = Some(WindowDecorations::Client);
         }
 
         // 7. 开窗：应用内容 view 直接返回 `RootView`, **不要**自己再包一层 `Root`

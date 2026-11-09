@@ -184,7 +184,7 @@ mod tests {
     fields(url, has_bypass = cf_bypass_base.is_some())
 )]
 pub async fn fetch_with_cf_fallback(
-    client: &reqwest::Client,
+    client: &Client,
     url: &str,
     timeout: Option<u32>,
     cf_bypass_base: Option<&str>,

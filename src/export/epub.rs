@@ -10,6 +10,7 @@
 use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 use epub_builder::{EpubBuilder, EpubContent, EpubVersion, ReferenceType, ZipLibrary};
 
@@ -110,7 +111,7 @@ pub fn merge_with_cover_bytes(
 
     let total_chapters = files.len();
     let digit = total_chapters.to_string().len().max(3);
-    let started = std::time::Instant::now();
+    let started = Instant::now();
     for (idx, path) in files.iter().enumerate() {
         // 流式: File 直接作为 `Read` 传给 `EpubContent`, 避免 `read_to_end` 把整章字节
         // 先吃进 Vec (1000 章 × 50KB 会白占 50MB)。
@@ -218,6 +219,8 @@ fn html_escape(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
+    use zip::ZipArchive;
+
     use super::*;
     use crate::config::ExportFormat;
     use crate::export::exporter::{RenderedChapter, write_chapter_files};
@@ -273,7 +276,7 @@ mod tests {
         );
 
         let f = File::open(&path).unwrap();
-        let mut zr = zip::ZipArchive::new(f).unwrap();
+        let mut zr = ZipArchive::new(f).unwrap();
         let names: Vec<String> = (0..zr.len())
             .map(|i| zr.by_index(i).unwrap().name().to_string())
             .collect();
@@ -303,7 +306,7 @@ mod tests {
 
         let path = merge_with_cover_bytes(&sample_book(), &chapters, &out, Some(&png)).unwrap();
         let f = File::open(&path).unwrap();
-        let mut zr = zip::ZipArchive::new(f).unwrap();
+        let mut zr = ZipArchive::new(f).unwrap();
         let names: Vec<String> = (0..zr.len())
             .map(|i| zr.by_index(i).unwrap().name().to_string())
             .collect();
