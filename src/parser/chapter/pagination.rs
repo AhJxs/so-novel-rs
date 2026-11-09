@@ -8,7 +8,7 @@ use reqwest::Client;
 use scraper::{ElementRef, Html};
 
 use super::parse::{ChapterError, fetch_with_cf_fallback};
-use crate::http::abs_url;
+use crate::http::absolute_url;
 use crate::models::{ContentType, Rule, RuleChapter};
 use crate::parser::dom::select_and_invoke_js;
 
@@ -111,13 +111,13 @@ pub(super) fn resolve_next_url(
         if v.is_empty() {
             return Ok(None);
         }
-        return Ok(abs_url(current_url, &v));
+        return Ok(absolute_url(current_url, &v));
     }
     let Some(first) = next_els.first() else {
         return Ok(None);
     };
     let href = first.value().attr("href").unwrap_or_default();
-    Ok(abs_url(current_url, href))
+    Ok(absolute_url(current_url, href))
 }
 
 /// 终止判定。两层:

@@ -11,7 +11,9 @@ use thiserror::Error;
 
 use super::cover;
 use crate::crawler::cover_updater;
-use crate::http::{FetchRequest, HttpMethod, abs_url, fetch, fetch_via_cf_bypass, has_cloudflare};
+use crate::http::{
+    FetchRequest, HttpMethod, absolute_url, fetch, fetch_via_cf_bypass, has_cloudflare,
+};
 use crate::models::{Book, Rule};
 use crate::parser::dom::{SelectError, select_and_invoke_js};
 
@@ -167,7 +169,7 @@ pub fn parse_book_html(html: &str, base_url: &str, rule: &Rule) -> Result<Book, 
     let category = optional_field(&document, &book_rule.category)?;
     let latest_chapter = optional_field(&document, &book_rule.latest_chapter)?;
     let latest_chapter_url = optional_field(&document, &book_rule.latest_chapter_url)?
-        .and_then(|u| abs_url(base_url, &u).or(Some(u)));
+        .and_then(|u| absolute_url(base_url, &u).or(Some(u)));
     let last_update_time = optional_field(&document, &book_rule.last_update_time)?.map(|s| {
         static RE: LazyLock<Regex> = LazyLock::new(|| {
             #[allow(

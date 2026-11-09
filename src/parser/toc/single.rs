@@ -7,7 +7,7 @@ use scraper::{ElementRef, Html, Selector};
 
 use super::paginated::{collect_pagination_urls, fetch_with_cf_fallback};
 use super::utils::{TocError, extract_book_id, format_with_id, resolve_base_for_join};
-use crate::http::abs_url;
+use crate::http::absolute_url;
 use crate::models::{Chapter, ContentType, Rule};
 use crate::parser::dom::select_and_invoke_js;
 
@@ -216,7 +216,7 @@ fn push_chapter(
         return;
     }
     let href = el.value().attr("href").unwrap_or_default();
-    let url = abs_url(base_for_href, href).unwrap_or_default();
+    let url = absolute_url(base_for_href, href).unwrap_or_default();
     if url.is_empty() {
         return;
     }
@@ -374,7 +374,7 @@ mod tests {
         let base = "https://www.22biqu.com/biqu5/";
         let urls: Vec<String> = elements
             .iter()
-            .filter_map(|e| e.value().attr("value").and_then(|v| abs_url(base, v)))
+            .filter_map(|e| e.value().attr("value").and_then(|v| absolute_url(base, v)))
             .collect();
 
         assert_eq!(

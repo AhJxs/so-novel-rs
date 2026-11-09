@@ -243,6 +243,12 @@ impl DownloadTask {
     }
 }
 
+impl From<DownloadTaskRecord> for DownloadTask {
+    fn from(rec: DownloadTaskRecord) -> Self {
+        Self::from_record(rec)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]

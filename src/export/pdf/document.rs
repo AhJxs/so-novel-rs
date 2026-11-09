@@ -163,16 +163,20 @@ const COVER_AUTHOR_SIZE: f32 = 14.0;
 const COVER_INTRO_SIZE: f32 = 11.0;
 
 /// 流式分页器: 边排边把满页 flush 到 `DocumentBuilder`, 内存只占一页。
-struct Paginator<'b> {
-    builder: &'b mut DocumentBuilder,
-    measurer: &'b Measurer,
+struct Paginator<'pdf> {
+    builder: &'pdf mut DocumentBuilder,
+    measurer: &'pdf Measurer,
     font: &'static str,
     y: f32, // 下一行的"顶"坐标 (PDF y 向上), 触底 flush
     runs: Vec<Run>,
 }
 
-impl<'b> Paginator<'b> {
-    fn new(builder: &'b mut DocumentBuilder, measurer: &'b Measurer, font: &'static str) -> Self {
+impl<'pdf> Paginator<'pdf> {
+    fn new(
+        builder: &'pdf mut DocumentBuilder,
+        measurer: &'pdf Measurer,
+        font: &'static str,
+    ) -> Self {
         Self {
             builder,
             measurer,

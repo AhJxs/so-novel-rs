@@ -11,7 +11,7 @@ use reqwest::Client;
 
 use crate::config::AppConfig;
 #[cfg(test)]
-use crate::config::{ProxyCfg, ProxyMode};
+use crate::config::{ProxyConfig, ProxyMode};
 use crate::http::system_proxy;
 
 /// 控制 client 行为的小参数。`unsafe_ssl` 用于关闭 SSL 校验的老书源
@@ -74,7 +74,7 @@ mod tests {
     fn build_async_with_manual_proxy_still_constructs() {
         // reqwest 的 Proxy::all 只做 URL 解析；不真正连。
         let cfg = AppConfig {
-            proxy: ProxyCfg {
+            proxy: ProxyConfig {
                 proxy_mode: ProxyMode::Manual,
                 proxy_host: "127.0.0.1".to_string(),
                 proxy_port: 1,
@@ -88,7 +88,7 @@ mod tests {
     fn build_async_with_manual_proxy_and_blank_host_constructs() {
         // host 为空 → resolve_proxy_url 返回 None → 直连，不构造 Proxy。
         let cfg = AppConfig {
-            proxy: ProxyCfg {
+            proxy: ProxyConfig {
                 proxy_mode: ProxyMode::Manual,
                 proxy_host: String::new(),
                 proxy_port: 7890,
@@ -136,7 +136,7 @@ mod tests {
         });
 
         let cfg = AppConfig {
-            proxy: ProxyCfg {
+            proxy: ProxyConfig {
                 proxy_mode: ProxyMode::Manual,
                 proxy_host: "127.0.0.1".into(),
                 proxy_port: proxy_port as u16,

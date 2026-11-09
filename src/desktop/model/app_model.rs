@@ -4,7 +4,7 @@ use anyhow::Result;
 use tokio::runtime::Runtime;
 
 use super::events::{self, WakeupHandle, WakeupReceiver};
-use super::ops::OpsCtx;
+use super::ops::OpsContext;
 use super::{
     LibraryState, ListCache, SearchState, SourcesState, UIEvent, UpdateState, build_shared_runtime,
 };
@@ -153,8 +153,8 @@ impl AppModel {
     }
 
     /// 构造 spawn 共享上下文。
-    pub(super) fn ops_ctx(&self) -> OpsCtx<'_> {
-        OpsCtx {
+    pub(super) fn ops_ctx(&self) -> OpsContext<'_> {
+        OpsContext {
             rules: &self.rules,
             config: &self.config,
             http: Arc::clone(&self.http),

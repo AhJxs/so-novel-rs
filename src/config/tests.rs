@@ -11,8 +11,9 @@
 use std::path::PathBuf;
 
 use crate::config::{
-    AppConfig, CookieCfg, CrawlCfg, DownloadCfg, ExportFormat, GlobalCfg, LangType, Language,
-    ProxyCfg, ProxyMode, SourceCfg, ThemeDynMode, ThemeKind, ThemePref, load_config, save_config,
+    AppConfig, CookieConfig, CrawlConfig, DownloadConfig, ExportFormat, GlobalConfig, LangType,
+    Language, ProxyConfig, ProxyMode, SourceConfig, ThemeDynMode, ThemeKind, ThemePref,
+    load_config, save_config,
 };
 
 #[test]
@@ -48,7 +49,7 @@ fn round_trip_through_save_and_load() {
     let path = dir.path().join("config.toml");
 
     let cfg = AppConfig {
-        global: GlobalCfg {
+        global: GlobalConfig {
             theme_pref: ThemePref {
                 kind: ThemeKind::Dynamic,
                 dyn_mode: ThemeDynMode::Dark,
@@ -59,28 +60,28 @@ fn round_trip_through_save_and_load() {
             language: Language::English,
             sidebar_collapsed: true,
             font_size: 20.0,
-            ..GlobalCfg::default()
+            ..GlobalConfig::default()
         },
-        download: DownloadCfg {
+        download: DownloadConfig {
             download_path: "/tmp/sn-novels".to_string(),
             ext_name: ExportFormat::Txt,
             txt_encoding: "GBK".to_string(),
             preserve_chapter_cache: true,
         },
-        source: SourceCfg {
+        source: SourceConfig {
             search_limit: Some(50),
-            ..SourceCfg::default()
+            ..SourceConfig::default()
         },
-        crawl: CrawlCfg {
+        crawl: CrawlConfig {
             concurrency: Some(8),
-            ..CrawlCfg::default()
+            ..CrawlConfig::default()
         },
-        proxy: ProxyCfg {
+        proxy: ProxyConfig {
             proxy_mode: ProxyMode::Manual,
             proxy_host: "10.0.0.1".to_string(),
             proxy_port: 1080,
         },
-        cookie: CookieCfg {
+        cookie: CookieConfig {
             qidian_cookie: String::new(),
         },
         ..AppConfig::default()

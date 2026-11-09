@@ -6,7 +6,7 @@
 use url::Url;
 
 /// 把 `href` 解析为绝对 URL（`base` 必须是绝对 URL）；空串或解析失败返回 `None`。
-pub fn abs_url(base: &str, href: &str) -> Option<String> {
+pub fn absolute_url(base: &str, href: &str) -> Option<String> {
     let trimmed = href.trim();
     if trimmed.is_empty() {
         return None;
@@ -39,32 +39,33 @@ mod tests {
 
     #[test]
     fn relative_to_absolute() {
-        let abs = abs_url("https://www.22biqu.com/ss/", "/biqu123/").unwrap();
+        let abs = absolute_url("https://www.22biqu.com/ss/", "/biqu123/").unwrap();
         assert_eq!(abs, "https://www.22biqu.com/biqu123/");
     }
 
     #[test]
     fn absolute_passes_through() {
-        let abs = abs_url("https://www.22biqu.com/", "https://other.example/x.html").unwrap();
+        let abs = absolute_url("https://www.22biqu.com/", "https://other.example/x.html").unwrap();
         assert_eq!(abs, "https://other.example/x.html");
     }
 
     #[test]
     fn protocol_relative() {
-        let abs = abs_url("https://www.22biqu.com/", "//cdn.example/img.jpg").unwrap();
+        let abs = absolute_url("https://www.22biqu.com/", "//cdn.example/img.jpg").unwrap();
         assert_eq!(abs, "https://cdn.example/img.jpg");
     }
 
     #[test]
     fn dot_paths_resolve() {
-        let abs = abs_url("https://www.22biqu.com/biqu1/123.html", "../biqu2/456.html").unwrap();
+        let abs =
+            absolute_url("https://www.22biqu.com/biqu1/123.html", "../biqu2/456.html").unwrap();
         assert_eq!(abs, "https://www.22biqu.com/biqu2/456.html");
     }
 
     #[test]
     fn empty_returns_none() {
-        assert!(abs_url("https://x.test/", "").is_none());
-        assert!(abs_url("https://x.test/", "   ").is_none());
+        assert!(absolute_url("https://x.test/", "").is_none());
+        assert!(absolute_url("https://x.test/", "   ").is_none());
     }
 
     #[test]

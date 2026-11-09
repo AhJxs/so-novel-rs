@@ -9,7 +9,7 @@ use gpui_kit::component::slider::{SliderEvent, SliderState, SliderValue};
 use gpui_kit::{App, AppContext, Context, Entity, IntoElement, Render, SharedString, Window};
 use rust_i18n::t;
 
-use super::ctx::{PageCtx, PickFolderListener};
+use super::ctx::{PageContext, PickFolderListener};
 use crate::desktop::model::AppModel;
 use crate::desktop::themes;
 
@@ -290,7 +290,7 @@ impl SettingsPage {
 
     /// 组装 4 个 `SettingPage`。
     fn build_pages(&self, cx: &App) -> Vec<SettingPage> {
-        let ctx = PageCtx {
+        let ctx = PageContext {
             model: &self.model,
             theme_state_static: &self.theme_state_static,
             theme_state_dyn_light: &self.theme_state_dyn_light,

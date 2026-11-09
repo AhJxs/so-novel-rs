@@ -3,7 +3,7 @@
 //! GET / POST 两种请求; POST 时把 hutool 风格 `data` 模板里的 `%s` 换成关键词构造
 //! form body, 并注入规则里的 `cookies` 头。选 `result` 列表后每条提取 bookName /
 //! author / category / latestChapter / lastUpdateTime / status / wordCount, bookName
-//! 的 href 用 `abs_url` 转绝对。CF 验证页返回 `SearchError::Cloudflare`。
+//! 的 href 用 `absolute_url` 转绝对。CF 验证页返回 `SearchError::Cloudflare`。
 //!
 //! 未实现: 搜索分页合并、完全匹配跳详情页 fallback、简繁转换、聚合搜索。
 
@@ -210,7 +210,7 @@ fn push_search_result(
     // href 走 attr_href，相对路径用 base_url 拼绝对
     let raw_href =
         select_and_invoke_js_within(el, &s.book_name, ContentType::AttrHref).unwrap_or_default();
-    let url = crate::http::abs_url(base_url, &raw_href).unwrap_or_default();
+    let url = crate::http::absolute_url(base_url, &raw_href).unwrap_or_default();
 
     let author = optional_field(el, &s.author);
     let category = optional_field(el, &s.category);

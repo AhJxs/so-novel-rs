@@ -18,8 +18,8 @@ pub use global::{global, set_global, validate_global};
 pub use paths::ConfigPaths;
 pub use toml_io::{load_config, save_config};
 pub use types::{
-    AppConfig, ConfigError, CookieCfg, CrawlCfg, DownloadCfg, ExportFormat, GlobalCfg, LangType,
-    Language, ProxyCfg, ProxyMode, SourceCfg, ThemeDynMode, ThemeKind, ThemePref,
+    AppConfig, ConfigError, CookieConfig, CrawlConfig, DownloadConfig, ExportFormat, GlobalConfig,
+    LangType, Language, ProxyConfig, ProxyMode, SourceConfig, ThemeDynMode, ThemeKind, ThemePref,
 };
 
 #[cfg(test)]

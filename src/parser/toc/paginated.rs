@@ -5,7 +5,7 @@ use reqwest::Client;
 use scraper::{ElementRef, Html, Selector};
 
 use super::utils::{TocError, resolve_base_for_join};
-use crate::http::abs_url;
+use crate::http::absolute_url;
 
 /// 在已抓的第一页里找全部分页 URL。
 ///
@@ -58,7 +58,7 @@ pub(super) async fn collect_pagination_urls(
             (|| {
                 let next_el = elements.first()?;
                 let href = next_el.value().attr("href")?;
-                let next = abs_url(&resolve_base_for_join(toc_base_uri, &current_url), href)?;
+                let next = absolute_url(&resolve_base_for_join(toc_base_uri, &current_url), href)?;
                 if next == current_url || out.contains(&next) {
                     return None;
                 }
@@ -104,7 +104,7 @@ pub(super) fn collect_option_pagination_urls(
     let mut out = Vec::new();
     for e in &elements {
         if let Some(raw) = e.value().attr(attr_key)
-            && let Some(abs) = abs_url(&base, raw)
+            && let Some(abs) = absolute_url(&base, raw)
         {
             out.push(abs);
         }

@@ -9,9 +9,9 @@ use gpui_kit::component::{ActiveTheme as _, Disableable, Icon, IconName, Sizable
 use gpui_kit::{App, IntoElement, ParentElement, Styled, div};
 use rust_i18n::t;
 
-use super::ctx::PageCtx;
+use super::ctx::PageContext;
 
-pub(super) fn build(ctx: &PageCtx<'_>, _cx: &App) -> SettingPage {
+pub(super) fn build(ctx: &PageContext<'_>, _cx: &App) -> SettingPage {
     let m = ctx.model.clone();
 
     SettingPage::new(t!("Settings.page.about"))

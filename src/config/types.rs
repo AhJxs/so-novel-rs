@@ -189,31 +189,31 @@ pub struct ThemePref {
 /// 不直接走 serde 反序列化；这里只声明结构与默认值。模板见 `defaults::default_template_doc`。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
-    /// 配置 schema 版本。`env!("CARGO_PKG_VERSION")` 在 `with_defaults` 时填。
+    /// 配置 schema 版本。`env!("CARGO_PKG_VERSION")` 在 `new` 时填。
     pub version: String,
 
     #[serde(default)]
-    pub global: GlobalCfg,
+    pub global: GlobalConfig,
 
     #[serde(default)]
-    pub download: DownloadCfg,
+    pub download: DownloadConfig,
 
     #[serde(default)]
-    pub source: SourceCfg,
+    pub source: SourceConfig,
 
     #[serde(default)]
-    pub crawl: CrawlCfg,
+    pub crawl: CrawlConfig,
 
     #[serde(default)]
-    pub cookie: CookieCfg,
+    pub cookie: CookieConfig,
 
     #[serde(default)]
-    pub proxy: ProxyCfg,
+    pub proxy: ProxyConfig,
 }
 
 /// `[global]` 章节。主题偏好 / 应用语言 / GitHub 代理 / Cloudflare bypass / 侧栏折叠 / 字号。
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
-pub struct GlobalCfg {
+pub struct GlobalConfig {
     pub theme_pref: ThemePref,
     pub language: Language,
     /// GitHub raw 代理前缀 (留空 = 直连)。
@@ -229,7 +229,7 @@ pub struct GlobalCfg {
 
 /// `[download]` 章节。下载路径 / 导出格式 / 编码 / 章节缓存策略。
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-pub struct DownloadCfg {
+pub struct DownloadConfig {
     /// 默认下载目录 (由 `defaults::default_download_path` 决定)。
     pub download_path: String,
     /// 导出文件格式。
@@ -242,7 +242,7 @@ pub struct DownloadCfg {
 
 /// `[source]` 章节。书源搜索限制 / 过滤开关。
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-pub struct SourceCfg {
+pub struct SourceConfig {
     /// 单次搜索最多返回结果数。`None` 表示未指定 (用书源默认)。
     pub search_limit: Option<i32>,
     /// 是否启用搜索结果过滤 (按书名/作者名相似度去重)。
@@ -251,7 +251,7 @@ pub struct SourceCfg {
 
 /// `[crawl]` 章节。并发数 / 间隔 / 重试参数。
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-pub struct CrawlCfg {
+pub struct CrawlConfig {
     /// 全局并发抓取上限。`None` = 由运行时按 CPU 数自动算。
     pub concurrency: Option<i32>,
     /// 两次抓取的最小间隔 (ms)。
@@ -269,7 +269,7 @@ pub struct CrawlCfg {
 
 /// `[cookie]` 章节。站点专用 cookie。
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-pub struct CookieCfg {
+pub struct CookieConfig {
     /// 起点中文网 cookie (订阅章节用)。
     pub qidian_cookie: String,
 }
@@ -309,7 +309,7 @@ impl ProxyMode {
 
 /// `[proxy]` 章节。代理模式 + 手动代理地址。
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ProxyCfg {
+pub struct ProxyConfig {
     /// 代理模式。决定 `crate::http::resolve_proxy_url` 的行为。
     pub proxy_mode: ProxyMode,
     /// 仅 `Manual` 模式使用的代理主机地址。
@@ -320,10 +320,10 @@ pub struct ProxyCfg {
 
 impl AppConfig {
     /// 构造默认配置, 下载路径由 `defaults::default_download_path` 决定。
-    pub fn with_defaults() -> Self {
+    pub fn new() -> Self {
         Self {
             version: env!("CARGO_PKG_VERSION").to_string(),
-            global: GlobalCfg {
+            global: GlobalConfig {
                 theme_pref: ThemePref::default(),
                 // 默认 = Dynamic + System + 空名 (gpui-kit 组件库默认浅/深主题, 跟 OS 走)
                 language: Language::SimplifiedChinese,
@@ -333,17 +333,17 @@ impl AppConfig {
                 // 与 themes::FONT_SIZE_DEFAULT 一致 (16px)
                 font_size: 16.0,
             },
-            download: DownloadCfg {
+            download: DownloadConfig {
                 download_path: crate::config::defaults::default_download_path(),
                 ext_name: ExportFormat::Epub,
                 txt_encoding: "UTF-8".to_string(),
                 preserve_chapter_cache: false,
             },
-            source: SourceCfg {
+            source: SourceConfig {
                 search_limit: None,
                 search_filter: true,
             },
-            crawl: CrawlCfg {
+            crawl: CrawlConfig {
                 concurrency: None,
                 min_interval: 200,
                 max_interval: 400,
@@ -352,10 +352,10 @@ impl AppConfig {
                 retry_min_interval: 2000,
                 retry_max_interval: 4000,
             },
-            cookie: CookieCfg {
+            cookie: CookieConfig {
                 qidian_cookie: String::new(),
             },
-            proxy: ProxyCfg {
+            proxy: ProxyConfig {
                 proxy_mode: ProxyMode::None,
                 proxy_host: "127.0.0.1".to_string(),
                 proxy_port: 7890,
@@ -428,6 +428,6 @@ pub enum ConfigError {
 
 impl Default for AppConfig {
     fn default() -> Self {
-        Self::with_defaults()
+        Self::new()
     }
 }

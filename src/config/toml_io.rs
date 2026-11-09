@@ -16,34 +16,34 @@ use super::types::{
 };
 
 /// 从 TOML 文档中取 `table.key` 对应的 `Item`。
-fn t_item<'a>(doc: &'a DocumentMut, table: &str, key: &str) -> Option<&'a Item> {
-    t_table(doc, table).and_then(|t| t.get(key))
+fn toml_item<'a>(doc: &'a DocumentMut, table: &str, key: &str) -> Option<&'a Item> {
+    toml_table(doc, table).and_then(|t| t.get(key))
 }
 
 /// 从 TOML 文档中取 `table` 对应的 `Table`。
-pub fn t_table<'a>(doc: &'a DocumentMut, table: &str) -> Option<&'a Table> {
+pub fn toml_table<'a>(doc: &'a DocumentMut, table: &str) -> Option<&'a Table> {
     doc.get(table).and_then(|t| t.as_table())
 }
 
 /// 从 TOML 文档中取 `table.key` 对应的字符串值；空串视为 None。
-fn t_str(doc: &DocumentMut, table: &str, key: &str) -> Option<String> {
-    t_item(doc, table, key)
+fn toml_str(doc: &DocumentMut, table: &str, key: &str) -> Option<String> {
+    toml_item(doc, table, key)
         .and_then(|v| v.as_str())
         .map(std::string::ToString::to_string)
         .filter(|s| !s.trim().is_empty())
 }
 
-fn t_bool(doc: &DocumentMut, table: &str, key: &str) -> Option<bool> {
-    t_item(doc, table, key).and_then(Item::as_bool)
+fn toml_bool(doc: &DocumentMut, table: &str, key: &str) -> Option<bool> {
+    toml_item(doc, table, key).and_then(Item::as_bool)
 }
 
-fn t_int(doc: &DocumentMut, table: &str, key: &str) -> Option<i64> {
-    t_item(doc, table, key).and_then(Item::as_integer)
+fn toml_int(doc: &DocumentMut, table: &str, key: &str) -> Option<i64> {
+    toml_item(doc, table, key).and_then(Item::as_integer)
 }
 
 /// 读浮点（兼容 TOML 里写成整数 `16` 或浮点 `16.0` 两种形式）。
-fn t_float(doc: &DocumentMut, table: &str, key: &str) -> Option<f32> {
-    let v = t_item(doc, table, key)?;
+fn toml_float(doc: &DocumentMut, table: &str, key: &str) -> Option<f32> {
+    let v = toml_item(doc, table, key)?;
     v.as_float()
         .map(|f| f as f32)
         // i 已由外层 `i32::try_from` clamp 到 i32 范围，i32→f32 只丢 9 位精度；
@@ -91,104 +91,104 @@ pub fn load_config(path: &Path) -> Result<AppConfig> {
     let mut cfg = AppConfig::default();
 
     // [global]：旧键 `[global].theme = "X"`（单一主题名）的兼容迁移在本函数末尾做。
-    let theme_kind = t_str(&doc, "global", "theme-kind");
+    let theme_kind = toml_str(&doc, "global", "theme-kind");
     if let Some(v) = &theme_kind {
         cfg.global.theme_pref.kind = ThemeKind::parse(v);
     }
-    if let Some(v) = t_str(&doc, "global", "theme-name") {
+    if let Some(v) = toml_str(&doc, "global", "theme-name") {
         cfg.global.theme_pref.static_name = v;
     }
-    if let Some(v) = t_str(&doc, "global", "theme-dyn-mode") {
+    if let Some(v) = toml_str(&doc, "global", "theme-dyn-mode") {
         cfg.global.theme_pref.dyn_mode = ThemeDynMode::parse(&v);
     }
-    if let Some(v) = t_str(&doc, "global", "theme-light") {
+    if let Some(v) = toml_str(&doc, "global", "theme-light") {
         cfg.global.theme_pref.dyn_light = v;
     }
-    if let Some(v) = t_str(&doc, "global", "theme-dark") {
+    if let Some(v) = toml_str(&doc, "global", "theme-dark") {
         cfg.global.theme_pref.dyn_dark = v;
     }
-    if let Some(v) = t_str(&doc, "global", "language")
+    if let Some(v) = toml_str(&doc, "global", "language")
         && let Some(parsed) = Language::parse(&v)
     {
         cfg.global.language = parsed;
     }
-    if let Some(v) = t_str(&doc, "global", "gh-proxy") {
+    if let Some(v) = toml_str(&doc, "global", "gh-proxy") {
         cfg.global.gh_proxy = v;
     }
-    if let Some(v) = t_str(&doc, "global", "cf-bypass") {
+    if let Some(v) = toml_str(&doc, "global", "cf-bypass") {
         cfg.global.cf_bypass = v;
     }
-    if let Some(v) = t_bool(&doc, "global", "sidebar-collapsed") {
+    if let Some(v) = toml_bool(&doc, "global", "sidebar-collapsed") {
         cfg.global.sidebar_collapsed = v;
     }
-    if let Some(v) = t_float(&doc, "global", "font-size") {
+    if let Some(v) = toml_float(&doc, "global", "font-size") {
         cfg.global.font_size = v;
     }
 
-    if let Some(v) = t_str(&doc, "download", "download-path") {
+    if let Some(v) = toml_str(&doc, "download", "download-path") {
         cfg.download.download_path = v;
     }
-    if let Some(v) = t_str(&doc, "download", "extname") {
+    if let Some(v) = toml_str(&doc, "download", "extname") {
         cfg.download.ext_name = ExportFormat::parse(&v);
     }
-    if let Some(v) = t_str(&doc, "download", "txt-encoding") {
+    if let Some(v) = toml_str(&doc, "download", "txt-encoding") {
         cfg.download.txt_encoding = v;
     }
-    if let Some(v) = t_bool(&doc, "download", "preserve-chapter-cache") {
+    if let Some(v) = toml_bool(&doc, "download", "preserve-chapter-cache") {
         cfg.download.preserve_chapter_cache = v;
     }
 
-    cfg.source.search_limit = t_int(&doc, "source", "search-limit").map(sat_i32);
-    if let Some(v) = t_bool(&doc, "source", "search-filter") {
+    cfg.source.search_limit = toml_int(&doc, "source", "search-limit").map(sat_i32);
+    if let Some(v) = toml_bool(&doc, "source", "search-filter") {
         cfg.source.search_filter = v;
     }
 
-    cfg.crawl.concurrency = t_int(&doc, "crawl", "concurrency").map(sat_i32);
-    if let Some(v) = t_int(&doc, "crawl", "min-interval") {
+    cfg.crawl.concurrency = toml_int(&doc, "crawl", "concurrency").map(sat_i32);
+    if let Some(v) = toml_int(&doc, "crawl", "min-interval") {
         cfg.crawl.min_interval = sat_u32(v);
     }
-    if let Some(v) = t_int(&doc, "crawl", "max-interval") {
+    if let Some(v) = toml_int(&doc, "crawl", "max-interval") {
         cfg.crawl.max_interval = sat_u32(v);
     }
-    if let Some(v) = t_bool(&doc, "crawl", "enable-retry") {
+    if let Some(v) = toml_bool(&doc, "crawl", "enable-retry") {
         cfg.crawl.enable_retry = v;
     }
-    if let Some(v) = t_int(&doc, "crawl", "max-retries") {
+    if let Some(v) = toml_int(&doc, "crawl", "max-retries") {
         cfg.crawl.max_retries = sat_u32(v);
     }
-    if let Some(v) = t_int(&doc, "crawl", "retry-min-interval") {
+    if let Some(v) = toml_int(&doc, "crawl", "retry-min-interval") {
         cfg.crawl.retry_min_interval = sat_u32(v);
     }
-    if let Some(v) = t_int(&doc, "crawl", "retry-max-interval") {
+    if let Some(v) = toml_int(&doc, "crawl", "retry-max-interval") {
         cfg.crawl.retry_max_interval = sat_u32(v);
     }
 
-    if let Some(v) = t_str(&doc, "cookie", "qidian-cookie") {
+    if let Some(v) = toml_str(&doc, "cookie", "qidian-cookie") {
         cfg.cookie.qidian_cookie = v;
     }
 
     // 旧键 `[proxy].enabled`（bool）迁移到新键 `[proxy].mode`（字符串）：`mode` 优先。
     // 两个键都在时以 `mode` 为准（用户手改过 mode 说明他知道新键）。
-    if let Some(v) = t_str(&doc, "proxy", "mode") {
+    if let Some(v) = toml_str(&doc, "proxy", "mode") {
         cfg.proxy.proxy_mode = ProxyMode::parse(&v);
-    } else if let Some(v) = t_bool(&doc, "proxy", "enabled") {
+    } else if let Some(v) = toml_bool(&doc, "proxy", "enabled") {
         cfg.proxy.proxy_mode = if v {
             ProxyMode::Manual
         } else {
             ProxyMode::None
         };
     }
-    if let Some(v) = t_str(&doc, "proxy", "host") {
+    if let Some(v) = toml_str(&doc, "proxy", "host") {
         cfg.proxy.proxy_host = v;
     }
-    if let Some(v) = t_int(&doc, "proxy", "port") {
+    if let Some(v) = toml_int(&doc, "proxy", "port") {
         cfg.proxy.proxy_port = sat_u16(v);
     }
 
-    let theme_kind_present = t_table(&doc, "global")
+    let theme_kind_present = toml_table(&doc, "global")
         .and_then(|t| t.get("theme-kind"))
         .is_some();
-    if !theme_kind_present && let Some(v) = t_str(&doc, "global", "theme") {
+    if !theme_kind_present && let Some(v) = toml_str(&doc, "global", "theme") {
         cfg.global.theme_pref = ThemePref {
             kind: ThemeKind::Static,
             static_name: v,

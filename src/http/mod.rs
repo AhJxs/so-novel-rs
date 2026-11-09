@@ -23,7 +23,7 @@ pub use http_clients::HttpClients;
 pub use system_proxy::{
     AbsentReason, SystemProxy, detect as detect_system_proxy, resolve_proxy_url,
 };
-pub use url_join::{abs_url, origin_or_self};
+pub use url_join::{absolute_url, origin_or_self};
 pub use user_agent::random_user_agent;
 pub use util::{
     build_form_data, clean_invisible_chars, format_url_query, random_interval_ms,

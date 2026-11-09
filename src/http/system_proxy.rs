@@ -8,7 +8,7 @@
 //! - [`resolve_proxy_url`] —— 把 [`ProxyMode`] 压成 `Option<String>`，`None` = 直连。
 //!   这是 client 层唯一认的接口，三态语义只在这里展开一次。
 
-use crate::config::{ProxyCfg, ProxyMode};
+use crate::config::{ProxyConfig, ProxyMode};
 
 /// 系统代理探测结果。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -52,7 +52,7 @@ pub fn detect() -> SystemProxy {
 /// - `None` 模式 → 直连；
 /// - `Manual` → `http://<host>:<port>`（host 为空视为直连）；
 /// - `System` → 探测结果，探测不到同样退化为直连（不阻断 client 构造）。
-pub fn resolve_proxy_url(p: &ProxyCfg) -> Option<String> {
+pub fn resolve_proxy_url(p: &ProxyConfig) -> Option<String> {
     match p.proxy_mode {
         ProxyMode::None => None,
         ProxyMode::Manual => manual_url(p),
@@ -64,7 +64,7 @@ pub fn resolve_proxy_url(p: &ProxyCfg) -> Option<String> {
 }
 
 /// 手动模式：host 为空 → 直连。避免拼出 `http://:7890` 这种畸形 URL 让 client 构造失败。
-fn manual_url(p: &ProxyCfg) -> Option<String> {
+fn manual_url(p: &ProxyConfig) -> Option<String> {
     let host = p.proxy_host.trim();
     if host.is_empty() {
         return None;
@@ -205,8 +205,8 @@ fn detect_env() -> SystemProxy {
 mod tests {
     use super::*;
 
-    fn cfg(mode: ProxyMode, host: &str, port: u16) -> ProxyCfg {
-        ProxyCfg {
+    fn cfg(mode: ProxyMode, host: &str, port: u16) -> ProxyConfig {
+        ProxyConfig {
             proxy_mode: mode,
             proxy_host: host.to_string(),
             proxy_port: port,

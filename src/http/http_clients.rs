@@ -15,7 +15,7 @@ use reqwest::Client;
 
 use crate::config::AppConfig;
 #[cfg(test)]
-use crate::config::{GlobalCfg, ProxyCfg, ProxyMode};
+use crate::config::{GlobalConfig, ProxyConfig, ProxyMode};
 use crate::http::client::{ClientOptions, build_async_client};
 use crate::models::Rule;
 use crate::utils::lock::{mutex_or, rw_read_or, rw_write_or};
@@ -30,10 +30,16 @@ struct ProxySignature {
 }
 
 impl ProxySignature {
-    fn from_cfg(cfg: &AppConfig) -> Self {
+    fn from_config(cfg: &AppConfig) -> Self {
         Self {
             resolved: crate::http::system_proxy::resolve_proxy_url(&cfg.proxy),
         }
+    }
+}
+
+impl From<&AppConfig> for ProxySignature {
+    fn from(cfg: &AppConfig) -> Self {
+        Self::from_config(cfg)
     }
 }
 
@@ -103,7 +109,7 @@ impl HttpClients {
         Ok(Self {
             clients: RwLock::new((safe, unsafe_ssl)),
             gh_proxy: Mutex::new((gh_proxy_url, gh_proxy_client)),
-            proxy_signature: Mutex::new(ProxySignature::from_cfg(cfg)),
+            proxy_signature: Mutex::new(ProxySignature::from_config(cfg)),
         })
     }
 
@@ -154,7 +160,7 @@ impl HttpClients {
     }
     /// proxy 配置变了 → 重建 safe + `unsafe_ssl` 两个 client（`gh_proxy` 不受 proxy 影响）。
     pub fn rebuild_proxy(&self, cfg: &AppConfig) -> Result<()> {
-        let new_sig = ProxySignature::from_cfg(cfg);
+        let new_sig = ProxySignature::from_config(cfg);
         let old_sig = mutex_or("rebuild_proxy:read_sig", &self.proxy_signature)
             .map_err(anyhow::Error::msg)
             .context("proxy_signature 锁 poison")?
@@ -228,7 +234,7 @@ mod tests {
 
         // rebuild 后 for_rule 仍正常工作
         let new_cfg = AppConfig {
-            proxy: ProxyCfg {
+            proxy: ProxyConfig {
                 proxy_mode: ProxyMode::Manual,
                 proxy_host: "127.0.0.1".into(),
                 proxy_port: 9999,
@@ -246,7 +252,7 @@ mod tests {
         let before = clients.safe_client_ptr().unwrap();
 
         let new_cfg = AppConfig {
-            proxy: ProxyCfg {
+            proxy: ProxyConfig {
                 proxy_mode: ProxyMode::Manual,
                 proxy_host: "127.0.0.1".into(),
                 proxy_port: 8080,
@@ -298,9 +304,9 @@ mod tests {
 
         // 配了 gh_proxy 的 cfg 应该构造带代理的 client
         let cfg_with_proxy = AppConfig {
-            global: GlobalCfg {
+            global: GlobalConfig {
                 gh_proxy: "https://ghproxy.example.com/".into(),
-                ..GlobalCfg::default()
+                ..GlobalConfig::default()
             },
             ..default_cfg()
         };
@@ -317,7 +323,7 @@ mod tests {
         let before = clients.safe_client_ptr().unwrap();
 
         let cfg = AppConfig {
-            proxy: ProxyCfg {
+            proxy: ProxyConfig {
                 proxy_mode: ProxyMode::Manual,
                 proxy_host: String::new(),
                 proxy_port: 7890,

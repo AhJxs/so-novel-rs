@@ -23,18 +23,18 @@ use crate::utils::time::now_unix_secs;
 
 /// spawn 共享上下文: 提取 `rules` / `config` / `http` / `runtime`,
 /// 消除各 `spawn_*` 的重复参数列表。
-pub struct OpsCtx<'a> {
-    pub rules: &'a [Rule],
-    pub config: &'a AppConfig,
+pub struct OpsContext<'app> {
+    pub rules: &'app [Rule],
+    pub config: &'app AppConfig,
     pub http: Arc<HttpClients>,
-    pub runtime: &'a tokio::runtime::Runtime,
+    pub runtime: &'app tokio::runtime::Runtime,
     /// 唤醒信号 sender: producer 写入 mpsc 后 `notify()`, 让 `drain_loop` 立即排空。
-    pub wakeup: &'a WakeupHandle,
+    pub wakeup: &'app WakeupHandle,
 }
 
 /// 派一个 TOC 预取任务（获取元数据 + 章节列表, 不开始下载）, 返回接收端。
 pub fn spawn_resolve_toc(
-    ctx: &OpsCtx<'_>,
+    ctx: &OpsContext<'_>,
     target: &SearchResult,
 ) -> mpsc::UnboundedReceiver<TocEvent> {
     let (tx, rx) = mpsc::unbounded_channel::<TocEvent>();
@@ -142,7 +142,7 @@ fn log_download_outcome(
 /// 派一个指定章节范围的下载任务, 跳过 resolve 阶段直接下载。
 /// `chapters` 已由调用方按用户选择过滤过范围。
 pub fn spawn_download_range(
-    ctx: &OpsCtx<'_>,
+    ctx: &OpsContext<'_>,
     next_task_id: u64,
     target: SearchResult,
     book: Book,
@@ -238,7 +238,7 @@ pub fn spawn_download_range(
 
 /// 派一个新的下载任务到后台。返回 `(task_id, task)`。
 pub fn spawn_download(
-    ctx: &OpsCtx<'_>,
+    ctx: &OpsContext<'_>,
     next_task_id: u64,
     target: SearchResult,
 ) -> (u64, DownloadTask) {

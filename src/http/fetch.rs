@@ -16,20 +16,20 @@ use reqwest::header::{ACCEPT, COOKIE, REFERER, USER_AGENT};
 use crate::http::{encoding, url_join, user_agent};
 
 /// 一次抓取的入参。
-pub struct FetchRequest<'a> {
-    pub url: &'a str,
-    pub method: HttpMethod<'a>,
+pub struct FetchRequest<'request> {
+    pub url: &'request str,
+    pub method: HttpMethod<'request>,
     /// 形如 `"k=v;k2=v2"` 的 cookie 字符串（与 Java 端规则字段直接拼）。
-    pub cookies: Option<&'a str>,
+    pub cookies: Option<&'request str>,
     /// 单次请求超时（秒）。规则里以秒为单位；None 时用 client 默认。
     pub timeout_secs: Option<u32>,
     /// 自定义 Referer 头。非空时覆盖默认的 origin Referer。
-    pub referer: Option<&'a str>,
+    pub referer: Option<&'request str>,
 }
 
-pub enum HttpMethod<'a> {
+pub enum HttpMethod<'raw> {
     Get,
-    Post(&'a [(String, String)]),
+    Post(&'raw [(String, String)]),
 }
 
 /// 抓取结果：解码后的 HTML、最终 URL（处理重定向后的）、状态码。
