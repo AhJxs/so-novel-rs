@@ -157,9 +157,9 @@
    `FailureRecord::new`、`TraceId::new`。
 4. `UpdateCheckResult` 的「两个互斥 `Option`」改为 `Result<Option<String>, UpdateError>`，
    同步更新 `core::update`、`desktop::model::ops::update`、设置页与测试。
-5. `LibraryEntry::from_path` 改为 `Result<Option<Self>, io::Error>`：`Ok(None)` 表示不是候选
-   文件，`Err` 表示元数据读取失败；库扫描调用点记录日志并跳过该文件（行为与现在一致，
-   但失败原因可见）。
+5. `core::library::LibraryEntry::from_path` 保持 `Option`：审计确认它只有测试调用，
+   真实库扫描（`desktop::model::library_state::scan_library_dir`）已经返回 `io::Result`；
+   改动该函数不会影响生产路径，故不做无收益的契约变更。
 6. `bool`→`ThemeVariant`；按 `clippy::must_use_candidate` 输出逐项标注 `#[must_use]`。
 7. `len()`/`is_empty()` 已配对，保持；`#[non_exhaustive]` N/A。
 
@@ -225,9 +225,7 @@
 
 1. `UpdateCheckResult`：`{ latest_version: Option<String>, error: Option<String> }` →
    `Result<Option<String>, UpdateError>`，消除「同时成功/同时失败」的不可表示状态。
-2. `LibraryEntry::from_path`：可恢复的元数据 I/O 失败不再静默并入 `None`（按最小改动选择
-   `Result<Option<_>, _>` 或显式日志 + 文档）。
-3. `impl Into` 移除后，调用点需显式 `.into()`/`.to_string()`；这是 API 形态变化，不改变行为。
+2. `impl Into` 移除后，调用点需显式 `.into()`/`.to_string()`；这是 API 形态变化，不改变行为。
 4. `Source { rule: Arc<Rule> }` 与 `AppModel.rules: Vec<Arc<Rule>>`：内部所有权变化，外部行为不变。
 
 ## 8. 例外清单（不修改，写入一致性报告）
