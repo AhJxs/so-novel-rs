@@ -6,10 +6,9 @@
 //! `select_sources` 以 `&[Rule]` 入参并要求传入**完整**规则列表，内部再判断
 //! `is_search_enabled`；这样 core 不需要知道调用方是否已预过滤。
 
+pub use super::config_helpers::cf_bypass;
 use crate::config::AppConfig;
 use crate::models::{Rule, Source};
-
-pub use super::config_helpers::cf_bypass;
 
 /// 选书源。
 ///

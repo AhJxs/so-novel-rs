@@ -9,7 +9,10 @@
 //! tracing macro 本身与 `TraceId` 链路（`app::trace`）不在本模块。
 
 use std::str::FromStr;
-use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
+
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
+use tracing_subscriber::{EnvFilter, fmt};
 
 /// 日志输出格式。
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -39,7 +42,7 @@ impl FromStr for LogFormat {
 /// ```
 /// // 启动时调一次; 二次 init 会 panic
 /// so_novel_rs::logger::init();
-/// tracing::info!("hello");  // 默认输出可读文本
+/// tracing::info!("hello"); // 默认输出可读文本
 /// ```
 ///
 /// 切到 JSON: `LOG_FORMAT=json so-novel-rs ...`.

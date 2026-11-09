@@ -174,7 +174,7 @@ fn chapter_title_from_filename(p: &Path) -> Option<String> {
 fn detect_image_mime(bytes: &[u8]) -> &'static str {
     if bytes.starts_with(&[0x89, b'P', b'N', b'G']) {
         "image/png"
-    } else if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
+    } else if bytes.starts_with(&[0xff, 0xd8, 0xff]) {
         "image/jpeg"
     } else if bytes.starts_with(b"GIF8") {
         "image/gif"
@@ -298,7 +298,7 @@ mod tests {
         write_chapter_files(&chapters, &sample_chapters(), ExportFormat::Epub).unwrap();
 
         // 用 PNG signature + 任意字节构造输入 (epub-builder 只校验文件头)。
-        let mut png = vec![0x89u8, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
+        let mut png = vec![0x89u8, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
         png.extend_from_slice(&[0u8; 32]);
 
         let path = merge_with_cover_bytes(&sample_book(), &chapters, &out, Some(&png)).unwrap();
@@ -334,7 +334,7 @@ mod tests {
     fn detect_image_mime_for_png_and_jpeg() {
         let png = [0x89u8, b'P', b'N', b'G', 0, 0, 0, 0];
         assert_eq!(detect_image_mime(&png), "image/png");
-        let jpeg = [0xFFu8, 0xD8, 0xFF, 0xE0];
+        let jpeg = [0xffu8, 0xd8, 0xff, 0xe0];
         assert_eq!(detect_image_mime(&jpeg), "image/jpeg");
         let unknown = [0u8, 0, 0, 0];
         assert_eq!(detect_image_mime(&unknown), "image/jpeg");
@@ -360,7 +360,7 @@ mod tests {
     fn detect_image_mime_short_input_does_not_panic() {
         assert_eq!(detect_image_mime(&[]), "image/jpeg");
         assert_eq!(detect_image_mime(&[0x89]), "image/jpeg");
-        assert_eq!(detect_image_mime(&[0xFF, 0xD8]), "image/jpeg");
+        assert_eq!(detect_image_mime(&[0xff, 0xd8]), "image/jpeg");
         // RIFF 但不够 12 字节 → 降级
         assert_eq!(detect_image_mime(b"RIFF"), "image/jpeg");
     }

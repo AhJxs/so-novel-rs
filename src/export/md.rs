@@ -108,13 +108,12 @@ mod tests {
     #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
     use std::path::PathBuf;
 
+    use super::super::md::MdExporter;
     use crate::config::ExportFormat;
     use crate::export::exporter::{
         ExportError, Exporter, RenderedChapter, exporter_for, write_chapter_files,
     };
     use crate::models::Book;
-
-    use super::super::md::MdExporter;
 
     fn sample_book() -> Book {
         Book {

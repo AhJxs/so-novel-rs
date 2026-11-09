@@ -13,33 +13,28 @@ const COVER_IMAGES_CAPACITY: NonZeroUsize = match NonZeroUsize::new(32) {
     None => unreachable!(),
 };
 
-use gpui_kit::component::{
-    ActiveTheme as _, Icon, IconName, Sizable, WindowExt,
-    button::{Button, ButtonVariants as _},
-    dialog::AlertDialog,
-    h_flex,
-    input::{Input, InputEvent, InputState, NumberInputEvent, StepAction},
-    list::{List, ListState},
-    notification::{Notification, NotificationType},
-    select::{SearchableVec, SelectDelegate, SelectEvent, SelectState},
-    v_flex,
-};
+use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::dialog::AlertDialog;
+use gpui_kit::component::input::{Input, InputEvent, InputState, NumberInputEvent, StepAction};
+use gpui_kit::component::list::{List, ListState};
+use gpui_kit::component::notification::{Notification, NotificationType};
+use gpui_kit::component::select::{SearchableVec, SelectDelegate, SelectEvent, SelectState};
+use gpui_kit::component::{ActiveTheme as _, Icon, IconName, Sizable, WindowExt, h_flex, v_flex};
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     App, AppContext, Context, Entity, IntoElement, ParentElement, Render, RenderImage,
-    SharedString, Styled, Window, div, prelude::FluentBuilder as _, px,
+    SharedString, Styled, Window, div, px,
 };
+use range_dialog::clamp_range_value;
+use rust_i18n::t;
+use source_select::SourceSelectItem;
 
+use self::delegate::SearchDelegate;
 use crate::desktop::components::{
     EmptyState, PageHeader, Pagination, compute_page_window, truncate,
 };
 use crate::desktop::model::{AppModel, TocState};
-use crate::models::SearchResult;
-use crate::models::Source;
-use rust_i18n::t;
-
-use self::delegate::SearchDelegate;
-use range_dialog::clamp_range_value;
-use source_select::SourceSelectItem;
+use crate::models::{SearchResult, Source};
 
 mod delegate;
 mod detail_dialog;

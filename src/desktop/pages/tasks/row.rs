@@ -1,23 +1,18 @@
 //! 单条任务行渲染（卡片式：序号 / 标题行 / 进度条 / 失败折叠 / 动作按钮）。
 
-use gpui_kit::component::{
-    ActiveTheme as _, Disableable, Icon, IconName, Sizable,
-    button::{Button, ButtonVariants as _},
-    h_flex,
-    progress::Progress,
-    v_flex,
-};
+use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::progress::Progress;
+use gpui_kit::component::{ActiveTheme as _, Disableable, Icon, IconName, Sizable, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     App, Entity, FontWeight, IntoElement, ParentElement, SharedString, Styled, Window, div, px,
 };
-
-use crate::desktop::components::{StatusBadge, StatusKind, truncate};
-use crate::utils::system::{open_path, reveal_in_folder};
 use rust_i18n::t;
 
 use super::TasksPage;
 use super::summary::TaskSummary;
+use crate::desktop::components::{StatusBadge, StatusKind, truncate};
+use crate::utils::system::{open_path, reveal_in_folder};
 
 pub(super) fn render(task: &TaskSummary, page: &Entity<TasksPage>, cx: &App) -> impl IntoElement {
     let running = task.is_running();
@@ -262,13 +257,18 @@ pub(super) fn render(task: &TaskSummary, page: &Entity<TasksPage>, cx: &App) -> 
                                             .small()
                                             .outline()
                                             .icon(Icon::new(IconName::TriangleAlert))
-                                            .label(t!("Tasks.card.action.failures", n = &fail_count.to_string()))
+                                            .label(t!(
+                                                "Tasks.card.action.failures",
+                                                n = &fail_count.to_string()
+                                            ))
                                             .on_click(move |_, window: &mut Window, cx| {
                                                 // 每次点击重新 clone 给 update 闭包。
                                                 let failures = failures.clone();
                                                 let book_name = book_name.clone();
                                                 page_for_fails.update(cx, |_p, cx| {
-                                                    TasksPage::show_failures(failures, book_name, window, cx);
+                                                    TasksPage::show_failures(
+                                                        failures, book_name, window, cx,
+                                                    );
                                                 });
                                             }),
                                     )

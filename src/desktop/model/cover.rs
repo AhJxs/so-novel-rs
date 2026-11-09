@@ -56,8 +56,9 @@ pub fn hash_short(s: &str) -> String {
 
 #[cfg(test)]
 mod cover_tests {
-    use super::*;
     use std::io::Cursor;
+
+    use super::*;
 
     /// 构造一个 2x2 RGBA 红色像素的 PNG 字节流。
     fn make_png_bytes() -> Vec<u8> {

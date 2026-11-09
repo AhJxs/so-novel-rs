@@ -9,7 +9,8 @@
 
 use crate::config::{ExportFormat, LangType};
 use crate::models::{Chapter, RuleChapter};
-use crate::parser::{filter::filter_chapter, formatter::format_chapter};
+use crate::parser::filter::filter_chapter;
+use crate::parser::formatter::format_chapter;
 
 /// 渲染目标。是 `ExportFormat` 的解析友好别名（避免 `export` 模块直接耦合 config）。
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -98,8 +99,9 @@ fn maybe_convert_chinese(
 
 /// TXT: 从 `<p>...</p>` 抽段落文字, 全角缩进 2 字符 + 换行 (与 Java 端一致); 无 `<p>` 时兜底一行。
 fn render_txt(title: &str, p_html: &str) -> String {
-    use regex::Regex;
     use std::sync::LazyLock;
+
+    use regex::Regex;
 
     /// 编译期确定的正则: 用 match 走 panic 路径避免 `clippy::expect_used` (panic 即设计)。
     #[allow(
@@ -149,11 +151,11 @@ fn render_txt(title: &str, p_html: &str) -> String {
 /// 段一
 ///
 /// 段二
-///
 /// ```
 fn render_md(title: &str, p_html: &str) -> String {
-    use regex::Regex;
     use std::sync::LazyLock;
+
+    use regex::Regex;
 
     /// 编译期确定的正则: 用 match 走 panic 路径避免 `clippy::expect_used` (panic 即设计)。
     #[allow(

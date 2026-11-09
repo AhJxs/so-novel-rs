@@ -5,12 +5,11 @@ use anyhow::Result;
 use reqwest::Client;
 use scraper::{Html, Selector};
 
+use super::paginated::{collect_pagination_urls, fetch_with_cf_fallback};
+use super::utils::{TocError, extract_book_id, format_with_id, resolve_base_for_join};
 use crate::http::abs_url;
 use crate::models::{Chapter, ContentType, Rule};
 use crate::parser::dom::select_and_invoke_js;
-
-use super::paginated::{collect_pagination_urls, fetch_with_cf_fallback};
-use super::utils::{TocError, extract_book_id, format_with_id, resolve_base_for_join};
 
 /// 抓取并解析整本书的目录。
 ///

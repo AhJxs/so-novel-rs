@@ -25,24 +25,25 @@ mod update_state;
 
 pub(crate) mod ops;
 
+use std::sync::Arc;
+
+use anyhow::Result;
 pub use cover::{CoverEntry, hash_short};
+use events::{WakeupHandle, WakeupReceiver};
 pub use library_state::{LibraryEntry, LibraryState, scan_library_dir};
 pub use list_cache::{ListCache, ListCacheKey, PageKind, filter_signature};
+use ops::OpsCtx;
 pub use runtime::build_shared_runtime;
 pub use search_state::{
     CoverEvent, DetailEvent, DetailState, SearchState, SourceSearchEvent, SourceStatus, TocEvent,
     TocState,
 };
 pub use sources_state::SourcesState;
+use tokio::runtime::Runtime;
 pub use ui_event::UIEvent;
 pub use update_state::{
     UpdateCheckResult, UpdateOutcome, UpdateState, check_github_latest_release,
 };
-
-use std::sync::Arc;
-
-use anyhow::Result;
-use tokio::runtime::Runtime;
 
 use crate::config::{AppConfig, ConfigPaths};
 use crate::core::DownloadTask;
@@ -50,8 +51,6 @@ use crate::core::bootstrap::load_context;
 use crate::db::{SourcesConfig, load_tasks_from_file};
 use crate::http::{HttpClients, SystemProxy, detect_system_proxy};
 use crate::models::Rule;
-use events::{WakeupHandle, WakeupReceiver};
-use ops::OpsCtx;
 
 /// 应用整体状态。UI 中立 —— 不依赖任何 GUI 框架, 由 `desktop` 层渲染。
 pub struct AppModel {

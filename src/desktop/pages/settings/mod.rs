@@ -12,20 +12,17 @@ mod page_crawl;
 mod page_general;
 mod page_proxy;
 
-use gpui_kit::component::{
-    group_box::GroupBoxVariant,
-    input::{InputEvent, InputState, TextareaState},
-    select::{SearchableVec, SelectDelegate, SelectEvent, SelectState},
-    setting::{SettingPage, Settings},
-    slider::{SliderEvent, SliderState, SliderValue},
-};
+use ctx::{PageCtx, PickFolderListener};
+use gpui_kit::component::group_box::GroupBoxVariant;
+use gpui_kit::component::input::{InputEvent, InputState, TextareaState};
+use gpui_kit::component::select::{SearchableVec, SelectDelegate, SelectEvent, SelectState};
+use gpui_kit::component::setting::{SettingPage, Settings};
+use gpui_kit::component::slider::{SliderEvent, SliderState, SliderValue};
 use gpui_kit::{App, AppContext, Context, Entity, IntoElement, Render, SharedString, Window};
 use rust_i18n::t;
 
 use crate::desktop::model::AppModel;
 use crate::desktop::themes;
-
-use ctx::{PageCtx, PickFolderListener};
 
 pub struct SettingsPage {
     model: Entity<AppModel>,

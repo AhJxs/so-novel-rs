@@ -76,10 +76,11 @@ mod tests {
         non_snake_case
     )]
 
+    use std::path::PathBuf;
+
     use super::*;
     use crate::core::DownloadTask;
     use crate::models::SearchResult;
-    use std::path::PathBuf;
 
     /// 构造一个最小 `DownloadTask`, 测试只关 `id` + `finished`。
     fn dummy_task(id: u64) -> DownloadTask {

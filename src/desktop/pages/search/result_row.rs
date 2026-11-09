@@ -2,22 +2,16 @@
 //!
 //! 固定宽度列 + `flex_1` 撑满 + `ListItem` 内部选中样式；`page` 只用于按钮 `on_click` 转发。
 
-use gpui_kit::component::{
-    ActiveTheme as _, Icon, IconName, Sizable, WindowExt,
-    button::Button,
-    dialog::Dialog,
-    h_flex,
-    notification::{Notification, NotificationType},
-    v_flex,
-};
+use gpui_kit::component::button::Button;
+use gpui_kit::component::dialog::Dialog;
+use gpui_kit::component::notification::{Notification, NotificationType};
+use gpui_kit::component::{ActiveTheme as _, Icon, IconName, Sizable, WindowExt, h_flex, v_flex};
 use gpui_kit::{App, Entity, IntoElement, ParentElement, Styled, div, px};
 use rust_i18n::t;
 
+use super::{SearchPage, detail_dialog};
 use crate::desktop::components::truncate;
 use crate::models::SearchResult;
-
-use super::SearchPage;
-use super::detail_dialog;
 
 /// 渲染一条搜索结果行（6 列：序号 / 书名 / 元信息 / 源 id / 选章 / 全本）。
 pub(super) fn render(
@@ -153,13 +147,7 @@ pub(super) fn render(
                         dialog
                             .title(t!("Search.detail.title"))
                             .w(px(640.))
-                            .child(detail_dialog::content(
-                                &r,
-                                &page,
-                                source_id,
-                                &url,
-                                cx,
-                            ))
+                            .child(detail_dialog::content(&r, &page, source_id, &url, cx))
                     });
                 }),
         )

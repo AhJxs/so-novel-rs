@@ -4,9 +4,8 @@ use anyhow::Result;
 use reqwest::Client;
 use scraper::{Html, Selector};
 
-use crate::http::abs_url;
-
 use super::utils::{TocError, resolve_base_for_join};
+use crate::http::abs_url;
 
 /// 在已抓的第一页里找全部分页 URL。
 ///

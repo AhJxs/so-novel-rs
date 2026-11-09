@@ -8,9 +8,8 @@ use std::rc::Rc;
 use gpui_kit::component::{Theme, ThemeConfig, ThemeMode, ThemeRegistry};
 use gpui_kit::{App, SharedString, Window, px};
 
-use crate::config::{ThemeDynMode, ThemeKind, ThemePref};
-
 use super::embedded::{FONT_SIZE_MAX, FONT_SIZE_MIN};
+use crate::config::{ThemeDynMode, ThemeKind, ThemePref};
 
 /// 把字号写进全局 `Theme.font_size` 并刷新所有窗口。`Root` 每帧 `prepare` 里 `set_rem_size` 把它设为
 /// rem 基准, 组件全用 `rems(...)` 缩放, 所以改这一个字段 = 全局等比缩放。

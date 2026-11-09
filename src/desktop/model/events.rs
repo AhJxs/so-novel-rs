@@ -9,8 +9,7 @@
 
 use rust_i18n::t;
 
-use super::AppModel;
-use super::UpdateOutcome;
+use super::{AppModel, UpdateOutcome};
 
 /// 唤醒信号 handle。**仅在 GPUI/smol executor 上使用** —— `cx.spawn` 跑在 smol
 /// 之上, 其 channel 在该 executor 原生工作, **不**触碰 tokio runtime。

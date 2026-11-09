@@ -9,27 +9,23 @@ mod row;
 mod summary;
 mod toolbar;
 
-use gpui_kit::component::{
-    ActiveTheme as _, IconName, WindowExt,
-    button::ButtonVariant,
-    dialog::{AlertDialog, Dialog},
-    list::{List, ListState},
-    scroll::ScrollableElement as _,
-    v_flex,
-};
+use gpui_kit::component::button::ButtonVariant;
+use gpui_kit::component::dialog::{AlertDialog, Dialog};
+use gpui_kit::component::list::{List, ListState};
+use gpui_kit::component::scroll::ScrollableElement as _;
+use gpui_kit::component::{ActiveTheme as _, IconName, WindowExt, v_flex};
 use gpui_kit::{
     App, AppContext, ClickEvent, Context, Entity, IntoElement, ParentElement, Render, Styled,
     Window, div, px,
 };
-
-use crate::desktop::components::{EmptyState, PageHeader, Pagination, compute_page_window};
-use crate::desktop::model::AppModel;
-use crate::desktop::model::tasks::DeleteTaskResult;
 use rust_i18n::t;
 
 use self::delegate::TasksDelegate;
 pub use self::summary::TaskSummary;
 use self::summary::{TaskFilter, build_summaries, count_by_status, filter_and_sort_indices};
+use crate::desktop::components::{EmptyState, PageHeader, Pagination, compute_page_window};
+use crate::desktop::model::AppModel;
+use crate::desktop::model::tasks::DeleteTaskResult;
 
 pub struct TasksPage {
     model: Entity<AppModel>,
@@ -116,8 +112,13 @@ impl TasksPage {
                 .confirm()
                 .on_ok(move |_ev: &ClickEvent, _window, cx| {
                     model_for_ok.update(cx, |m, _cx| match m.delete_task(task_id) {
-                        DeleteTaskResult::Deleted => m.push_success(t!("Toasts.delete_task_ok", book_name = &name_for_ok)),
-                        DeleteTaskResult::StillRunning => m.push_warning(t!("Toasts.delete_task_still_running", book_name = &name_for_ok)),
+                        DeleteTaskResult::Deleted => {
+                            m.push_success(t!("Toasts.delete_task_ok", book_name = &name_for_ok));
+                        }
+                        DeleteTaskResult::StillRunning => m.push_warning(t!(
+                            "Toasts.delete_task_still_running",
+                            book_name = &name_for_ok
+                        )),
                         DeleteTaskResult::Missing => {
                             m.push_warning(t!("Toasts.delete_task_missing"));
                         }
@@ -150,7 +151,10 @@ impl TasksPage {
             let failures_for_list = failures.clone();
             // 宽 640px + 不调 `.alert()`/`.confirm()`，保留默认 close_button + overlay / Esc 关闭。
             dialog
-                .title(t!("Tasks.failures_dialog.title", book_name = &name_for_title))
+                .title(t!(
+                    "Tasks.failures_dialog.title",
+                    book_name = &name_for_title
+                ))
                 .w(px(640.))
                 // 失败章节可能很多 —— 限高 + 纵向滚动。`overflow_y_scrollbar` 是 terminal
                 // builder（返回 `Scrollable<Div>`），必须放链尾。
@@ -168,7 +172,11 @@ impl TasksPage {
                                 .map(|(idx, title, reason)| {
                                     div().gap_1().child(div().child(format!(
                                         "{} · {}",
-                                        t!("Tasks.card.failure_chapter", idx = &idx.to_string(), title = title),
+                                        t!(
+                                            "Tasks.card.failure_chapter",
+                                            idx = &idx.to_string(),
+                                            title = title
+                                        ),
                                         t!("Tasks.card.failure_reason", reason = reason),
                                     )))
                                 }),

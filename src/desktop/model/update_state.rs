@@ -5,13 +5,12 @@
 
 use tokio::sync::mpsc;
 
-use crate::core::{DrainOutcome, try_drain_all};
-
 // 保留旧 re-export, 免得 `desktop::model::*` 的外部 user 受影响。
 pub use crate::core::update::{
     UpdateCheckResult, UpdateOutcome, check_latest_release as check_github_latest_release,
     classify, is_new_version_available,
 };
+use crate::core::{DrainOutcome, try_drain_all};
 
 /// 当前进程内的"更新检查中 / 最新版本 / 错误"状态聚合。
 ///

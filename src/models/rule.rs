@@ -11,8 +11,9 @@ use serde::{Deserialize, Deserializer, Serialize};
 
 /// 宽松反序列化布尔：接受 bool 字面量或字符串 `"true"/"false"/"1"/"0"`。
 fn lenient_bool<'de, D: Deserializer<'de>>(d: D) -> Result<bool, D::Error> {
-    use serde::de::{self, Visitor};
     use std::fmt;
+
+    use serde::de::{self, Visitor};
 
     struct V;
     impl Visitor<'_> for V {

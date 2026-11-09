@@ -4,10 +4,8 @@
 //! 颜色全部走 `cx.theme()`；不写自定义调色板。
 
 use gpui_kit::component::{ActiveTheme as _, Icon, IconName, Sizable};
-use gpui_kit::{
-    App, IntoElement, ParentElement, RenderOnce, SharedString, Styled, Window, div,
-    prelude::FluentBuilder as _,
-};
+use gpui_kit::prelude::FluentBuilder as _;
+use gpui_kit::{App, IntoElement, ParentElement, RenderOnce, SharedString, Styled, Window, div};
 
 /// 空态展示。`RenderOnce` — 没有内部状态，构造即可用。
 #[derive(IntoElement)]

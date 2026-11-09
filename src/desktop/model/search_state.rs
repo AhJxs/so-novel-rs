@@ -1,14 +1,13 @@
 use std::collections::{HashMap, HashSet};
 use std::num::NonZeroUsize;
+
+use lru::LruCache;
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
 
-use lru::LruCache;
-
+use super::cover::{CoverEntry, cover_entry_from_bytes};
 use crate::core::{DrainOutcome, try_drain_all};
 use crate::models::{Book, Chapter, SearchResult};
-
-use super::cover::{CoverEntry, cover_entry_from_bytes};
 
 /// 封面结果缓存最大条目数。64 条 ≈ 5-10MB, 让长会话的内存有界
 /// （旧实现是无上限 `HashMap`, 会累积所有查看过的封面）。

@@ -13,13 +13,14 @@ mod sources_config;
 mod tasks;
 
 mod tasks_init;
+use std::path::{Path, PathBuf};
+
 pub use rules::{
     META_AUTHOR, META_BOOK_NAME, META_CATEGORY, META_COVER_URL, META_INTRO, META_LAST_UPDATE_TIME,
     META_LATEST_CHAPTER, META_LATEST_CHAPTER_URL, META_STATUS, RulesError, apply_default_rule,
     init_rules_dir, list_rule_files, load_active_rules, load_rules_from_path,
 };
 pub use sources_config::SourcesConfig;
-use std::path::{Path, PathBuf};
 pub use tasks::{load as load_tasks, save as save_tasks, save_with_trim};
 pub use tasks_init::load_tasks_from_file;
 
@@ -107,8 +108,9 @@ pub fn write_atomically(path: &Path, data: &[u8]) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
-    use super::*;
     use std::io::Read;
+
+    use super::*;
 
     #[test]
     fn write_atomically_creates_file() {

@@ -6,10 +6,9 @@ use reqwest::Client;
 use scraper::Html;
 use thiserror::Error;
 
+use super::pagination::fetch_paginated_content;
 use crate::models::{Chapter, ContentType, Rule};
 use crate::parser::dom::{SelectError, select_and_invoke_js};
-
-use super::pagination::fetch_paginated_content;
 
 #[derive(Debug, Error)]
 pub enum ChapterError {

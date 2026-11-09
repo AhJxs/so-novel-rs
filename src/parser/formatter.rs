@@ -7,8 +7,9 @@
 //!    差异只在嵌套结构上, 而源站正文几乎没有正文级嵌套。
 //! 2. **非闭合标签** (`false`)：按规则的 `paragraphTag` 正则（如 `<br>+`）切分，逐段包 `<p>`。
 
-use regex::Regex;
 use std::sync::LazyLock;
+
+use regex::Regex;
 
 use crate::models::RuleChapter;
 use crate::parser::dom::clear_all_attributes;

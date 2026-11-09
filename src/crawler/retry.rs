@@ -41,9 +41,10 @@ where
 #[cfg(test)]
 mod tests {
     #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
-    use super::*;
     use std::cell::RefCell;
     use std::rc::Rc;
+
+    use super::*;
 
     fn no_sleep() -> impl FnMut(u32) -> std::future::Ready<()> {
         |_| std::future::ready(())

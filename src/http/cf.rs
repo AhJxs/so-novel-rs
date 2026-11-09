@@ -5,12 +5,12 @@
 //!
 //! 检测直接在原始 HTML 上取 `<title>`，不走 scraper（每页都会检测一次）。
 
+use std::sync::LazyLock;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
 use regex::Regex;
 use reqwest::Client;
-use std::sync::LazyLock;
 
 const CF_TITLES: &[&str] = &[
     "Just a moment...",

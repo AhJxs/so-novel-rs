@@ -208,8 +208,9 @@ pub(crate) fn pad_zero(n: u32, width: usize) -> String {
 /// 极简 HTML 标签清理（仅用于 intro 文本）：删除 `<...>`、HTML 实体、多余空白。
 /// 不引入 ammonia / scraper（intro 一般几百字，正则足够）。
 pub(crate) fn strip_html_tags(s: &str) -> String {
-    use regex::Regex;
     use std::sync::LazyLock;
+
+    use regex::Regex;
 
     // 正则由源码字面量构造，编译期确定能编译；用 `match` 走 panic 路径避免 `clippy::expect_used`。
     // panic 即设计：字面量写错是程序员错误，启动期炸出来比在 lazy init 崩在半成品状态更易诊断。

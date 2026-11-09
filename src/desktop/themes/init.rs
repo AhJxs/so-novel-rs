@@ -4,10 +4,9 @@
 use gpui_kit::App;
 use gpui_kit::component::ThemeRegistry;
 
-use crate::config::{ConfigPaths, ThemePref};
-
 use super::apply::{apply_font_size, apply_theme_pref, list_theme_names};
 use super::user_dir::ensure_user_themes_dir;
+use crate::config::{ConfigPaths, ThemePref};
 
 /// 启动时调用一次: 把 embed JSON 喂给 `ThemeRegistry::watch_dir`, reload 完成后用 `saved_theme`
 /// 名字应用主题 + refresh 所有窗口。

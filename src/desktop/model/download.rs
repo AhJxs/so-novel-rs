@@ -2,9 +2,8 @@
 //!
 //! 全部 thin delegator, 实际逻辑在 `crate::desktop::model::ops::download`。
 
-use crate::models::{Book, Chapter, SearchResult};
-
 use super::{AppModel, ops};
+use crate::models::{Book, Chapter, SearchResult};
 
 impl AppModel {
     /// 派一个新的下载任务。返回新任务 id。

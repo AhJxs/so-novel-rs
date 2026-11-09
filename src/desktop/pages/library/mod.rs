@@ -14,26 +14,21 @@ mod toolbar;
 
 use std::path::PathBuf;
 
-use gpui_kit::component::{
-    ActiveTheme as _, Disableable as _, Icon, IconName, WindowExt,
-    button::{Button, ButtonVariant},
-    dialog::AlertDialog,
-    input::{InputEvent, InputState},
-    list::List,
-    list::ListState,
-    v_flex,
-};
+use gpui_kit::component::button::{Button, ButtonVariant};
+use gpui_kit::component::dialog::AlertDialog;
+use gpui_kit::component::input::{InputEvent, InputState};
+use gpui_kit::component::list::{List, ListState};
+use gpui_kit::component::{ActiveTheme as _, Disableable as _, Icon, IconName, WindowExt, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     App, AppContext, ClickEvent, Context, Entity, IntoElement, ParentElement, Render, Styled,
     Window, div, px,
 };
-
-use crate::desktop::components::{EmptyState, PageHeader, Pagination, compute_page_window};
-use crate::desktop::model::{AppModel, LibraryEntry};
 use rust_i18n::t;
 
 use self::delegate::LibraryDelegate;
+use crate::desktop::components::{EmptyState, PageHeader, Pagination, compute_page_window};
+use crate::desktop::model::{AppModel, LibraryEntry};
 
 /// Library 页面 entity。
 pub struct LibraryPage {

@@ -9,8 +9,7 @@ use tokio::sync::{Semaphore, mpsc};
 use tokio::task::JoinSet;
 
 use crate::http::HttpClients;
-use crate::models::SearchResult;
-use crate::models::Source;
+use crate::models::{SearchResult, Source};
 use crate::parser::{SearchError, search_one};
 
 const DEFAULT_SEARCH_CONCURRENCY: usize = 8;

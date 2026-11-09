@@ -4,17 +4,13 @@ mod delegate;
 mod row;
 mod toolbar;
 
-use gpui_kit::component::{
-    ActiveTheme as _, Disableable, Icon, IconName, Sizable,
-    button::Button,
-    h_flex,
-    input::{InputEvent, InputState},
-    list::{List, ListState},
-    select::{SearchableVec, SelectEvent, SelectState},
-    spinner::Spinner,
-    tag::Tag,
-    v_flex,
-};
+use gpui_kit::component::button::Button;
+use gpui_kit::component::input::{InputEvent, InputState};
+use gpui_kit::component::list::{List, ListState};
+use gpui_kit::component::select::{SearchableVec, SelectEvent, SelectState};
+use gpui_kit::component::spinner::Spinner;
+use gpui_kit::component::tag::Tag;
+use gpui_kit::component::{ActiveTheme as _, Disableable, Icon, IconName, Sizable, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AppContext, Context, Entity, IntoElement, ParentElement, Render, SharedString, Styled, Window,
@@ -22,12 +18,11 @@ use gpui_kit::{
 };
 use rust_i18n::t;
 
+use self::delegate::SourcesDelegate;
 use crate::db::list_rule_files;
 use crate::desktop::components::{EmptyState, PageHeader, Pagination, compute_page_window};
 use crate::desktop::model::{AppModel, SourcesFilterStatus};
 use crate::models::Rule;
-
-use self::delegate::SourcesDelegate;
 
 /// Sources 页面 entity。
 pub struct SourcesPage {

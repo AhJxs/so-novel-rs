@@ -7,23 +7,20 @@
 //! - 覆盖层 (dialog / sheet / notification / menu) 由外层 `Root` 上挂的 `RootPlugin`
 //!   叠加, 不由本 view 渲染。
 
-use gpui_kit::component::{
-    ActiveTheme as _, Icon, TitleBar, WindowExt as _,
-    sidebar::{Sidebar, SidebarMenu, SidebarMenuItem, SidebarToggleButton},
-};
+use gpui_kit::component::sidebar::{Sidebar, SidebarMenu, SidebarMenuItem, SidebarToggleButton};
+use gpui_kit::component::{ActiveTheme as _, Icon, TitleBar, WindowExt as _};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::{
     AnyElement, AppContext, ClickEvent, Context, Entity, FontWeight, InteractiveElement,
     IntoElement, MouseButton, ParentElement, Render, Styled, Window, div, px,
 };
-
-use crate::desktop::model::AppModel;
-use crate::desktop::pages::{LibraryPage, SearchPage, SettingsPage, SourcesPage, TasksPage};
 use rust_i18n::t;
 
 use super::logo::render_logo;
 use super::nav::{KEY_CONTEXT, NavPage};
 use super::notifications::ui_event_to_notification;
+use crate::desktop::model::AppModel;
+use crate::desktop::pages::{LibraryPage, SearchPage, SettingsPage, SourcesPage, TasksPage};
 use crate::desktop::{
     NextPage, PrevPage, ShowLibrary, ShowSearch, ShowSettings, ShowSources, ShowTasks,
     ToggleSidebar,

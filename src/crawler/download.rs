@@ -11,15 +11,14 @@ use std::time::Duration;
 use rand::RngExt;
 use tokio::sync::Semaphore;
 
-use crate::config::AppConfig;
-use crate::export::{RenderTarget, build_book_dir_name, exporter_for, write_single_chapter};
-use crate::models::{Book, Chapter, Source};
-use crate::parser::{ChapterError, TocError, parse_chapter};
-
 use super::download_options::DownloadOptions;
 use super::progress::Progress;
 use super::resolve::{CrawlerError, resolve_book};
 use super::retry as retry_mod;
+use crate::config::AppConfig;
+use crate::export::{RenderTarget, build_book_dir_name, exporter_for, write_single_chapter};
+use crate::models::{Book, Chapter, Source};
+use crate::parser::{ChapterError, TocError, parse_chapter};
 
 /// 入口: 抓一本书并导出。**全 async**: 内部直接 await 各级 parser,
 /// 配合 `tokio::select!` 让外部 `cancel` 信号瞬间中断 in-flight HTTP (reqwest 关闭连接)。

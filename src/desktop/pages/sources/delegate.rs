@@ -2,15 +2,13 @@
 
 use std::collections::HashMap;
 
-use gpui_kit::component::list::{ListItem, ListState};
-use gpui_kit::component::{ActiveTheme as _, IndexPath, list::ListDelegate};
+use gpui_kit::component::list::{ListDelegate, ListItem, ListState};
+use gpui_kit::component::{ActiveTheme as _, IndexPath};
 use gpui_kit::{App, Context, Entity, ParentElement, Styled, Window, px};
 
+use super::{SourcesPage, row};
 use crate::crawler::health::SourceHealth;
 use crate::models::Rule;
-
-use super::SourcesPage;
-use super::row;
 
 pub(super) struct SourcesDelegate {
     pub(super) page_items: Vec<(usize, Rule)>,

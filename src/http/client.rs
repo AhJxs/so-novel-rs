@@ -110,6 +110,7 @@ mod tests {
     #[tokio::test]
     async fn manual_proxy_actually_routes_traffic_through_proxy() {
         use std::sync::{Arc, Mutex};
+
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
         use tokio::net::TcpListener;
 

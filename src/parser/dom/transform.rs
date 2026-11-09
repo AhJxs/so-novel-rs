@@ -1,8 +1,9 @@
 //! HTML 转换工具: 清属性 / 删标签。选择器 + @js 后处理在 [`super::selector`]。
 
+use std::sync::LazyLock;
+
 use regex::Regex;
 use scraper::{Html, Selector};
-use std::sync::LazyLock;
 
 /// 清除所有元素的属性。Java `JsoupUtils.clearAllAttributes`。
 /// 用途: 正文 HTML 在写入模板前, 去掉所有 class/style/id 等属性,

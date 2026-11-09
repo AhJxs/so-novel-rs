@@ -8,9 +8,9 @@
 use std::fs::File;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::LazyLock;
 
 use regex::Regex;
-use std::sync::LazyLock;
 use zip::CompressionMethod;
 use zip::write::SimpleFileOptions;
 
@@ -124,10 +124,11 @@ fn zip_directory(src: &Path, dst: &Path) -> Result<(), ExportError> {
 #[cfg(test)]
 mod tests {
     #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
+    use std::io::Read;
+
     use super::*;
     use crate::config::ExportFormat;
     use crate::export::exporter::{RenderedChapter, write_chapter_files};
-    use std::io::Read;
 
     fn sample_book() -> Book {
         Book {

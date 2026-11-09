@@ -74,8 +74,9 @@ pub fn list_rule_files(rules_dir: &Path) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
-    use super::*;
     use std::path::PathBuf;
+
+    use super::*;
 
     fn repo_rules_dir() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))

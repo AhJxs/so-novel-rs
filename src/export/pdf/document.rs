@@ -5,16 +5,15 @@ use std::path::{Path, PathBuf};
 
 use pdf_oxide::writer::{DocumentBuilder, DocumentMetadata, EmbeddedFont, PageSize};
 
+use super::chapters::{
+    extract_body, extract_chapter_content, html_to_text, strip_nav_bar, wrap_text,
+};
+use super::fonts::{CJK_FONT, Measurer, find_cjk_font};
 use crate::export::exporter::{
     ExportError, Exporter, sort_chapter_files, strip_html_tags, unique_path,
 };
 use crate::models::Book;
 use crate::utils::fs::sanitize_filename;
-
-use super::chapters::{
-    extract_body, extract_chapter_content, html_to_text, strip_nav_bar, wrap_text,
-};
-use super::fonts::{CJK_FONT, Measurer, find_cjk_font};
 
 /// PDF 导出器 (实现 [`Exporter`] trait)。
 pub struct PdfExporter;

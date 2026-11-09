@@ -1,11 +1,12 @@
 //! `boa_engine` 包装。**每次调用都新建一个 boa Context**: boa 的 `Context` 不是 `Send`, 多线程下载
 //! 场景下不能共享同一个; 而创建 Context 只是分配一组 vec/map, 开销远小于一次 HTTP 请求。
 
+use std::fmt::Write as _;
+
 use anyhow::{Context as _, Result};
 use base64::Engine as _;
 use boa_engine::vm::RuntimeLimits;
 use boa_engine::{Context, Source};
-use std::fmt::Write as _;
 
 /// JS 规则执行的资源护栏。
 ///
@@ -140,8 +141,9 @@ fn json_quote_for_js(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
-    use super::*;
     use std::path::PathBuf;
+
+    use super::*;
 
     fn repo_web() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))

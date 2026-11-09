@@ -167,8 +167,9 @@ impl From<crate::parser::SearchError> for AppError {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::path::PathBuf;
+
+    use super::*;
 
     #[test]
     fn from_io_error() {

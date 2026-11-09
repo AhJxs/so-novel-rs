@@ -1,8 +1,9 @@
 //! 杂项工具。对应 Java `util.CrawlUtils` 中除 `hasCf`/`request` 之外的部分。
 
+use std::sync::LazyLock;
+
 use rand::RngExt;
 use regex::Regex;
-use std::sync::LazyLock;
 
 use crate::config::AppConfig;
 use crate::models::EffectiveCrawl;
@@ -75,7 +76,7 @@ fn url_encode_query_value(s: &str) -> String {
             _ => {
                 out.push('%');
                 out.push(HEX[(*b >> 4) as usize] as char);
-                out.push(HEX[(*b & 0x0F) as usize] as char);
+                out.push(HEX[(*b & 0x0f) as usize] as char);
             }
         }
     }

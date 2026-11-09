@@ -3,7 +3,8 @@
 //! gpui-kit 组件库本身已有 `Badge` + `Alert`，颜色自动走 `cx.theme().info / success / warning / error`。
 //! 这里只做"业务命名 → Badge"的便捷构造器，不引入新调色板。
 
-use gpui_kit::component::{ActiveTheme as _, badge::Badge};
+use gpui_kit::component::ActiveTheme as _;
+use gpui_kit::component::badge::Badge;
 use gpui_kit::{App, IntoElement, ParentElement, RenderOnce, SharedString, Styled, Window, div};
 
 /// 业务状态的 4 个语义色（与 gpui-kit 组件库的主题色对齐）。

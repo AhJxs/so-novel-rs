@@ -6,9 +6,10 @@
 //! `decode_response_bytes` 只吃 body bytes + 可选的 Content-Type 头（不吃
 //! `reqwest::Response`），以便脱离 HTTP 上下文单测。
 
+use std::sync::LazyLock;
+
 use encoding_rs::{Encoding, UTF_8};
 use regex::Regex;
-use std::sync::LazyLock;
 
 /// 静态正则字面量写错即程序员错误，故直接 panic（避开 `clippy::expect_used`）。
 #[allow(
@@ -98,7 +99,7 @@ mod tests {
     #[test]
     fn decodes_via_content_type_header() {
         // GBK 里"中文"两字
-        let gbk_bytes = [0xD6, 0xD0, 0xCE, 0xC4]; // 中文
+        let gbk_bytes = [0xd6, 0xd0, 0xce, 0xc4]; // 中文
         let s = decode_response_bytes(&gbk_bytes, Some("text/html; charset=GBK"));
         assert_eq!(s, "中文");
     }
@@ -109,7 +110,7 @@ mod tests {
         buf.extend_from_slice(
             b"<html><head><meta http-equiv=\"Content-Type\" content=\"text/html; charset=gbk\"></head><body>",
         );
-        buf.extend_from_slice(&[0xD6, 0xD0, 0xCE, 0xC4]);
+        buf.extend_from_slice(&[0xd6, 0xd0, 0xce, 0xc4]);
         buf.extend_from_slice(b"</body></html>");
         let s = decode_response_bytes(&buf, None);
         assert!(s.contains("中文"), "decoded: {s:?}");
@@ -119,7 +120,7 @@ mod tests {
     fn decodes_via_meta_short_form() {
         let mut buf = Vec::new();
         buf.extend_from_slice(b"<html><head><meta charset='GBK'></head><body>");
-        buf.extend_from_slice(&[0xD6, 0xD0, 0xCE, 0xC4]);
+        buf.extend_from_slice(&[0xd6, 0xd0, 0xce, 0xc4]);
         buf.extend_from_slice(b"</body></html>");
         let s = decode_response_bytes(&buf, None);
         assert!(s.contains("中文"));

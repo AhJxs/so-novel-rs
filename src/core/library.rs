@@ -57,8 +57,9 @@ impl LibraryEntry {
 #[cfg(test)]
 mod tests {
     #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
-    use super::*;
     use std::path::PathBuf;
+
+    use super::*;
 
     #[test]
     fn supported_exts_contains_expected() {

@@ -12,17 +12,16 @@ use reqwest::Client;
 use scraper::Html;
 use thiserror::Error;
 
+#[cfg(test)]
+use crate::config::AppConfig;
+#[cfg(test)]
+use crate::http::client::{ClientOptions, build_async_client};
 use crate::http::{
     FetchRequest, HttpMethod, build_form_data, fetch, fetch_via_cf_bypass, format_url_query,
     has_cloudflare,
 };
 use crate::models::{ContentType, Rule, SearchResult};
 use crate::parser::dom::{SelectError, select_and_invoke_js_within, split_js};
-
-#[cfg(test)]
-use crate::config::AppConfig;
-#[cfg(test)]
-use crate::http::client::{ClientOptions, build_async_client};
 
 #[derive(Debug, Error)]
 pub enum SearchError {
@@ -416,6 +415,7 @@ mod tests {
     #[ignore = "live network: depends on 22biqu availability"]
     async fn search_one_span_records_url_method_final_url() {
         use std::sync::{Arc, Mutex};
+
         use tracing_subscriber::fmt::MakeWriter;
 
         #[derive(Clone, Default)]

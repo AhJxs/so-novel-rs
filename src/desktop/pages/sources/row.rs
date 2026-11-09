@@ -1,17 +1,17 @@
 //! 单条书源行渲染（5 列：序号 / name + lang tag / URL / 健康状态 / Switch）。
 
-use gpui_kit::component::{
-    ActiveTheme as _, Sizable, StyledExt, h_flex, link::Link, switch::Switch, tag::Tag,
-};
+use gpui_kit::component::link::Link;
+use gpui_kit::component::switch::Switch;
+use gpui_kit::component::tag::Tag;
+use gpui_kit::component::{ActiveTheme as _, Sizable, StyledExt, h_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{App, Entity, IntoElement, ParentElement, SharedString, Styled, div, px};
 use rust_i18n::t;
 
+use super::SourcesPage;
 use crate::crawler::health::{HealthStatus, SourceHealth};
 use crate::desktop::components::{StatusBadge, StatusKind, truncate};
 use crate::models::Rule;
-
-use super::SourcesPage;
 
 pub(super) fn render(
     index: usize,
@@ -64,9 +64,7 @@ pub(super) fn render(
                                 .gap_1()
                                 .child(Tag::secondary().small().child(lang_display))
                                 .when(need_proxy, |d| {
-                                    d.child(
-                                        Tag::secondary().small().child(t!("Sources.tag.proxy")),
-                                    )
+                                    d.child(Tag::secondary().small().child(t!("Sources.tag.proxy")))
                                 }),
                         ),
                 ),
@@ -74,20 +72,21 @@ pub(super) fn render(
         .child(
             // URL 列：`Link` 点击由内置 on_click 走 `cx.open_url`。
             // Link 不实现 Sizable，按项目惯例把字号挂在**外层 div** 上。
-            div()
-                .w(px(250.))
-                .text_xs()
-                .overflow_x_hidden()
-                .child(
-                    Link::new(("src-url", index as u64))
-                        .href(rule.url.clone())
-                        .child(truncate(&rule.url, 60)),
-                ),
+            div().w(px(250.)).text_xs().overflow_x_hidden().child(
+                Link::new(("src-url", index as u64))
+                    .href(rule.url.clone())
+                    .child(truncate(&rule.url, 60)),
+            ),
         )
         // ---- 健康状态 Badge ----
         .child(div().w(px(150.)).justify_end().child({
             let (badge_kind, label) = health.map_or_else(
-                || (StatusKind::Neutral, t!("Sources.health.not_tested").to_string()),
+                || {
+                    (
+                        StatusKind::Neutral,
+                        t!("Sources.health.not_tested").to_string(),
+                    )
+                },
                 |h| (health_status_kind_from(h.classify()), h.label()),
             );
             StatusBadge::new(badge_kind, label)
@@ -103,7 +102,10 @@ pub(super) fn render(
                     page_for_switch.update(cx, |p, cx| {
                         p.model.update(cx, |m, _cx| {
                             // 只在 model 当前状态与 UI 期望不一致时才 toggle（避免重复触发）。
-                            if m.rules.iter().find(|r| r.url == rule_url).map(|r| r.disabled)
+                            if m.rules
+                                .iter()
+                                .find(|r| r.url == rule_url)
+                                .map(|r| r.disabled)
                                 != Some(want_disabled)
                             {
                                 m.toggle_source_disabled(&rule_url);

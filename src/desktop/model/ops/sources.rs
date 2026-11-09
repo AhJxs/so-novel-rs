@@ -3,14 +3,12 @@
 use std::path::Path;
 use std::sync::Arc;
 
+use super::super::sources_state::SourcesState;
 use crate::core::sources as core_sources;
 use crate::db::SourcesConfig;
-use crate::error::AppError;
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult};
 use crate::http::HttpClients;
 use crate::models::Rule;
-
-use super::super::sources_state::SourcesState;
 
 /// 切换书源的禁用状态；立即持久化到 `sources_config.json`。
 pub fn toggle_source_disabled(

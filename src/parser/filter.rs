@@ -6,8 +6,9 @@
 //! 4. filterTag 节点删除（复用 `parser::dom::remove_tags`）; 5. 正文开头的章节名擦掉,
 //!    保留前面的 tag/whitespace; 6. `1.章节名` → `第1章 章节名`; 7. 清理空标签。
 
-use regex::Regex;
 use std::sync::LazyLock;
+
+use regex::Regex;
 
 use crate::http::clean_invisible_chars;
 use crate::models::{Chapter, RuleChapter};

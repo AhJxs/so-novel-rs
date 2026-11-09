@@ -7,10 +7,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use reqwest::header::{ACCEPT, USER_AGENT};
+use rust_i18n::t;
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
-
-use rust_i18n::t;
 
 use crate::http::HttpClients;
 use crate::http::ua::random_ua;

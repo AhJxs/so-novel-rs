@@ -8,13 +8,12 @@ use std::time::Duration;
 
 use thiserror::Error;
 
+use super::download_options::CancelToken;
+use super::retry::retry_with_backoff;
 use crate::config::AppConfig;
 use crate::models::{Book, Chapter, Source};
 use crate::parser::{BookError, SelectError, TocError, parse_book_detail, parse_toc};
 use crate::utils::zhconv::convert_book_meta;
-
-use super::download_options::CancelToken;
-use super::retry::retry_with_backoff;
 
 /// 调度层错误。
 ///

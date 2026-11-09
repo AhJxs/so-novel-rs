@@ -6,11 +6,9 @@
 
 use std::rc::Rc;
 
-use gpui_kit::component::{
-    input::{InputState, TextareaState},
-    select::{SearchableVec, SelectState},
-    slider::SliderState,
-};
+use gpui_kit::component::input::{InputState, TextareaState};
+use gpui_kit::component::select::{SearchableVec, SelectState};
+use gpui_kit::component::slider::SliderState;
 use gpui_kit::{App, ClickEvent, Entity, SharedString, Window};
 
 use crate::desktop::model::AppModel;

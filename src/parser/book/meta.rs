@@ -1,19 +1,18 @@
 //! 详情页 HTML 解析 + 主流程: [`parse_book_detail`] 抓 + 解析 + `CoverUpdater`。封面 URL 处理在 [`super::cover`]。
 
+use std::sync::LazyLock;
+
 use anyhow::Result;
 use regex::Regex;
 use reqwest::Client;
 use scraper::Html;
-use std::sync::LazyLock;
 use thiserror::Error;
 
+use super::cover::{content_type_for, extract_cover_url, maybe_replace_cover};
 use crate::crawler::cover_updater;
-use crate::http::abs_url;
-use crate::http::{FetchRequest, HttpMethod, fetch, fetch_via_cf_bypass, has_cloudflare};
+use crate::http::{FetchRequest, HttpMethod, abs_url, fetch, fetch_via_cf_bypass, has_cloudflare};
 use crate::models::{Book, Rule};
 use crate::parser::dom::{SelectError, select_and_invoke_js};
-
-use super::cover::{content_type_for, extract_cover_url, maybe_replace_cover};
 
 #[derive(Debug, Error)]
 pub enum BookError {

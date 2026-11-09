@@ -2,20 +2,19 @@
 //!
 //! 2 个 group：代理（模式下拉 / Host / Port / 系统代理探测结果）与起点 Cookie（多行 textarea）。
 
-use gpui_kit::component::{
-    ActiveTheme as _, AxisExt, Sizable as _,
-    input::Textarea,
-    setting::{NumberFieldOptions, SettingField, SettingGroup, SettingItem, SettingPage},
+use gpui_kit::component::input::Textarea;
+use gpui_kit::component::setting::{
+    NumberFieldOptions, SettingField, SettingGroup, SettingItem, SettingPage,
 };
+use gpui_kit::component::{ActiveTheme as _, AxisExt, Sizable as _};
 use gpui_kit::{App, Entity, ParentElement, SharedString, Styled, div, px};
 use rust_i18n::t;
 
+use super::ctx::PageCtx;
+use super::fields::{dropdown_field, number_field_u16, string_field};
 use crate::config::ProxyMode;
 use crate::desktop::model::AppModel;
 use crate::http::{AbsentReason, SystemProxy};
-
-use super::ctx::PageCtx;
-use super::fields::{dropdown_field, number_field_u16, string_field};
 
 pub(super) fn build(ctx: &PageCtx<'_>, cx: &App) -> SettingPage {
     let m = ctx.model.clone();

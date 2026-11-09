@@ -5,14 +5,13 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::Instrument;
 
+use super::super::events::WakeupHandle;
+use super::super::search_state::{DetailEvent, DetailState, SourceSearchEvent, SourceStatus};
+use super::super::trace::{TraceId, sub};
 use crate::config::AppConfig;
 use crate::core::{config_helpers, search as core_search};
 use crate::http::HttpClients;
 use crate::models::{Book, Rule};
-
-use super::super::events::WakeupHandle;
-use super::super::search_state::{DetailEvent, DetailState, SourceSearchEvent, SourceStatus};
-use super::super::trace::{TraceId, sub};
 
 /// 派聚合搜索任务。返回是否成功派发。
 pub fn spawn_search(

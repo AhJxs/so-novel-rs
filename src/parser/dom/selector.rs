@@ -192,8 +192,9 @@ fn is_xpath(s: &str) -> bool {
 ///
 /// 引入完整 `XPath` 引擎的成本远高于改写这几条规则, 故其它 `XPath` 一律返回 `None`。
 fn xpath_to_css(s: &str) -> Option<String> {
-    use regex::Regex;
     use std::sync::LazyLock;
+
+    use regex::Regex;
 
     /// 编译期确定的正则：用 match + panic 避免 `clippy::expect_used`，与项目里
     /// 其它 `LazyLock` 静态正则统一风格。

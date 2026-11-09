@@ -4,23 +4,22 @@
 //! 函数重读 live cache，从占位自动切到真实内容。详情字段只有详情请求才完整，所以优先
 //! `detail_cache` 的 Book，未回来时用 `SearchResult` 兜底。
 
-use rust_i18n::t;
 use std::io::Cursor;
 use std::sync::Arc;
 
+use gpui_kit::component::link::Link;
 use gpui_kit::component::scroll::ScrollableElement as _;
-use gpui_kit::component::{
-    ActiveTheme as _, Sizable, h_flex, link::Link, spinner::Spinner, v_flex,
-};
+use gpui_kit::component::spinner::Spinner;
+use gpui_kit::component::{ActiveTheme as _, Sizable, h_flex, v_flex};
 use gpui_kit::{
     App, Entity, ImageSource, IntoElement, ObjectFit, ParentElement, RenderImage, SharedString,
     Styled, StyledImage, div, img, px,
 };
-
-use crate::desktop::model::{CoverEntry, DetailState};
-use crate::models::SearchResult;
+use rust_i18n::t;
 
 use super::SearchPage;
+use crate::desktop::model::{CoverEntry, DetailState};
+use crate::models::SearchResult;
 
 /// 详情 Dialog 封面区固定尺寸（宽 × 高）。封面比例不一，统一容器 + `ObjectFit::Fill`
 /// 保证布局稳定。

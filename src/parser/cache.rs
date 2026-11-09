@@ -87,8 +87,9 @@ pub fn cached_regex(pat: &str) -> Result<Arc<Regex>, regex::Error> {
 #[cfg(test)]
 mod tests {
     #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
-    use super::*;
     use std::sync::Barrier;
+
+    use super::*;
 
     #[test]
     fn cached_selector_returns_same_arc_for_same_string() {

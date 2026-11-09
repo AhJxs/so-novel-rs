@@ -2,23 +2,18 @@
 //! 和 `source_status_row`（每个源的 status badge + 进度 spinner），由 `mod.rs::impl Render`
 //! 依次挂上。
 
-use gpui_kit::component::{
-    ActiveTheme as _, Disableable, Icon, IconName, Sizable,
-    button::Button,
-    h_flex,
-    input::{Input, InputState},
-    select::{SearchableVec, Select, SelectState},
-    spinner::Spinner,
-    tag::Tag,
-};
-use gpui_kit::{
-    App, Context, Entity, IntoElement, ParentElement, Styled, div, prelude::FluentBuilder as _, px,
-};
+use gpui_kit::component::button::Button;
+use gpui_kit::component::input::{Input, InputState};
+use gpui_kit::component::select::{SearchableVec, Select, SelectState};
+use gpui_kit::component::spinner::Spinner;
+use gpui_kit::component::tag::Tag;
+use gpui_kit::component::{ActiveTheme as _, Disableable, Icon, IconName, Sizable, h_flex};
+use gpui_kit::prelude::FluentBuilder as _;
+use gpui_kit::{App, Context, Entity, IntoElement, ParentElement, Styled, div, px};
 use rust_i18n::t;
 
-use crate::desktop::model::{AppModel, SourceStatus};
-
 use super::source_select::SourceSelectItem;
+use crate::desktop::model::{AppModel, SourceStatus};
 
 /// 输入行：关键词 Input + "书源" label + Select + 搜索 Button。
 pub(super) fn toolbar_row(

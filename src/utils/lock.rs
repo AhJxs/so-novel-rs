@@ -10,6 +10,7 @@ use std::sync::{Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
 ///
 /// ```
 /// use std::sync::Mutex;
+///
 /// use so_novel_rs::utils::lock::mutex_or;
 ///
 /// let m = Mutex::new(42_u32);
@@ -53,9 +54,10 @@ pub fn rw_write_or<'a, T>(
 #[cfg(test)]
 mod tests {
     #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
-    use super::*;
     use std::sync::Arc;
     use std::thread;
+
+    use super::*;
 
     #[test]
     fn mutex_or_happy_path() {

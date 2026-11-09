@@ -1,15 +1,15 @@
 //! 单章分页正文抓取: [`fetch_paginated_content`] 循环抓 + 拼 + 判定终止。入口 [`super::parse::parse_chapter`]。
 
+use std::sync::LazyLock;
+
 use regex::Regex;
 use reqwest::Client;
 use scraper::Html;
-use std::sync::LazyLock;
 
+use super::parse::{ChapterError, fetch_with_cf_fallback};
 use crate::http::abs_url;
 use crate::models::{ContentType, Rule, RuleChapter};
 use crate::parser::dom::select_and_invoke_js;
-
-use super::parse::{ChapterError, fetch_with_cf_fallback};
 
 /// 循环抓分页正文 + 拼接 + 终止判定。
 ///
@@ -170,10 +170,11 @@ static NEXT_CHAPTER_TEXT_RE: LazyLock<Regex> =
 #[cfg(test)]
 mod tests {
     #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
+    use scraper::Selector;
+
     use super::*;
     use crate::config::LangType;
     use crate::db::apply_default_rule;
-    use scraper::Selector;
 
     fn rule_22biqu_chapter() -> Rule {
         let mut r: Rule = serde_json::from_str(

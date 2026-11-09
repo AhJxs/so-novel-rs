@@ -1,10 +1,10 @@
 //! 书源管理页状态：连通性检测的结果与运行标记。
 
 use std::collections::HashMap;
+
 use tokio::sync::mpsc;
 
-use crate::core::sources as core_sources;
-use crate::core::{DrainOutcome, try_drain_all};
+use crate::core::{DrainOutcome, sources as core_sources, try_drain_all};
 use crate::crawler::health::SourceHealth;
 use crate::models::Rule;
 

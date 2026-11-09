@@ -82,9 +82,10 @@ pub fn match_source_by_url<'a>(sources: &'a [Source], url: &str) -> Option<&'a S
 #[cfg(test)]
 mod tests {
     #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
+    use std::collections::HashSet;
+
     use super::*;
     use crate::models::RuleSearch;
-    use std::collections::HashSet;
 
     fn rule(id: i32, url: &str, disabled: bool) -> Rule {
         Rule {

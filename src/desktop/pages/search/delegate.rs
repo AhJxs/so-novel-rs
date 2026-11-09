@@ -1,13 +1,11 @@
 //! `SearchDelegate`: `gpui_kit::component::list::List` 的 delegate，持有 page handle + 当前页条目。
 
-use gpui_kit::component::list::{ListItem, ListState};
-use gpui_kit::component::{ActiveTheme as _, IndexPath, list::ListDelegate};
+use gpui_kit::component::list::{ListDelegate, ListItem, ListState};
+use gpui_kit::component::{ActiveTheme as _, IndexPath};
 use gpui_kit::{App, Context, Entity, ParentElement, Styled, Window, px};
 
+use super::{SearchPage, result_row};
 use crate::models::SearchResult;
-
-use super::SearchPage;
-use super::result_row;
 
 /// `List` 的 delegate —— 把当前页的 (index, `SearchResult`) 渲染成行。
 ///

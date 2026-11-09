@@ -1,6 +1,7 @@
 //! 一个正在跑的下载任务（由搜索页"下载"按钮触发，下载页/任务页消费）。
 
 use std::time::Duration;
+
 use tokio::sync::mpsc;
 
 use crate::crawler::{CancelToken, Progress};
