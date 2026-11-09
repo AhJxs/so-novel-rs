@@ -1,8 +1,6 @@
 //! `boa_engine` 包装。**每次调用都新建一个 boa Context**: boa 的 `Context` 不是 `Send`, 多线程下载
 //! 场景下不能共享同一个; 而创建 Context 只是分配一组 vec/map, 开销远小于一次 HTTP 请求。
 
-use std::fmt::Write as _;
-
 use anyhow::{Context as _, Result};
 use base64::Engine as _;
 use boa_engine::vm::RuntimeLimits;
@@ -117,6 +115,8 @@ pub fn eval_function_returning_string(
 
 /// 把字符串包装为 JS 字面量 (最小 JSON-quote 即可, 不用 boa 内部的 `js_string!`)。
 fn json_quote_for_js(s: &str) -> String {
+    use std::fmt::Write as _;
+
     let mut out = String::with_capacity(s.len() + 2);
     out.push('"');
     for ch in s.chars() {
