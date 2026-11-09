@@ -374,7 +374,7 @@ impl SearchPage {
                     if url.is_empty() {
                         page.update(cx, |p, cx| {
                             p.model.update(cx, |m, _cx| {
-                                m.push_warning(t!("Search.url_download.no_match"));
+                                m.push_warning(t!("Search.url_download.no_match").to_string());
                             });
                             cx.notify();
                         });
@@ -393,7 +393,7 @@ impl SearchPage {
                     let Some(source) = source else {
                         page.update(cx, |p, cx| {
                             p.model.update(cx, |m, _cx| {
-                                m.push_warning(t!("Search.url_download.no_match"));
+                                m.push_warning(t!("Search.url_download.no_match").to_string());
                             });
                             cx.notify();
                         });
@@ -415,10 +415,10 @@ impl SearchPage {
                     };
                     page.update(cx, |p, cx| {
                         p.model.update(cx, |m, _cx| {
-                            m.push_success(t!(
-                                "Search.url_download.matched_source",
-                                name = &source.name
-                            ));
+                            m.push_success(
+                                t!("Search.url_download.matched_source", name = &source.name)
+                                    .to_string(),
+                            );
                         });
                         // 不能直接开 range Dialog：on_ok 返回 true 后组件库会 pop 栈顶，
                         // 刚 push 的 Dialog 会被弹掉。改为置 flag，render 下一帧接手。
@@ -625,8 +625,8 @@ impl Render for SearchPage {
             .p_6()
             .gap_4()
             .child(
-                PageHeader::new(t!("Search.page_title"))
-                    .subtitle(t!("Search.page_subtitle"))
+                PageHeader::new(t!("Search.page_title").into())
+                    .subtitle(t!("Search.page_subtitle").into())
                     .action(
                         Button::new("search-url-download")
                             .icon(Icon::new(IconName::ExternalLink))
@@ -660,8 +660,8 @@ impl Render for SearchPage {
                     .items_center()
                     .justify_center()
                     .child(
-                        EmptyState::new(IconName::Search, t!("Search.empty.title"))
-                            .subtitle(t!("Search.empty.subtitle")),
+                        EmptyState::new(IconName::Search, t!("Search.empty.title").into())
+                            .subtitle(t!("Search.empty.subtitle").into()),
                     )
                     .into_any_element()
             } else {

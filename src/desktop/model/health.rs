@@ -13,7 +13,7 @@ impl AppModel {
     /// 派一个连通性检测任务。
     pub fn spawn_health_check(&mut self) {
         if self.rules.is_empty() {
-            self.push_warning(t!("Toasts.no_sources_detected"));
+            self.push_warning(t!("Toasts.no_sources_detected").to_string());
             return;
         }
         ops::spawn_health_check(

@@ -89,7 +89,7 @@ pub(super) fn render(
                 },
                 |h| (health_status_kind_from(h.classify()), h.label()),
             );
-            StatusBadge::new(badge_kind, label)
+            StatusBadge::new(badge_kind, label.into())
         }))
         // ---- 启用开关 ----
         .child({

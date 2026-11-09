@@ -221,10 +221,10 @@ pub fn save_config(path: &Path, cfg: &AppConfig) -> Result<()> {
     };
 
     // 写一行 (table, key, value)。`value()` 自动处理 toml 类型。
-    fn set_item(doc: &mut DocumentMut, table: &str, key: &str, v: impl Into<Item>) {
+    fn set_item(doc: &mut DocumentMut, table: &str, key: &str, v: Item) {
         let t = doc.entry(table).or_insert(Item::Table(Table::default()));
         if let Some(t) = t.as_table_mut() {
-            t[key] = v.into();
+            t[key] = v;
         }
     }
     fn set_str(doc: &mut DocumentMut, table: &str, key: &str, v: &str) {

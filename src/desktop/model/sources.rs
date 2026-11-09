@@ -58,9 +58,9 @@ impl AppModel {
             source_url,
         ) {
             Ok(true) => {
-                self.push_success(t!("Toasts.delete_source_ok", url = source_url));
+                self.push_success(t!("Toasts.delete_source_ok", url = source_url).to_string());
             }
-            Ok(false) => self.push_warning(t!("Toasts.delete_source_missing")),
+            Ok(false) => self.push_warning(t!("Toasts.delete_source_missing").to_string()),
             Err(e) => self.push_error(e.message()),
         }
     }
@@ -81,7 +81,9 @@ impl AppModel {
                 self.search.clear_results_and_caches();
                 // 同理清 list_cache（也顺带避免 stale 占用）。
                 self.list_cache.clear();
-                self.push_success(t!("Toasts.switch_source_file_ok", filename = filename));
+                self.push_success(
+                    t!("Toasts.switch_source_file_ok", filename = filename).to_string(),
+                );
                 self.save_sources_config();
             }
             Err(e) => self.push_error(e.message()),

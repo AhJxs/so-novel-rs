@@ -39,7 +39,7 @@ pub fn add_sources_from_file(
     let filename = source_path
         .file_name()
         .and_then(|n| n.to_str())
-        .ok_or_else(|| AppError::invalid("无法获取文件名"))?
+        .ok_or_else(|| AppError::invalid("无法获取文件名".to_string()))?
         .to_string();
 
     // 验证文件内容有效（解析链统一在 core::sources::parse_rules_bytes）。

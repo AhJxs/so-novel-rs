@@ -139,7 +139,9 @@ pub fn spawn_search(
                         let _ = tx.send(SourceSearchEvent {
                             source_id: *id,
                             source_name: name.clone(),
-                            result: Err(crate::error::AppError::internal("后台任务异常退出")),
+                            result: Err(crate::error::AppError::internal(
+                                "后台任务异常退出".to_string(),
+                            )),
                         });
                         wakeup.notify();
                     }

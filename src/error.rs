@@ -84,53 +84,53 @@ pub type AppResult<T> = Result<T, AppError>;
 // 构造函数 —— 比直接写 `AppError::Xxx(s.to_string())` 干净。
 impl AppError {
     /// 配置加载 / 校验失败。
-    pub fn config(msg: impl Into<String>) -> Self {
-        Self::Config(msg.into())
+    pub const fn config(msg: String) -> Self {
+        Self::Config(msg)
     }
 
     /// HTTP 请求或响应异常。
-    pub fn http(msg: impl Into<String>) -> Self {
-        Self::Http(msg.into())
+    pub const fn http(msg: String) -> Self {
+        Self::Http(msg)
     }
 
     /// 页面解析失败。
-    pub fn parse(msg: impl Into<String>) -> Self {
-        Self::Parse(msg.into())
+    pub const fn parse(msg: String) -> Self {
+        Self::Parse(msg)
     }
 
     /// 数据读写（DAO / 文件）失败。
-    pub fn db(msg: impl Into<String>) -> Self {
-        Self::Db(msg.into())
+    pub const fn db(msg: String) -> Self {
+        Self::Db(msg)
     }
 
     /// `@js:` 脚本执行失败。
-    pub fn js(msg: impl Into<String>) -> Self {
-        Self::Js(msg.into())
+    pub const fn js(msg: String) -> Self {
+        Self::Js(msg)
     }
 
     /// 业务规则不满足。
-    pub fn business(msg: impl Into<String>) -> Self {
-        Self::Business(msg.into())
+    pub const fn business(msg: String) -> Self {
+        Self::Business(msg)
     }
 
     /// 调用方参数非法。
-    pub fn invalid(msg: impl Into<String>) -> Self {
-        Self::InvalidArgument(msg.into())
+    pub const fn invalid(msg: String) -> Self {
+        Self::InvalidArgument(msg)
     }
 
     /// 请求的资源不存在。
-    pub fn not_found(msg: impl Into<String>) -> Self {
-        Self::NotFound(msg.into())
+    pub const fn not_found(msg: String) -> Self {
+        Self::NotFound(msg)
     }
 
     /// 状态冲突（重复操作等）。
-    pub fn conflict(msg: impl Into<String>) -> Self {
-        Self::Conflict(msg.into())
+    pub const fn conflict(msg: String) -> Self {
+        Self::Conflict(msg)
     }
 
     /// 未归类的内部错误。
-    pub fn internal(msg: impl Into<String>) -> Self {
-        Self::Internal(msg.into())
+    pub const fn internal(msg: String) -> Self {
+        Self::Internal(msg)
     }
 
     /// IO 错误加业务前缀 —— 业务侧常要「读取文件失败: No such file」这种带前缀的字符串。
@@ -199,19 +199,37 @@ mod tests {
 
     #[test]
     fn constructors_produce_expected_variant() {
-        assert!(matches!(AppError::config("a"), AppError::Config(_)));
-        assert!(matches!(AppError::http("a"), AppError::Http(_)));
-        assert!(matches!(AppError::parse("a"), AppError::Parse(_)));
-        assert!(matches!(AppError::db("a"), AppError::Db(_)));
-        assert!(matches!(AppError::js("a"), AppError::Js(_)));
-        assert!(matches!(AppError::business("a"), AppError::Business(_)));
         assert!(matches!(
-            AppError::invalid("a"),
+            AppError::config("a".to_string()),
+            AppError::Config(_)
+        ));
+        assert!(matches!(AppError::http("a".to_string()), AppError::Http(_)));
+        assert!(matches!(
+            AppError::parse("a".to_string()),
+            AppError::Parse(_)
+        ));
+        assert!(matches!(AppError::db("a".to_string()), AppError::Db(_)));
+        assert!(matches!(AppError::js("a".to_string()), AppError::Js(_)));
+        assert!(matches!(
+            AppError::business("a".to_string()),
+            AppError::Business(_)
+        ));
+        assert!(matches!(
+            AppError::invalid("a".to_string()),
             AppError::InvalidArgument(_)
         ));
-        assert!(matches!(AppError::not_found("a"), AppError::NotFound(_)));
-        assert!(matches!(AppError::conflict("a"), AppError::Conflict(_)));
-        assert!(matches!(AppError::internal("a"), AppError::Internal(_)));
+        assert!(matches!(
+            AppError::not_found("a".to_string()),
+            AppError::NotFound(_)
+        ));
+        assert!(matches!(
+            AppError::conflict("a".to_string()),
+            AppError::Conflict(_)
+        ));
+        assert!(matches!(
+            AppError::internal("a".to_string()),
+            AppError::Internal(_)
+        ));
     }
 
     #[test]
@@ -220,7 +238,7 @@ mod tests {
         // 已是 Ok, 这里只是断言 identity —— 免被 clippy 误判成可失败解包。
         assert!(matches!(ok, Ok(42)));
 
-        let err: AppResult<u32> = Err(AppError::invalid("bad"));
+        let err: AppResult<u32> = Err(AppError::invalid("bad".to_string()));
         assert!(err.is_err());
     }
 }

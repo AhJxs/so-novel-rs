@@ -232,8 +232,8 @@ impl Render for SourcesPage {
             .gap_3()
             // ---- PageHeader：标题 + 副标题 + 右侧 actions ----
             .child(
-                PageHeader::new(t!("Sources.page_title"))
-                    .subtitle(t!("Sources.page_subtitle"))
+                PageHeader::new(t!("Sources.page_title").into())
+                    .subtitle(t!("Sources.page_subtitle").into())
                     .action(
                         Button::new("add-source")
                             .icon(Icon::new(IconName::Plus))
@@ -326,8 +326,8 @@ impl Render for SourcesPage {
                     .items_center()
                     .justify_center()
                     .child(
-                        EmptyState::new(IconName::Globe, t!("Sources.empty.title"))
-                            .subtitle(t!("Sources.empty.subtitle")),
+                        EmptyState::new(IconName::Globe, t!("Sources.empty.title").into())
+                            .subtitle(t!("Sources.empty.subtitle").into()),
                     )
                     .into_any_element()
             } else {

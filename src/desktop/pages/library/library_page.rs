@@ -216,12 +216,15 @@ impl Render for LibraryPage {
             .p_6()
             .gap_3()
             .child(
-                PageHeader::new(t!("Library.page_title"))
-                    .subtitle(format!(
-                        "{}: {}",
-                        t!("Library.download_path_label"),
-                        std::path::Path::new(&download_path).display()
-                    ))
+                PageHeader::new(t!("Library.page_title").into())
+                    .subtitle(
+                        format!(
+                            "{}: {}",
+                            t!("Library.download_path_label"),
+                            std::path::Path::new(&download_path).display()
+                        )
+                        .into(),
+                    )
                     .action(
                         Button::new("library-refresh")
                             .icon(Icon::new(IconName::Redo))
@@ -256,8 +259,8 @@ impl Render for LibraryPage {
                     .items_center()
                     .justify_center()
                     .child(
-                        EmptyState::new(IconName::BookOpen, t!("Library.empty_title"))
-                            .subtitle(t!("Library.empty_subtitle")),
+                        EmptyState::new(IconName::BookOpen, t!("Library.empty_title").into())
+                            .subtitle(t!("Library.empty_subtitle").into()),
                     )
                     .into_any_element()
             } else {

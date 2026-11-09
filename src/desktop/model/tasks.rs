@@ -30,7 +30,7 @@ impl AppModel {
                     tracing::warn!("保存任务到文件失败: {e:#}");
                 }
             });
-            self.push_success(t!("Toasts.clear_tasks_ok", n = &removed.to_string()));
+            self.push_success(t!("Toasts.clear_tasks_ok", n = &removed.to_string()).to_string());
         }
     }
 

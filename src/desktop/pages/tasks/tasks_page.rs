@@ -102,14 +102,16 @@ impl TasksPage {
                 .on_ok(move |_ev: &ClickEvent, _window, cx| {
                     model_for_ok.update(cx, |m, _cx| match m.delete_task(task_id) {
                         DeleteTaskResult::Deleted => {
-                            m.push_success(t!("Toasts.delete_task_ok", book_name = &name_for_ok));
+                            m.push_success(
+                                t!("Toasts.delete_task_ok", book_name = &name_for_ok).to_string(),
+                            );
                         }
-                        DeleteTaskResult::StillRunning => m.push_warning(t!(
-                            "Toasts.delete_task_still_running",
-                            book_name = &name_for_ok
-                        )),
+                        DeleteTaskResult::StillRunning => m.push_warning(
+                            t!("Toasts.delete_task_still_running", book_name = &name_for_ok)
+                                .to_string(),
+                        ),
                         DeleteTaskResult::Missing => {
-                            m.push_warning(t!("Toasts.delete_task_missing"));
+                            m.push_warning(t!("Toasts.delete_task_missing").to_string());
                         }
                     });
                     cx.notify(model_id_for_ok);
@@ -218,7 +220,10 @@ impl Render for TasksPage {
             .p_6()
             .gap_4()
             // Header：title + subtitle，**无** action。
-            .child(PageHeader::new(t!("Tasks.page_title")).subtitle(t!("Tasks.subtitle")))
+            .child(
+                PageHeader::new(t!("Tasks.page_title").into())
+                    .subtitle(t!("Tasks.subtitle").into()),
+            )
             // 过滤按钮组：「全部 / 运行中 / 已完成 / 失败 / 已取消」，各带数量。
             .child(super::toolbar::filter_buttons(self.filter, counts, cx))
             // 列表 / 空态
@@ -229,8 +234,8 @@ impl Render for TasksPage {
                     .items_center()
                     .justify_center()
                     .child(
-                        EmptyState::new(IconName::Inbox, t!(filter.empty_title_key()))
-                            .subtitle(t!(filter.empty_subtitle_key())),
+                        EmptyState::new(IconName::Inbox, t!(filter.empty_title_key()).into())
+                            .subtitle(t!(filter.empty_subtitle_key()).into()),
                     )
                     .into_any_element()
             } else {

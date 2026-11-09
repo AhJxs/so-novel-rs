@@ -19,18 +19,18 @@ pub struct EmptyState {
 
 impl EmptyState {
     /// 以图标和主标题构造，副标题默认为空。
-    pub fn new(icon: IconName, title: impl Into<SharedString>) -> Self {
+    pub const fn new(icon: IconName, title: SharedString) -> Self {
         Self {
             icon,
-            title: title.into(),
+            title,
             subtitle: None,
         }
     }
 
     #[must_use]
     /// 追加一行补充说明文字。
-    pub fn subtitle(mut self, subtitle: impl Into<SharedString>) -> Self {
-        self.subtitle = Some(subtitle.into());
+    pub fn subtitle(mut self, subtitle: SharedString) -> Self {
+        self.subtitle = Some(subtitle);
         self
     }
 }

@@ -132,12 +132,12 @@ pub fn drain(model: &mut AppModel) -> bool {
     if let Some(outcome) = model.update_state.drain() {
         use UpdateOutcome::{Failed, NewVersion, UpToDate};
         match outcome {
-            UpToDate => model.push_success(t!("Toasts.update_up_to_date")),
+            UpToDate => model.push_success(t!("Toasts.update_up_to_date").to_string()),
             NewVersion(latest) => model.push_open_link(
-                t!("Toasts.update_new_version", ver = &latest),
-                "https://github.com/AhJxs/so-novel-rs/releases/latest",
+                t!("Toasts.update_new_version", ver = &latest).to_string(),
+                "https://github.com/AhJxs/so-novel-rs/releases/latest".to_string(),
             ),
-            Failed(err) => model.push_error(t!("Toasts.update_failed", err = &err)),
+            Failed(err) => model.push_error(t!("Toasts.update_failed", err = &err).to_string()),
         }
     }
 

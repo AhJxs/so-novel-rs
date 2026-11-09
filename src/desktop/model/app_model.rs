@@ -140,31 +140,28 @@ impl AppModel {
     }
 
     /// 排入一条普通信息通知。
-    pub fn push_info(&mut self, msg: impl Into<String>) {
-        self.push_event(UIEvent::Info(msg.into()));
+    pub fn push_info(&mut self, msg: String) {
+        self.push_event(UIEvent::Info(msg));
     }
 
     /// 排入一条成功通知。
-    pub fn push_success(&mut self, msg: impl Into<String>) {
-        self.push_event(UIEvent::Success(msg.into()));
+    pub fn push_success(&mut self, msg: String) {
+        self.push_event(UIEvent::Success(msg));
     }
 
     /// 排入一条警告通知。
-    pub fn push_warning(&mut self, msg: impl Into<String>) {
-        self.push_event(UIEvent::Warning(msg.into()));
+    pub fn push_warning(&mut self, msg: String) {
+        self.push_event(UIEvent::Warning(msg));
     }
 
     /// 排入一条错误通知。
-    pub fn push_error(&mut self, msg: impl Into<String>) {
-        self.push_event(UIEvent::Error(msg.into()));
+    pub fn push_error(&mut self, msg: String) {
+        self.push_event(UIEvent::Error(msg));
     }
 
     /// 推一条**可点击**通知 —— 用户点 toast 时调 `cx.open_url(url)`。
-    pub fn push_open_link(&mut self, msg: impl Into<String>, url: impl Into<String>) {
-        self.push_event(UIEvent::OpenLink {
-            message: msg.into(),
-            url: url.into(),
-        });
+    pub fn push_open_link(&mut self, msg: String, url: String) {
+        self.push_event(UIEvent::OpenLink { message: msg, url });
     }
 
     /// 构造 spawn 共享上下文。
