@@ -117,8 +117,10 @@ spec §8 所列、**未修改**的框架强制项：
 2. **跨平台**：只在本机 Windows 上完成 fmt / clippy / test / release build；Linux 与
    macOS 的编译、CI 安装的系统依赖未实际跑过。CI 的 Linux 依赖清单抄自既有 release
    workflow，未在本环境验证。
-3. **CI workflow 本身**：`.github/workflows/ci.yml` 未在 GitHub 上执行过；`actions/checkout@v6`
-   与 `nightly-2026-11-08` 工具链的实际可用性以首次运行为准。
+3. **CI workflow 本身**：首次运行（run 42743463426）已验证 `actions/checkout@v6`、
+   `nightly-2026-11-08` 与 Linux 依赖清单都可用，`fmt` 通过；`test` 因 Rust 1.99 的
+   新 lint 失败，已在 `366aa79` 修复。**修复后的运行尚未观察到**——那次运行才是本报告
+   「clippy 干净」在 CI 侧的唯一证据。
 4. **`--features web`**：当前 `Cargo.toml` 已无 `web` feature（构建脚本与 `web-ui/`
    均不存在），该项检查 N/A；spec 中的环境限制条目不再适用。
 5. **网络相关测试**：健康检查用 RFC 5737 保留地址、搜索聚合测试不发真实请求；真实书源
@@ -141,8 +143,15 @@ cargo doc --no-deps                         # 0 warnings
 CI（`.github/workflows/ci.yml`）：
 
 - `fmt`：nightly-2026-11-08 + rustfmt，`cargo +nightly-2026-11-08 fmt --all -- --check`；
-- `test`：stable + clippy，安装 Linux gpui 依赖后跑 `cargo clippy --all-targets -- -D warnings`
+- `test`：固定 clippy 1.99.0，安装 Linux gpui 依赖后跑 `cargo clippy --all-targets -- -D warnings`
   与 `cargo test --all-targets`。
+
+**首次运行结果**（`f85ea36`，run 42743463426）：`fmt` 通过；`test` 在 clippy 阶段失败——
+Rust 1.99 比本机的 1.98 多报四类 lint（`must_use_candidate`（非 Windows 分支的
+`system_proxy::detect`）、`suboptimal_flops`、`uninlined_format_args`（仅 Unix 分支）、
+`assert_is_empty`（仅测试代码）×5）。已在 `366aa79` 修掉，并把 test job 的工具链固定到
+1.99.0（与 fmt job 固定 nightly 同理：pedantic/nursery 每随 stable 升级新增 lint，
+不固定就无法复现）。修复后的 CI 运行尚待触发。
 
 ## 6. 建议实机点击项
 
