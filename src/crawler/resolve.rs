@@ -3,7 +3,6 @@
 //! 返回 `(Book, Vec<Chapter>)`, 供 UI 层展示章节列表、让用户选择范围后再调 [`super::download::download_chapters`]。
 //! 详情 + 目录都包重试 (`retry_with_backoff`), 一次瞬态 HTTP 抖动不应让整本下载失败。
 
-use std::sync::Arc;
 use std::time::Duration;
 
 use reqwest::Client;
@@ -12,9 +11,9 @@ use thiserror::Error;
 use super::download_options::CancelToken;
 use super::retry::retry_with_backoff;
 use crate::config::AppConfig;
-use crate::models::{Book, Chapter, Source};
+use crate::models::{Book, Chapter, Rule, Source};
 use crate::parser::{BookError, SelectError, TocError, parse_book_detail, parse_toc};
-use crate::utils::zhconv::convert_book_meta;
+use crate::utils::zhconv::convert_book_meta_in_place;
 
 /// 调度层错误。
 ///
@@ -110,38 +109,25 @@ pub async fn resolve_book(
         Some(cfg.cookie.qidian_cookie.as_str())
     };
 
-    let rule = source.rule.clone();
-    let book_url_owned = book_url.to_string();
-    let cf_bypass_owned: Option<Arc<str>> = cf_bypass.map(Arc::from);
-    let qidian_cookie_owned = qidian_cookie.map(String::from);
-    let eff = source.effective_crawl.clone();
+    // 重试闭包只捕获引用 (全部是 Copy)，不必为每次 attempt clone Rule / URL / cookie。
+    let rule: &Rule = &source.rule;
+    let eff = &source.effective_crawl;
     let max_attempts = if cfg.crawl.enable_retry {
         eff.max_retries
     } else {
         0
     };
-    // 两次 retry 各需一份 eff (sleep_fn 是 move 闭包)。
-    let eff_for_book = eff.clone();
-    let eff_for_toc = eff;
 
-    let book = retry_with_backoff(
-        |_attempt| {
-            let client = client.clone();
-            let rule = rule.clone();
-            let url = book_url_owned.clone();
-            let cf = cf_bypass_owned.as_ref().map(Arc::clone);
-            let qc = qidian_cookie_owned.clone();
-            let cancel = cancel.clone();
-            async move {
-                if cancel.is_cancelled() {
-                    return Err(BookError::Http("cancelled".to_string()));
-                }
-                parse_book_detail(&client, &rule, &url, cf.as_deref(), qc.as_deref()).await
+    let mut book = retry_with_backoff(
+        |_attempt| async move {
+            if cancel.is_cancelled() {
+                return Err(BookError::Http("cancelled".to_string()));
             }
+            parse_book_detail(client, rule, book_url, cf_bypass, qidian_cookie).await
         },
         max_attempts,
         move |_attempt| {
-            let dur = Duration::from_millis(crate::http::random_retry_interval_ms(&eff_for_book));
+            let dur = Duration::from_millis(crate::http::random_retry_interval_ms(eff));
             async move {
                 tokio::time::sleep(dur).await;
             }
@@ -155,24 +141,17 @@ pub async fn resolve_book(
     }
 
     let toc: Vec<Chapter> = retry_with_backoff(
-        |_attempt| {
-            let client = client.clone();
-            let rule = rule.clone();
-            let url = book_url_owned.clone();
-            let cf = cf_bypass_owned.as_ref().map(Arc::clone);
-            let cancel = cancel.clone();
-            async move {
-                if cancel.is_cancelled() {
-                    return Err(TocError::Selector(SelectError::JsFailed(
-                        "cancelled".to_string(),
-                    )));
-                }
-                parse_toc(&client, &rule, &url, cf.as_deref()).await
+        |_attempt| async move {
+            if cancel.is_cancelled() {
+                return Err(TocError::Selector(SelectError::JsFailed(
+                    "cancelled".to_string(),
+                )));
             }
+            parse_toc(client, rule, book_url, cf_bypass).await
         },
         max_attempts,
         move |_attempt| {
-            let dur = Duration::from_millis(crate::http::random_retry_interval_ms(&eff_for_toc));
+            let dur = Duration::from_millis(crate::http::random_retry_interval_ms(eff));
             async move {
                 tokio::time::sleep(dur).await;
             }
@@ -185,7 +164,7 @@ pub async fn resolve_book(
     // 导出器 (EPUB metadata + 文件名 + TXT 首页 + HTML zip 名) 全部共享同一结果, 避免各自重写 + drift。
     // 目标语言从界面语言 (`Language`) 推 (English → ZhCn 兜底)。
     let target_lang = cfg.global.language.to_book_target_lang();
-    let book = convert_book_meta(&book, &source.rule.language, &target_lang);
+    convert_book_meta_in_place(&mut book, &source.rule.language, &target_lang);
 
     Ok(ResolvedBook {
         book,

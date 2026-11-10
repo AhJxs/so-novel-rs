@@ -194,7 +194,7 @@ pub fn parse_one_toc_page(
 
 fn parse_items_from_fragment(
     frag: &Html,
-    sel: &std::sync::Arc<Selector>,
+    sel: &Selector,
     base_for_href: &str,
     order_counter: &mut u32,
 ) -> Vec<Chapter> {
