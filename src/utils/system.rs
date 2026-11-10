@@ -46,7 +46,7 @@ pub fn open_path(path: &Path) -> Result<()> {
         Command::new("xdg-open")
             .arg(path_str)
             .spawn()
-            .with_context(|| format!("xdg-open {}", path_str))?;
+            .with_context(|| format!("xdg-open {path_str}"))?;
         Ok(())
     }
 

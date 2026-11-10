@@ -51,7 +51,7 @@ fn calculate_hybrid_score(sr: &SearchResult, kw: &str) -> f64 {
     let min_sim = f64::min(book_sim, author_sim);
 
     // 主信号 90%, 辅信号 10%
-    max_sim * 0.9 + min_sim * 0.1
+    max_sim.mul_add(0.9, min_sim * 0.1)
 }
 
 /// 过滤 + 排序聚合搜索结果。
@@ -119,7 +119,7 @@ mod tests {
     #[test]
     fn empty_input_returns_empty() {
         let out = filter_sort(&[], "三体");
-        assert!(out.is_empty());
+        assert!(out.is_empty(), "空输入应返回空结果");
     }
 
     #[test]
@@ -139,7 +139,7 @@ mod tests {
             sr("诡秘之主续集", "爱潜水的乌贼", 3),
         ];
         let out = filter_sort(&list, "诡秘之主");
-        assert!(!out.is_empty());
+        assert!(!out.is_empty(), "关键字命中时不应返回空结果");
         assert_eq!(out[0].book_name, "诡秘之主"); // 完全匹配优先
         assert_eq!(out[1].book_name, "诡秘之主续集"); // 包含关系次之
         assert!(out.iter().all(|r| r.book_name != "天龙八部"));

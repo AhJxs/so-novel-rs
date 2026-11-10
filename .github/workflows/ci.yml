@@ -24,8 +24,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@stable
+      # 固定 clippy 版本：pedantic/nursery 会随 stable 升级新增 lint，钉住版本才能让
+      # CI 结果可复现；升级工具链时同步改这里并修掉新增 lint。
+      - uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: 1.99.0
           components: clippy
       - name: Install Linux build deps
         run: |

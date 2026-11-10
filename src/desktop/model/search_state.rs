@@ -410,7 +410,10 @@ mod search_state_tests {
         assert!(s.cover_in_flight.is_empty());
         assert!(s.cover_rx.is_none());
         assert!(s.cover_tx.is_none());
-        assert!(s.pending_cover_prefetch.is_empty());
+        assert!(
+            s.pending_cover_prefetch.is_empty(),
+            "初始状态不应有待预取的封面请求"
+        );
     }
 
     fn make_test_client() -> Client {

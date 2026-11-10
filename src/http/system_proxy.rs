@@ -47,6 +47,7 @@ pub fn detect() -> SystemProxy {
 
 /// 探测当前系统代理。
 #[cfg(not(target_os = "windows"))]
+#[must_use]
 pub fn detect() -> SystemProxy {
     detect_env()
 }

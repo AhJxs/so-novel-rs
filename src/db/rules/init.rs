@@ -143,7 +143,7 @@ mod tests {
     #[test]
     fn list_returns_empty_for_nonexistent_dir() {
         let files = list_rule_files(Path::new("/nonexistent/dir/xyz"));
-        assert!(files.is_empty());
+        assert!(files.is_empty(), "不存在的目录不应列出任何规则文件");
     }
 
     #[test]

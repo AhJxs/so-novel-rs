@@ -506,7 +506,7 @@ mod tests {
 
         assert!(!results.is_empty(), "expected ≥1 result for known title");
         for r in &results {
-            assert!(!r.book_name.is_empty());
+            assert!(!r.book_name.is_empty(), "解析出的书名不应为空: {}", r.url);
             assert!(
                 r.url.starts_with("http"),
                 "url should be absolute: {}",
