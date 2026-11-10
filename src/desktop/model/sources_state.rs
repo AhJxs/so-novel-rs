@@ -1,6 +1,7 @@
 //! 书源管理页状态：连通性检测的结果与运行标记。
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use tokio::sync::mpsc;
 
@@ -70,7 +71,7 @@ impl SourcesState {
     /// 应用 `filter_text` + `filter_status` 过滤 rules, 返回克隆后的 Vec。
     ///
     /// 不改 self、不改传入的 rules, 返回 owned Vec 方便 caller 排序 / 分页。
-    pub fn filtered_rules(&self, rules: &[Rule]) -> Vec<Rule> {
+    pub fn filtered_rules(&self, rules: &[Arc<Rule>]) -> Vec<Rule> {
         let kw = self.filter_text.trim().to_lowercase();
         let mut out: Vec<Rule> = rules
             .iter()
@@ -85,7 +86,7 @@ impl SourcesState {
                 }
                 r.name.to_lowercase().contains(&kw) || core_sources::rule_key(r).contains(&kw)
             })
-            .cloned()
+            .map(|r| r.as_ref().clone())
             .collect();
         // 按 id 升序（id 是加载时分配的自增主键）。
         out.sort_by_key(|r| r.id);

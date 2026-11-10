@@ -135,7 +135,7 @@ pub async fn download_chapters(
         Some(cfg.global.cf_bypass.as_str())
     };
 
-    let rule = Arc::new(source.rule.clone());
+    let rule = Arc::clone(&source.rule);
     let cf_bypass_owned: Option<Arc<str>> = cf_bypass.map(Arc::from);
 
     let book_dir_name = export::build_book_dir_name(book, cfg.download.ext_name);
@@ -480,7 +480,7 @@ mod tests {
             crawl,
             ..Rule::default()
         };
-        Source::from(rule, &cfg)
+        Source::from(Arc::new(rule), &cfg)
     }
 
     #[test]

@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use tokio::sync::{Semaphore, mpsc};
+use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
 
 use crate::http::HttpClients;
@@ -33,13 +33,13 @@ pub struct SourceSearchOutcome {
 /// `cf_bypass_base` 与各 parser 中的同名参数一致：CF 命中时若非空则调用外部 bypass 服务。
 #[tracing::instrument(skip_all, fields(sources = sources.len(), keyword = %crate::utils::fs::truncate_log(&keyword, 10)))]
 pub async fn search_aggregated(
-    http: Arc<HttpClients>,
+    http: &HttpClients,
     sources: Vec<Source>,
     keyword: String,
     limit: Option<usize>,
     cf_bypass_base: Option<String>,
 ) -> Vec<SourceSearchOutcome> {
-    let mut set = spawn_search_tasks(&http, sources, keyword, limit, cf_bypass_base);
+    let mut set = spawn_search_tasks(http, sources, keyword, limit, cf_bypass_base);
 
     let mut out = Vec::with_capacity(set.len());
     while let Some(joined) = set.join_next().await {
@@ -53,38 +53,15 @@ pub async fn search_aggregated(
     out
 }
 
-/// 流式聚合搜索：每源完成后立即通过 `tx` 推送，而不是等全部完成再返回。
-///
-/// `search_aggregated` 收集所有结果到 Vec（适合测试 / 一次性批量处理），本函数适合 UI 逐源更新进度。
-#[tracing::instrument(skip_all, fields(sources = sources.len(), keyword = keyword))]
-pub async fn search_streaming(
-    http: Arc<HttpClients>,
-    sources: Vec<Source>,
-    keyword: String,
-    limit: Option<usize>,
-    cf_bypass_base: Option<String>,
-    tx: mpsc::UnboundedSender<SourceSearchOutcome>,
-) {
-    let mut set = spawn_search_tasks(&http, sources, keyword, limit, cf_bypass_base);
-
-    while let Some(joined) = set.join_next().await {
-        match joined {
-            Ok(o) => {
-                // 接收端已关闭（UI 侧 drop）→ 放弃剩余任务
-                if tx.send(o).is_err() {
-                    break;
-                }
-            }
-            Err(e) => tracing::warn!("聚合搜索任务 join 失败: {e}"),
-        }
-    }
-}
-
 /// 为每个 source spawn 一个异步搜索任务，返回 `JoinSet`。
 ///
-/// 调用方决定如何消费结果（收集到 Vec 或逐个推送 channel）；共享逻辑：日志、Client 复用、结果包装。
-fn spawn_search_tasks(
-    http: &Arc<HttpClients>,
+/// 调用方决定如何消费结果（收集到 Vec 或逐个转发 channel）；共享逻辑：日志、Client 复用、结果包装。
+/// 每个任务的 `reqwest::Client` 在 `spawn` 前由 [`HttpClients::for_rule`] 取出并移入任务，
+/// 因此任务不借用 `HttpClients`，可以在任意 `'static` 任务里运行。
+///
+/// 必须在 Tokio runtime 上下文内调用（`JoinSet::spawn` 要求）。
+pub fn spawn_search_tasks(
+    http: &HttpClients,
     sources: Vec<Source>,
     keyword: String,
     limit: Option<usize>,
@@ -93,13 +70,12 @@ fn spawn_search_tasks(
     let mut set: JoinSet<SourceSearchOutcome> = JoinSet::new();
 
     let concurrency = compute_search_concurrency(sources.len());
-    let http = Arc::clone(http);
     let kw = Arc::new(keyword);
     let cf = Arc::new(cf_bypass_base);
     let semaphore = Arc::new(Semaphore::new(concurrency));
 
     for src in sources {
-        let http = Arc::clone(&http);
+        let client = http.for_rule(&src.rule);
         let kw = Arc::clone(&kw);
         let cf = Arc::clone(&cf);
         let semaphore = Arc::clone(&semaphore);
@@ -117,7 +93,6 @@ fn spawn_search_tasks(
                     };
                 }
             };
-            let client = http.for_rule(&src.rule);
             let cf_borrow: Option<&str> = cf.as_ref().as_ref().map(std::string::String::as_str);
             let result = parser::search_one(&client, &src.rule, kw.as_str(), limit, cf_borrow).await;
             drop(permit);
@@ -147,7 +122,7 @@ mod tests {
             ..Rule::default()
         };
         let cfg = AppConfig::default();
-        Source::from(rule, &cfg)
+        Source::from(Arc::new(rule), &cfg)
     }
 
     #[test]
@@ -171,8 +146,8 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn empty_sources_returns_empty() {
         let cfg = AppConfig::default();
-        let http = Arc::new(crate::http::HttpClients::new(&cfg).unwrap());
-        let outcomes = search_aggregated(http, Vec::new(), "any".into(), Some(10), None).await;
+        let http = crate::http::HttpClients::new(&cfg).unwrap();
+        let outcomes = search_aggregated(&http, Vec::new(), "any".into(), Some(10), None).await;
         assert!(outcomes.is_empty());
     }
 
@@ -180,9 +155,9 @@ mod tests {
     async fn each_source_yields_one_outcome_with_typed_error() {
         // 没有 search 段的规则会立即返回 SearchDisabled，不发起任何网络请求。
         let cfg = AppConfig::default();
-        let http = Arc::new(crate::http::HttpClients::new(&cfg).unwrap());
+        let http = crate::http::HttpClients::new(&cfg).unwrap();
         let sources = vec![make_source(1, "A"), make_source(2, "B")];
-        let outcomes = search_aggregated(http, sources, "any".into(), Some(10), None).await;
+        let outcomes = search_aggregated(&http, sources, "any".into(), Some(10), None).await;
         assert_eq!(outcomes.len(), 2);
         assert!(matches!(
             outcomes[0].result,

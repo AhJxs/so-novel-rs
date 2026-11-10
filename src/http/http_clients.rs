@@ -53,7 +53,8 @@ pub struct GhProxy {
     pub client: reqwest::Client,
 }
 
-/// 共享 HTTP client 集合。构造代价一次性（启动时），之后每个爬取只 `Arc::clone`。
+/// 共享 HTTP client 集合。构造代价一次性（启动时）；后台任务在 `spawn` 前用
+/// [`Self::for_rule`] 取出 owned `reqwest::Client`（clone 只是 refcount bump）。
 pub struct HttpClients {
     /// safe / `unsafe_ssl` 两个 client：`for_rule` 只 read，`rebuild_proxy` 用 write 换实例。
     /// 返回的 clone 只是 refcount bump（`Client` 内部本就是 Arc）。

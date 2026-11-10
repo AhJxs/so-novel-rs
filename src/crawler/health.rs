@@ -11,7 +11,6 @@ use rust_i18n::t;
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 
-use crate::http::HttpClients;
 use crate::http::user_agent::random_user_agent;
 use crate::models::Rule;
 
@@ -85,31 +84,33 @@ impl SourceHealth {
     }
 }
 
-/// 并发探测一组规则；每源结果通过 `tx` 实时回推（顺序不保证，UI 用 `source_id` 关联）。
+/// 并发探测一组 `(规则, client)`；每源结果通过 `tx` 实时回推（顺序不保证，UI 用 `source_id` 关联）。
 /// 完成后通道关闭（tx drop），UI 端 `try_recv` 看到 Disconnected 即知道全部跑完。
+///
+/// client 由调用方在 `spawn` 前用 [`crate::http::HttpClients::for_rule`] 取出，
+/// 本函数因此不依赖 `HttpClients`（可在 `'static` 任务里运行）。
 ///
 /// # Examples
 ///
 /// ```ignore
+/// let probes = rules.iter().map(|r| (Arc::clone(r), http.for_rule(r))).collect();
 /// let (tx, rx) = mpsc::unbounded_channel();
-/// check_sources_health(http, rules, tx).await;
+/// check_sources_health(probes, tx).await;
 /// while let Ok(h) = rx.try_recv() { /* update UI */ }
 /// ```
-#[tracing::instrument(name = "check_sources_health", skip_all, fields(rules = rules.len()))]
+#[tracing::instrument(name = "check_sources_health", skip_all, fields(rules = probes.len()))]
 pub async fn check_sources_health(
-    http: Arc<HttpClients>,
-    rules: Vec<Rule>,
+    probes: Vec<(Arc<Rule>, reqwest::Client)>,
     tx: mpsc::UnboundedSender<SourceHealth>,
 ) {
     let mut set: JoinSet<()> = JoinSet::new();
 
-    for rule in rules {
-        let http = Arc::clone(&http);
+    for (rule, client) in probes {
         let tx = tx.clone();
         set.spawn(async move {
             // 直接在 tokio task 里 async 探测: 不用 spawn_blocking + blocking client —— 后者会在
             // 工作线程 drop Client, 触发 reqwest::blocking 已知 panic (见 http/client.rs 的反模式警告)。
-            let result = probe_one(&http, &rule).await;
+            let result = probe_one(&client, &rule).await;
             let _ = tx.send(result);
         });
     }
@@ -118,9 +119,8 @@ pub async fn check_sources_health(
     // tx drop（与 set 同生命周期），UI 端通道收尾。
 }
 
-async fn probe_one(http: &HttpClients, rule: &Rule) -> SourceHealth {
+async fn probe_one(client: &reqwest::Client, rule: &Rule) -> SourceHealth {
     let started = Instant::now();
-    let client = http.for_rule(rule);
 
     let result = client
         .head(&rule.url)
@@ -172,27 +172,25 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn empty_rules_finishes_immediately() {
-        let cfg = Arc::new(AppConfig::default());
-        let http = Arc::new(crate::http::HttpClients::new(&cfg).unwrap());
         let (tx, mut rx) = mpsc::unbounded_channel::<SourceHealth>();
-        check_sources_health(http, Vec::new(), tx).await;
+        check_sources_health(Vec::new(), tx).await;
         assert!(rx.try_recv().is_err(), "no rules → no events");
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn unreachable_host_yields_error_with_id() {
         // 用一个保留地址，远端肯定不通；验证流程把错误封装到 SourceHealth。
-        let cfg = Arc::new(AppConfig::default());
-        let http = Arc::new(crate::http::HttpClients::new(&cfg).unwrap());
-        let rule = Rule {
+        let http = crate::http::HttpClients::new(&AppConfig::default()).unwrap();
+        let rule = Arc::new(Rule {
             id: 42,
             name: "test".to_string(),
             // 保留地址段 192.0.2.0/24（RFC 5737 文档示例，不会路由）
             url: "http://192.0.2.1/".to_string(),
             ..Rule::default()
-        };
+        });
+        let client = http.for_rule(&rule);
         let (tx, mut rx) = mpsc::unbounded_channel::<SourceHealth>();
-        check_sources_health(http, vec![rule], tx).await;
+        check_sources_health(vec![(rule, client)], tx).await;
 
         let h = rx.try_recv().expect("should yield exactly one event");
         assert_eq!(h.source_id, 42);

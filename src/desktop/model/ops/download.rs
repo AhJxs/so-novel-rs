@@ -24,9 +24,10 @@ use crate::utils::time::now_unix_secs;
 /// spawn 共享上下文: 提取 `rules` / `config` / `http` / `runtime`,
 /// 消除各 `spawn_*` 的重复参数列表。
 pub struct OpsContext<'app> {
-    pub rules: &'app [Rule],
+    pub rules: &'app [Arc<Rule>],
     pub config: &'app AppConfig,
-    pub http: Arc<HttpClients>,
+    /// 只在本层同步使用：每个 `spawn` 前用 `for_rule` 取出 owned client。
+    pub http: &'app HttpClients,
     pub runtime: &'app tokio::runtime::Runtime,
     /// 唤醒信号 sender: producer 写入 mpsc 后 `notify()`, 让 `drain_loop` 立即排空。
     pub wakeup: &'app WakeupHandle,
@@ -39,9 +40,13 @@ pub fn spawn_resolve_toc(
 ) -> mpsc::UnboundedReceiver<TocEvent> {
     let (tx, rx) = mpsc::unbounded_channel::<TocEvent>();
 
-    let rule = ctx.rules.iter().find(|r| r.id == target.source_id).cloned();
+    // 任务不借用 ctx：规则与 client 都预先取成 owned 值。
+    let rule_and_client = ctx
+        .rules
+        .iter()
+        .find(|r| r.id == target.source_id)
+        .map(|r| (Arc::clone(r), ctx.http.for_rule(r)));
     let cfg = ctx.config.clone();
-    let http = Arc::clone(&ctx.http);
     let book_url = target.url.clone();
     let source_id = target.source_id;
 
@@ -59,10 +64,9 @@ pub fn spawn_resolve_toc(
     ctx.runtime.spawn(
         async move {
             let started = Instant::now();
-            let state = if let Some(rule) = rule {
+            let state = if let Some((rule, client)) = rule_and_client {
                 let source = Source::from(rule, &cfg);
                 let cancel = CancelToken::new();
-                let client = http.for_rule(&source.rule);
                 match resolve_book(&cfg, &client, &source, &book_url, &cancel).await {
                     Ok(ResolvedBook { book, chapters }) => {
                         tracing::info!(
@@ -152,9 +156,12 @@ pub fn spawn_download_range(
     let (tx, rx) = mpsc::unbounded_channel::<Progress>();
     let cancel = CancelToken::new();
 
-    let rule = ctx.rules.iter().find(|r| r.id == target.source_id).cloned();
+    let rule_and_client = ctx
+        .rules
+        .iter()
+        .find(|r| r.id == target.source_id)
+        .map(|r| (Arc::clone(r), ctx.http.for_rule(r)));
     let cfg = ctx.config.clone();
-    let http = Arc::clone(&ctx.http);
     let book_url = target.url.clone();
     let cancel_for_task = cancel.clone();
     let tx_for_task = tx.clone();
@@ -189,7 +196,7 @@ pub fn spawn_download_range(
 
     ctx.runtime.spawn(
         async move {
-            let Some(rule) = rule else {
+            let Some((rule, client)) = rule_and_client else {
                 let _ = tx_for_task.send(Progress::Cancelled);
                 tracing::warn!(
                     book = %book_name,
@@ -200,7 +207,6 @@ pub fn spawn_download_range(
                 return;
             };
             let source = Source::from(rule, &cfg);
-            let client = http.for_rule(&source.rule);
             let tx_for_failure = tx_for_task.clone();
             let notify: std::option::Option<
                 std::sync::Arc<dyn Fn() + std::marker::Send + std::marker::Sync>,
@@ -246,9 +252,12 @@ pub fn spawn_download(
     let (tx, rx) = mpsc::unbounded_channel::<Progress>();
     let cancel = CancelToken::new();
 
-    let rule = ctx.rules.iter().find(|r| r.id == target.source_id).cloned();
+    let rule_and_client = ctx
+        .rules
+        .iter()
+        .find(|r| r.id == target.source_id)
+        .map(|r| (Arc::clone(r), ctx.http.for_rule(r)));
     let cfg = ctx.config.clone();
-    let http = Arc::clone(&ctx.http);
     let book_url = target.url.clone();
     let cancel_for_task = cancel.clone();
     let tx_for_task = tx.clone();
@@ -269,7 +278,7 @@ pub fn spawn_download(
 
     ctx.runtime.spawn(
         async move {
-            let Some(rule) = rule else {
+            let Some((rule, client)) = rule_and_client else {
                 let _ = tx_for_task.send(Progress::Cancelled);
                 tracing::warn!(
                     book = %book_name,
@@ -280,7 +289,6 @@ pub fn spawn_download(
                 return;
             };
             let source = Source::from(rule, &cfg);
-            let client = http.for_rule(&source.rule);
             // 留一个 sender 副本给失败路径发 Progress::Failed（tx_for_task 会 move 进 opts）。
             let tx_for_failure = tx_for_task.clone();
             let notify: std::option::Option<

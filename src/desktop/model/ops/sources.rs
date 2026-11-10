@@ -13,16 +13,17 @@ use crate::models::Rule;
 /// 切换书源的禁用状态；立即持久化到 `sources_config.json`。
 pub fn toggle_source_disabled(
     sources_config: &mut SourcesConfig,
-    rules: &mut [Rule],
+    rules: &mut [Arc<Rule>],
     source_url: &str,
 ) {
     let now_disabled = sources_config.toggle_disabled(source_url);
     // 同步内存里的规则状态（URL 键规范化统一在 core::sources）。
+    // `make_mut`：若已有派发任务共享该 `Arc`，先 clone 再改，不影响在途任务。
     if let Some(r) = rules
         .iter_mut()
         .find(|r| core_sources::rule_key(r) == core_sources::disabled_url_key(source_url))
     {
-        r.disabled = now_disabled;
+        Arc::make_mut(r).disabled = now_disabled;
     }
 }
 
@@ -32,7 +33,7 @@ pub fn toggle_source_disabled(
 pub fn add_sources_from_file(
     rules_dir: &Path,
     sources_config: &SourcesConfig,
-    rules: &mut Vec<Rule>,
+    rules: &mut Vec<Arc<Rule>>,
     rule_load_error: &mut Option<String>,
     source_path: &Path,
 ) -> AppResult<ImportResult> {
@@ -58,7 +59,7 @@ pub fn add_sources_from_file(
     if filename == sources_config.active_file {
         match core_sources::load_active(rules_dir, sources_config) {
             Ok(rs) => {
-                *rules = rs;
+                *rules = rs.into_iter().map(Arc::new).collect();
                 *rule_load_error = None;
                 reloaded_active = true;
             }
@@ -87,7 +88,7 @@ pub struct ImportResult {
 pub fn delete_source(
     rules_dir: &Path,
     sources_config: &SourcesConfig,
-    rules: &mut Vec<Rule>,
+    rules: &mut Vec<Arc<Rule>>,
     sources_state: &mut SourcesState,
     source_url: &str,
 ) -> AppResult<bool> {
@@ -108,7 +109,9 @@ pub fn delete_source(
         // 重新保存活跃文件（原子写入, 防崩溃损坏）。
         let file_path = rules_dir.join(&sources_config.active_file);
         if file_path.exists() {
-            let content = serde_json::to_string_pretty(rules)
+            // `serde` 未启用 `rc` feature：先解引用成 `Vec<&Rule>`，保持落盘 JSON 不变。
+            let plain: Vec<&Rule> = rules.iter().map(Arc::as_ref).collect();
+            let content = serde_json::to_string_pretty(&plain)
                 .map_err(|e| AppError::internal(format!("序列化失败: {e}")))?;
             crate::db::write_atomically(&file_path, content.as_bytes())
                 .map_err(|e| AppError::internal(format!("写入文件失败: {e}")))?;
@@ -127,7 +130,7 @@ pub fn delete_source(
 pub fn switch_active_file(
     rules_dir: &Path,
     sources_config: &mut SourcesConfig,
-    rules: &mut Vec<Rule>,
+    rules: &mut Vec<Arc<Rule>>,
     rule_load_error: &mut Option<String>,
     filename: &str,
 ) -> AppResult<()> {
@@ -140,7 +143,7 @@ pub fn switch_active_file(
 
     match core_sources::load_active(rules_dir, sources_config) {
         Ok(rs) => {
-            *rules = rs;
+            *rules = rs.into_iter().map(Arc::new).collect();
             *rule_load_error = None;
             Ok(())
         }
@@ -152,10 +155,9 @@ pub fn switch_active_file(
 }
 
 /// 派一个连通性检测任务到后台。
-#[allow(clippy::needless_pass_by_value)]
 pub fn spawn_health_check(
-    rules: &[Rule],
-    http: Arc<HttpClients>,
+    rules: &[Arc<Rule>],
+    http: &HttpClients,
     runtime: &tokio::runtime::Runtime,
     sources_state: &mut SourcesState,
 ) {
@@ -174,9 +176,12 @@ pub fn spawn_health_check(
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
     sources_state.rx = Some(rx);
 
-    let http = Arc::clone(&http);
-    let rules = rules.to_vec();
+    // 任务不借用 HttpClients：spawn 前把每源 client 与 Arc<Rule> 配好。
+    let probes: Vec<(Arc<Rule>, reqwest::Client)> = rules
+        .iter()
+        .map(|r| (Arc::clone(r), http.for_rule(r)))
+        .collect();
     runtime.spawn(async move {
-        crate::crawler::health::check_sources_health(http, rules, tx).await;
+        crate::crawler::health::check_sources_health(probes, tx).await;
     });
 }

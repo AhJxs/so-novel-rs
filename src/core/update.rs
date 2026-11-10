@@ -3,13 +3,12 @@
 //! `check_latest_release` / `classify` / `is_new_version_available` 都是纯业务，无 GUI /
 //! HTTP 状态语义。
 //!
-//! 网络层通过 [`HttpClients`] 复用同一套共享 client：`gh_proxy` 配了走前向代理（启动期一次
-//! 性 build），否则走 `safe` client。
+//! 网络层不持有共享 `HttpClients`：调用方在 `spawn` 前取出 [`GhProxy`] 与 safe
+//! `reqwest::Client` 并移入任务。
 
 use serde_json::Value;
 
-use crate::http::{GhProxy, HttpClients};
-use crate::models::Rule;
+use crate::http::GhProxy;
 
 /// 更新检查失败原因。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -62,26 +61,25 @@ pub fn is_new_version_available(latest: &str) -> bool {
 
 /// 向 GitHub API 查询最新 release 版本号。
 ///
-/// 代理优先级：`gh_proxy_pair()` URL 非空 → 预构建的 GH 镜像前向代理 client（已含 proxy + UA），否则复用共享
-/// `safe` client（已含 CONNECT 代理 / TLS cache / 默认 headers）；失败返回 [`UpdateError`]，解析不到 `tag_name` 则由 [`classify`] 兜底。
+/// 代理优先级：`gh_proxy.url` 非空 → 预构建的 GH 镜像前向代理 client（已含 proxy + UA），
+/// 否则用调用方传入的 `safe_client`（已含 CONNECT 代理 / TLS cache / 默认 headers）。
+/// 失败返回 [`UpdateError`]，解析不到 `tag_name` 则由 [`classify`] 兜底。
 /// 网络错误只走 `tracing::warn!`，不把 debug 字符串写进错误文案（避免泄漏到 UI 文案）。
-pub async fn check_latest_release(http: &HttpClients) -> UpdateCheckResult {
+pub async fn check_latest_release(
+    gh_proxy: GhProxy,
+    safe_client: reqwest::Client,
+) -> UpdateCheckResult {
     const URL: &str = "https://api.github.com/repos/AhJxs/so-novel-rs/releases/latest";
 
     let GhProxy {
         url: gh_proxy_url,
         client: gh_proxy_client,
-    } = http.gh_proxy_pair();
+    } = gh_proxy;
 
     // GitHub API 对无 UA 的请求返回 403；gh_proxy client 构造时已设 UA，
     // safe client 分支需显式带 UA header。
     let result = if gh_proxy_url.is_empty() {
-        // 共享 client 分支用占位 rule（ignore_ssl=false）：查 GitHub API 不需要忽略证书校验。
-        let client = http.for_rule(&Rule {
-            ignore_ssl: false,
-            ..Rule::default()
-        });
-        client
+        safe_client
             .get(URL)
             .header(reqwest::header::USER_AGENT, "so-novel-rs")
             .send()

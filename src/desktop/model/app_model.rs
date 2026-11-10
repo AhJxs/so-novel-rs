@@ -21,8 +21,8 @@ pub struct AppModel {
     pub paths: ConfigPaths,
     /// 已加载的应用配置。
     pub config: AppConfig,
-    /// 当前活跃的书源规则。
-    pub rules: Vec<Rule>,
+    /// 当前活跃的书源规则；派发的 `Source` 与本列表共享同一批 `Arc`。
+    pub rules: Vec<Arc<Rule>>,
     /// 书源加载失败的原因；成功时为 `None`。
     pub rule_load_error: Option<String>,
     /// 配置读取失败的原因；成功时为 `None`。
@@ -34,8 +34,9 @@ pub struct AppModel {
     pub runtime: &'static Runtime,
 
     /// 共享 HTTP client 集合。复用连接池 + TLS session cache; 改 proxy / `unsafe_ssl` 时
-    /// `HttpClients::rebuild_proxy` 整体替换实例。
-    pub http: Arc<HttpClients>,
+    /// `HttpClients::rebuild_proxy` 整体替换实例。后台任务在 `spawn` 前用
+    /// `HttpClients::for_rule` 取出 owned `reqwest::Client`, 不持有本字段的引用。
+    pub http: HttpClients,
 
     /// 最近一次系统代理探测结果（设置页展示用）。
     ///
@@ -170,7 +171,7 @@ impl AppModel {
         OpsContext {
             rules: &self.rules,
             config: &self.config,
-            http: Arc::clone(&self.http),
+            http: &self.http,
             runtime: self.runtime,
             wakeup: &self.wakeup,
         }

@@ -85,6 +85,7 @@ pub fn match_source_by_url<'a>(sources: &'a [Source], url: &str) -> Option<&'a S
 mod tests {
     #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
     use std::collections::HashSet;
+    use std::sync::Arc;
 
     use super::*;
     use crate::models::RuleSearch;
@@ -262,8 +263,8 @@ mod tests {
     fn match_source_by_url_finds_matching_origin() {
         let cfg = crate::config::AppConfig::default();
         let sources = vec![
-            Source::from(rule(1, "https://a.com", false), &cfg),
-            Source::from(rule(2, "https://b.com", false), &cfg),
+            Source::from(Arc::new(rule(1, "https://a.com", false)), &cfg),
+            Source::from(Arc::new(rule(2, "https://b.com", false)), &cfg),
         ];
         let s = match_source_by_url(&sources, "https://b.com/book/123").unwrap();
         assert_eq!(s.rule.id, 2);
@@ -273,7 +274,10 @@ mod tests {
     fn match_source_by_url_ignores_path() {
         // origin 只比对 scheme://host[:port]，不比对 path
         let cfg = crate::config::AppConfig::default();
-        let sources = vec![Source::from(rule(1, "https://a.com/book", false), &cfg)];
+        let sources = vec![Source::from(
+            Arc::new(rule(1, "https://a.com/book", false)),
+            &cfg,
+        )];
         let s = match_source_by_url(&sources, "https://a.com/different/path?q=1").unwrap();
         assert_eq!(s.rule.id, 1);
     }
@@ -281,7 +285,10 @@ mod tests {
     #[test]
     fn match_source_by_url_returns_none_for_invalid_target_url() {
         let cfg = crate::config::AppConfig::default();
-        let sources = vec![Source::from(rule(1, "https://a.com", false), &cfg)];
+        let sources = vec![Source::from(
+            Arc::new(rule(1, "https://a.com", false)),
+            &cfg,
+        )];
         assert!(match_source_by_url(&sources, "not a url at all").is_none());
     }
 
@@ -289,8 +296,8 @@ mod tests {
     fn match_source_by_url_skips_malformed_rule_urls() {
         let cfg = crate::config::AppConfig::default();
         let sources = vec![
-            Source::from(rule(1, "not a url", false), &cfg),
-            Source::from(rule(2, "https://good.com", false), &cfg),
+            Source::from(Arc::new(rule(1, "not a url", false)), &cfg),
+            Source::from(Arc::new(rule(2, "https://good.com", false)), &cfg),
         ];
         let s = match_source_by_url(&sources, "https://good.com/x").unwrap();
         assert_eq!(s.rule.id, 2);
@@ -301,8 +308,8 @@ mod tests {
         // 多个 rule 同 origin → 列表顺序第一个
         let cfg = crate::config::AppConfig::default();
         let sources = vec![
-            Source::from(rule(1, "https://shared.com", false), &cfg),
-            Source::from(rule(2, "https://shared.com/alt", false), &cfg),
+            Source::from(Arc::new(rule(1, "https://shared.com", false)), &cfg),
+            Source::from(Arc::new(rule(2, "https://shared.com/alt", false)), &cfg),
         ];
         let s = match_source_by_url(&sources, "https://shared.com/anything").unwrap();
         assert_eq!(s.rule.id, 1);
@@ -311,7 +318,10 @@ mod tests {
     #[test]
     fn match_source_by_url_returns_none_when_no_match() {
         let cfg = crate::config::AppConfig::default();
-        let sources = vec![Source::from(rule(1, "https://a.com", false), &cfg)];
+        let sources = vec![Source::from(
+            Arc::new(rule(1, "https://a.com", false)),
+            &cfg,
+        )];
         assert!(match_source_by_url(&sources, "https://other.com/x").is_none());
     }
 
@@ -325,7 +335,7 @@ mod tests {
             disabled: true,
             ..RuleSearch::default()
         });
-        let sources = vec![Source::from(r, &cfg)];
+        let sources = vec![Source::from(Arc::new(r), &cfg)];
         let s = match_source_by_url(&sources, "https://a.com/x").unwrap();
         assert_eq!(s.rule.id, 1);
     }
@@ -335,7 +345,10 @@ mod tests {
         // origin 比对不含 query / fragment；浏览器粘贴的 URL 几乎都带 `?utm_source=...` 或 `#chapter-N`，
         // 必须不影响匹配。
         let cfg = crate::config::AppConfig::default();
-        let sources = vec![Source::from(rule(1, "https://a.com", false), &cfg)];
+        let sources = vec![Source::from(
+            Arc::new(rule(1, "https://a.com", false)),
+            &cfg,
+        )];
         assert_eq!(
             match_source_by_url(&sources, "https://a.com/p?q=1")
                 .unwrap()
@@ -363,7 +376,10 @@ mod tests {
     fn match_source_by_url_handles_port_difference() {
         // origin 含 port：`https://a.com:8080` 不会被 `https://a.com` 命中（防端口错配误命中）。
         let cfg = crate::config::AppConfig::default();
-        let sources = vec![Source::from(rule(1, "https://a.com:8080", false), &cfg)];
+        let sources = vec![Source::from(
+            Arc::new(rule(1, "https://a.com:8080", false)),
+            &cfg,
+        )];
         assert!(
             match_source_by_url(&sources, "https://a.com/foo").is_none(),
             "rule 带 :8080，URL 不带端口 → 不应命中"

@@ -7,6 +7,8 @@
 //! 所有 bool 字段统一走 `lenient_bool`: Java/hutool 容忍字符串 (`no-search.json` 里真实存在
 //! `"paragraphTagClosed": "true"`), 而 serde 严格, 不宽松会直接解析失败。
 
+use std::sync::Arc;
+
 use serde::{Deserialize, Deserializer, Serialize};
 
 /// 宽松反序列化布尔：接受 bool 字面量或字符串 `"true"/"false"/"1"/"0"`。
@@ -337,17 +339,20 @@ impl EffectiveCrawl {
 }
 
 /// 一个书源 = 规则 + 派生的有效抓取参数。
+///
+/// `rule` 用 `Arc` 共享：聚合搜索 / 下载会为每个在途任务各持一份 `Source`,
+/// 深拷贝整份规则（含 selector 与章节规则）代价远高于一次引用计数。
 #[derive(Debug, Clone)]
 pub struct Source {
-    /// 原始书源规则。
-    pub rule: Rule,
+    /// 原始书源规则（与 `AppModel.rules` 共享同一份）。
+    pub rule: Arc<Rule>,
     /// 规则与全局配置合并后的抓取参数。
     pub effective_crawl: EffectiveCrawl,
 }
 
 impl Source {
     /// 用规则与全局配置构造书源，并即时算出有效抓取参数。
-    pub const fn from(rule: Rule, cfg: &AppConfig) -> Self {
+    pub fn from(rule: Arc<Rule>, cfg: &AppConfig) -> Self {
         let effective_crawl = EffectiveCrawl::derive(cfg, &rule);
         Self {
             rule,
@@ -378,7 +383,7 @@ mod source_tests {
             ..Rule::default()
         };
 
-        let src = Source::from(rule, &cfg);
+        let src = Source::from(Arc::new(rule), &cfg);
         assert_eq!(src.effective_crawl.concurrency, Some(5));
         assert_eq!(src.effective_crawl.min_interval_ms, 1000);
         assert_eq!(src.effective_crawl.max_interval_ms, 2000);
@@ -397,7 +402,7 @@ mod source_tests {
             url: "https://x".into(),
             ..Rule::default()
         };
-        let src = Source::from(rule, &cfg);
+        let src = Source::from(Arc::new(rule), &cfg);
         assert_eq!(src.effective_crawl.min_interval_ms, cfg.crawl.min_interval);
         assert_eq!(src.effective_crawl.max_interval_ms, cfg.crawl.max_interval);
     }
