@@ -35,6 +35,7 @@ pub enum ExportFormat {
 
 impl ExportFormat {
     /// 小写名字，用作导出文件扩展名与 TOML 取值。
+    #[must_use]
     pub const fn as_lower(self) -> &'static str {
         match self {
             Self::Epub => "epub",
@@ -46,6 +47,7 @@ impl ExportFormat {
     }
 
     /// 解析 TOML 里的格式名；无法识别时回落到 [`Self::Epub`]。
+    #[must_use]
     pub fn parse(s: &str) -> Self {
         match s.trim().to_ascii_lowercase().as_str() {
             "txt" => Self::Txt,
@@ -79,6 +81,7 @@ pub enum LangType {
 
 impl LangType {
     /// zhconv 接受的语言标签。
+    #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::ZhCn => "zh-CN",
@@ -88,6 +91,7 @@ impl LangType {
     }
 
     /// 从语言标签解析；接受下划线写法与简体/繁体别名，未知标签返回 `None`。
+    #[must_use]
     pub fn parse(s: &str) -> Option<Self> {
         s.parse().ok()
     }
@@ -125,6 +129,7 @@ pub enum Language {
 
 impl Language {
     /// 存进 TOML / 系统语言 API 的 BCP-47 标签。
+    #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::SimplifiedChinese => "zh-CN",
@@ -134,6 +139,7 @@ impl Language {
     }
 
     /// 从语言标签解析界面语言；未知标签返回 `None`。
+    #[must_use]
     pub fn parse(s: &str) -> Option<Self> {
         s.parse().ok()
     }
@@ -143,6 +149,7 @@ impl Language {
     ///
     /// `LangType::ZhHant`（通用繁体）不再从 UI 暴露 —— 原来的 Source language 下拉已被合并掉，
     /// 需要"通用繁体"输出得用其它工具后处理。
+    #[must_use]
     pub const fn to_book_target_lang(self) -> LangType {
         match self {
             Self::SimplifiedChinese | Self::English => LangType::ZhCn,
@@ -177,6 +184,7 @@ pub enum ThemeKind {
 
 impl ThemeKind {
     /// 存进 TOML 的模式名。
+    #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Dynamic => "dynamic",
@@ -185,6 +193,7 @@ impl ThemeKind {
     }
 
     /// 解析 TOML 里的模式名；无法识别时回落到 [`Self::Dynamic`]。
+    #[must_use]
     pub fn parse(s: &str) -> Self {
         match s.trim() {
             "static" => Self::Static,
@@ -215,6 +224,7 @@ pub enum ThemeDynMode {
 
 impl ThemeDynMode {
     /// 存进 TOML 的模式名。
+    #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::System => "system",
@@ -224,6 +234,7 @@ impl ThemeDynMode {
     }
 
     /// 解析 TOML 里的模式名；无法识别时回落到 [`Self::System`]。
+    #[must_use]
     pub fn parse(s: &str) -> Self {
         match s.trim() {
             "light" => Self::Light,
@@ -378,6 +389,7 @@ pub enum ProxyMode {
 
 impl ProxyMode {
     /// 存进 TOML 的模式名。
+    #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::None => "none",
@@ -387,6 +399,7 @@ impl ProxyMode {
     }
 
     /// 解析 TOML 里的字符串。无法识别（含空串）→ [`Self::None`]，与 `ThemeKind::parse` 风格一致。
+    #[must_use]
     pub fn parse(s: &str) -> Self {
         match s.trim().to_ascii_lowercase().as_str() {
             "manual" => Self::Manual,
@@ -417,6 +430,7 @@ pub struct ProxyConfig {
 
 impl AppConfig {
     /// 构造默认配置, 下载路径由 `defaults::default_download_path` 决定。
+    #[must_use]
     pub fn new() -> Self {
         Self {
             version: env!("CARGO_PKG_VERSION").to_string(),
@@ -463,6 +477,10 @@ impl AppConfig {
     /// 校验配置合法性（启动时调一次，失败让用户改 config.toml 重启）：
     /// `font_size` ∈ [12.0, 24.0]（与 `desktop::themes::FONT_SIZE_MIN/MAX` 一致）、
     /// `min_interval <= max_interval`、`retry_min_interval <= retry_max_interval`、`download_path` 非空。
+    ///
+    /// # Errors
+    ///
+    /// 任一字段超出合法范围或区间颠倒时返回对应的 [`ConfigError`]。
     pub fn validate(&self) -> Result<(), ConfigError> {
         const FONT_MIN: f32 = 12.0;
         const FONT_MAX: f32 = 24.0;

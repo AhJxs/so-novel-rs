@@ -4,6 +4,7 @@ use crate::config::LangType;
 
 /// 检测系统当前 locale 并映射到 `LangType`：依次读 `LC_ALL` / `LC_MESSAGES` / `LANG`，
 /// 都拿不到时默认 `ZhCn`（与 Java 端一致）。
+#[must_use]
 pub fn detect_system_lang() -> LangType {
     let candidates = [
         std::env::var("LC_ALL").ok(),

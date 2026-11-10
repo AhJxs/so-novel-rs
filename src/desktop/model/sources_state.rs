@@ -73,6 +73,7 @@ impl SourcesState {
     /// （按 id 升序）。
     ///
     /// 只返回下标、不复制 `Rule`：调用方按需对当前页的项做 `Arc::clone`。
+    #[must_use]
     pub fn filtered_rule_indices(&self, rules: &[Arc<Rule>]) -> Vec<usize> {
         let kw = self.filter_text.trim().to_lowercase();
         let mut out: Vec<usize> = rules

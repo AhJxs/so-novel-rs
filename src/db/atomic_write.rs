@@ -3,6 +3,11 @@ use std::path::Path;
 /// 把 `data` 写到 `path`, 失败时不会留下半截文件: 同目录生成唯一临时名 (避免多实例冲突) →
 /// 全量写 + fsync → `rename` 覆盖 → 失败时主动删临时文件。临时文件放同目录是为了让 `rename`
 /// 是原子的 (跨目录 / 跨文件系统 rename 不是原子)。
+///
+/// # Errors
+///
+/// 创建 / 写入 / fsync / rename 任一步失败时返回对应的 `std::io::Error`；
+/// 失败路径已清理临时文件。
 #[tracing::instrument(skip(data), fields(path = %path.display(), bytes = data.len()))]
 pub fn write_atomically(path: &Path, data: &[u8]) -> std::io::Result<()> {
     use std::io::Write;

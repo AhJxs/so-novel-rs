@@ -14,6 +14,7 @@ pub use super::time::format_duration;
 /// （不做 display width 估算，列表里的话术多为中文）。
 ///
 /// `max_chars == 0` → 空串；`max_chars >= 字符数` → 原样；否则截到 `max_chars - 1` 个字符 + `…`。
+#[must_use]
 pub fn truncate(s: &str, max_chars: usize) -> String {
     if max_chars == 0 {
         return String::new();
@@ -40,6 +41,7 @@ pub fn truncate(s: &str, max_chars: usize) -> String {
 /// `from_unix_timestamp` 失败 → `invalid_key`；`Rfc3339` 格式化失败 →
 /// `format_failed_key`（后两者理论上有 `time` crate 保证，保留兜底）。不区分的
 /// caller（tasks page）三个 key 传同一个。
+#[must_use]
 pub fn format_local_unix_secs(
     secs: i64,
     unknown_key: &'static str,

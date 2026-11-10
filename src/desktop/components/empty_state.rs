@@ -19,6 +19,7 @@ pub struct EmptyState {
 
 impl EmptyState {
     /// 以图标和主标题构造，副标题默认为空。
+    #[must_use]
     pub const fn new(icon: IconName, title: SharedString) -> Self {
         Self {
             icon,

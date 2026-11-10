@@ -10,6 +10,10 @@ use std::process::Command;
 use anyhow::{Context, Result, anyhow};
 
 /// 用系统默认程序打开文件或目录。
+///
+/// # Errors
+///
+/// 路径不存在、不是合法 UTF-8 或启动系统程序失败时返回错误。
 pub fn open_path(path: &Path) -> Result<()> {
     if !path.exists() {
         return Err(anyhow!("path does not exist: {}", path.display()));
@@ -54,6 +58,10 @@ pub fn open_path(path: &Path) -> Result<()> {
 }
 
 /// 在文件管理器中显示文件 — Windows / macOS 高亮选中，Linux 退回打开父目录。
+///
+/// # Errors
+///
+/// 路径不存在或启动文件管理器失败时返回错误。
 pub fn reveal_in_folder(path: &Path) -> Result<()> {
     if !path.exists() {
         return Err(anyhow!("path does not exist: {}", path.display()));

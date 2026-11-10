@@ -70,11 +70,19 @@ pub struct AppModel {
 
 impl AppModel {
     /// 构造函数。失败时调用方应向用户展示致命错误, 不要 panic。
+    ///
+    /// # Errors
+    ///
+    /// tokio runtime 构造或历史任务加载失败时返回错误（见 [`Self::new_with_wakeup`]）。
     pub fn new() -> Result<Self> {
         Ok(Self::new_with_wakeup()?.0)
     }
 
     /// 构造 `AppModel` + 配套的 `WakeupReceiver`。
+    ///
+    /// # Errors
+    ///
+    /// tokio runtime 构造失败（资源耗尽）或历史任务文件加载失败时返回错误。
     pub fn new_with_wakeup() -> Result<(Self, WakeupReceiver)> {
         // 启动期公共资源 (paths / config / sources_config / rules / http) 统一走
         // `core::bootstrap::load_context`; 它加载失败时只 `tracing::warn!` + 兜底默认,

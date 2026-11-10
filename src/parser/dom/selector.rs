@@ -57,6 +57,10 @@ pub fn select_and_invoke_js(
 
 /// 同上, 但作用于已选中的 `ElementRef` (嵌套查询场景, 例如搜索结果列表里
 /// 对每条 result 元素再选 bookName/author 等子字段)。
+///
+/// # Errors
+///
+/// 选择器非法、`XPath` 未支持或 `@js:` 后处理失败时返回 [`SelectError`]。
 pub fn select_and_invoke_js_within(
     el: ElementRef<'_>,
     query: &str,
@@ -100,6 +104,10 @@ fn select_and_invoke_js_impl(
 }
 
 /// 仅做选择 + 内容抽取, 不做 JS 后处理。
+///
+/// # Errors
+///
+/// 选择器非法或 `XPath` 未支持时返回 [`SelectError`]。
 pub fn dom_select_text(
     document: &Html,
     selector: &str,
@@ -169,6 +177,7 @@ fn strip_at_suffix(query: &str, ct: ContentType) -> (&str, ContentType) {
 }
 
 /// 拆 query 里 `<sel>@js:<body>` 这两段。
+#[must_use]
 pub fn split_js(query: &str) -> (&str, Option<&str>) {
     query.find("@js:").map_or((query, None), |idx| {
         (&query[..idx], Some(&query[idx + 4..]))

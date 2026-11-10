@@ -45,6 +45,7 @@ pub struct StatusBadge {
 
 impl StatusBadge {
     /// 以语义色和标签文本构造徽章。
+    #[must_use]
     pub const fn new(kind: StatusKind, label: SharedString) -> Self {
         Self { kind, label }
     }

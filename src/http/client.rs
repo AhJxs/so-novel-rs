@@ -27,6 +27,10 @@ const DEFAULT_TIMEOUT_SECS: u64 = 10;
 
 /// 构造 async reqwest Client。共用当前 tokio runtime，**不**创建嵌套 runtime，
 /// 可在 `tokio::spawn` 内部直接 `.await`。
+///
+/// # Errors
+///
+/// proxy / TLS / 超时等配置非法导致 `reqwest::Client` 构造失败时返回错误。
 pub fn build_async_client(cfg: &AppConfig, opts: &ClientOptions) -> Result<Client> {
     let mut builder = Client::builder()
         .connect_timeout(Duration::from_secs(DEFAULT_TIMEOUT_SECS))

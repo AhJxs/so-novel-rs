@@ -48,6 +48,10 @@ pub struct LibraryState {
 
 /// 扫描下载目录得到 `LibraryEntry` 列表: 只看**直接子文件**, 只保留
 /// [`crate::core::library::SUPPORTED_LIBRARY_EXTS`] 白名单内的扩展名。
+///
+/// # Errors
+///
+/// 目录不可读或其下某个条目的元信息获取失败时返回对应的 `std::io::Error`。
 pub fn scan_library_dir(dir: &Path) -> std::io::Result<Vec<LibraryEntry>> {
     use crate::core::library::SUPPORTED_LIBRARY_EXTS;
 

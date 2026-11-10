@@ -35,6 +35,7 @@ static NON_P_PAIR_RE: LazyLock<Regex> = LazyLock::new(|| {
 /// 把规则化清洗后的章节内容整形为"一段一行 `<p>` 的 HTML"。
 ///
 /// 入参 `content` 通常来自 `filter_chapter(...).content`。
+#[must_use]
 pub fn format_chapter(content: &str, rule_chapter: &RuleChapter) -> String {
     // 与 Java 一致：先把属性全清掉，避免被 class/style 影响匹配。
     let cleared = clear_all_attributes(content);

@@ -57,6 +57,10 @@ pub fn init() {
 }
 
 /// 用显式配置初始化, 不读 env. 测试友好.
+///
+/// # Errors
+///
+/// 日志过滤表达式非法或全局 subscriber 已初始化时返回错误文案。
 pub fn init_with_format(format: LogFormat) -> Result<(), String> {
     use tracing_subscriber::layer::SubscriberExt;
     use tracing_subscriber::util::SubscriberInitExt;

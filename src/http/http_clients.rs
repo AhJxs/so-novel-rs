@@ -74,6 +74,7 @@ impl HttpClients {
     ///
     /// `core::bootstrap::load_context` 在 proxy strip 后仍失败时最后兜底用 ——
     /// 比 panic 友好（UI 仍能进，下载时报网络错即可）。日常路径都走 [`Self::new`]。
+    #[must_use]
     pub fn empty() -> Self {
         let bare = Client::new();
         Self {
@@ -86,6 +87,10 @@ impl HttpClients {
     }
 
     /// 从 `AppConfig` 构造初始 client 集合。
+    ///
+    /// # Errors
+    ///
+    /// safe / `unsafe_ssl` / `gh_proxy` 任一 client 构造失败时返回带上下文的错误。
     pub fn new(cfg: &AppConfig) -> Result<Self> {
         let safe = build_async_client(cfg, &ClientOptions { unsafe_ssl: false })
             .context("构造 safe HTTP client 失败")?;
@@ -177,6 +182,10 @@ impl HttpClients {
         )
     }
     /// proxy 配置变了 → 重建 safe + `unsafe_ssl` 两个 client（`gh_proxy` 不受 proxy 影响）。
+    ///
+    /// # Errors
+    ///
+    /// client 构造失败或内部锁 poison 时返回错误（配置已变更但 client 仍为旧实例）。
     pub fn rebuild_proxy(&self, cfg: &AppConfig) -> Result<()> {
         let new_sig = ProxySignature::from_config(cfg);
         let old_sig = mutex_or("rebuild_proxy:read_sig", &self.proxy_signature)

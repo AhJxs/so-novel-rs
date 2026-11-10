@@ -34,6 +34,7 @@ pub(super) fn maybe_replace_cover(book: &mut Book, new_cover: String) -> bool {
 /// 其他走 text。
 ///
 /// book 模块独享, 不进 `dom::selector` (search/toc/chapter 不需要这层判断)。
+#[must_use]
 pub fn content_type_for(query: &str) -> ContentType {
     if query.trim_start().starts_with("meta[") {
         ContentType::AttrContent

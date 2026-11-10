@@ -58,6 +58,7 @@ fn calculate_hybrid_score(sr: &SearchResult, kw: &str) -> f64 {
 ///
 /// 入参与返回值都是 `Arc<SearchResult>`：过滤只搬引用，不复制结果字段
 /// （结果集常驻内存直到下一次搜索）。
+#[must_use]
 pub fn filter_sort(results: &[Arc<SearchResult>], kw: &str) -> Vec<Arc<SearchResult>> {
     if results.is_empty() {
         return Vec::new();

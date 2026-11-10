@@ -47,6 +47,10 @@ pub trait Exporter {
     fn ext(&self) -> &'static str;
 
     /// 执行合并（不带封面）。
+    ///
+    /// # Errors
+    ///
+    /// 读取章节文件或写成品失败时返回 [`ExportError`]。
     fn merge(
         &self,
         book: &Book,
@@ -56,6 +60,10 @@ pub trait Exporter {
 
     /// 带封面的合并入口。默认实现忽略封面、与 `merge` 等价；EPUB 覆写它把封面字节写入电子书。
     /// `cover_bytes`：调用方（调度层）负责下载，失败时传 `None`，实现者降级为不带封面继续。
+    ///
+    /// # Errors
+    ///
+    /// 读取章节文件或写成品失败时返回 [`ExportError`]。
     fn merge_with_cover(
         &self,
         book: &Book,
@@ -70,6 +78,7 @@ pub trait Exporter {
 /// 按 `ExportFormat` 选择导出器。Pdf 走 `pdf_oxide` 真生成 PDF（章节文件由
 /// `render_chapter(target=Pdf)` 写成 Html，`PdfExporter` 内部再合并成 PDF）；
 /// Markdown 由 `md.rs` 输出单个 `.md`（含 YAML front matter、TOC 与 `<a id="chapter-N">` 锚点）。
+#[must_use]
 pub fn exporter_for(format: ExportFormat, txt_encoding: &str) -> Box<dyn Exporter + Send + Sync> {
     match format {
         ExportFormat::Txt => Box::new(super::txt::TxtExporter::new(txt_encoding)),
@@ -84,6 +93,10 @@ pub fn exporter_for(format: ExportFormat, txt_encoding: &str) -> Box<dyn Exporte
 ///
 /// 命名约定与 Java 端 `Crawler#generateChapterPath` 一致：`html`/`pdf` → `001_.html`
 /// （下划线后无标题，便于翻页脚本拼前缀），`txt` → `001_<标题>.txt`，`epub` → `001_<标题>.html`。
+///
+/// # Errors
+///
+/// 创建章节目录或写入某个章节文件失败时返回带路径上下文的错误。
 pub fn write_chapter_files(
     chapters_dir: &Path,
     rendered: &[RenderedChapter],
@@ -114,6 +127,10 @@ pub fn write_chapter_files(
 
 /// 把单章写入 `chapters_dir`（并发安全：order 唯一不会冲突）。不检查文件是否已存在
 /// （全新下载不可能冲突），省掉每章一次额外 syscall。
+///
+/// # Errors
+///
+/// 写章节文件失败时返回对应的 `std::io::Error`。
 pub fn write_single_chapter(
     dir: &Path,
     order: u32,
@@ -138,6 +155,10 @@ pub fn write_single_chapter(
 
 /// 按"前缀数字"升序枚举目录下的章节文件。
 /// 跳过 `0_`（书目索引、封面这类）开头的辅助文件以避免被当成正文章节。
+///
+/// # Errors
+///
+/// 目录不可读时返回 [`ExportError`]。
 pub fn sort_chapter_files(dir: &Path) -> Result<Vec<PathBuf>, ExportError> {
     let mut files: Vec<PathBuf> = std::fs::read_dir(dir)?
         .filter_map(std::result::Result::ok)
@@ -157,6 +178,7 @@ pub fn sort_chapter_files(dir: &Path) -> Result<Vec<PathBuf>, ExportError> {
 
 /// 工厂：用书名 + 作者构造目录名。与 Java 端
 /// `"%s (%s) %s".formatted(bookName, author, extName.toUpperCase())` 一致。
+#[must_use]
 pub fn build_book_dir_name(book: &Book, format: ExportFormat) -> String {
     let raw = format!(
         "{} ({}) {}",
@@ -182,6 +204,7 @@ pub struct RenderedChapter {
 
 /// 如果 `dir/filename` 已存在，追加 ` (1)` / ` (2)` 后缀直到不冲突。
 /// 正常路径（无冲突）零开销：只做一次 `exists()` 检查。
+#[must_use]
 pub fn unique_path(dir: &Path, filename: &str) -> PathBuf {
     let path = dir.join(filename);
     if !path.exists() {

@@ -41,6 +41,7 @@ pub enum UpdateOutcome {
 ///
 /// `Err` 原样翻译成 `Failed`；成功但解析不到 tag 时兜底成 `Failed("(empty result)")`，
 /// 避免静默丢事件（通常意味着 GitHub 响应 schema 变了）。
+#[must_use]
 pub fn classify(result: &UpdateCheckResult) -> UpdateOutcome {
     match result {
         Err(e) => UpdateOutcome::Failed(e.to_string()),
@@ -55,6 +56,7 @@ pub fn classify(result: &UpdateCheckResult) -> UpdateOutcome {
 /// 给定 latest release tag（含/不含 `v` 前缀都行），判断是否新于当前 build 版本。
 ///
 /// 剥 `v` 后与 `env!("CARGO_PKG_VERSION")` 字符串比较，不做 semver 解析（不引入 `semver` 依赖）。
+#[must_use]
 pub fn is_new_version_available(latest: &str) -> bool {
     latest.trim_start_matches('v') != env!("CARGO_PKG_VERSION")
 }
@@ -65,6 +67,11 @@ pub fn is_new_version_available(latest: &str) -> bool {
 /// 否则用调用方传入的 `safe_client`（已含 CONNECT 代理 / TLS cache / 默认 headers）。
 /// 失败返回 [`UpdateError`]，解析不到 `tag_name` 则由 [`classify`] 兜底。
 /// 网络错误只走 `tracing::warn!`，不把 debug 字符串写进错误文案（避免泄漏到 UI 文案）。
+///
+/// # Errors
+///
+/// HTTP 请求失败、状态码非 2xx 或响应不是合法 JSON 时返回 [`UpdateError`]；
+/// 响应合法但缺 `tag_name` 时返回 `Ok(None)`。
 pub async fn check_latest_release(
     gh_proxy: GhProxy,
     safe_client: reqwest::Client,

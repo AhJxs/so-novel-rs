@@ -8,6 +8,7 @@ use crate::models::Book;
 
 /// 把 `LangType` 映射到 `zhconv` 的目标变体：`ZhCn` → `ZhHans`、`ZhTw` → `ZhTW`
 /// （台湾繁体，含用词差异如"软体"）、`ZhHant` → ZhHant。源语言由 zhconv 自行判断。
+#[must_use]
 pub const fn lang_to_variant(target: &LangType) -> Variant {
     match target {
         LangType::ZhCn => Variant::ZhHans,
@@ -17,6 +18,7 @@ pub const fn lang_to_variant(target: &LangType) -> Variant {
 }
 
 /// 直接对纯文本调用 zhconv。TXT body 用这个。
+#[must_use]
 pub fn convert_text(text: &str, target: &LangType) -> String {
     zhconv(text, lang_to_variant(target))
 }
@@ -44,6 +46,7 @@ pub fn convert_book_meta_in_place(book: &mut Book, source_lang_raw: &str, target
 /// 转换书籍元信息（书名 / 作者 / 简介）到目标语言，返回新 `Book`，不修改入参。
 ///
 /// [`convert_book_meta_in_place`] 的 clone 包装：需要同时保留原 `Book` 时用。
+#[must_use]
 pub fn convert_book_meta(book: &Book, source_lang_raw: &str, target: &LangType) -> Book {
     let mut out = book.clone();
     convert_book_meta_in_place(&mut out, source_lang_raw, target);
@@ -53,6 +56,7 @@ pub fn convert_book_meta(book: &Book, source_lang_raw: &str, target: &LangType) 
 /// 对 HTML body 转换中文，**跳过 `<script>` / `<style>` 块**（代码里的中文不该被转）。
 /// ASCII（标签、实体名、URL）不会被改 → 标签结构稳定；属性值里的中文跟着转，符合预期。
 /// 局限：`<script` / `<style` 出现在属性值 / CDATA 内会把切分搞错，正常书源不会这样。
+#[must_use]
 pub fn convert_html_body(body: &str, target: &LangType) -> String {
     const SCRIPT: &str = "<script";
     const STYLE: &str = "<style";

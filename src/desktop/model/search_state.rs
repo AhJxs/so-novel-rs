@@ -146,6 +146,7 @@ pub enum DetailState {
 
 impl DetailState {
     /// 仅当 Loaded 状态可取书；Pending/Failed 返回 None。
+    #[must_use]
     pub fn book(&self) -> Option<&Book> {
         match self {
             Self::Loaded(b) => Some(b),

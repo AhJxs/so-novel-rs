@@ -16,6 +16,7 @@ pub struct PageHeader {
 
 impl PageHeader {
     /// 以标题构造，副标题与右侧动作默认为空。
+    #[must_use]
     pub const fn new(title: SharedString) -> Self {
         Self {
             title,

@@ -158,11 +158,13 @@ impl DownloadTask {
     }
 
     /// 任务尚未结束（成功、失败、取消均算结束）。
+    #[must_use]
     pub const fn is_running(&self) -> bool {
         self.finished.is_none()
     }
 
     /// 用户主动取消 → cancelled。
+    #[must_use]
     pub const fn is_cancelled(&self) -> bool {
         matches!(
             self.finished.as_ref(),
@@ -173,6 +175,7 @@ impl DownloadTask {
     }
 
     /// 已结束且不是取消 → 失败。
+    #[must_use]
     pub const fn is_failed(&self) -> bool {
         matches!(
             self.finished.as_ref(),
@@ -181,6 +184,7 @@ impl DownloadTask {
     }
 
     /// 展示用书名：优先详情页抓到的名字，回落到搜索结果的标题。
+    #[must_use]
     pub fn book_name(&self) -> &str {
         self.book_meta
             .as_ref()
@@ -188,6 +192,7 @@ impl DownloadTask {
     }
 
     /// 距开始的实时耗时。
+    #[must_use]
     pub fn elapsed(&self) -> Option<Duration> {
         let started = self.started_at_unix.max(0) as u64;
         if self.is_running() {
@@ -202,6 +207,7 @@ impl DownloadTask {
     }
 
     /// 转成可持久化的 record（不含 rx/cancel）。
+    #[must_use]
     pub fn to_record(&self) -> DownloadTaskRecord {
         DownloadTaskRecord {
             id: self.id,

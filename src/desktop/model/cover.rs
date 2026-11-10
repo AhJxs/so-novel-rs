@@ -49,6 +49,7 @@ pub fn cover_entry_from_bytes(
 }
 
 /// 短哈希 (fnv-like 64-bit → 16 hex), 仅用于 URI 去重 key, **不是**密码学用途。
+#[must_use]
 pub fn hash_short(s: &str) -> String {
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
     for b in s.as_bytes() {

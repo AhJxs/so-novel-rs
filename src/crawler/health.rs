@@ -47,6 +47,7 @@ pub enum HealthStatus {
 
 impl SourceHealth {
     /// 把探测结果归类成 5 个语义状态之一。
+    #[must_use]
     pub fn classify(&self) -> HealthStatus {
         if self.error.is_some() {
             return HealthStatus::ProbeError;
@@ -60,6 +61,7 @@ impl SourceHealth {
     }
 
     /// 本地化显示文本: 延迟 2xx 只显示 ms, 4xx/5xx 同时显示状态码 + 延迟, 失败 / 无响应各走独立 i18n key。
+    #[must_use]
     pub fn label(&self) -> String {
         if self.error.is_some() {
             return t!("Sources.health.error").to_string();

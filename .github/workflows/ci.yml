@@ -1,0 +1,40 @@
+name: ci
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  fmt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      # 固定 nightly：rustfmt 的 unstable 选项只在 nightly 生效，且格式结果需可复现。
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2026-11-08
+          components: rustfmt
+      - run: cargo +nightly-2026-11-08 fmt --all -- --check
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - name: Install Linux build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libxkbcommon-dev libxkbcommon-x11-dev libfontconfig1-dev \
+            libxcb1-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
+            libwayland-dev libgl1-mesa-dev libegl1-mesa-dev \
+            libglib2.0-dev libssl-dev mesa-vulkan-drivers
+          sudo apt-get install -y vulkan-utility-libraries-dev || true
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo test --all-targets

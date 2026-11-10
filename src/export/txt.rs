@@ -64,6 +64,7 @@ pub struct TxtExporter {
 
 impl TxtExporter {
     /// 按编码名构造；未知编码降级为 UTF-8。
+    #[must_use]
     pub fn new(label: &str) -> Self {
         let label = label.trim();
         let label = if label.is_empty() { "UTF-8" } else { label };

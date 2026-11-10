@@ -45,6 +45,7 @@ impl From<ExportFormat> for RenderTarget {
 /// 是用户在 Settings 选的目标语言 —— 两者相同或 source 解析失败时跳过简繁转换。
 ///
 /// 返回 `(title, body)`, 落盘由调用方负责; `title` 已按 "`1.章节名` → `第1章 章节名`" 重写。
+#[must_use]
 pub fn render_chapter(
     chapter: &Chapter,
     rule_chapter: &RuleChapter,

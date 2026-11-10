@@ -52,6 +52,11 @@ pub enum SearchError {
 ///
 /// `limit` 为 `None` 表示不限（对应 Java 端 -1）。`cf_bypass_base` 非空时，
 /// 命中 CF 验证页会自动重试外部 bypass 服务，否则直接返回 `SearchError::Cloudflare`。
+///
+/// # Errors
+///
+/// 请求失败、命中未配置旁路的 CF 验证页、HTML 结构不符或选择器 / JS 执行失败时
+/// 返回对应的 [`SearchError`]。
 #[tracing::instrument(
     name = "parser_search_one",
     skip_all,
@@ -148,6 +153,10 @@ pub async fn search_one(
 
 /// 把已经下载好的 HTML 解析为搜索结果列表。
 /// `base_url` 用来解析 href 相对路径（相当于 jsoup `Element.absUrl(...)`）。
+///
+/// # Errors
+///
+/// 规则缺少搜索选择器、HTML 结构不符或选择器 / JS 执行失败时返回 [`SearchError`]。
 pub fn parse_search_results(
     html: &str,
     base_url: &str,

@@ -4,6 +4,7 @@ use std::path::Path;
 
 /// 替换文件名中的非法字符；仅适用于"文件名"，不要传入路径分隔符。
 /// 与 Java 端 `util.FileUtils#sanitizeFileName` 保持一致。
+#[must_use]
 pub fn sanitize_filename(name: &str) -> String {
     if cfg!(target_os = "windows") {
         let mut out = String::with_capacity(name.len());
@@ -41,6 +42,7 @@ pub fn sanitize_filename(name: &str) -> String {
 
 /// 日志字段脱敏：超过 `max_chars` 的字符串截断并加 `***` 后缀。
 /// 用于搜索关键词等用户输入，避免完整查询词写入日志；短于阈值时原样返回。
+#[must_use]
 pub fn truncate_log(s: &str, max_chars: usize) -> String {
     let chars: Vec<char> = s.chars().collect();
     if chars.len() <= max_chars {
@@ -60,6 +62,7 @@ pub fn to_absolute(p: impl AsRef<Path>) -> std::path::PathBuf {
 }
 
 /// 把字节数格式化为人类可读的文件大小（"1.5 MB" / "0 B"）。
+#[must_use]
 pub fn format_size(bytes: u64) -> String {
     const KB: u64 = 1024;
     const MB: u64 = KB * 1024;

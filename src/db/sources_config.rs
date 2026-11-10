@@ -43,6 +43,10 @@ impl SourcesConfig {
     }
 
     /// 保存到 JSON 文件（原子写入）。
+    ///
+    /// # Errors
+    ///
+    /// JSON 序列化或写盘失败时返回错误。
     pub fn save(&self, path: &Path) -> anyhow::Result<()> {
         let content = serde_json::to_string_pretty(self)?;
         if let Some(parent) = path.parent() {

@@ -40,6 +40,7 @@ pub enum AbsentReason {
 
 /// 探测当前系统代理。
 #[cfg(target_os = "windows")]
+#[must_use]
 pub fn detect() -> SystemProxy {
     detect_windows()
 }
@@ -55,6 +56,7 @@ pub fn detect() -> SystemProxy {
 /// - `None` 模式 → 直连；
 /// - `Manual` → `http://<host>:<port>`（host 为空视为直连）；
 /// - `System` → 探测结果，探测不到同样退化为直连（不阻断 client 构造）。
+#[must_use]
 pub fn resolve_proxy_url(p: &ProxyConfig) -> Option<String> {
     match p.proxy_mode {
         ProxyMode::None => None,

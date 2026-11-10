@@ -84,51 +84,61 @@ pub type AppResult<T> = Result<T, AppError>;
 // 构造函数 —— 比直接写 `AppError::Xxx(s.to_string())` 干净。
 impl AppError {
     /// 配置加载 / 校验失败。
+    #[must_use]
     pub const fn config(msg: String) -> Self {
         Self::Config(msg)
     }
 
     /// HTTP 请求或响应异常。
+    #[must_use]
     pub const fn http(msg: String) -> Self {
         Self::Http(msg)
     }
 
     /// 页面解析失败。
+    #[must_use]
     pub const fn parse(msg: String) -> Self {
         Self::Parse(msg)
     }
 
     /// 数据读写（DAO / 文件）失败。
+    #[must_use]
     pub const fn db(msg: String) -> Self {
         Self::Db(msg)
     }
 
     /// `@js:` 脚本执行失败。
+    #[must_use]
     pub const fn js(msg: String) -> Self {
         Self::Js(msg)
     }
 
     /// 业务规则不满足。
+    #[must_use]
     pub const fn business(msg: String) -> Self {
         Self::Business(msg)
     }
 
     /// 调用方参数非法。
+    #[must_use]
     pub const fn invalid(msg: String) -> Self {
         Self::InvalidArgument(msg)
     }
 
     /// 请求的资源不存在。
+    #[must_use]
     pub const fn not_found(msg: String) -> Self {
         Self::NotFound(msg)
     }
 
     /// 状态冲突（重复操作等）。
+    #[must_use]
     pub const fn conflict(msg: String) -> Self {
         Self::Conflict(msg)
     }
 
     /// 未归类的内部错误。
+    #[must_use]
     pub const fn internal(msg: String) -> Self {
         Self::Internal(msg)
     }
@@ -139,6 +149,7 @@ impl AppError {
     }
 
     /// 返回错误的消息文本 (不含结构化字段), 便于日志和 HTTP 响应。
+    #[must_use]
     pub fn message(&self) -> String {
         match self {
             Self::Config(s)

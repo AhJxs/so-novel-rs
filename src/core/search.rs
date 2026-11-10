@@ -16,6 +16,7 @@ use crate::models::{Rule, Source};
 ///
 /// `source_id = Some(id)` → 精确按 id 找且**不**检查 disabled（上层决定报"已禁用"还是 404，找不到返回空 vec）；
 /// `None` → 按 [`Rule::is_search_enabled`] 过滤后转 [`Source`]（`Source::from` 内部 derive EffectiveCrawl，故传全量 `cfg`）。
+#[must_use]
 pub fn select_sources(rules: &[Arc<Rule>], cfg: &AppConfig, source_id: Option<i32>) -> Vec<Source> {
     source_id.map_or_else(
         || {
@@ -40,6 +41,7 @@ pub fn select_sources(rules: &[Arc<Rule>], cfg: &AppConfig, source_id: Option<i3
 /// `cfg.source.search_limit`（`Option<i32>`，≤0 视作未设）→ `None`（调用方兜底：书源自带 / 不限）。
 ///
 /// query param 的校验属于调用方的输入层，不在此处做。
+#[must_use]
 pub fn effective_limit(explicit: Option<usize>, cfg: &AppConfig) -> Option<usize> {
     explicit.or_else(|| {
         cfg.source

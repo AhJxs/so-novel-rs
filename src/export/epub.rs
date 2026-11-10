@@ -51,6 +51,10 @@ impl Exporter for EpubExporter {
 ///
 /// `cover_bytes` 为 None 时不写封面；Some 时按 magic number 判 mime (PNG/JPEG/GIF/WEBP/BMP,
 /// 未知降级 `image/jpeg`), 与 Java 端把 cover bytes 写到 `cover.jpg` 一致。
+///
+/// # Errors
+///
+/// 章节文件读取 / 排序失败、epub 打包写入失败时返回 [`ExportError`]。
 pub fn merge_with_cover_bytes(
     book: &Book,
     chapters_dir: &Path,

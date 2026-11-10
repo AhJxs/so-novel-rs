@@ -23,6 +23,7 @@ pub enum FinishedReason {
 
 impl FinishedReason {
     /// 给 UI 用的错误消息文案（仅 `Failed` 有内容）。
+    #[must_use]
     pub const fn user_message(&self) -> Option<&str> {
         match self {
             Self::Failed { message } => Some(message.as_str()),
@@ -31,6 +32,7 @@ impl FinishedReason {
     }
 
     /// 用户取消 或 应用重启中断（"非真正的失败"）。
+    #[must_use]
     pub const fn is_cancelled(&self) -> bool {
         matches!(self, Self::UserCancelled | Self::AppRestarted)
     }
@@ -79,6 +81,7 @@ pub struct FailureRecord {
 
 impl FailureRecord {
     /// 用章节顺序号、标题与失败原因构造一条明细。
+    #[must_use]
     pub const fn new(index: u32, title: String, reason: String) -> Self {
         Self {
             index,

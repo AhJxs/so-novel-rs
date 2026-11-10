@@ -14,6 +14,10 @@ static GLOBAL_VIEW: LazyLock<&'static AppConfig> =
 
 /// 注入全局配置。仅在启动期（`main`）调一次；重复调用返回 `Err`，
 /// 由调用方决定如何处理（panic / warn-and-ignore）。
+///
+/// # Errors
+///
+/// 全局配置已初始化（重复调用）时返回错误文案。
 pub fn set_global(cfg: AppConfig) -> Result<(), &'static str> {
     GLOBAL
         .set(cfg)
@@ -21,11 +25,16 @@ pub fn set_global(cfg: AppConfig) -> Result<(), &'static str> {
 }
 
 /// 获取全局配置。第一次读时若未显式 [`set_global`], 用 `new()` 兜底。
+#[must_use]
 pub fn global() -> &'static AppConfig {
     &GLOBAL_VIEW
 }
 
 /// 校验全局配置。启动期 `set_global` 后调一次, 失败让用户改 config.toml 重启。
+///
+/// # Errors
+///
+/// 透传 [`AppConfig::validate`] 的校验错误（字段越界 / 区间非法 / 路径为空）。
 pub fn validate_global() -> Result<(), ConfigError> {
     global().validate()
 }

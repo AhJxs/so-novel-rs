@@ -25,6 +25,7 @@ impl ContentType {
     /// 非 attr 变体（Text / Html）返回 `""`，调用方需要先用外层 `match` 过滤
     /// 到 attr 变体再使用 —— 这里用空串而不是 `Option` 是为了避免在
     /// `extract_from_elements` 等已知变体子集的上下文中触发 `clippy::expect_used`。
+    #[must_use]
     pub const fn attr_name(self) -> &'static str {
         match self {
             Self::AttrSrc => "src",

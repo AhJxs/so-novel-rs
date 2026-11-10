@@ -59,6 +59,7 @@ impl Default for CancelToken {
 
 impl CancelToken {
     /// 创建未触发的令牌。
+    #[must_use]
     pub fn new() -> Self {
         Self {
             flag: Arc::new(AtomicBool::new(false)),
@@ -73,6 +74,7 @@ impl CancelToken {
     }
 
     /// 同步检查是否已触发。
+    #[must_use]
     pub fn is_cancelled(&self) -> bool {
         self.flag.load(Ordering::SeqCst)
     }

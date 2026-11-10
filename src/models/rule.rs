@@ -92,6 +92,7 @@ impl Rule {
     /// 此书源能否加入聚合搜索。判定与 `app::ops::search::spawn_search` 派发时完全一致: 顶
     /// `Rule.disabled` 为 false 且 `RuleSearch.disabled` 也为 false (`RuleSearch` 不存在视为 false)。
     /// 搜索页书源下拉和派发共用此谓词, 避免"下拉里有但实际不发请求"的不一致。
+    #[must_use]
     pub fn is_search_enabled(&self) -> bool {
         !self.disabled && self.search.as_ref().is_some_and(|s| !s.disabled)
     }
@@ -301,6 +302,7 @@ pub struct EffectiveCrawl {
 
 impl EffectiveCrawl {
     /// 以全局 `crawl` 配置为底，用书源自身的 `Rule.crawl` 覆盖非 `None` 字段。
+    #[must_use]
     pub const fn derive(cfg: &AppConfig, rule: &Rule) -> Self {
         let mut eff = Self {
             concurrency: cfg.crawl.concurrency,
@@ -352,6 +354,7 @@ pub struct Source {
 
 impl Source {
     /// 用规则与全局配置构造书源，并即时算出有效抓取参数。
+    #[must_use]
     pub fn from(rule: Arc<Rule>, cfg: &AppConfig) -> Self {
         let effective_crawl = EffectiveCrawl::derive(cfg, &rule);
         Self {

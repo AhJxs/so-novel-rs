@@ -14,6 +14,7 @@ use crate::config::Language;
 ///
 /// **`Language → locale 字符串` 的唯一权威映射**。
 /// `TraditionalChinese` → `"zh-TW"`，**不是** `gpui_kit::component` 旧版用的 `"zh-HK"`。
+#[must_use]
 pub const fn locale_for(lang: Language) -> &'static str {
     match lang {
         Language::SimplifiedChinese => "zh-CN",

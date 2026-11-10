@@ -31,6 +31,7 @@ pub struct PageSlice {
 
 impl PageSlice {
     /// 本页是否没有任何元素。
+    #[must_use]
     pub const fn is_empty(&self) -> bool {
         self.start >= self.end
     }

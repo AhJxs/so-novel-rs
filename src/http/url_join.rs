@@ -6,6 +6,7 @@
 use url::Url;
 
 /// 把 `href` 解析为绝对 URL（`base` 必须是绝对 URL）；空串或解析失败返回 `None`。
+#[must_use]
 pub fn absolute_url(base: &str, href: &str) -> Option<String> {
     let trimmed = href.trim();
     if trimmed.is_empty() {
@@ -20,6 +21,7 @@ pub fn absolute_url(base: &str, href: &str) -> Option<String> {
 }
 
 /// 取 URL 的 origin（`scheme://host[:port]/`）用作 Referer 头；解析失败返回原串。
+#[must_use]
 pub fn origin_or_self(url: &str) -> String {
     Url::parse(url).map_or_else(
         |_| url.to_string(),

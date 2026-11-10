@@ -28,6 +28,10 @@ fn lock_or_recover<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 
 /// 按字符串缓存 `Selector`。同一字符串重复解析直接命中已编译实例。
 /// 解析失败返回 `Err`（**不**缓存失败结果，让用户编辑规则后能重试）。
+///
+/// # Errors
+///
+/// 选择器语法非法时返回 [`SelectError::BadSelector`]。
 pub fn cached_selector(sel: &str) -> Result<Arc<Selector>, SelectError> {
     let cache = SELECTOR_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
 
@@ -51,6 +55,10 @@ pub fn cached_selector(sel: &str) -> Result<Arc<Selector>, SelectError> {
 }
 
 /// 按字符串缓存 `Regex`。失败结果不缓存，规则修复后能重试编译。
+///
+/// # Errors
+///
+/// 正则语法非法时返回 [`regex::Error`]。
 pub fn cached_regex(pat: &str) -> Result<Arc<Regex>, regex::Error> {
     let cache = REGEX_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
 

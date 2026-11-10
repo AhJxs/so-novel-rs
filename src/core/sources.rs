@@ -19,17 +19,20 @@ use crate::models::{Rule, Source};
 ///
 /// ID 在不同 `sources_config.active_file` 间不复用，跨内存查找必须按 URL 归一后比对；
 /// `SourcesConfig::toggle_disabled` 用同样的规范化，两者语义必须一致。
+#[must_use]
 pub fn rule_key(rule: &Rule) -> String {
     rule.url.trim().to_lowercase()
 }
 
 /// 把任意 URL 字符串标准化为 `SourcesConfig.disabled_urls` 用的键。
 /// 等价于 `toggle_disabled` 的内部归一逻辑；导出给调用方，避免各自再写一遍。
+#[must_use]
 pub fn disabled_url_key(url: &str) -> String {
     url.trim().to_lowercase()
 }
 
 /// 在规则列表里按 ID 找（返回借用，生命周期绑到 `rules`）。
+#[must_use]
 pub fn find_rule_by_id(rules: &[Rule], id: i32) -> Option<&Rule> {
     rules.iter().find(|r| r.id == id)
 }
@@ -73,6 +76,7 @@ pub fn load_active(rules_dir: &Path, sources_config: &SourcesConfig) -> anyhow::
 ///
 /// 遍历 `sources`，**不**依赖 `is_search_enabled`（下载场景无视 `search_disabled`），取第一个 origin
 /// 相同的 source（多个匹配按列表顺序）；`url` 或 rule URL 解析失败 → 跳过 / 返回 `None`。
+#[must_use]
 pub fn match_source_by_url<'a>(sources: &'a [Source], url: &str) -> Option<&'a Source> {
     let parsed = Url::parse(url).ok()?;
     let origin = parsed.origin();

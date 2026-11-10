@@ -19,6 +19,11 @@ pub struct LoadedTasks {
 }
 
 /// 读取历史任务并还原成运行时任务；同时返回已用过的最大 ID，供新任务续号。
+///
+/// # Errors
+///
+/// 目前读取与还原不会失败（损坏文件按空列表处理，重写失败只记日志）；
+/// 保留 `Result` 以便将来读取策略变化时不必改调用方。
 pub fn load_tasks_from_file(path: &Path) -> Result<LoadedTasks, DaoError> {
     let records = crate::db::load_tasks(path);
     let now = time::now_unix_secs();

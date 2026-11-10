@@ -13,6 +13,10 @@ use super::constants::BUNDLED_RULES;
 /// let n = init_rules_dir(rules_dir)?;
 /// println!("首次启动创建了 {n} 个规则文件");
 /// ```
+///
+/// # Errors
+///
+/// 创建规则目录或写入内置规则文件失败时返回对应的 `std::io::Error`。
 pub fn init_rules_dir(rules_dir: &Path) -> std::io::Result<usize> {
     if !rules_dir.exists() {
         std::fs::create_dir_all(rules_dir)?;
@@ -37,6 +41,7 @@ pub fn init_rules_dir(rules_dir: &Path) -> std::io::Result<usize> {
 
 /// 列出目录下所有规则文件名 (不含路径、跳过模板)。
 /// 用于"切活跃书源文件"下拉的可选项填充。
+#[must_use]
 pub fn list_rule_files(rules_dir: &Path) -> Vec<String> {
     if !rules_dir.exists() {
         return Vec::new();

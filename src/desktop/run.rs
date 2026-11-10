@@ -34,6 +34,10 @@ use crate::i18n;
 ///
 /// `cx.open_window` 失败时（仅在 `WindowOptions` 非法或 GPU 已满载时）弹错误对话框后
 /// 退出应用, 不会 panic; 显式处理是为了避免用户看到空白窗口以为还在加载。
+///
+/// # Errors
+///
+/// GPUI 应用初始化 / 窗口创建失败时返回错误（启动期致命错误已在内部弹框并退出）。
 pub fn run() -> Result<()> {
     // This single-window application has no background/tray mode. On macOS,
     // GPUI's default leaves the process running after the last window closes.
