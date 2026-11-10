@@ -18,7 +18,9 @@ const BROWSERS: &[&str] = &["Chrome", "Firefox", "Safari", "Edge"];
 const MIN_VERSION: u32 = 86;
 const MAX_VERSION: u32 = 145;
 
-pub fn random_ua() -> String {
+/// 随机拼一个桌面浏览器 UA（OS / 浏览器 / 版本均在支持范围内随机）。
+#[must_use]
+pub fn random_user_agent() -> String {
     let mut rng = rand::rng();
     let os = DESKTOP_OS[rng.random_range(0..DESKTOP_OS.len())];
     let browser = BROWSERS[rng.random_range(0..BROWSERS.len())];
@@ -49,7 +51,7 @@ mod tests {
     #[test]
     fn ua_has_mozilla_prefix_and_browser_token() {
         for _ in 0..50 {
-            let ua = random_ua();
+            let ua = random_user_agent();
             assert!(ua.starts_with("Mozilla/5.0"), "bad UA: {ua}");
             assert!(
                 BROWSERS.iter().any(|b| ua.contains(b)) || ua.contains("Version/"),

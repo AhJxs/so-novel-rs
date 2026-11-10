@@ -10,12 +10,17 @@ use std::sync::{Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
 ///
 /// ```
 /// use std::sync::Mutex;
+///
 /// use so_novel_rs::utils::lock::mutex_or;
 ///
 /// let m = Mutex::new(42_u32);
-/// let g = mutex_or("counter", &m).unwrap();
+/// let g = mutex_or("counter", &m).expect("lock available");
 /// assert_eq!(*g, 42);
 /// ```
+///
+/// # Errors
+///
+/// 锁被 poison 时返回带 `label` 的错误文案。
 pub fn mutex_or<'a, T>(label: &str, mtx: &'a Mutex<T>) -> Result<MutexGuard<'a, T>, String> {
     mtx.lock().map_err(|e| {
         tracing::error!("{label}: Mutex poisoned: {e}");
@@ -28,6 +33,10 @@ pub fn mutex_or<'a, T>(label: &str, mtx: &'a Mutex<T>) -> Result<MutexGuard<'a, 
 /// # Examples
 ///
 /// 用法同 [`mutex_or`]：`rw_read_or("items", &lk)` 返回 `RwLockReadGuard`。
+///
+/// # Errors
+///
+/// 锁被 poison 时返回带 `label` 的错误文案。
 pub fn rw_read_or<'a, T>(label: &str, lk: &'a RwLock<T>) -> Result<RwLockReadGuard<'a, T>, String> {
     lk.read().map_err(|e| {
         tracing::error!("{label}: RwLock read poisoned: {e}");
@@ -40,6 +49,10 @@ pub fn rw_read_or<'a, T>(label: &str, lk: &'a RwLock<T>) -> Result<RwLockReadGua
 /// # Examples
 ///
 /// 用法同 [`mutex_or`]：`rw_write_or("counter", &lk)` 返回 `RwLockWriteGuard`。
+///
+/// # Errors
+///
+/// 锁被 poison 时返回带 `label` 的错误文案。
 pub fn rw_write_or<'a, T>(
     label: &str,
     lk: &'a RwLock<T>,
@@ -53,9 +66,10 @@ pub fn rw_write_or<'a, T>(
 #[cfg(test)]
 mod tests {
     #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
-    use super::*;
     use std::sync::Arc;
     use std::thread;
+
+    use super::*;
 
     #[test]
     fn mutex_or_happy_path() {

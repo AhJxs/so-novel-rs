@@ -4,13 +4,13 @@
 
 use std::path::Path;
 
-use super::write_atomically;
 use crate::core::DownloadTask;
 use crate::models::DownloadTaskRecord;
 
 /// 已完成任务的最大保留数量, 超出后按完成时间从旧到新删除; 运行中的任务不受限制。
 const MAX_COMPLETED_TASKS: usize = 1000;
 
+/// 从 JSON 文件读取历史任务；文件缺失或损坏时返回空列表。
 pub fn load(path: &Path) -> Vec<DownloadTaskRecord> {
     if !path.exists() {
         return Vec::new();
@@ -29,6 +29,10 @@ pub fn load(path: &Path) -> Vec<DownloadTaskRecord> {
 
 /// 保存所有任务到 JSON 文件（原子写入）。接收运行期 [`DownloadTask`] 切片 → 内部转
 /// [`DownloadTaskRecord`] → 写盘; 调用方不再手动 `.map(to_record)`。
+///
+/// # Errors
+///
+/// JSON 序列化或写盘失败时返回错误。
 pub fn save(path: &Path, tasks: &[DownloadTask]) -> anyhow::Result<()> {
     let records: Vec<DownloadTaskRecord> = tasks.iter().map(DownloadTask::to_record).collect();
     save_records(path, &records)
@@ -36,10 +40,36 @@ pub fn save(path: &Path, tasks: &[DownloadTask]) -> anyhow::Result<()> {
 
 fn save_records(path: &Path, records: &[DownloadTaskRecord]) -> anyhow::Result<()> {
     let content = serde_json::to_string_pretty(records)?;
+    write_json(path, &content)
+}
+
+/// 把任务切片序列化成待写盘的 JSON 文本，并顺带清理超额的已完成任务。
+///
+/// 拆出这一步是为了让 UI 线程只做序列化（`DownloadTask` 含通道，克隆整表代价大），
+/// 真正的写盘交给 `spawn_blocking`。
+///
+/// # Errors
+///
+/// `serde_json` 序列化失败。
+pub fn tasks_json_with_trim(tasks: &[DownloadTask]) -> serde_json::Result<String> {
+    let mut records: Vec<DownloadTaskRecord> = tasks.iter().map(DownloadTask::to_record).collect();
+    let trimmed = trim_completed(&mut records);
+    if trimmed > 0 {
+        tracing::info!("自动清理了 {trimmed} 条旧的已完成任务");
+    }
+    serde_json::to_string_pretty(&records)
+}
+
+/// 把已序列化的 JSON 文本原子写入 `path`（父目录缺失时补建）。
+///
+/// # Errors
+///
+/// 写文件失败；父目录创建失败只记日志、不中断写入。
+pub fn write_json(path: &Path, json: &str) -> anyhow::Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).ok();
     }
-    write_atomically(path, content.as_bytes())?;
+    super::write_atomically(path, json.as_bytes())?;
     Ok(())
 }
 
@@ -77,7 +107,7 @@ pub fn trim_completed(tasks: &mut Vec<DownloadTaskRecord>) -> usize {
 /// # Examples
 ///
 /// ```ignore
-/// let tasks = state.tasks.lock().unwrap();
+/// let tasks = state.tasks.lock().expect("tasks lock not poisoned");
 /// save_with_trim(&PathBuf::from(".tasks.json"), &tasks)?;
 /// ```
 ///
@@ -86,12 +116,8 @@ pub fn trim_completed(tasks: &mut Vec<DownloadTaskRecord>) -> usize {
 /// - `std::io::Error` — 序列化或写文件失败
 #[tracing::instrument(name = "db::tasks::save_with_trim", skip_all, fields(path = %path.display(), count = tasks.len()))]
 pub fn save_with_trim(path: &Path, tasks: &[DownloadTask]) -> anyhow::Result<()> {
-    let mut records: Vec<DownloadTaskRecord> = tasks.iter().map(DownloadTask::to_record).collect();
-    let trimmed = trim_completed(&mut records);
-    if trimmed > 0 {
-        tracing::info!("自动清理了 {trimmed} 条旧的已完成任务");
-    }
-    save_records(path, &records)
+    let json = tasks_json_with_trim(tasks)?;
+    write_json(path, &json)
 }
 
 #[cfg(test)]
@@ -189,7 +215,7 @@ mod tests {
     #[test]
     fn load_missing_file_returns_empty() {
         let tasks = load(Path::new("/definitely/does/not/exist.json"));
-        assert!(tasks.is_empty());
+        assert!(tasks.is_empty(), "缺失文件应返回空列表");
     }
 
     #[test]
@@ -200,7 +226,7 @@ mod tests {
             sample_rec(3, Some(Err(FinishedReason::UserCancelled))),
         ];
         let trimmed = trim_completed(&mut tasks);
-        assert_eq!(trimmed, 0); // 只有 2 条已完成，不需要清理
+        assert_eq!(trimmed, 0, "只有 2 条已完成，不需要清理");
         assert_eq!(tasks.len(), 3);
     }
 
@@ -221,16 +247,19 @@ mod tests {
         let before = tasks.len();
         let trimmed = trim_completed(&mut tasks);
 
-        assert_eq!(trimmed, 200); // 1200 - 1000 = 200
-        assert_eq!(tasks.len(), before - 200);
+        assert_eq!(trimmed, 200, "1200 条已完成 - 上限 1000 = 清理 200");
+        assert_eq!(tasks.len(), before - 200, "清理后总数应同步减少");
         // 运行中的任务应该保留
-        assert!(tasks.iter().any(|t| t.id == 1201));
+        assert!(
+            tasks.iter().any(|t| t.id == 1201),
+            "运行中的任务不受清理影响"
+        );
         // 最新的 1000 条已完成任务应该保留（id 201..=1200）
-        assert!(tasks.iter().any(|t| t.id == 1200));
-        assert!(tasks.iter().any(|t| t.id == 201));
+        assert!(tasks.iter().any(|t| t.id == 1200), "最新的应保留");
+        assert!(tasks.iter().any(|t| t.id == 201), "第 1000 条应保留");
         // 最旧的 200 条应该被删除
-        assert!(!tasks.iter().any(|t| t.id == 1));
-        assert!(!tasks.iter().any(|t| t.id == 200));
+        assert!(!tasks.iter().any(|t| t.id == 1), "最旧的 200 条应删除");
+        assert!(!tasks.iter().any(|t| t.id == 200), "第 200 条应删除");
     }
 
     #[test]
@@ -245,7 +274,7 @@ mod tests {
             .collect();
 
         let trimmed = trim_completed(&mut tasks);
-        assert_eq!(trimmed, 0);
+        assert_eq!(trimmed, 0, "未超上限时不应清理");
         assert_eq!(tasks.len(), 50);
     }
 

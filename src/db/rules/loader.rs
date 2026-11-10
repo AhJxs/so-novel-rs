@@ -5,13 +5,12 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use crate::core::sources as core_sources;
-use crate::models::Rule;
-use crate::utils::lang::detect_system_lang;
-
 use super::apply_default::apply_default_rule;
 use super::error::RulesError;
+use crate::core::sources as core_sources;
 use crate::db::SourcesConfig;
+use crate::models::Rule;
+use crate::utils::lang::detect_system_lang;
 
 /// 加载一个规则路径 (文件或目录): `.json` / `.json5` 文件直接解析; 目录递归查找 `*.json` / `*.json5`
 /// (跳过 `rule-template.json5` 模板)。加载完统一 [`apply_default_rule`] 填默认值并按顺序赋自增 ID。
@@ -160,8 +159,9 @@ fn apply_disabled_urls(rules: &mut [Rule], disabled_urls: &HashSet<String>) {
 #[cfg(test)]
 mod tests {
     #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
-    use super::*;
     use std::path::PathBuf;
+
+    use super::*;
 
     fn repo_rules_dir() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))

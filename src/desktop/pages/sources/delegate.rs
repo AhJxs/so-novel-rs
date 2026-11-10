@@ -1,20 +1,19 @@
 //! `SourcesDelegate`: `gpui_kit::component::list::List` 的 delegate，持有 page handle + 当前页 (index, Rule) + health map。
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
-use gpui_kit::component::list::{ListItem, ListState};
-use gpui_kit::component::{ActiveTheme as _, IndexPath, list::ListDelegate};
+use gpui_kit::component::list::{ListDelegate, ListItem, ListState};
+use gpui_kit::component::{ActiveTheme as _, IndexPath};
 use gpui_kit::{App, Context, Entity, ParentElement, Styled, Window, px};
 
+use super::{SourcesPage, row};
 use crate::crawler::health::SourceHealth;
 use crate::models::Rule;
 
-use super::SourcesPage;
-use super::row;
-
 pub(super) struct SourcesDelegate {
-    pub(super) page_items: Vec<(usize, Rule)>,
-    pub(super) health: HashMap<i32, SourceHealth>,
+    pub(super) page_items: Vec<(usize, Arc<Rule>)>,
+    pub(super) health: Arc<HashMap<i32, SourceHealth>>,
     pub(super) selected_index: Option<IndexPath>,
     pub(super) page_handle: Entity<SourcesPage>,
 }
@@ -23,7 +22,7 @@ impl SourcesDelegate {
     pub(super) fn new(page_handle: Entity<SourcesPage>) -> Self {
         Self {
             page_items: Vec::new(),
-            health: HashMap::new(),
+            health: Arc::new(HashMap::new()),
             selected_index: None,
             page_handle,
         }
@@ -43,7 +42,8 @@ impl ListDelegate for SourcesDelegate {
         _window: &mut Window,
         cx: &mut Context<ListState<Self>>,
     ) -> Option<Self::Item> {
-        let (global_index, rule) = self.page_items.get(ix.row)?.clone();
+        // 借用当前页条目即可 —— 渲染只读，不复制规则。
+        let (global_index, rule) = self.page_items.get(ix.row)?;
         let health_status = self.health.get(&rule.id).cloned();
         Some(
             ListItem::new(ix)
@@ -51,8 +51,8 @@ impl ListDelegate for SourcesDelegate {
                 .rounded(cx.theme().radius)
                 .mb(px(4.))
                 .child(row::render(
-                    global_index,
-                    &rule,
+                    *global_index,
+                    rule,
                     health_status.as_ref(),
                     self.page_handle.clone(),
                     &*cx,

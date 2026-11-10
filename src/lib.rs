@@ -15,17 +15,19 @@
 // ---------------------------------------------------------------------------
 
 #![deny(unsafe_code)]
-#![allow(missing_docs)]
+#![deny(clippy::unwrap_used)]
 #![warn(dead_code)]
 #![warn(invalid_value)]
 #![warn(rustdoc::broken_intra_doc_links)]
 #![warn(clippy::pedantic, clippy::nursery)]
-#![warn(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+#![warn(clippy::expect_used, clippy::panic)]
 #![warn(clippy::todo, clippy::unimplemented)]
+#![warn(clippy::wildcard_imports)]
+#![warn(clippy::missing_panics_doc)]
+// 测试模块普遍使用 `use super::*`；只在整个测试构建中放行，不影响生产代码。
+#![cfg_attr(test, allow(clippy::wildcard_imports))]
 #![allow(
     clippy::module_name_repetitions,
-    clippy::must_use_candidate,
-    clippy::missing_errors_doc,
     clippy::cast_possible_truncation,
     clippy::cast_lossless,
     clippy::cast_sign_loss,

@@ -1,15 +1,16 @@
-//! 单章分页正文抓取: [`fetch_paginated_content`] 循环抓 + 拼 + 判定终止。入口 [`super::parse::parse_chapter`]。
+//! 单章分页正文抓取: `fetch_paginated_content` 循环抓 + 拼 + 判定终止。入口 [`super::parse::parse_chapter`]。
+
+use std::sync::LazyLock;
+use std::time::Instant;
 
 use regex::Regex;
 use reqwest::Client;
-use scraper::Html;
-use std::sync::LazyLock;
-
-use crate::http::abs_url;
-use crate::models::{ContentType, Rule, RuleChapter};
-use crate::parser::dom::select_and_invoke_js;
+use scraper::{ElementRef, Html};
 
 use super::parse::{ChapterError, fetch_with_cf_fallback};
+use crate::http::absolute_url;
+use crate::models::{ContentType, Rule, RuleChapter};
+use crate::parser::dom::select_and_invoke_js;
 
 /// 循环抓分页正文 + 拼接 + 终止判定。
 ///
@@ -28,7 +29,7 @@ pub(super) async fn fetch_paginated_content(
     let mut buf = String::new();
     let mut current_url = start_url.to_string();
     let mut pages = 0usize;
-    let started = std::time::Instant::now();
+    let started = Instant::now();
 
     for _ in 0..50 {
         let html =
@@ -53,7 +54,7 @@ pub(super) async fn fetch_paginated_content(
             } else {
                 crate::parser::cache::cached_selector(&chapter_rule.next_page).ok()
             };
-            let next_els: Vec<scraper::ElementRef<'_>> = next_sel
+            let next_els: Vec<ElementRef<'_>> = next_sel
                 .as_ref()
                 .map_or_else(Vec::new, |s| document.select(s).collect());
 
@@ -100,7 +101,7 @@ enum NextStep {
 /// `chapter.nextPage` 选元素的 `href`。
 pub(super) fn resolve_next_url(
     document: &Html,
-    next_els: &[scraper::ElementRef<'_>],
+    next_els: &[ElementRef<'_>],
     chapter_rule: &RuleChapter,
     current_url: &str,
 ) -> Result<Option<String>, ChapterError> {
@@ -110,13 +111,13 @@ pub(super) fn resolve_next_url(
         if v.is_empty() {
             return Ok(None);
         }
-        return Ok(abs_url(current_url, &v));
+        return Ok(absolute_url(current_url, &v));
     }
     let Some(first) = next_els.first() else {
         return Ok(None);
     };
     let href = first.value().attr("href").unwrap_or_default();
-    Ok(abs_url(current_url, href))
+    Ok(absolute_url(current_url, href))
 }
 
 /// 终止判定。两层:
@@ -124,7 +125,7 @@ pub(super) fn resolve_next_url(
 /// 2. 兜底: URL 不再像 `*[-_]数字.html`, 且按钮文本含 `下一章/没有了/>>/书末页`。
 pub(super) fn is_last_page(
     candidate: Option<&str>,
-    next_els: &[scraper::ElementRef<'_>],
+    next_els: &[ElementRef<'_>],
     chapter_rule: &RuleChapter,
 ) -> bool {
     let Some(next_url) = candidate else {
@@ -170,10 +171,11 @@ static NEXT_CHAPTER_TEXT_RE: LazyLock<Regex> =
 #[cfg(test)]
 mod tests {
     #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
+    use scraper::Selector;
+
     use super::*;
     use crate::config::LangType;
     use crate::db::apply_default_rule;
-    use scraper::Selector;
 
     fn rule_22biqu_chapter() -> Rule {
         let mut r: Rule = serde_json::from_str(

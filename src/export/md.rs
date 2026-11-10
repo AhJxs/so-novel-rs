@@ -9,8 +9,9 @@ use crate::export::exporter::{
     ExportError, Exporter, sort_chapter_files, strip_html_tags, unique_path,
 };
 use crate::models::Book;
-use crate::utils::fs::sanitize_filename;
+use crate::utils::fs;
 
+/// 把章节缓存目录合并成单个 Markdown 文件。
 pub struct MdExporter;
 
 impl Exporter for MdExporter {
@@ -50,7 +51,7 @@ impl Exporter for MdExporter {
         }
 
         std::fs::create_dir_all(out_dir)?;
-        let out_name = sanitize_filename(&format!("{}({}).md", book.book_name, book.author));
+        let out_name = fs::sanitize_filename(&format!("{}({}).md", book.book_name, book.author));
         let out_path = unique_path(out_dir, &out_name);
 
         // BufWriter 流式写入, 避免把整本书拼成一个大 String (Markdown 是纯 UTF-8, 无需编码转换)。
@@ -108,13 +109,12 @@ mod tests {
     #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
     use std::path::PathBuf;
 
+    use super::super::md::MdExporter;
     use crate::config::ExportFormat;
     use crate::export::exporter::{
         ExportError, Exporter, RenderedChapter, exporter_for, write_chapter_files,
     };
     use crate::models::Book;
-
-    use super::super::md::MdExporter;
 
     fn sample_book() -> Book {
         Book {

@@ -3,18 +3,17 @@
 //! 返回 `(Book, Vec<Chapter>)`, 供 UI 层展示章节列表、让用户选择范围后再调 [`super::download::download_chapters`]。
 //! 详情 + 目录都包重试 (`retry_with_backoff`), 一次瞬态 HTTP 抖动不应让整本下载失败。
 
-use std::sync::Arc;
 use std::time::Duration;
 
+use reqwest::Client;
 use thiserror::Error;
-
-use crate::config::AppConfig;
-use crate::models::{Book, Chapter, Source};
-use crate::parser::{BookError, SelectError, TocError, parse_book_detail, parse_toc};
-use crate::utils::zhconv::convert_book_meta;
 
 use super::download_options::CancelToken;
 use super::retry::retry_with_backoff;
+use crate::config::AppConfig;
+use crate::models::{Book, Chapter, Rule, Source};
+use crate::parser::{BookError, SelectError, TocError, parse_book_detail, parse_toc};
+use crate::utils::zhconv::convert_book_meta_in_place;
 
 /// 调度层错误。
 ///
@@ -40,19 +39,32 @@ pub enum CrawlerError {
     /// 目录解析失败 (HTTP / CF / Parse / Selector 4 子类)。
     #[error("目录解析失败: {0}")]
     Toc(#[from] TocError),
+    /// 目录解析成功但章节数为 0，整本无法下载。
     #[error("章节抓取全部失败 — 目录返回 0 章")]
     EmptyToc,
+    /// 构造本书源专用 HTTP 客户端失败。
     #[error("HTTP 客户端构造失败: {0}")]
     Client(String),
     /// 标准库 IO 错误 (写盘 / `create_dir_all` 等)。
     #[error("IO 错误: {0}")]
     Io(#[from] std::io::Error),
+    /// 导出阶段失败（写盘 / 排版）。
     #[error("导出失败: {0}")]
     Export(#[from] crate::export::ExportError),
+    /// 用户主动取消，未产出文件。
     #[error("用户取消")]
     Cancelled,
+    /// 请求的章节范围非法（越界或起止颠倒）。
     #[error("章节范围非法: {0}")]
     InvalidRange(String),
+}
+
+/// 阶段一结果：书籍元信息 + 目录章节列表。
+pub struct ResolvedBook {
+    /// 详情页解析并完成简繁转换的书籍元信息。
+    pub book: Book,
+    /// 目录解析出的章节列表。
+    pub chapters: Vec<Chapter>,
 }
 
 /// 阶段一: 获取书籍元信息 + 章节列表 (不开始下载)。
@@ -60,7 +72,7 @@ pub enum CrawlerError {
 /// # Examples
 ///
 /// ```ignore
-/// let (book, chapters) = resolve_book(&cfg, &client, &source, &url, &cancel).await?;
+/// let ResolvedBook { book, chapters } = resolve_book(&cfg, &client, &source, &url, &cancel).await?;
 /// println!("{}: {} 章", book.book_name, chapters.len());
 /// ```
 ///
@@ -79,11 +91,11 @@ pub enum CrawlerError {
 )]
 pub async fn resolve_book(
     cfg: &AppConfig,
-    client: &reqwest::Client,
+    client: &Client,
     source: &Source,
     book_url: &str,
     cancel: &CancelToken,
-) -> Result<(Book, Vec<Chapter>), CrawlerError> {
+) -> Result<ResolvedBook, CrawlerError> {
     let cf_bypass = if cfg.global.cf_bypass.trim().is_empty() {
         None
     } else {
@@ -97,38 +109,25 @@ pub async fn resolve_book(
         Some(cfg.cookie.qidian_cookie.as_str())
     };
 
-    let rule = source.rule.clone();
-    let book_url_owned = book_url.to_string();
-    let cf_bypass_owned: Option<Arc<str>> = cf_bypass.map(Arc::from);
-    let qidian_cookie_owned = qidian_cookie.map(String::from);
-    let eff = source.effective_crawl.clone();
+    // 重试闭包只捕获引用 (全部是 Copy)，不必为每次 attempt clone Rule / URL / cookie。
+    let rule: &Rule = &source.rule;
+    let eff = &source.effective_crawl;
     let max_attempts = if cfg.crawl.enable_retry {
         eff.max_retries
     } else {
         0
     };
-    // 两次 retry 各需一份 eff (sleep_fn 是 move 闭包)。
-    let eff_for_book = eff.clone();
-    let eff_for_toc = eff;
 
-    let book = retry_with_backoff(
-        |_attempt| {
-            let client = client.clone();
-            let rule = rule.clone();
-            let url = book_url_owned.clone();
-            let cf = cf_bypass_owned.as_ref().map(Arc::clone);
-            let qc = qidian_cookie_owned.clone();
-            let cancel = cancel.clone();
-            async move {
-                if cancel.is_cancelled() {
-                    return Err(BookError::Http("cancelled".to_string()));
-                }
-                parse_book_detail(&client, &rule, &url, cf.as_deref(), qc.as_deref()).await
+    let mut book = retry_with_backoff(
+        |_attempt| async move {
+            if cancel.is_cancelled() {
+                return Err(BookError::Http("cancelled".to_string()));
             }
+            parse_book_detail(client, rule, book_url, cf_bypass, qidian_cookie).await
         },
         max_attempts,
         move |_attempt| {
-            let dur = Duration::from_millis(crate::http::random_retry_interval_ms(&eff_for_book));
+            let dur = Duration::from_millis(crate::http::random_retry_interval_ms(eff));
             async move {
                 tokio::time::sleep(dur).await;
             }
@@ -142,24 +141,17 @@ pub async fn resolve_book(
     }
 
     let toc: Vec<Chapter> = retry_with_backoff(
-        |_attempt| {
-            let client = client.clone();
-            let rule = rule.clone();
-            let url = book_url_owned.clone();
-            let cf = cf_bypass_owned.as_ref().map(Arc::clone);
-            let cancel = cancel.clone();
-            async move {
-                if cancel.is_cancelled() {
-                    return Err(TocError::Selector(SelectError::JsFailed(
-                        "cancelled".to_string(),
-                    )));
-                }
-                parse_toc(&client, &rule, &url, cf.as_deref()).await
+        |_attempt| async move {
+            if cancel.is_cancelled() {
+                return Err(TocError::Selector(SelectError::JsFailed(
+                    "cancelled".to_string(),
+                )));
             }
+            parse_toc(client, rule, book_url, cf_bypass).await
         },
         max_attempts,
         move |_attempt| {
-            let dur = Duration::from_millis(crate::http::random_retry_interval_ms(&eff_for_toc));
+            let dur = Duration::from_millis(crate::http::random_retry_interval_ms(eff));
             async move {
                 tokio::time::sleep(dur).await;
             }
@@ -172,7 +164,10 @@ pub async fn resolve_book(
     // 导出器 (EPUB metadata + 文件名 + TXT 首页 + HTML zip 名) 全部共享同一结果, 避免各自重写 + drift。
     // 目标语言从界面语言 (`Language`) 推 (English → ZhCn 兜底)。
     let target_lang = cfg.global.language.to_book_target_lang();
-    let book = convert_book_meta(&book, &source.rule.language, &target_lang);
+    convert_book_meta_in_place(&mut book, &source.rule.language, &target_lang);
 
-    Ok((book, toc))
+    Ok(ResolvedBook {
+        book,
+        chapters: toc,
+    })
 }

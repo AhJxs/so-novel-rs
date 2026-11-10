@@ -2,47 +2,51 @@
 
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Instant;
 
 use tokio::sync::mpsc;
 use tracing::Instrument;
 
-use crate::config::AppConfig;
-use crate::crawler::{
-    CancelToken, CrawlerError, DownloadOptions, Progress, download_book, download_chapters,
-    resolve_book,
-};
-use crate::desktop::model::search_state::TocState;
-use crate::http::HttpClients;
-use crate::models::Source;
-use crate::models::{Book, Chapter, Rule, SearchResult};
-
 use super::super::events::WakeupHandle;
 use super::super::search_state::TocEvent;
 use super::super::trace::{TraceId, sub};
+use crate::config::AppConfig;
 use crate::core::DownloadTask;
+use crate::crawler::{
+    CancelToken, CrawlerError, DownloadOptions, Progress, ResolvedBook, download_book,
+    download_chapters, resolve_book,
+};
+use crate::desktop::model::search_state::TocState;
+use crate::http::HttpClients;
+use crate::models::{Book, Chapter, Rule, SearchResult, Source};
 use crate::utils::time::now_unix_secs;
 
 /// spawn 共享上下文: 提取 `rules` / `config` / `http` / `runtime`,
 /// 消除各 `spawn_*` 的重复参数列表。
-pub struct OpsCtx<'a> {
-    pub rules: &'a [Rule],
-    pub config: &'a AppConfig,
-    pub http: Arc<HttpClients>,
-    pub runtime: &'a tokio::runtime::Runtime,
+pub struct OpsContext<'app> {
+    pub rules: &'app [Arc<Rule>],
+    pub config: &'app AppConfig,
+    /// 只在本层同步使用：每个 `spawn` 前用 `for_rule` 取出 owned client。
+    pub http: &'app HttpClients,
+    pub runtime: &'app tokio::runtime::Runtime,
     /// 唤醒信号 sender: producer 写入 mpsc 后 `notify()`, 让 `drain_loop` 立即排空。
-    pub wakeup: &'a WakeupHandle,
+    pub wakeup: &'app WakeupHandle,
 }
 
 /// 派一个 TOC 预取任务（获取元数据 + 章节列表, 不开始下载）, 返回接收端。
 pub fn spawn_resolve_toc(
-    ctx: &OpsCtx<'_>,
+    ctx: &OpsContext<'_>,
     target: &SearchResult,
 ) -> mpsc::UnboundedReceiver<TocEvent> {
     let (tx, rx) = mpsc::unbounded_channel::<TocEvent>();
 
-    let rule = ctx.rules.iter().find(|r| r.id == target.source_id).cloned();
+    // 任务不借用 ctx：规则与 client 都预先取成 owned 值。
+    let rule_and_client = ctx
+        .rules
+        .iter()
+        .find(|r| r.id == target.source_id)
+        .map(|r| (Arc::clone(r), ctx.http.for_rule(r)));
     let cfg = ctx.config.clone();
-    let http = Arc::clone(&ctx.http);
     let book_url = target.url.clone();
     let source_id = target.source_id;
 
@@ -59,13 +63,12 @@ pub fn spawn_resolve_toc(
 
     ctx.runtime.spawn(
         async move {
-            let started = std::time::Instant::now();
-            let state = if let Some(rule) = rule {
+            let started = Instant::now();
+            let state = if let Some((rule, client)) = rule_and_client {
                 let source = Source::from(rule, &cfg);
                 let cancel = CancelToken::new();
-                let client = http.for_rule(&source.rule);
                 match resolve_book(&cfg, &client, &source, &book_url, &cancel).await {
-                    Ok((book, chapters)) => {
+                    Ok(ResolvedBook { book, chapters }) => {
                         tracing::info!(
                             book = %book.book_name,
                             chapters = chapters.len(),
@@ -104,7 +107,7 @@ pub fn spawn_resolve_toc(
 fn log_download_outcome(
     result: Result<PathBuf, CrawlerError>,
     book_name: &str,
-    started: std::time::Instant,
+    started: Instant,
     label: &str,
     tx_for_failure: &mpsc::UnboundedSender<Progress>,
 ) {
@@ -143,7 +146,7 @@ fn log_download_outcome(
 /// 派一个指定章节范围的下载任务, 跳过 resolve 阶段直接下载。
 /// `chapters` 已由调用方按用户选择过滤过范围。
 pub fn spawn_download_range(
-    ctx: &OpsCtx<'_>,
+    ctx: &OpsContext<'_>,
     next_task_id: u64,
     target: SearchResult,
     book: Book,
@@ -153,17 +156,22 @@ pub fn spawn_download_range(
     let (tx, rx) = mpsc::unbounded_channel::<Progress>();
     let cancel = CancelToken::new();
 
-    let rule = ctx.rules.iter().find(|r| r.id == target.source_id).cloned();
+    let rule_and_client = ctx
+        .rules
+        .iter()
+        .find(|r| r.id == target.source_id)
+        .map(|r| (Arc::clone(r), ctx.http.for_rule(r)));
     let cfg = ctx.config.clone();
-    let http = Arc::clone(&ctx.http);
     let book_url = target.url.clone();
     let cancel_for_task = cancel.clone();
     let tx_for_task = tx.clone();
 
     let total = chapters.len();
-    let book_for_meta = book.clone();
+    // 书籍元信息在进度事件、任务字段与下载流程之间共享同一份 `Arc<Book>`。
+    let book = Arc::new(book);
+    let book_for_meta = Arc::clone(&book);
     let _ = tx_for_task.send(Progress::BookResolved {
-        book: Box::new(book.clone()),
+        book: Arc::clone(&book),
         total_chapters: total,
     });
     let wakeup_guard = ctx.wakeup.clone();
@@ -181,7 +189,7 @@ pub fn spawn_download_range(
         total_chapters = total,
     );
     let span_for_instrument = span;
-    let started = std::time::Instant::now();
+    let started = Instant::now();
     let book_name = target.book_name.clone();
 
     drop(tx);
@@ -190,7 +198,7 @@ pub fn spawn_download_range(
 
     ctx.runtime.spawn(
         async move {
-            let Some(rule) = rule else {
+            let Some((rule, client)) = rule_and_client else {
                 let _ = tx_for_task.send(Progress::Cancelled);
                 tracing::warn!(
                     book = %book_name,
@@ -201,7 +209,6 @@ pub fn spawn_download_range(
                 return;
             };
             let source = Source::from(rule, &cfg);
-            let client = http.for_rule(&source.rule);
             let tx_for_failure = tx_for_task.clone();
             let notify: std::option::Option<
                 std::sync::Arc<dyn Fn() + std::marker::Send + std::marker::Sync>,
@@ -239,7 +246,7 @@ pub fn spawn_download_range(
 
 /// 派一个新的下载任务到后台。返回 `(task_id, task)`。
 pub fn spawn_download(
-    ctx: &OpsCtx<'_>,
+    ctx: &OpsContext<'_>,
     next_task_id: u64,
     target: SearchResult,
 ) -> (u64, DownloadTask) {
@@ -247,9 +254,12 @@ pub fn spawn_download(
     let (tx, rx) = mpsc::unbounded_channel::<Progress>();
     let cancel = CancelToken::new();
 
-    let rule = ctx.rules.iter().find(|r| r.id == target.source_id).cloned();
+    let rule_and_client = ctx
+        .rules
+        .iter()
+        .find(|r| r.id == target.source_id)
+        .map(|r| (Arc::clone(r), ctx.http.for_rule(r)));
     let cfg = ctx.config.clone();
-    let http = Arc::clone(&ctx.http);
     let book_url = target.url.clone();
     let cancel_for_task = cancel.clone();
     let tx_for_task = tx.clone();
@@ -264,13 +274,13 @@ pub fn spawn_download(
         %book_url,
     );
     let span_for_instrument = span;
-    let started = std::time::Instant::now();
+    let started = Instant::now();
     let book_name = target.book_name.clone();
     let wakeup_inner = ctx.wakeup.clone();
 
     ctx.runtime.spawn(
         async move {
-            let Some(rule) = rule else {
+            let Some((rule, client)) = rule_and_client else {
                 let _ = tx_for_task.send(Progress::Cancelled);
                 tracing::warn!(
                     book = %book_name,
@@ -281,7 +291,6 @@ pub fn spawn_download(
                 return;
             };
             let source = Source::from(rule, &cfg);
-            let client = http.for_rule(&source.rule);
             // 留一个 sender 副本给失败路径发 Progress::Failed（tx_for_task 会 move 进 opts）。
             let tx_for_failure = tx_for_task.clone();
             let notify: std::option::Option<

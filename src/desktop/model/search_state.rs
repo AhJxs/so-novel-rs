@@ -1,14 +1,18 @@
+//! 搜索页运行时状态：结果列表、详情/目录预取缓存、封面缓存与各后台通道。
+
 use std::collections::{HashMap, HashSet};
 use std::num::NonZeroUsize;
+use std::sync::Arc;
+use std::time::Duration;
+
+use lru::LruCache;
+use reqwest::Client;
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
 
-use lru::LruCache;
-
+use super::cover::{CoverEntry, cover_entry_from_bytes};
 use crate::core::{DrainOutcome, try_drain_all};
 use crate::models::{Book, Chapter, SearchResult};
-
-use super::cover::{CoverEntry, cover_entry_from_bytes};
 
 /// 封面结果缓存最大条目数。64 条 ≈ 5-10MB, 让长会话的内存有界
 /// （旧实现是无上限 `HashMap`, 会累积所有查看过的封面）。
@@ -20,50 +24,75 @@ const COVER_CACHE_CAPACITY: NonZeroUsize = match NonZeroUsize::new(64) {
 /// TOC 预取加载状态。
 #[derive(Debug, Clone)]
 pub enum TocState {
+    /// 预取尚未返回。
     Pending,
+    /// 已拿到书籍详情与章节目录。
     Loaded(Box<Book>, Vec<Chapter>),
+    /// 预取失败，附错误文本。
     Failed(String),
 }
 
 /// TOC 预取后台 → UI 通道事件。
 #[derive(Debug)]
 pub struct TocEvent {
+    /// 完成预取的书源 ID。
     pub source_id: i32,
+    /// 该书的详情页 URL，作为缓存 key 的另一半。
     pub url: String,
+    /// 预取结果状态。
     pub state: TocState,
 }
 
 /// 搜索页状态（含后台通道）。
 pub struct SearchState {
+    /// 输入框里当前的关键词。
     pub keyword: String,
     /// `None` = 聚合搜索；`Some(rule_id)` = 仅当前书源。
     pub source_id: Option<i32>,
 
+    /// 上一次真正提交的关键词，用于判断是否重复搜索。
     pub last_keyword: Option<String>,
-    pub results: Vec<SearchResult>,
+    /// 当前展示的搜索结果列表。元素共享 `Arc`，过滤/分页/渲染只搬引用。
+    pub results: Vec<Arc<SearchResult>>,
+    /// 结果集版本号，UI 列表缓存用它作 key 的一部分。
     pub results_version: u64,
     /// 各源搜索状态 (true = 跑完), 让 UI 显示哪个源还在等。
-    pub source_status: Vec<(i32, String, SourceStatus)>,
+    /// 用 `Arc` 快照：渲染时整体 clone 只是 refcount bump，drain 时 `make_mut` 写回。
+    pub source_status: Arc<Vec<(i32, String, SourceStatus)>>,
+    /// 是否有搜索正在进行。
     pub running: bool,
+    /// 最近一次搜索的整体错误。
     pub last_error: Option<String>,
 
     /// 后台搜索通过此通道汇报"单源完成"。
     pub rx: Option<mpsc::UnboundedReceiver<SourceSearchEvent>>,
+    /// 本次搜索预计返回的源数量。
     pub expected: usize,
+    /// 已收到结果的源数量。
     pub received: usize,
 
+    /// 结果列表中当前选中的行下标。
     pub selected: Option<usize>,
+    /// 每个 (源 ID, 书 URL) 的详情加载状态。
     pub detail_cache: HashMap<(i32, String), DetailState>,
+    /// 详情预取的后台通道。
     pub detail_rx: Option<mpsc::UnboundedReceiver<DetailEvent>>,
 
+    /// 搜索结束后是否自动执行结果过滤。
     pub filter_after_done: bool,
 
+    /// 每个 (源 ID, 书 URL) 的目录预取状态。
     pub toc_cache: HashMap<(i32, String), TocState>,
+    /// 目录预取的后台通道。
     pub toc_rx: Option<mpsc::UnboundedReceiver<TocEvent>>,
+    /// 下载章节范围的下界（含）。
     pub chapter_range_start: u32,
+    /// 下载章节范围的上界（含）。
     pub chapter_range_end: u32,
 
+    /// 封面下载任务的发送端。
     pub cover_tx: Option<mpsc::UnboundedSender<CoverEvent>>,
+    /// 封面下载完成的接收端。
     pub cover_rx: Option<mpsc::UnboundedReceiver<CoverEvent>>,
     /// 封面结果缓存; 上限 `COVER_CACHE_CAPACITY`, 切 active rule 时整表 `clear()`。
     pub cover_cache: LruCache<(i32, String), CoverEntry>,
@@ -81,7 +110,7 @@ impl Default for SearchState {
             last_keyword: None,
             results: Vec::new(),
             results_version: 0,
-            source_status: Vec::new(),
+            source_status: Arc::new(Vec::new()),
             running: false,
             last_error: None,
             rx: None,
@@ -107,13 +136,17 @@ impl Default for SearchState {
 /// 详情面板加载状态。
 #[derive(Debug, Clone)]
 pub enum DetailState {
+    /// 详情尚未返回。
     Pending,
+    /// 已拿到书籍详情。
     Loaded(Box<Book>),
+    /// 详情抓取失败，附错误文本。
     Failed(String),
 }
 
 impl DetailState {
     /// 仅当 Loaded 状态可取书；Pending/Failed 返回 None。
+    #[must_use]
     pub fn book(&self) -> Option<&Book> {
         match self {
             Self::Loaded(b) => Some(b),
@@ -125,23 +158,31 @@ impl DetailState {
 /// 详情后台 → UI 通道事件。
 #[derive(Debug)]
 pub struct DetailEvent {
+    /// 完成预取的书源 ID。
     pub source_id: i32,
+    /// 该书的详情页 URL，作为缓存 key 的另一半。
     pub url: String,
+    /// 预取结果状态。
     pub state: DetailState,
 }
 
 /// 封面下载完成事件。后台 HTTP 下载 → UI 构造 `CoverEntry`。
 #[derive(Debug)]
 pub struct CoverEvent {
+    /// 封面所属书源 ID。
     pub source_id: i32,
+    /// 封面图片的 URL。
     pub url: String,
     /// 下载成功：Some(bytes)；失败：None。
     pub bytes: Option<Vec<u8>>,
 }
 
+/// 单个书源在本次聚合搜索中的进度状态。
 #[derive(Debug, Clone)]
 pub enum SourceStatus {
+    /// 请求已派发，结果未回。
     Pending,
+    /// 成功，附该源返回的结果条数。
     Ok(usize),
     /// 错误简短文案
     Err(String),
@@ -150,7 +191,9 @@ pub enum SourceStatus {
 /// 后台聚合搜索向 UI 推送的事件（每源 1 条）。
 #[derive(Debug)]
 pub struct SourceSearchEvent {
+    /// 完成搜索的书源 ID。
     pub source_id: i32,
+    /// 书源显示名，用于状态条与错误归属。
     pub source_name: String,
     /// 单源搜索结果。`AppError` 承载 [`crate::parser::SearchError`] / 任务异常退出;
     /// 调用方用 `e.message()` 拿 i18n 渲染文本。
@@ -176,7 +219,7 @@ impl SearchState {
             let status = match ev.result {
                 Ok(list) => {
                     let n = list.len();
-                    self.results.extend(list);
+                    self.results.extend(list.into_iter().map(Arc::new));
                     SourceStatus::Ok(n)
                 }
                 Err(e) => {
@@ -185,15 +228,14 @@ impl SearchState {
                     SourceStatus::Err(truncated)
                 }
             };
-            if let Some(slot) = self
-                .source_status
+            let source_status = Arc::make_mut(&mut self.source_status);
+            if let Some(slot) = source_status
                 .iter_mut()
                 .find(|(id, _, _)| *id == ev.source_id)
             {
                 slot.2 = status;
             } else {
-                self.source_status
-                    .push((ev.source_id, ev.source_name, status));
+                source_status.push((ev.source_id, ev.source_name, status));
             }
         });
         if self.received >= self.expected && self.expected > 0 {
@@ -280,7 +322,7 @@ impl SearchState {
         &mut self,
         source_id: i32,
         url: &str,
-        client: &reqwest::Client,
+        client: &Client,
         runtime: &Runtime,
     ) {
         let url = url.trim();
@@ -305,16 +347,16 @@ impl SearchState {
 
         let url_owned = url.to_string();
         let source_id_send = source_id;
-        // `client` 借自 caller 不能跨 `.await` move; `reqwest::Client::clone` 是廉价
+        // `client` 借自 caller 不能跨 `.await` move; `Client::clone` 是廉价
         // Arc clone (共享连接池), 正是"跨任务复用"要的语义。
         let client = client.clone();
         runtime.spawn(async move {
             let key_send = (source_id_send, url_owned.clone());
             let referer = crate::http::origin_or_self(&url_owned);
-            let ua = crate::http::ua::random_ua();
+            let ua = crate::http::user_agent::random_user_agent();
             let result: Option<Vec<u8>> = match client
                 .get(&url_owned)
-                .timeout(std::time::Duration::from_secs(15))
+                .timeout(Duration::from_secs(15))
                 .header(reqwest::header::USER_AGENT, ua)
                 .header(reqwest::header::REFERER, referer)
                 .header(reqwest::header::ACCEPT, "image/*,*/*;q=0.8")
@@ -368,10 +410,13 @@ mod search_state_tests {
         assert!(s.cover_in_flight.is_empty());
         assert!(s.cover_rx.is_none());
         assert!(s.cover_tx.is_none());
-        assert!(s.pending_cover_prefetch.is_empty());
+        assert!(
+            s.pending_cover_prefetch.is_empty(),
+            "初始状态不应有待预取的封面请求"
+        );
     }
 
-    fn make_test_client() -> reqwest::Client {
+    fn make_test_client() -> Client {
         crate::http::client::build_async_client(
             &AppConfig::default(),
             &crate::http::client::ClientOptions::default(),
@@ -435,7 +480,7 @@ mod search_state_tests {
         let mut s = SearchState::default();
 
         s.spawn_cover_download(1, "https://example.com/cover.png", &client, &rt);
-        std::thread::sleep(std::time::Duration::from_millis(500));
+        std::thread::sleep(Duration::from_millis(500));
         drop(rt);
     }
 
@@ -450,13 +495,13 @@ mod search_state_tests {
         };
         s.source_id = Some(3);
         s.last_keyword = Some("校花".to_string());
-        s.results.push(SearchResult {
+        s.results.push(Arc::new(SearchResult {
             source_id: 3,
             source_name: "梦书中文".to_string(),
             url: "http://www.mcxs.la/148_148487/".to_string(),
             book_name: "校花别追了".to_string(),
             ..Default::default()
-        });
+        }));
         s.detail_cache.insert(
             (3, "http://www.mcxs.la/148_148487/".to_string()),
             DetailState::Loaded(Box::default()),

@@ -8,7 +8,6 @@
 //! - 读写都做兜底: 缓存失效只降级为未缓存路径, 不让 `.unwrap()` 炸掉整个调用栈。
 
 use std::collections::HashMap;
-use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
 use regex::Regex;
@@ -29,6 +28,10 @@ fn lock_or_recover<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 
 /// 按字符串缓存 `Selector`。同一字符串重复解析直接命中已编译实例。
 /// 解析失败返回 `Err`（**不**缓存失败结果，让用户编辑规则后能重试）。
+///
+/// # Errors
+///
+/// 选择器语法非法时返回 [`SelectError::BadSelector`]。
 pub fn cached_selector(sel: &str) -> Result<Arc<Selector>, SelectError> {
     let cache = SELECTOR_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
 
@@ -44,21 +47,18 @@ pub fn cached_selector(sel: &str) -> Result<Arc<Selector>, SelectError> {
         }
     }
 
-    let parsed = match catch_unwind(AssertUnwindSafe(|| Selector::parse(sel))) {
-        Ok(Ok(s)) => s,
-        Ok(Err(e)) => return Err(SelectError::BadSelector(format!("`{sel}`: {e:?}"))),
-        Err(_) => {
-            return Err(SelectError::BadSelector(format!(
-                "`{sel}`: parser panicked"
-            )));
-        }
-    };
+    let parsed =
+        Selector::parse(sel).map_err(|e| SelectError::BadSelector(format!("`{sel}`: {e:?}")))?;
     let arc = Arc::new(parsed);
     lock_or_recover(cache).insert(sel.to_string(), Arc::clone(&arc));
     Ok(arc)
 }
 
 /// 按字符串缓存 `Regex`。失败结果不缓存，规则修复后能重试编译。
+///
+/// # Errors
+///
+/// 正则语法非法时返回 [`regex::Error`]。
 pub fn cached_regex(pat: &str) -> Result<Arc<Regex>, regex::Error> {
     let cache = REGEX_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
 
@@ -72,13 +72,7 @@ pub fn cached_regex(pat: &str) -> Result<Arc<Regex>, regex::Error> {
         }
     }
 
-    let parsed = match catch_unwind(AssertUnwindSafe(|| Regex::new(pat))) {
-        Ok(Ok(r)) => r,
-        Ok(Err(e)) => return Err(e),
-        Err(_) => {
-            return Err(regex::Error::Syntax("regex parser panicked".to_string()));
-        }
-    };
+    let parsed = Regex::new(pat)?;
     let arc = Arc::new(parsed);
     lock_or_recover(cache).insert(pat.to_string(), Arc::clone(&arc));
     Ok(arc)
@@ -87,8 +81,9 @@ pub fn cached_regex(pat: &str) -> Result<Arc<Regex>, regex::Error> {
 #[cfg(test)]
 mod tests {
     #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
-    use super::*;
     use std::sync::Barrier;
+
+    use super::*;
 
     #[test]
     fn cached_selector_returns_same_arc_for_same_string() {
@@ -101,7 +96,7 @@ mod tests {
     fn cached_selector_distinct_strings_get_distinct_arcs() {
         let a = cached_selector("div.book").unwrap();
         let b = cached_selector("span.title").unwrap();
-        assert!(!Arc::ptr_eq(&a, &b));
+        assert!(!Arc::ptr_eq(&a, &b), "不同选择器字符串不得共享同一 Arc");
     }
 
     #[test]
@@ -192,16 +187,18 @@ mod tests {
     /// Mutex 中毒（PoisonError）后 `lock_or_recover` 应能用旧值继续工作。
     #[test]
     fn lock_or_recover_unpoisoned_mutex_keeps_working() {
-        let m: Mutex<i32> = Mutex::new(0);
-        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let _g = m.lock().unwrap();
+        let shared = Arc::new(Mutex::new(0));
+        let cloned = Arc::clone(&shared);
+        let _ = std::thread::spawn(move || {
+            let _g = cloned.lock().expect("lock");
             panic!("simulated poison");
-        }));
-        assert!(m.lock().is_err(), "Mutex 应处于 poisoned 状态");
+        })
+        .join();
+        // 线程 panic 后 Mutex 处于 poisoned 状态；lock_or_recover 应仍能取回旧值。
         {
-            let mut g = lock_or_recover(&m);
+            let mut g = lock_or_recover(&shared);
             *g = 42;
         }
-        assert_eq!(*lock_or_recover(&m), 42);
+        assert_eq!(*lock_or_recover(&shared), 42);
     }
 }

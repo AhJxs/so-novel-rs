@@ -3,34 +3,34 @@
 //! 调用方收敛为 `select_sources(&rules, &cfg, source_id)` + `cf_bypass(&cfg)` +
 //! `effective_limit(limit, &cfg)`。
 //!
-//! `select_sources` 以 `&[Rule]` 入参并要求传入**完整**规则列表，内部再判断
+//! `select_sources` 以 `&[Arc<Rule>]` 入参并要求传入**完整**规则列表，内部再判断
 //! `is_search_enabled`；这样 core 不需要知道调用方是否已预过滤。
 
-use crate::config::AppConfig;
-use crate::models::{Rule, Source};
+use std::sync::Arc;
 
 pub use super::config_helpers::cf_bypass;
+use crate::config::AppConfig;
+use crate::models::{Rule, Source};
 
 /// 选书源。
 ///
 /// `source_id = Some(id)` → 精确按 id 找且**不**检查 disabled（上层决定报"已禁用"还是 404，找不到返回空 vec）；
 /// `None` → 按 [`Rule::is_search_enabled`] 过滤后转 [`Source`]（`Source::from` 内部 derive EffectiveCrawl，故传全量 `cfg`）。
-pub fn select_sources(rules: &[Rule], cfg: &AppConfig, source_id: Option<i32>) -> Vec<Source> {
+#[must_use]
+pub fn select_sources(rules: &[Arc<Rule>], cfg: &AppConfig, source_id: Option<i32>) -> Vec<Source> {
     source_id.map_or_else(
         || {
             rules
                 .iter()
                 .filter(|r| r.is_search_enabled())
-                .cloned()
-                .map(|r| Source::from(r, cfg))
+                .map(|r| Source::from(Arc::clone(r), cfg))
                 .collect()
         },
         |id| {
             rules
                 .iter()
                 .find(|r| r.id == id)
-                .cloned()
-                .map(|r| Source::from(r, cfg))
+                .map(|r| Source::from(Arc::clone(r), cfg))
                 .into_iter()
                 .collect()
         },
@@ -41,6 +41,7 @@ pub fn select_sources(rules: &[Rule], cfg: &AppConfig, source_id: Option<i32>) -
 /// `cfg.source.search_limit`（`Option<i32>`，≤0 视作未设）→ `None`（调用方兜底：书源自带 / 不限）。
 ///
 /// query param 的校验属于调用方的输入层，不在此处做。
+#[must_use]
 pub fn effective_limit(explicit: Option<usize>, cfg: &AppConfig) -> Option<usize> {
     explicit.or_else(|| {
         cfg.source
@@ -83,14 +84,14 @@ mod tests {
     #[test]
     fn select_sources_none_returns_all_enabled() {
         let rules = vec![
-            rule(1, false, false), // enabled
-            rule(2, true, false),  // top-level disabled → not enabled
-            rule(3, false, true),  // search.disabled → not enabled
-            rule(4, false, false), // enabled
+            Arc::new(rule(1, false, false)), // enabled
+            Arc::new(rule(2, true, false)),  // top-level disabled → not enabled
+            Arc::new(rule(3, false, true)),  // search.disabled → not enabled
+            Arc::new(rule(4, false, false)), // enabled
         ];
         let cfg = cfg_no_limit();
         let sources = select_sources(&rules, &cfg, None);
-        assert_eq!(sources.len(), 2);
+        assert_eq!(sources.len(), 2, "只应选中 enabled 的源");
         assert_eq!(sources[0].rule.id, 1);
         assert_eq!(sources[1].rule.id, 4);
     }
@@ -98,9 +99,9 @@ mod tests {
     #[test]
     fn select_sources_some_id_filters_by_id() {
         let rules = vec![
-            rule(1, false, false),
-            rule(2, false, false),
-            rule(3, false, false),
+            Arc::new(rule(1, false, false)),
+            Arc::new(rule(2, false, false)),
+            Arc::new(rule(3, false, false)),
         ];
         let cfg = cfg_no_limit();
         let sources = select_sources(&rules, &cfg, Some(2));
@@ -111,7 +112,7 @@ mod tests {
     #[test]
     fn select_sources_some_id_returns_disabled_too() {
         // 用户显式传 id 时不管 disabled，调用方决定怎么处理（4xx 还是 warn）
-        let rules = vec![rule(1, true, true)];
+        let rules = vec![Arc::new(rule(1, true, true))];
         let cfg = cfg_no_limit();
         let sources = select_sources(&rules, &cfg, Some(1));
         assert_eq!(sources.len(), 1);
@@ -119,29 +120,38 @@ mod tests {
 
     #[test]
     fn select_sources_some_id_missing_returns_empty_vec() {
-        let rules = vec![rule(1, false, false)];
+        let rules = vec![Arc::new(rule(1, false, false))];
         let cfg = cfg_no_limit();
         let sources = select_sources(&rules, &cfg, Some(99));
-        assert!(sources.is_empty());
+        assert!(sources.is_empty(), "缺失的 source_id 应返回空结果");
     }
 
     #[test]
     fn select_sources_empty_rules_returns_empty_vec() {
-        let rules: Vec<Rule> = vec![];
+        let rules: Vec<Arc<Rule>> = vec![];
         let cfg = cfg_no_limit();
-        assert!(select_sources(&rules, &cfg, None).is_empty());
-        assert!(select_sources(&rules, &cfg, Some(1)).is_empty());
+        assert!(
+            select_sources(&rules, &cfg, None).is_empty(),
+            "空规则列表 → 空结果"
+        );
+        assert!(
+            select_sources(&rules, &cfg, Some(1)).is_empty(),
+            "空规则列表即使指定 id 也应为空"
+        );
     }
 
     #[test]
     fn select_sources_all_disabled_returns_empty() {
         let rules = vec![
-            rule(1, true, true),
-            rule(2, true, false),
-            rule(3, false, true),
+            Arc::new(rule(1, true, true)),
+            Arc::new(rule(2, true, false)),
+            Arc::new(rule(3, false, true)),
         ];
         let cfg = cfg_no_limit();
-        assert!(select_sources(&rules, &cfg, None).is_empty());
+        assert!(
+            select_sources(&rules, &cfg, None).is_empty(),
+            "全部禁用时结果应为空"
+        );
     }
 
     #[test]

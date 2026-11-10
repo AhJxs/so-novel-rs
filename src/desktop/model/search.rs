@@ -2,8 +2,6 @@
 //!
 //! 全部 thin delegator, 实际逻辑在 `crate::desktop::model::ops::search`.
 
-use std::sync::Arc;
-
 use super::{AppModel, ops};
 
 impl AppModel {
@@ -20,7 +18,7 @@ impl AppModel {
         ops::spawn_search(
             &self.rules,
             &self.config,
-            Arc::clone(&self.http),
+            &self.http,
             self.runtime,
             &self.wakeup,
             &mut self.search,
@@ -32,7 +30,7 @@ impl AppModel {
         ops::select_search_result(
             &self.rules,
             &self.config,
-            Arc::clone(&self.http),
+            &self.http,
             self.runtime,
             &self.wakeup,
             &mut self.search,

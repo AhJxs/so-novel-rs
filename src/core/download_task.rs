@@ -1,6 +1,8 @@
 //! 一个正在跑的下载任务（由搜索页"下载"按钮触发，下载页/任务页消费）。
 
+use std::sync::Arc;
 use std::time::Duration;
+
 use tokio::sync::mpsc;
 
 use crate::crawler::{CancelToken, Progress};
@@ -33,6 +35,7 @@ impl Clone for DownloadTask {
     }
 }
 
+/// 单个下载任务的运行时状态；持久化时裁剪为 [`DownloadTaskRecord`]。
 pub struct DownloadTask {
     /// 任务唯一 id（递增）。
     pub id: u64,
@@ -53,10 +56,15 @@ pub struct DownloadTask {
     /// 任务结束的 unix 时间戳（秒）；None = 还没结束。给 UI 算"耗时"。
     pub finished_at_unix: Option<i64>,
 
-    pub book_meta: Option<Book>,
+    /// 抓取到的书籍详情；详情页失败时为空。与进度事件共享同一份 `Arc`。
+    pub book_meta: Option<Arc<Book>>,
+    /// 目录解析出的章节总数。
     pub total_chapters: usize,
+    /// 已成功下载的章节数。
     pub completed: u32,
+    /// 下载失败的章节数。
     pub failed: u32,
+    /// 最近完成章节的标题，供进度条展示。
     pub last_chapter_title: String,
     /// `Some(Ok(path))` 完成；`Some(Err(reason))` 失败 / 取消；`None` 还在跑。
     pub finished: Option<Result<std::path::PathBuf, FinishedReason>>,
@@ -76,7 +84,7 @@ impl DownloadTask {
                 book,
                 total_chapters,
             } => {
-                self.book_meta = Some(*book);
+                self.book_meta = Some(book);
                 self.total_chapters = total_chapters;
             }
             Progress::ChapterDone { index, title } => {
@@ -149,11 +157,14 @@ impl DownloadTask {
         any
     }
 
+    /// 任务尚未结束（成功、失败、取消均算结束）。
+    #[must_use]
     pub const fn is_running(&self) -> bool {
         self.finished.is_none()
     }
 
     /// 用户主动取消 → cancelled。
+    #[must_use]
     pub const fn is_cancelled(&self) -> bool {
         matches!(
             self.finished.as_ref(),
@@ -164,6 +175,7 @@ impl DownloadTask {
     }
 
     /// 已结束且不是取消 → 失败。
+    #[must_use]
     pub const fn is_failed(&self) -> bool {
         matches!(
             self.finished.as_ref(),
@@ -171,6 +183,8 @@ impl DownloadTask {
         )
     }
 
+    /// 展示用书名：优先详情页抓到的名字，回落到搜索结果的标题。
+    #[must_use]
     pub fn book_name(&self) -> &str {
         self.book_meta
             .as_ref()
@@ -178,6 +192,7 @@ impl DownloadTask {
     }
 
     /// 距开始的实时耗时。
+    #[must_use]
     pub fn elapsed(&self) -> Option<Duration> {
         let started = self.started_at_unix.max(0) as u64;
         if self.is_running() {
@@ -192,13 +207,14 @@ impl DownloadTask {
     }
 
     /// 转成可持久化的 record（不含 rx/cancel）。
+    #[must_use]
     pub fn to_record(&self) -> DownloadTaskRecord {
         DownloadTaskRecord {
             id: self.id,
             origin: self.origin.clone(),
             started_at_unix: self.started_at_unix,
             finished_at_unix: self.finished_at_unix,
-            book_meta: self.book_meta.clone(),
+            book_meta: self.book_meta.as_deref().cloned(),
             total_chapters: self.total_chapters,
             completed: self.completed,
             failed: self.failed,
@@ -207,11 +223,7 @@ impl DownloadTask {
             failures: self
                 .failures
                 .iter()
-                .map(|(i, t, r)| FailureRecord {
-                    index: *i,
-                    title: t.clone(),
-                    reason: r.clone(),
-                })
+                .map(|(i, t, r)| FailureRecord::new(*i, t.clone(), r.clone()))
                 .collect(),
         }
     }
@@ -226,7 +238,7 @@ impl DownloadTask {
             cancelling: false,
             started_at_unix: rec.started_at_unix,
             finished_at_unix: rec.finished_at_unix,
-            book_meta: rec.book_meta,
+            book_meta: rec.book_meta.map(Arc::new),
             total_chapters: rec.total_chapters,
             completed: rec.completed,
             failed: rec.failed,
@@ -239,6 +251,12 @@ impl DownloadTask {
                 .collect(),
             version: 0,
         }
+    }
+}
+
+impl From<DownloadTaskRecord> for DownloadTask {
+    fn from(rec: DownloadTaskRecord) -> Self {
+        Self::from_record(rec)
     }
 }
 
@@ -352,9 +370,12 @@ mod tests {
         })
         .expect("send");
         let any = task.drain();
-        assert!(any);
+        assert!(any, "有待处理事件时 drain 不应返回 false");
         assert_eq!(task.completed, 1, "ChapterDone → completed += 1");
-        assert_eq!(task.last_chapter_title, "第五章");
+        assert_eq!(
+            task.last_chapter_title, "第五章",
+            "ChapterDone 的 title 应写入 last_chapter_title"
+        );
         assert_eq!(task.version, 1, "收到事件 → version += 1");
     }
 
@@ -367,7 +388,11 @@ mod tests {
         })
         .expect("send");
         task.drain();
-        assert!(matches!(task.finished, Some(Ok(ref p)) if p == &out));
+        assert!(
+            matches!(task.finished, Some(Ok(ref p)) if p == &out),
+            "Finished 事件应写入输出路径，实际 {:?}",
+            task.finished
+        );
         assert!(
             task.finished_at_unix.is_some(),
             "Finished 事件应触发 finished_at_unix 兜底"

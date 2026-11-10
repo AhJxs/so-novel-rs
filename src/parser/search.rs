@@ -3,15 +3,19 @@
 //! GET / POST 两种请求; POST 时把 hutool 风格 `data` 模板里的 `%s` 换成关键词构造
 //! form body, 并注入规则里的 `cookies` 头。选 `result` 列表后每条提取 bookName /
 //! author / category / latestChapter / lastUpdateTime / status / wordCount, bookName
-//! 的 href 用 `abs_url` 转绝对。CF 验证页返回 `SearchError::Cloudflare`。
+//! 的 href 用 `absolute_url` 转绝对。CF 验证页返回 `SearchError::Cloudflare`。
 //!
 //! 未实现: 搜索分页合并、完全匹配跳详情页 fallback、简繁转换、聚合搜索。
 
 use anyhow::Result;
 use reqwest::Client;
-use scraper::Html;
+use scraper::{ElementRef, Html};
 use thiserror::Error;
 
+#[cfg(test)]
+use crate::config::AppConfig;
+#[cfg(test)]
+use crate::http::client::{ClientOptions, build_async_client};
 use crate::http::{
     FetchRequest, HttpMethod, build_form_data, fetch, fetch_via_cf_bypass, format_url_query,
     has_cloudflare,
@@ -19,25 +23,27 @@ use crate::http::{
 use crate::models::{ContentType, Rule, SearchResult};
 use crate::parser::dom::{SelectError, select_and_invoke_js_within, split_js};
 
-#[cfg(test)]
-use crate::config::AppConfig;
-#[cfg(test)]
-use crate::http::client::{ClientOptions, build_async_client};
-
+/// 单源搜索错误。
 #[derive(Debug, Error)]
 pub enum SearchError {
+    /// 书源的 `search.disabled` 为 true。
     #[error("书源未启用搜索")]
     SearchDisabled,
+    /// 整个书源被禁用。
     #[error("书源已被禁用")]
     SourceDisabled,
+    /// 搜索请求失败。
     #[error("HTTP 错误: {0}")]
     Http(String),
     #[error(
         "命中 Cloudflare 验证页，未配置 cf-bypass 旁路（请在 config.toml [global] cf-bypass 填地址）: {0}"
     )]
+    /// 命中 Cloudflare 验证页且未配置 bypass。
     Cloudflare(String),
+    /// HTML 结构解析失败。
     #[error("HTML 解析失败: {0}")]
     Parse(String),
+    /// CSS 选择器或 `@js:` 后处理失败。
     #[error("选择器/JS 执行失败: {0}")]
     Selector(#[from] SelectError),
 }
@@ -46,6 +52,11 @@ pub enum SearchError {
 ///
 /// `limit` 为 `None` 表示不限（对应 Java 端 -1）。`cf_bypass_base` 非空时，
 /// 命中 CF 验证页会自动重试外部 bypass 服务，否则直接返回 `SearchError::Cloudflare`。
+///
+/// # Errors
+///
+/// 请求失败、命中未配置旁路的 CF 验证页、HTML 结构不符或选择器 / JS 执行失败时
+/// 返回对应的 [`SearchError`]。
 #[tracing::instrument(
     name = "parser_search_one",
     skip_all,
@@ -142,6 +153,10 @@ pub async fn search_one(
 
 /// 把已经下载好的 HTML 解析为搜索结果列表。
 /// `base_url` 用来解析 href 相对路径（相当于 jsoup `Element.absUrl(...)`）。
+///
+/// # Errors
+///
+/// 规则缺少搜索选择器、HTML 结构不符或选择器 / JS 执行失败时返回 [`SearchError`]。
 pub fn parse_search_results(
     html: &str,
     base_url: &str,
@@ -193,7 +208,7 @@ pub fn parse_search_results(
 
 /// 从单个搜索结果元素中提取字段并推入结果列表。
 fn push_search_result(
-    el: scraper::ElementRef<'_>,
+    el: ElementRef<'_>,
     s: &crate::models::RuleSearch,
     base_url: &str,
     source_id: i32,
@@ -211,7 +226,7 @@ fn push_search_result(
     // href 走 attr_href，相对路径用 base_url 拼绝对
     let raw_href =
         select_and_invoke_js_within(el, &s.book_name, ContentType::AttrHref).unwrap_or_default();
-    let url = crate::http::abs_url(base_url, &raw_href).unwrap_or_default();
+    let url = crate::http::absolute_url(base_url, &raw_href).unwrap_or_default();
 
     let author = optional_field(el, &s.author);
     let category = optional_field(el, &s.category);
@@ -236,7 +251,7 @@ fn push_search_result(
 }
 
 /// 提取可选字段：选择器/JS 失败时静默返回 `None`（搜索结果容错，不阻断整条）。
-fn optional_field(el: scraper::ElementRef<'_>, query: &str) -> Option<String> {
+fn optional_field(el: ElementRef<'_>, query: &str) -> Option<String> {
     if query.trim().is_empty() {
         return None;
     }
@@ -416,6 +431,7 @@ mod tests {
     #[ignore = "live network: depends on 22biqu availability"]
     async fn search_one_span_records_url_method_final_url() {
         use std::sync::{Arc, Mutex};
+
         use tracing_subscriber::fmt::MakeWriter;
 
         #[derive(Clone, Default)]
@@ -490,7 +506,7 @@ mod tests {
 
         assert!(!results.is_empty(), "expected ≥1 result for known title");
         for r in &results {
-            assert!(!r.book_name.is_empty());
+            assert!(!r.book_name.is_empty(), "解析出的书名不应为空: {}", r.url);
             assert!(
                 r.url.starts_with("http"),
                 "url should be absolute: {}",

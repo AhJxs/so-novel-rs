@@ -9,13 +9,16 @@
 
 use crate::config::{ExportFormat, LangType};
 use crate::models::{Chapter, RuleChapter};
-use crate::parser::{filter::filter_chapter, formatter::format_chapter};
+use crate::parser::{filter, formatter};
 
 /// 渲染目标。是 `ExportFormat` 的解析友好别名（避免 `export` 模块直接耦合 config）。
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum RenderTarget {
+    /// 纯文本输出。
     Txt,
+    /// HTML 输出。
     Html,
+    /// EPUB 输出。
     Epub,
     /// 章节文件沿用 Html 模板写到 `chapters_dir`，由 `PdfExporter` 读取并合成 PDF。
     Pdf,
@@ -42,6 +45,7 @@ impl From<ExportFormat> for RenderTarget {
 /// 是用户在 Settings 选的目标语言 —— 两者相同或 source 解析失败时跳过简繁转换。
 ///
 /// 返回 `(title, body)`, 落盘由调用方负责; `title` 已按 "`1.章节名` → `第1章 章节名`" 重写。
+#[must_use]
 pub fn render_chapter(
     chapter: &Chapter,
     rule_chapter: &RuleChapter,
@@ -49,8 +53,8 @@ pub fn render_chapter(
     source_lang_raw: &str,
     target_lang: LangType,
 ) -> (String, String) {
-    let filtered = filter_chapter(chapter, rule_chapter);
-    let formatted_html = format_chapter(&filtered.content, rule_chapter);
+    let filtered = filter::filter_chapter(chapter, rule_chapter);
+    let formatted_html = formatter::format_chapter(&filtered.content, rule_chapter);
 
     let body = match target {
         RenderTarget::Txt => render_txt(&filtered.title, &formatted_html),
@@ -98,8 +102,9 @@ fn maybe_convert_chinese(
 
 /// TXT: 从 `<p>...</p>` 抽段落文字, 全角缩进 2 字符 + 换行 (与 Java 端一致); 无 `<p>` 时兜底一行。
 fn render_txt(title: &str, p_html: &str) -> String {
-    use regex::Regex;
     use std::sync::LazyLock;
+
+    use regex::Regex;
 
     /// 编译期确定的正则: 用 match 走 panic 路径避免 `clippy::expect_used` (panic 即设计)。
     #[allow(
@@ -149,11 +154,11 @@ fn render_txt(title: &str, p_html: &str) -> String {
 /// 段一
 ///
 /// 段二
-///
 /// ```
 fn render_md(title: &str, p_html: &str) -> String {
-    use regex::Regex;
     use std::sync::LazyLock;
+
+    use regex::Regex;
 
     /// 编译期确定的正则: 用 match 走 panic 路径避免 `clippy::expect_used` (panic 即设计)。
     #[allow(

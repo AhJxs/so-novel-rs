@@ -9,17 +9,17 @@
 pub mod book;
 pub mod chapter;
 pub mod content_type;
+pub mod download_task_record;
 pub mod rule;
 pub mod search;
 pub mod source_info;
-pub mod task_record;
 
 pub use book::Book;
 pub use chapter::Chapter;
 pub use content_type::ContentType;
+pub use download_task_record::{DownloadTaskRecord, FailureRecord, FinishedReason};
 pub use rule::{
     EffectiveCrawl, Rule, RuleBook, RuleChapter, RuleCrawl, RuleSearch, RuleToc, Source,
 };
 pub use search::SearchResult;
 pub use source_info::SourceInfo;
-pub use task_record::{DownloadTaskRecord, FailureRecord, FinishedReason};

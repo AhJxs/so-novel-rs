@@ -1,7 +1,7 @@
 //! 5 个一级导航页面 (`NavPage`) + 全局 key bindings + GPUI actions 注册。
 //!
 //! - `NavPage` enum + label/icon/next/prev helpers;
-//! - [`register_key_bindings`] 在 `desktop::run` 启动时调一次 (actions 声明在 `desktop` 顶层)。
+//! - [`register_key_bindings`] 在 `desktop::run` 启动时调一次 (actions 声明在 `desktop/actions.rs`)。
 //!
 //! 翻页不用 `Ctrl+Tab`: `gpui_kit::component` 的 `InputState` 把 `tab` / `shift-tab` 绑到
 //! 自己的 `IndentInline` / `OutdentInline`, 焦点在 Input 时 Tab 事件被消费, 应用级翻页
@@ -11,8 +11,8 @@ use gpui_kit::component::IconName;
 use gpui_kit::{App, KeyBinding, SharedString};
 use rust_i18n::t;
 
-// `actions!` 宏在 `crate::desktop` (mod.rs) 调用, 生成的 action 类型位于 `desktop::*`,
-// 这里只 re-export 给 root.rs 用。
+// `actions!` 宏在 `crate::desktop::actions` 调用, 生成的 action 类型经 `desktop` re-export
+// 暴露为 `desktop::*`, 这里只 re-export 给 root.rs 用。
 pub(super) use crate::desktop::{
     NextPage, PrevPage, ShowLibrary, ShowSearch, ShowSettings, ShowSources, ShowTasks,
     ToggleSidebar,
@@ -24,11 +24,16 @@ pub(super) const KEY_CONTEXT: &str = "AppShell";
 /// 5 个一级导航页面。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum NavPage {
+    /// 搜索页（默认页）。
     #[default]
     Search,
+    /// 下载任务页。
     Tasks,
+    /// 本地书库页。
     Library,
+    /// 书源管理页。
     Sources,
+    /// 设置页。
     Settings,
 }
 

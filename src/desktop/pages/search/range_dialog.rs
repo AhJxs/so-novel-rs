@@ -5,17 +5,16 @@
 //! 都由 drain loop 每 100ms 重 render 自动推进。就绪判定在 `confirm_range_download`
 //! 那边，这里只渲染。
 
-use gpui_kit::component::{
-    ActiveTheme as _, Sizable, h_flex, input::NumberInput, spinner::Spinner, v_flex,
-};
+use gpui_kit::component::input::NumberInput;
+use gpui_kit::component::spinner::Spinner;
+use gpui_kit::component::{ActiveTheme as _, Sizable, h_flex, v_flex};
 use gpui_kit::{App, Entity, IntoElement, ParentElement, SharedString, Styled, Window, div, px};
-
-use crate::desktop::components::truncate;
-use crate::desktop::model::TocState;
-use crate::models::Chapter;
 use rust_i18n::t;
 
 use super::SearchPage;
+use crate::desktop::components::truncate;
+use crate::desktop::model::TocState;
+use crate::models::Chapter;
 
 /// 渲染选章 Dialog 的 body。
 pub(super) fn content(
@@ -123,7 +122,9 @@ pub(super) fn content(
                                 // 宽 160px：minus/plus 各 ~28px，留 ~100px 给数字。
                                 // 数字左对齐是组件限制（Input/NumberInput 无水平居中 API，
                                 // 外层 text_align 也不会被内部 Input 继承），不要再试着居中。
-                                .child(NumberInput::new(&page.read(cx).range_start_input).w(px(160.0))),
+                                .child(
+                                    NumberInput::new(&page.read(cx).range_start_input).w(px(160.0)),
+                                ),
                         )
                         .child(
                             h_flex()
@@ -135,7 +136,9 @@ pub(super) fn content(
                                         .text_color(cx.theme().muted_foreground)
                                         .child(t!("Search.range.end")),
                                 )
-                                .child(NumberInput::new(&page.read(cx).range_end_input).w(px(160.0))),
+                                .child(
+                                    NumberInput::new(&page.read(cx).range_end_input).w(px(160.0)),
+                                ),
                         ),
                 )
                 // 首尾章名各占一行，避免长章名被挤成两段。

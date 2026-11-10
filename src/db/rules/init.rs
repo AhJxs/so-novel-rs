@@ -4,7 +4,7 @@ use std::path::Path;
 
 use super::constants::BUNDLED_RULES;
 
-/// 初始化规则目录: 创建目录 + 补齐 [`BUNDLED_RULES`] 缺失的规则文件, 返回新创建的数量;
+/// 初始化规则目录: 创建目录 + 补齐 `BUNDLED_RULES` 缺失的规则文件, 返回新创建的数量;
 /// 已存在的文件**不覆盖** (尊重用户修改)。
 ///
 /// # Examples
@@ -13,6 +13,10 @@ use super::constants::BUNDLED_RULES;
 /// let n = init_rules_dir(rules_dir)?;
 /// println!("首次启动创建了 {n} 个规则文件");
 /// ```
+///
+/// # Errors
+///
+/// 创建规则目录或写入内置规则文件失败时返回对应的 `std::io::Error`。
 pub fn init_rules_dir(rules_dir: &Path) -> std::io::Result<usize> {
     if !rules_dir.exists() {
         std::fs::create_dir_all(rules_dir)?;
@@ -37,6 +41,7 @@ pub fn init_rules_dir(rules_dir: &Path) -> std::io::Result<usize> {
 
 /// 列出目录下所有规则文件名 (不含路径、跳过模板)。
 /// 用于"切活跃书源文件"下拉的可选项填充。
+#[must_use]
 pub fn list_rule_files(rules_dir: &Path) -> Vec<String> {
     if !rules_dir.exists() {
         return Vec::new();
@@ -74,8 +79,9 @@ pub fn list_rule_files(rules_dir: &Path) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
-    use super::*;
     use std::path::PathBuf;
+
+    use super::*;
 
     fn repo_rules_dir() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -137,7 +143,7 @@ mod tests {
     #[test]
     fn list_returns_empty_for_nonexistent_dir() {
         let files = list_rule_files(Path::new("/nonexistent/dir/xyz"));
-        assert!(files.is_empty());
+        assert!(files.is_empty(), "不存在的目录不应列出任何规则文件");
     }
 
     #[test]

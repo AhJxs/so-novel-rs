@@ -3,13 +3,12 @@
 //! 回填 `language` (系统 locale) / 各 section 的 `base_uri` (= `rule.url`) 与 `timeout`
 //! (15s, toc 60s) / `book.*` (= `META_*`, 让 scraper 走浏览器 meta 解析)。
 
-use crate::config::LangType;
-use crate::models::Rule;
-
 use super::constants::{
     META_AUTHOR, META_BOOK_NAME, META_CATEGORY, META_COVER_URL, META_INTRO, META_LAST_UPDATE_TIME,
     META_LATEST_CHAPTER, META_LATEST_CHAPTER_URL, META_STATUS,
 };
+use crate::config::LangType;
+use crate::models::Rule;
 
 /// 给一条 `Rule` 填默认值, 具体回填规则见模块头。
 ///
@@ -20,7 +19,7 @@ use super::constants::{
 /// rule.url = "https://example.com".into();
 /// apply_default_rule(&mut rule, LangType::ZhCn);
 /// assert_eq!(rule.language, "zh-CN");
-/// assert!(rule.book.as_ref().unwrap().base_uri == "https://example.com");
+/// assert!(rule.book.as_ref().expect("rule has book").base_uri == "https://example.com");
 /// ```
 pub fn apply_default_rule(rule: &mut Rule, system_lang: LangType) {
     if rule.language.trim().is_empty() {

@@ -1,8 +1,9 @@
 //! HTML 转换工具: 清属性 / 删标签。选择器 + @js 后处理在 [`super::selector`]。
 
-use regex::Regex;
-use scraper::{Html, Selector};
 use std::sync::LazyLock;
+
+use regex::{Captures, Regex};
+use scraper::{Html, Selector};
 
 /// 清除所有元素的属性。Java `JsoupUtils.clearAllAttributes`。
 /// 用途: 正文 HTML 在写入模板前, 去掉所有 class/style/id 等属性,
@@ -41,7 +42,7 @@ pub fn clear_all_attributes(html: &str) -> String {
     });
 
     OPEN_TAG
-        .replace_all(html, |caps: &regex::Captures<'_>| {
+        .replace_all(html, |caps: &Captures<'_>| {
             // OPEN_TAG 固定两个 group；改 regex 时必须同步保留 group 数量，
             // 否则 get() 返回 None 会在这里立刻 panic 定位。
             #[allow(clippy::panic, reason = "regex match success guarantees group exists; panic = programmer error on regex change")]

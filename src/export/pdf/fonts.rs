@@ -17,10 +17,14 @@ pub const CJK_FONT: &str = "CJK";
 /// - `Embedded`: 用真实 CJK 字体字形度量 (精确)。
 /// - `Heuristic`: CJK=1em、ASCII=0.55em、空格=0.3em 的近似 (无字体降级路径)。
 pub enum Measurer {
+    /// 用真实字体字形度量，结果精确但需加载字体。
     Embedded {
+        /// 已解析的 CJK 字体。
         font: Box<EmbeddedFont>,
+        /// 按字符缓存宽度（pt），避免重复排版计算。
         width_cache: RefCell<HashMap<u32, f32>>,
     },
+    /// 无字体时的近似宽度。
     Heuristic,
 }
 

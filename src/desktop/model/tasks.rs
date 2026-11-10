@@ -17,19 +17,14 @@ pub enum DeleteTaskResult {
 }
 
 impl AppModel {
+    /// 移除所有已结束的任务（成功、失败、取消）。
     pub fn clear_finished_tasks(&mut self) {
         let before = self.tasks.len();
         ops::clear_finished_tasks(&mut self.tasks);
         let removed = before - self.tasks.len();
         if removed > 0 {
-            let path = self.paths.tasks_file.clone();
-            let tasks = self.tasks.clone();
-            self.runtime.spawn_blocking(move || {
-                if let Err(e) = crate::db::save_with_trim(&path, &tasks) {
-                    tracing::warn!("保存任务到文件失败: {e:#}");
-                }
-            });
-            self.push_success(t!("Toasts.clear_tasks_ok", n = &removed.to_string()));
+            self.persist_tasks();
+            self.push_success(t!("Toasts.clear_tasks_ok", n = &removed.to_string()).to_string());
         }
     }
 
@@ -40,13 +35,7 @@ impl AppModel {
     pub fn delete_task(&mut self, id: u64) -> DeleteTaskResult {
         let result = delete_task_inner(&mut self.tasks, id);
         if result == DeleteTaskResult::Deleted {
-            let path = self.paths.tasks_file.clone();
-            let tasks = self.tasks.clone();
-            self.runtime.spawn_blocking(move || {
-                if let Err(e) = crate::db::save_with_trim(&path, &tasks) {
-                    tracing::warn!("保存任务到文件失败: {e:#}");
-                }
-            });
+            self.persist_tasks();
         }
         result
     }
@@ -76,10 +65,11 @@ mod tests {
         non_snake_case
     )]
 
+    use std::path::PathBuf;
+
     use super::*;
     use crate::core::DownloadTask;
     use crate::models::SearchResult;
-    use std::path::PathBuf;
 
     /// 构造一个最小 `DownloadTask`, 测试只关 `id` + `finished`。
     fn dummy_task(id: u64) -> DownloadTask {

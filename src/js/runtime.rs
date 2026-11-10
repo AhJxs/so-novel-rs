@@ -5,7 +5,6 @@ use anyhow::{Context as _, Result};
 use base64::Engine as _;
 use boa_engine::vm::RuntimeLimits;
 use boa_engine::{Context, Source};
-use std::fmt::Write as _;
 
 /// JS 规则执行的资源护栏。
 ///
@@ -35,6 +34,10 @@ fn install_console_shim(ctx: &mut Context) {
 ///
 /// `body` 是规则中 `@js:` 后面的 JS 片段 (不带 `function func()` 包装); 含 `return` 时包装成
 /// IIFE, 让 `return` 合法: `(function(r){<body>; return r;})(input)`。
+///
+/// # Errors
+///
+/// JS 语法 / 运行时错误、执行超时或结果无法转成字符串时返回错误。
 pub fn post_process(body: &str, input: &str) -> Result<String> {
     // 注入 input 时用 JSON.stringify 风格转义，避免引号 / 反斜杠破坏脚本。
     let mut ctx = Context::default();
@@ -72,7 +75,11 @@ pub fn apply_java_step(code: &str, input: &str) -> Result<String> {
     match code.trim() {
         "base64.decode()" => {
             let mut out = String::new();
-            for line in input.lines().map(str::trim).filter(|line| !line.is_empty()) {
+            for raw in input.lines() {
+                let line = raw.trim();
+                if line.is_empty() {
+                    continue;
+                }
                 let bytes = base64::engine::general_purpose::STANDARD
                     .decode(line)
                     .with_context(|| format!("base64 decode failed: {line:?}"))?;
@@ -89,6 +96,10 @@ pub fn apply_java_step(code: &str, input: &str) -> Result<String> {
 
 /// 加载一个 JS 文件 (含全局函数定义), 调用其中某个函数, 返回字符串结果。
 /// 等价 Java `JsCaller#callFunction`, 入参/出参都是字符串, 不做 ECMAScript Value 互转。
+///
+/// # Errors
+///
+/// 模块加载 / 函数调用抛错、执行超时或返回值无法转成字符串时返回错误。
 pub fn eval_function_returning_string(
     module_js: &str,
     fn_name: &str,
@@ -116,6 +127,8 @@ pub fn eval_function_returning_string(
 
 /// 把字符串包装为 JS 字面量 (最小 JSON-quote 即可, 不用 boa 内部的 `js_string!`)。
 fn json_quote_for_js(s: &str) -> String {
+    use std::fmt::Write as _;
+
     let mut out = String::with_capacity(s.len() + 2);
     out.push('"');
     for ch in s.chars() {
@@ -140,8 +153,9 @@ fn json_quote_for_js(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
-    use super::*;
     use std::path::PathBuf;
+
+    use super::*;
 
     fn repo_web() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))

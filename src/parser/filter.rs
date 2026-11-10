@@ -6,12 +6,13 @@
 //! 4. filterTag 节点删除（复用 `parser::dom::remove_tags`）; 5. 正文开头的章节名擦掉,
 //!    保留前面的 tag/whitespace; 6. `1.章节名` → `第1章 章节名`; 7. 清理空标签。
 
-use regex::Regex;
 use std::sync::LazyLock;
 
-use crate::http::clean_invisible_chars;
+use regex::Regex;
+
+use crate::http;
 use crate::models::{Chapter, RuleChapter};
-use crate::parser::dom::remove_tags;
+use crate::parser::dom;
 
 /// 编译期确定的正则：用 match + panic 避免 `clippy::expect_used`，与项目里
 /// 其它 `LazyLock` 静态正则统一风格。
@@ -46,7 +47,7 @@ pub fn filter_chapter(chapter: &Chapter, rule_chapter: &RuleChapter) -> Chapter 
     let mut content = chapter.content.clone();
     let mut title = chapter.title.clone();
 
-    content = clean_invisible_chars(&content);
+    content = http::clean_invisible_chars(&content);
 
     content = HTML_ENTITY_RE.replace_all(&content, "").into_owned();
 
@@ -68,7 +69,7 @@ pub fn filter_chapter(chapter: &Chapter, rule_chapter: &RuleChapter) -> Chapter 
 
     // filterTag: 配置为 css 选择器
     if !rule_chapter.filter_tag.trim().is_empty() {
-        content = remove_tags(&content, &rule_chapter.filter_tag);
+        content = dom::remove_tags(&content, &rule_chapter.filter_tag);
     }
 
     content = strip_leading_title(&content, &title);

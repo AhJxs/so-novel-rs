@@ -10,7 +10,7 @@
 use std::rc::Rc;
 
 use gpui_kit::component::pagination::Pagination as ComponentPagination;
-use gpui_kit::{App, Empty, IntoElement, RenderOnce, Styled, Window};
+use gpui_kit::{App, Empty, IntoElement, RenderOnce, Styled, ViewElement, Window};
 
 /// 统一的列表分页大小。4 个 page（library / sources / tasks / search）共用。
 pub const PAGE_SIZE: usize = 30;
@@ -19,13 +19,19 @@ pub const PAGE_SIZE: usize = 30;
 /// [`compute_page_window`] 兜底回卷，永远 `start < end <= total`。
 #[derive(Debug, Clone, Copy)]
 pub struct PageSlice {
+    /// 本页第一条元素的下标（含）。
     pub start: usize,
+    /// 本页末条元素的下标（排他）。
     pub end: usize,
+    /// 过滤后的元素总数。
     pub total: usize,
+    /// 总页数。
     pub page_count: usize,
 }
 
 impl PageSlice {
+    /// 本页是否没有任何元素。
+    #[must_use]
     pub const fn is_empty(&self) -> bool {
         self.start >= self.end
     }
@@ -86,10 +92,10 @@ impl Pagination {
 // `#[derive(IntoElement)]` 也能用于单态类型；手写等价产物更显式
 // （derive 产物是 `ViewElement<Self>`，`RenderOnce` 经 blanket impl 自动成为 `View`）。
 impl IntoElement for Pagination {
-    type Element = gpui_kit::ViewElement<Self>;
+    type Element = ViewElement<Self>;
 
     fn into_element(self) -> Self::Element {
-        gpui_kit::ViewElement::new(self)
+        ViewElement::new(self)
     }
 }
 

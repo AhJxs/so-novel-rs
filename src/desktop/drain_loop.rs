@@ -11,7 +11,7 @@
 
 use std::time::Duration;
 
-use gpui_kit::{App, AppContext, Entity};
+use gpui_kit::{App, AppContext, AsyncApp, Entity};
 
 use crate::desktop::model::AppModel;
 use crate::desktop::model::events::{WakeupReceiver, drain};
@@ -23,7 +23,7 @@ use crate::desktop::model::events::{WakeupReceiver, drain};
 pub fn spawn_drain_loop(model: &Entity<AppModel>, wakeup: WakeupReceiver, cx: &App) {
     // 只持弱引用：强引用会让 entity 永不释放，循环也就无法感知退出。
     let weak_model = model.downgrade();
-    cx.spawn(async move |async_cx: &mut gpui_kit::AsyncApp| {
+    cx.spawn(async move |async_cx: &mut AsyncApp| {
         loop {
             // 非阻塞 try_recv；拿不到就 100ms 兜底（既保证延迟感知不到，也防 producer hang）。
             if wakeup.try_recv().is_none() {

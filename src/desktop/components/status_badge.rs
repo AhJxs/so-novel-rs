@@ -3,22 +3,29 @@
 //! gpui-kit 组件库本身已有 `Badge` + `Alert`，颜色自动走 `cx.theme().info / success / warning / error`。
 //! 这里只做"业务命名 → Badge"的便捷构造器，不引入新调色板。
 
-use gpui_kit::component::{ActiveTheme as _, badge::Badge};
-use gpui_kit::{App, IntoElement, ParentElement, RenderOnce, SharedString, Styled, Window, div};
+use gpui_kit::component::ActiveTheme as _;
+use gpui_kit::component::badge::Badge;
+use gpui_kit::{
+    App, Hsla, IntoElement, ParentElement, RenderOnce, SharedString, Styled, Window, div,
+};
 
 /// 业务状态的 4 个语义色（与 gpui-kit 组件库的主题色对齐）。
 #[derive(Debug, Clone, Copy)]
 pub enum StatusKind {
+    /// 提示色（蓝）。
     Info,
+    /// 成功色（绿）。
     Success,
+    /// 警告色（黄）。
     Warning,
+    /// 错误色（红）。
     Error,
     /// 中性 / 默认 — 没有特定语义，用 `muted_foreground` 兜底。
     Neutral,
 }
 
 impl StatusKind {
-    fn color(self, cx: &App) -> gpui_kit::Hsla {
+    fn color(self, cx: &App) -> Hsla {
         match self {
             Self::Info => cx.theme().info,
             Self::Success => cx.theme().success,
@@ -37,11 +44,10 @@ pub struct StatusBadge {
 }
 
 impl StatusBadge {
-    pub fn new(kind: StatusKind, label: impl Into<SharedString>) -> Self {
-        Self {
-            kind,
-            label: label.into(),
-        }
+    /// 以语义色和标签文本构造徽章。
+    #[must_use]
+    pub const fn new(kind: StatusKind, label: SharedString) -> Self {
+        Self { kind, label }
     }
 }
 

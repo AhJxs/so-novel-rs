@@ -1,9 +1,9 @@
 //! 通用页面顶栏：左侧 title + subtitle，右侧 actions slot。
 
 use gpui_kit::component::ActiveTheme as _;
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    App, Div, IntoElement, ParentElement, RenderOnce, SharedString, Styled, Window, div,
-    prelude::FluentBuilder as _,
+    App, Div, FontWeight, IntoElement, ParentElement, RenderOnce, SharedString, Styled, Window, div,
 };
 
 /// 页面顶栏。最常见的 `<h1> + 副标题 + 右侧按钮组` 模式。
@@ -15,17 +15,20 @@ pub struct PageHeader {
 }
 
 impl PageHeader {
-    pub fn new(title: impl Into<SharedString>) -> Self {
+    /// 以标题构造，副标题与右侧动作默认为空。
+    #[must_use]
+    pub const fn new(title: SharedString) -> Self {
         Self {
-            title: title.into(),
+            title,
             subtitle: None,
             actions: Vec::new(),
         }
     }
 
     #[must_use]
-    pub fn subtitle(mut self, subtitle: impl Into<SharedString>) -> Self {
-        self.subtitle = Some(subtitle.into());
+    /// 追加副标题文字。
+    pub fn subtitle(mut self, subtitle: SharedString) -> Self {
+        self.subtitle = Some(subtitle);
         self
     }
 
@@ -56,7 +59,7 @@ impl RenderOnce for PageHeader {
                     .child(
                         div()
                             .text_lg()
-                            .font_weight(gpui_kit::FontWeight::BOLD)
+                            .font_weight(FontWeight::BOLD)
                             .text_color(cx.theme().foreground)
                             .child(self.title),
                     )

@@ -15,9 +15,13 @@ pub const SUPPORTED_LIBRARY_EXTS: &[&str] = &["epub", "txt", "html", "zip", "pdf
 /// 单条 library 条目。
 #[derive(Debug, Clone, Serialize)]
 pub struct LibraryEntry {
+    /// 文件名字（不含目录）。
     pub filename: String,
+    /// 小写扩展名，用于图标与打开方式。
     pub ext: String,
+    /// 最后修改时间的 Unix 秒。
     pub modified_unix: i64,
+    /// 文件大小（字节）。
     pub size_bytes: u64,
 }
 
@@ -57,8 +61,9 @@ impl LibraryEntry {
 #[cfg(test)]
 mod tests {
     #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
-    use super::*;
     use std::path::PathBuf;
+
+    use super::*;
 
     #[test]
     fn supported_exts_contains_expected() {
@@ -73,7 +78,11 @@ mod tests {
     #[test]
     fn supported_exts_length_is_six() {
         // 锁死长度 —— 防新加 / 删除扩展名时漏改下游消费方的分页 / 计数逻辑。
-        assert_eq!(SUPPORTED_LIBRARY_EXTS.len(), 6);
+        assert_eq!(
+            SUPPORTED_LIBRARY_EXTS.len(),
+            6,
+            "新增/删除扩展名时必须同步下游分页/计数逻辑"
+        );
     }
 
     fn touch(path: &Path, content: &[u8]) {
@@ -85,7 +94,7 @@ mod tests {
         p.push(format!(
             "sonovel-core-library-{name}-{}-{}",
             std::process::id(),
-            std::time::SystemTime::now()
+            SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
                 .unwrap()
                 .as_nanos()
@@ -97,7 +106,10 @@ mod tests {
     #[test]
     fn from_path_returns_none_for_directory() {
         let dir = temp_dir("dir");
-        assert!(LibraryEntry::from_path(&dir).is_none());
+        assert!(
+            LibraryEntry::from_path(&dir).is_none(),
+            "目录不应被当作书库文件"
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -106,7 +118,10 @@ mod tests {
         let dir = temp_dir("unsupported");
         let f = dir.join("book.docx");
         touch(&f, b"x");
-        assert!(LibraryEntry::from_path(&f).is_none());
+        assert!(
+            LibraryEntry::from_path(&f).is_none(),
+            "不支持的后缀必须被过滤"
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -115,7 +130,10 @@ mod tests {
         let dir = temp_dir("noext");
         let f = dir.join("README");
         touch(&f, b"x");
-        assert!(LibraryEntry::from_path(&f).is_none());
+        assert!(
+            LibraryEntry::from_path(&f).is_none(),
+            "无后缀文件必须被过滤"
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -128,7 +146,7 @@ mod tests {
         assert_eq!(entry.filename, "book.epub");
         assert_eq!(entry.ext, "epub");
         assert_eq!(entry.size_bytes, b"epub-body".len() as u64);
-        assert!(entry.modified_unix > 0);
+        assert!(entry.modified_unix > 0, "修改时间应可读取（> 0）");
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -145,6 +163,9 @@ mod tests {
     #[test]
     fn from_path_returns_none_for_missing_file() {
         let p = std::path::PathBuf::from("/nonexistent/path/never-exists.epub");
-        assert!(LibraryEntry::from_path(&p).is_none());
+        assert!(
+            LibraryEntry::from_path(&p).is_none(),
+            "不存在的文件应返回 None"
+        );
     }
 }

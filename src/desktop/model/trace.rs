@@ -16,6 +16,11 @@ static NEXT: AtomicU64 = AtomicU64::new(1);
 pub struct TraceId(u64);
 
 impl TraceId {
+    /// 用给定数值构造追踪 ID。
+    pub const fn new(value: u64) -> Self {
+        Self(value)
+    }
+
     /// 分配一个新的全局唯一 ID。线程安全，单调递增。
     pub(crate) fn mint() -> Self {
         Self(NEXT.fetch_add(1, Ordering::Relaxed))
@@ -35,7 +40,7 @@ impl std::fmt::Display for TraceId {
 
 impl From<u64> for TraceId {
     fn from(v: u64) -> Self {
-        Self(v)
+        Self::new(v)
     }
 }
 
@@ -49,11 +54,11 @@ pub mod sub {
 #[cfg(test)]
 mod tests {
     #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
-    use super::*;
     use std::collections::HashSet;
-    use std::sync::Arc;
-    use std::sync::Barrier;
+    use std::sync::{Arc, Barrier};
     use std::thread;
+
+    use super::*;
 
     #[test]
     fn mint_is_monotonic() {
@@ -102,6 +107,7 @@ mod tests {
     #[test]
     fn trace_id_appears_in_event_fields() {
         use std::sync::{Arc, Mutex};
+
         use tracing_subscriber::fmt::MakeWriter;
 
         // 简单的 in-memory writer，把每行 capture 起来。

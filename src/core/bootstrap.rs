@@ -13,11 +13,16 @@ use crate::models::Rule;
 /// 启动期公共资源聚合（`paths` + `config` + `sources_config` + `rules` + `http`）。
 /// desktop 拿它加 `tasks / runtime / wakeup` 拼 state。
 pub struct AppContext {
+    /// 解析好的配置文件与目录路径。
     pub paths: ConfigPaths,
+    /// 已加载的应用配置（读取失败时为默认值）。
     pub config: AppConfig,
+    /// 活跃书源文件与禁用列表。
     pub sources_config: SourcesConfig,
-    pub rules: Vec<Rule>,
-    pub http: Arc<HttpClients>,
+    /// 从活跃书源文件加载出的规则集合；与派发出的 [`crate::models::Source`] 共享。
+    pub rules: Vec<Arc<Rule>>,
+    /// 供各处复用的共享 HTTP 客户端。
+    pub http: HttpClients,
 }
 
 /// 启动期"凑齐所有公共资源"的统一入口。**不**返回 `Result`。
@@ -64,7 +69,7 @@ pub fn load_context() -> AppContext {
     }
 
     let rules = match load_active_rules(&paths.rules_dir, &sources_config) {
-        Ok(rs) => rs,
+        Ok(rs) => rs.into_iter().map(Arc::new).collect(),
         Err(e) => {
             tracing::warn!("rules load failed: {e:#}");
             Vec::new()
@@ -73,16 +78,16 @@ pub fn load_context() -> AppContext {
 
     // 常见失败原因是 proxy URL 畸形：原始 cfg → 关闭 proxy → 空 stub 三步 fallback。
     let http = match HttpClients::new(&config) {
-        Ok(c) => Arc::new(c),
+        Ok(c) => c,
         Err(e) => {
             tracing::warn!("HttpClients init failed: {e:#}，尝试关闭 proxy 后重试");
             let mut cfg_no_proxy = config.clone();
             cfg_no_proxy.proxy.proxy_mode = ProxyMode::None;
             match HttpClients::new(&cfg_no_proxy) {
-                Ok(c) => Arc::new(c),
+                Ok(c) => c,
                 Err(e2) => {
                     tracing::error!("HttpClients init 重试仍失败: {e2:#}；fall back to empty stub");
-                    Arc::new(HttpClients::empty())
+                    HttpClients::empty()
                 }
             }
         }

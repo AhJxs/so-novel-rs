@@ -7,16 +7,18 @@
 use std::time::Duration;
 
 use anyhow::{Context, Result};
+use reqwest::Client;
 
 use crate::config::AppConfig;
 #[cfg(test)]
-use crate::config::{ProxyCfg, ProxyMode};
-use crate::http::system_proxy::resolve_proxy_url;
+use crate::config::{ProxyConfig, ProxyMode};
+use crate::http::system_proxy;
 
 /// 控制 client 行为的小参数。`unsafe_ssl` 用于关闭 SSL 校验的老书源
 /// （rate-limit.json 里 `0xs.net` 的 `ignoreSsl: true`）。
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct ClientOptions {
+    /// 关闭 SSL 证书校验；仅用于声明了 `ignoreSsl` 的老书源。
     pub unsafe_ssl: bool,
 }
 
@@ -25,8 +27,12 @@ const DEFAULT_TIMEOUT_SECS: u64 = 10;
 
 /// 构造 async reqwest Client。共用当前 tokio runtime，**不**创建嵌套 runtime，
 /// 可在 `tokio::spawn` 内部直接 `.await`。
-pub fn build_async_client(cfg: &AppConfig, opts: &ClientOptions) -> Result<reqwest::Client> {
-    let mut builder = reqwest::Client::builder()
+///
+/// # Errors
+///
+/// proxy / TLS / 超时等配置非法导致 `reqwest::Client` 构造失败时返回错误。
+pub fn build_async_client(cfg: &AppConfig, opts: &ClientOptions) -> Result<Client> {
+    let mut builder = Client::builder()
         .connect_timeout(Duration::from_secs(DEFAULT_TIMEOUT_SECS))
         .timeout(Duration::from_secs(DEFAULT_TIMEOUT_SECS))
         .pool_idle_timeout(Duration::from_mins(1))
@@ -43,7 +49,7 @@ pub fn build_async_client(cfg: &AppConfig, opts: &ClientOptions) -> Result<reqwe
 
     // 三态模式在 `resolve_proxy_url` 里展开：`None` = 直连，所以这里不需要 match。
     // 手动模式 host 为空、或系统模式探测不到代理，都返回 `None`（静默直连，不阻断 client 构造）。
-    if let Some(proxy_url) = resolve_proxy_url(&cfg.proxy) {
+    if let Some(proxy_url) = system_proxy::resolve_proxy_url(&cfg.proxy) {
         let proxy = reqwest::Proxy::all(&proxy_url)
             .with_context(|| format!("invalid proxy URL: {proxy_url}"))?;
         builder = builder.proxy(proxy);
@@ -73,7 +79,7 @@ mod tests {
     fn build_async_with_manual_proxy_still_constructs() {
         // reqwest 的 Proxy::all 只做 URL 解析；不真正连。
         let cfg = AppConfig {
-            proxy: ProxyCfg {
+            proxy: ProxyConfig {
                 proxy_mode: ProxyMode::Manual,
                 proxy_host: "127.0.0.1".to_string(),
                 proxy_port: 1,
@@ -87,7 +93,7 @@ mod tests {
     fn build_async_with_manual_proxy_and_blank_host_constructs() {
         // host 为空 → resolve_proxy_url 返回 None → 直连，不构造 Proxy。
         let cfg = AppConfig {
-            proxy: ProxyCfg {
+            proxy: ProxyConfig {
                 proxy_mode: ProxyMode::Manual,
                 proxy_host: String::new(),
                 proxy_port: 7890,
@@ -110,6 +116,7 @@ mod tests {
     #[tokio::test]
     async fn manual_proxy_actually_routes_traffic_through_proxy() {
         use std::sync::{Arc, Mutex};
+
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
         use tokio::net::TcpListener;
 
@@ -134,7 +141,7 @@ mod tests {
         });
 
         let cfg = AppConfig {
-            proxy: ProxyCfg {
+            proxy: ProxyConfig {
                 proxy_mode: ProxyMode::Manual,
                 proxy_host: "127.0.0.1".into(),
                 proxy_port: proxy_port as u16,

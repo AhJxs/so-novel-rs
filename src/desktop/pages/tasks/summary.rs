@@ -1,10 +1,11 @@
 //! Tasks 页数据摘要：`TaskSummary`（避开 `DownloadTask` 不可 Clone）+ `TaskFilter` 分类。
 //!
 //! `DownloadTask` 含 `mpsc::Receiver` / `CancelToken` 不可 Clone，UI 渲染时复制必要字段
-//! 为 `TaskSummary`。所有"过滤 / 排序 / 复制字段"的 helper 都集中到这里，让 `mod.rs`
+//! 为 `TaskSummary`。所有"过滤 / 排序 / 复制字段"的 helper 都集中到这里，让 `tasks_page.rs`
 //! 只剩组装逻辑。
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use crate::core::DownloadTask;
 use crate::desktop::model::AppModel;
@@ -18,7 +19,7 @@ pub struct TaskSummary {
     pub index: usize,
     pub origin: SearchResult,
     pub started_at_unix: i64,
-    pub book_meta: Option<Book>,
+    pub book_meta: Option<Arc<Book>>,
     pub total_chapters: usize,
     pub completed: u32,
     pub failed: u32,

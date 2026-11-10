@@ -2,6 +2,7 @@
 
 use std::path::PathBuf;
 
+/// `~/.sonovel/` 下应用依赖的各文件/目录路径。
 #[derive(Debug, Clone)]
 pub struct ConfigPaths {
     /// `config.toml` 路径。
@@ -20,6 +21,7 @@ pub struct ConfigPaths {
 impl ConfigPaths {
     /// 路径约定：所有文件统一在 `~/.sonovel/` 下，首次启动自动创建；
     /// 取不到主目录（极端情况）时回落到当前工作目录。
+    #[must_use]
     pub fn discover() -> Self {
         let base = home_dir().join(".sonovel");
         Self {

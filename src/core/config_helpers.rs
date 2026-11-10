@@ -8,6 +8,7 @@ use crate::config::AppConfig;
 /// `AppConfig.global.cf_bypass` 的 "空串视作 None" 包装：trim 后为空 → `None`（**不**走 bypass）。
 ///
 /// 返回 `Option<String>` 而非 `Option<&str>`：调用方需要 `'static` 放进 `CrawlerOpts::cf_bypass`。
+#[must_use]
 pub fn cf_bypass(cfg: &AppConfig) -> Option<String> {
     let trimmed = cfg.global.cf_bypass.trim();
     if trimmed.is_empty() {
@@ -18,6 +19,7 @@ pub fn cf_bypass(cfg: &AppConfig) -> Option<String> {
 }
 
 /// 同 [`cf_bypass`]，用于起点中文网 cookie（订阅章节专用）。
+#[must_use]
 pub fn qidian_cookie(cfg: &AppConfig) -> Option<String> {
     let trimmed = cfg.cookie.qidian_cookie.trim();
     if trimmed.is_empty() {

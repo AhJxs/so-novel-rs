@@ -6,12 +6,27 @@
 use std::path::Path;
 
 use crate::core::DownloadTask;
+use crate::db::DaoError;
 use crate::models::FinishedReason;
-use crate::utils::time::now_unix_secs;
+use crate::utils::time;
 
-pub fn load_tasks_from_file(path: &Path) -> (Vec<DownloadTask>, u64) {
+/// 从 `tasks.json` 加载出的历史任务快照。
+pub struct LoadedTasks {
+    /// 还原后的运行时任务列表。
+    pub tasks: Vec<DownloadTask>,
+    /// 已用过的最大任务 ID（没有任务时为 0）。
+    pub max_id: u64,
+}
+
+/// 读取历史任务并还原成运行时任务；同时返回已用过的最大 ID，供新任务续号。
+///
+/// # Errors
+///
+/// 目前读取与还原不会失败（损坏文件按空列表处理，重写失败只记日志）；
+/// 保留 `Result` 以便将来读取策略变化时不必改调用方。
+pub fn load_tasks_from_file(path: &Path) -> Result<LoadedTasks, DaoError> {
     let records = crate::db::load_tasks(path);
-    let now = now_unix_secs();
+    let now = time::now_unix_secs();
     let mut max_id: u64 = 0;
     let mut tasks = Vec::with_capacity(records.len());
     let mut need_rewrite = false;
@@ -34,5 +49,5 @@ pub fn load_tasks_from_file(path: &Path) -> (Vec<DownloadTask>, u64) {
         tracing::warn!("rewrite interrupted tasks failed: {e}");
     }
 
-    (tasks, max_id + 1)
+    Ok(LoadedTasks { tasks, max_id })
 }

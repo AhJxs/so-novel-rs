@@ -2,7 +2,7 @@
 //!
 //! 入口: `download_book(cfg, source, book_url, opts) -> Result<PathBuf, CrawlerError>`:
 //! `resolve_book` (阶段一: 详情 + 目录) → `download_chapters` (阶段二: 并发抓取 + 导出)。
-//! 子模块: [`progress`] / [`download_options`] / [`resolve`] / [`download`] / [`search`] / [`cover_updater`] / [`health`] / `retry`(私有)。
+//! 子模块: `progress` / [`download_options`] / [`resolve`] / [`download`] / [`search`] / [`cover_updater`] / [`health`] / `retry`(私有)。
 //!
 //! 两处坑: `Progress` 经 `mpsc::UnboundedSender` 推给 UI, 由 `events::drain` 排空; `CancelToken`
 //! 在每章入口检查, 正在跑的章节会跑完才退出 (任务级取消, 非连接级中断)。
@@ -20,4 +20,4 @@ pub mod search;
 pub use download::{download_book, download_chapters};
 pub use download_options::{CancelToken, DownloadOptions};
 pub use progress::Progress;
-pub use resolve::{CrawlerError, resolve_book};
+pub use resolve::{CrawlerError, ResolvedBook, resolve_book};

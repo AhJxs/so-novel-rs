@@ -3,18 +3,15 @@
 //! 3 个 item 形态各异（裸 div / 带 loading 的 Button / 跳外链的 Button），全部手写
 //! `SettingField::render`，不抽 helper。
 
-use gpui_kit::component::{
-    ActiveTheme as _, Disableable, Icon, IconName, Sizable as _,
-    button::Button,
-    setting::{SettingField, SettingGroup, SettingItem, SettingPage},
-};
+use gpui_kit::component::button::Button;
+use gpui_kit::component::setting::{SettingField, SettingGroup, SettingItem, SettingPage};
+use gpui_kit::component::{ActiveTheme as _, Disableable, Icon, IconName, Sizable as _};
 use gpui_kit::{App, IntoElement, ParentElement, Styled, div};
-
 use rust_i18n::t;
 
-use super::ctx::PageCtx;
+use super::ctx::PageContext;
 
-pub(super) fn build(ctx: &PageCtx<'_>, _cx: &App) -> SettingPage {
+pub(super) fn build(ctx: &PageContext<'_>, _cx: &App) -> SettingPage {
     let m = ctx.model.clone();
 
     SettingPage::new(t!("Settings.page.about"))

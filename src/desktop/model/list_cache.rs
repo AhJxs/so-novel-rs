@@ -13,8 +13,11 @@ use std::sync::Arc;
 /// 列表页种类。`u8` 足够，互斥。
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 pub enum PageKind {
+    /// 下载文件库页。
     Library,
+    /// 搜索结果页。
     Search,
+    /// 下载任务页。
     Tasks,
 }
 
@@ -23,10 +26,15 @@ pub enum PageKind {
 /// `SearchResult` Vec 取出来。
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 pub struct ListCacheKey {
+    /// 属于哪个列表页。
     pub page: PageKind,
+    /// 底层数据版本，数据一变就换 key。
     pub data_version: u64,
+    /// 过滤条件的哈希签名。
     pub filter_sig: u64,
+    /// 当前分页下标。
     pub page_index: u32,
+    /// 元素类型，用于类型擦除后安全取回。
     pub elem_type: TypeId,
 }
 
@@ -40,11 +48,14 @@ pub struct ListCache {
 }
 
 impl ListCache {
+    /// 建一个空缓存。
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
     /// 取缓存。返回 `None` 表示未命中, 调用方应走原始 filter+sort+slice 路径。
+    #[must_use]
     pub fn get<T: 'static + Send + Sync + Clone>(&self, key: ListCacheKey) -> Option<Arc<Vec<T>>> {
         let v = self.map.get(&key)?;
         let arc = Arc::clone(v);
@@ -70,18 +81,21 @@ impl ListCache {
 
     /// 当前缓存条目数（测试用）。
     #[cfg(test)]
+    #[must_use]
     pub fn len(&self) -> usize {
         self.map.len()
     }
 
     /// 当前是否为空（`clippy::len_without_is_empty` 要求 `len` 配套 `is_empty`）。
     #[cfg(test)]
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.map.is_empty()
     }
 }
 
 /// 计算过滤输入（文本 / 扩展名 / 状态）的 hash。std `Hash` + `Hasher` 即可。
+#[must_use]
 pub fn filter_signature(parts: &[&str]) -> u64 {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     for p in parts {

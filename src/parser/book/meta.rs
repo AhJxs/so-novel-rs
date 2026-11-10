@@ -1,34 +1,43 @@
 //! 详情页 HTML 解析 + 主流程: [`parse_book_detail`] 抓 + 解析 + `CoverUpdater`。封面 URL 处理在 [`super::cover`]。
 
+use std::sync::LazyLock;
+use std::time::Instant;
+
 use anyhow::Result;
 use regex::Regex;
 use reqwest::Client;
 use scraper::Html;
-use std::sync::LazyLock;
 use thiserror::Error;
 
+use super::cover;
 use crate::crawler::cover_updater;
-use crate::http::abs_url;
-use crate::http::{FetchRequest, HttpMethod, fetch, fetch_via_cf_bypass, has_cloudflare};
+use crate::http::{
+    FetchRequest, HttpMethod, absolute_url, fetch, fetch_via_cf_bypass, has_cloudflare,
+};
 use crate::models::{Book, Rule};
 use crate::parser::dom::{SelectError, select_and_invoke_js};
 
-use super::cover::{content_type_for, extract_cover_url, maybe_replace_cover};
-
+/// 详情页抓取 / 解析错误。
 #[derive(Debug, Error)]
 pub enum BookError {
+    /// 书源规则里没有 `book` 段，无法解析详情。
     #[error("书源没有 book 规则")]
     BookRuleMissing,
+    /// 详情页请求失败。
     #[error("HTTP 错误: {0}")]
     Http(String),
     #[error(
         "命中 Cloudflare 验证页, 未配置 cf-bypass 旁路 (请在 config.toml [global] cf-bypass 填地址): {0}"
     )]
+    /// 命中 Cloudflare 验证页且未配置 bypass。
     Cloudflare(String),
+    /// 解析出的书名或作者为空。
     #[error("详情页书名或作者为空")]
     MissingTitleOrAuthor,
+    /// HTML 结构解析失败。
     #[error("HTML 解析失败: {0}")]
     Parse(String),
+    /// CSS 选择器或 `@js:` 后处理失败。
     #[error("选择器/JS 执行失败: {0}")]
     Selector(#[from] SelectError),
 }
@@ -66,7 +75,7 @@ pub async fn parse_book_detail(
     cf_bypass_base: Option<&str>,
     qidian_cookie: Option<&str>,
 ) -> Result<Book, BookError> {
-    let started = std::time::Instant::now();
+    let started = Instant::now();
     let book_rule = rule.book.as_ref().ok_or(BookError::BookRuleMissing)?;
 
     let response = fetch(
@@ -114,7 +123,7 @@ pub async fn parse_book_detail(
             qidian_cookie.unwrap_or(""),
         )
         .await;
-        if maybe_replace_cover(&mut book, new_cover) {
+        if cover::maybe_replace_cover(&mut book, new_cover) {
             tracing::info!(book = %book.book_name, "CoverUpdater 替换封面");
         }
     }
@@ -150,12 +159,12 @@ pub fn parse_book_html(html: &str, base_url: &str, rule: &Rule) -> Result<Book, 
     let book_name = select_and_invoke_js(
         &document,
         &book_rule.book_name,
-        content_type_for(&book_rule.book_name),
+        cover::content_type_for(&book_rule.book_name),
     )?;
     let author = select_and_invoke_js(
         &document,
         &book_rule.author,
-        content_type_for(&book_rule.author),
+        cover::content_type_for(&book_rule.author),
     )?;
     // author 前缀 (如 "作者: ") 需剥掉
     let author = author.replace("作者: ", "").replace("作者:", "");
@@ -167,7 +176,7 @@ pub fn parse_book_html(html: &str, base_url: &str, rule: &Rule) -> Result<Book, 
     let category = optional_field(&document, &book_rule.category)?;
     let latest_chapter = optional_field(&document, &book_rule.latest_chapter)?;
     let latest_chapter_url = optional_field(&document, &book_rule.latest_chapter_url)?
-        .and_then(|u| abs_url(base_url, &u).or(Some(u)));
+        .and_then(|u| absolute_url(base_url, &u).or(Some(u)));
     let last_update_time = optional_field(&document, &book_rule.last_update_time)?.map(|s| {
         static RE: LazyLock<Regex> = LazyLock::new(|| {
             #[allow(
@@ -187,9 +196,9 @@ pub fn parse_book_html(html: &str, base_url: &str, rule: &Rule) -> Result<Book, 
     let raw_cover = select_and_invoke_js(
         &document,
         &book_rule.cover_url,
-        content_type_for(&book_rule.cover_url),
+        cover::content_type_for(&book_rule.cover_url),
     )?;
-    let cover_url = extract_cover_url(raw_cover, base_url);
+    let cover_url = cover::extract_cover_url(raw_cover, base_url);
 
     Ok(Book {
         url: base_url.to_string(),
@@ -210,7 +219,7 @@ fn optional_field(document: &Html, query: &str) -> Result<Option<String>, BookEr
     if query.trim().is_empty() {
         return Ok(None);
     }
-    let v = select_and_invoke_js(document, query, content_type_for(query))?;
+    let v = select_and_invoke_js(document, query, cover::content_type_for(query))?;
     Ok(if v.is_empty() { None } else { Some(v) })
 }
 
@@ -362,7 +371,7 @@ mod tests {
     async fn live_22biqu_book_detail_parses() {
         use crate::config::AppConfig;
         use crate::http::client::{ClientOptions, build_async_client};
-        use crate::parser::search::search_one;
+        use crate::parser::search;
 
         let cfg = AppConfig::default();
         let client = build_async_client(&cfg, &ClientOptions::default()).unwrap();
@@ -391,13 +400,14 @@ mod tests {
         search_rule.id = 5;
         apply_default_rule(&mut search_rule, LangType::ZhCn);
 
-        let results = match search_one(&client, &search_rule, "诡秘之主", Some(1), None).await {
-            Ok(v) => v,
-            Err(e) => {
-                eprintln!("live search soft-skip: {e}");
-                return;
-            }
-        };
+        let results =
+            match search::search_one(&client, &search_rule, "诡秘之主", Some(1), None).await {
+                Ok(v) => v,
+                Err(e) => {
+                    eprintln!("live search soft-skip: {e}");
+                    return;
+                }
+            };
         let Some(first) = results.first() else {
             eprintln!("no search results, skipping live book test");
             return;

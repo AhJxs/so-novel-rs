@@ -1,8 +1,9 @@
 //! 杂项工具。对应 Java `util.CrawlUtils` 中除 `hasCf`/`request` 之外的部分。
 
+use std::sync::LazyLock;
+
 use rand::RngExt;
 use regex::Regex;
-use std::sync::LazyLock;
 
 use crate::config::AppConfig;
 use crate::models::EffectiveCrawl;
@@ -25,6 +26,7 @@ fn compile_static_re(pattern: &'static str) -> Regex {
     }
 }
 
+/// 把规则里的 `key: value` 模板（可含 `{0}` 占位）展开成表单键值对。
 pub fn build_form_data(template: &str, args: &[&str]) -> Vec<(String, String)> {
     static KV: LazyLock<Regex> = LazyLock::new(|| {
         // 形如 `key: value`，value 直到下一个 `,` 或 `}`；容忍两侧可选引号。
@@ -57,6 +59,7 @@ pub fn build_form_data(template: &str, args: &[&str]) -> Vec<(String, String)> {
 
 /// 把 GET 搜索 url 里的 `%s` 占位符替换成关键字，并对关键字做最小限度的 url-encode
 /// （关键字可能含 `%`、`#` 等字符，不能直接 `String::replace`）。
+#[must_use]
 pub fn format_url_query(url_template: &str, keyword: &str) -> String {
     let encoded = url_encode_query_value(keyword);
     url_template.replacen("%s", &encoded, 1)
@@ -75,7 +78,7 @@ fn url_encode_query_value(s: &str) -> String {
             _ => {
                 out.push('%');
                 out.push(HEX[(*b >> 4) as usize] as char);
-                out.push(HEX[(*b & 0x0F) as usize] as char);
+                out.push(HEX[(*b & 0x0f) as usize] as char);
             }
         }
     }
@@ -83,6 +86,7 @@ fn url_encode_query_value(s: &str) -> String {
 }
 
 /// 随机抓取间隔（毫秒）。对应 Java `CrawlUtils.randomInterval(config, false)`。
+#[must_use]
 pub fn random_interval_ms(eff: &EffectiveCrawl) -> u64 {
     let lo = eff.min_interval_ms as u64;
     let hi = eff.max_interval_ms.max(eff.min_interval_ms + 1) as u64;
@@ -90,6 +94,7 @@ pub fn random_interval_ms(eff: &EffectiveCrawl) -> u64 {
 }
 
 /// 重试随机间隔（毫秒）。对应 Java `CrawlUtils.randomInterval(config, true)`。
+#[must_use]
 pub fn random_retry_interval_ms(eff: &EffectiveCrawl) -> u64 {
     let lo = eff.retry_min_interval_ms as u64;
     let hi = eff.retry_max_interval_ms.max(eff.retry_min_interval_ms + 1) as u64;
@@ -97,6 +102,7 @@ pub fn random_retry_interval_ms(eff: &EffectiveCrawl) -> u64 {
 }
 
 /// 也提供一个直接吃 `AppConfig` 的版本，便于不需要 `EffectiveCrawl` 的调用方。
+#[must_use]
 pub fn random_interval_from_cfg(cfg: &AppConfig) -> u64 {
     let lo = cfg.crawl.min_interval as u64;
     let hi = cfg.crawl.max_interval.max(cfg.crawl.min_interval + 1) as u64;
@@ -106,6 +112,7 @@ pub fn random_interval_from_cfg(cfg: &AppConfig) -> u64 {
 /// 清理不可见字符：控制字符、零宽字符、BOM、行/段分隔等（页面反爬常用手段，
 /// 留在文本里会导致中文显示错乱）。对应 Java `util.CrawlUtils.cleanInvisibleChars`；
 /// Rust 端不能套 `[\\p{C}...]` 正则（regex crate 默认禁用 Unicode 大类），故用白名单。
+#[must_use]
 pub fn clean_invisible_chars(s: &str) -> String {
     s.chars()
         .filter(|c| {

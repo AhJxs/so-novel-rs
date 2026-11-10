@@ -10,10 +10,10 @@ use gpui_kit::App;
 use gpui_kit::component::setting::{NumberFieldOptions, SettingGroup, SettingItem, SettingPage};
 use rust_i18n::t;
 
-use super::ctx::PageCtx;
+use super::ctx::PageContext;
 use super::fields::{bool_field, number_field_option_i32, number_field_u32_clamped};
 
-pub(super) fn build(ctx: &PageCtx<'_>, _cx: &App) -> SettingPage {
+pub(super) fn build(ctx: &PageContext<'_>, _cx: &App) -> SettingPage {
     let m = ctx.model.clone();
 
     SettingPage::new(t!("Settings.page.crawl"))

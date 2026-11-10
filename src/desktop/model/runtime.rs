@@ -12,6 +12,10 @@ use tokio::runtime::Runtime;
 /// `tokio::runtime::Builder::build()` 失败的唯一现实场景是系统资源耗尽
 /// （内存 / fd / thread 上限），此时 app 必然跑不起来 — 错误沿 `Result` 冒到
 /// `AppModel::new` 的初始化失败分支，让 UI 入口弹致命错误对话框，而不是 panic。
+///
+/// # Errors
+///
+/// tokio runtime 构造失败（内存 / fd / thread 上限耗尽）时返回带上下文的错误。
 pub fn build_shared_runtime() -> Result<&'static Runtime> {
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()

@@ -9,17 +9,17 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use rand::RngExt;
+use reqwest::Client;
 use tokio::sync::Semaphore;
-
-use crate::config::AppConfig;
-use crate::export::{RenderTarget, build_book_dir_name, exporter_for, write_single_chapter};
-use crate::models::{Book, Chapter, Source};
-use crate::parser::{ChapterError, TocError, parse_chapter};
 
 use super::download_options::DownloadOptions;
 use super::progress::Progress;
-use super::resolve::{CrawlerError, resolve_book};
+use super::resolve::{CrawlerError, ResolvedBook, resolve_book};
 use super::retry as retry_mod;
+use crate::config::AppConfig;
+use crate::export::{self, RenderTarget};
+use crate::models::{Book, Chapter, Source};
+use crate::parser::{ChapterError, TocError, parse_chapter};
 
 /// 入口: 抓一本书并导出。**全 async**: 内部直接 await 各级 parser,
 /// 配合 `tokio::select!` 让外部 `cancel` 信号瞬间中断 in-flight HTTP (reqwest 关闭连接)。
@@ -48,7 +48,7 @@ use super::retry as retry_mod;
 )]
 pub async fn download_book(
     cfg: &AppConfig,
-    client: &reqwest::Client,
+    client: &Client,
     source: &Source,
     book_url: &str,
     opts: DownloadOptions,
@@ -57,7 +57,10 @@ pub async fn download_book(
     let progress = opts.progress.clone();
     let notify = opts.notify.clone();
 
-    let (book, toc) = resolve_book(cfg, client, source, book_url, &cancel).await?;
+    let ResolvedBook {
+        book,
+        chapters: toc,
+    } = resolve_book(cfg, client, source, book_url, &cancel).await?;
 
     if toc.is_empty() {
         // 真实失败: 书源返回 0 章, 无法继续。warn 让 trace_id 里有原因可查。
@@ -65,8 +68,9 @@ pub async fn download_book(
         return Err(CrawlerError::EmptyToc);
     }
 
+    let book = Arc::new(book);
     let _ = progress.send(Progress::BookResolved {
-        book: Box::new(book.clone()),
+        book: Arc::clone(&book),
         total_chapters: toc.len(),
     });
     if let Some(ref n) = notify {
@@ -110,7 +114,7 @@ pub async fn download_book(
 )]
 pub async fn download_chapters(
     cfg: &AppConfig,
-    client: &reqwest::Client,
+    client: &Client,
     source: &Source,
     book: &Book,
     chapters: Vec<Chapter>,
@@ -132,23 +136,24 @@ pub async fn download_chapters(
         Some(cfg.global.cf_bypass.as_str())
     };
 
-    let rule = Arc::new(source.rule.clone());
+    let rule = Arc::clone(&source.rule);
     let cf_bypass_owned: Option<Arc<str>> = cf_bypass.map(Arc::from);
 
-    let book_dir_name = build_book_dir_name(book, cfg.download.ext_name);
+    let book_dir_name = export::build_book_dir_name(book, cfg.download.ext_name);
     let chapters_dir = std::path::Path::new(&cfg.download.download_path).join(&book_dir_name);
     std::fs::create_dir_all(&chapters_dir)?;
 
     let max_concurrent = compute_concurrency(source, chapters.len());
     let render_target: RenderTarget = cfg.download.ext_name.into();
-    let rule_chapter = Arc::new(
-        rule.chapter
-            .clone()
-            .ok_or(CrawlerError::Toc(TocError::TocRuleMissing))?,
-    );
+    // 章节规则在整本书里共享；预检一次后由每个 task 从 `rule` 借用，不再逐章深拷贝。
+    if rule.chapter.is_none() {
+        return Err(CrawlerError::Toc(TocError::TocRuleMissing));
+    }
 
     let semaphore = Arc::new(Semaphore::new(max_concurrent));
     let eff = source.effective_crawl.clone();
+    // 源语言整本书共享，用 `Arc<str>` 免去逐章 `String` 深拷贝。
+    let rule_lang: Arc<str> = Arc::from(source.rule.language.as_str());
     let mut handles = Vec::with_capacity(chapters.len());
     let chapter_count = chapters.len();
 
@@ -168,15 +173,13 @@ pub async fn download_chapters(
         let permit = Arc::clone(&semaphore);
         let client = client.clone();
         let rule = Arc::clone(&rule);
-        let rule_chapter = Arc::clone(&rule_chapter);
         let cf = cf_bypass_owned.as_ref().map(Arc::clone);
         let progress = progress.clone();
         let cancel = cancel.clone();
         let eff = eff.clone();
         let enable_retry = cfg.crawl.enable_retry;
-        // 简繁转换需要源/目标语言: `source` / `cfg` 是借用, 闭包 'static 要求 owned 值,
-        // 故 clone Rule (Arc 浅拷贝, 开销小) 与 target LangType (Copy)。
-        let rule_lang = source.rule.language.clone();
+        // 简繁转换需要源/目标语言: 源语言是整本共享的 `Arc<str>`, 目标语言 `Copy`。
+        let rule_lang = Arc::clone(&rule_lang);
         let target_lang = cfg.global.language.to_book_target_lang();
 
         let ch_dir = chapters_dir.clone();
@@ -212,18 +215,19 @@ pub async fn download_chapters(
                 return ChapterOutcome::Cancelled;
             }
 
-            // 抓 + 重试
+            // 抓 + 重试。章节用 `Arc` 共享给每次尝试，避免每次重试深拷贝标题/URL。
+            let chapter = Arc::new(chapter);
             let max_attempts = if enable_retry { eff.max_retries } else { 0 };
             let order = chapter.order;
             let title = chapter.title.clone();
 
             // 把章节抓取整段 (含重试) 和 cancel 信号 race; cancel 一来 future
-            // 立刻被 drop, reqwest::Client::send 关闭底层连接 — 真·零延迟。
+            // 立刻被 drop, Client::send 关闭底层连接 — 真·零延迟。
             let fetch_future = retry_mod::retry_with_backoff(
                 |_attempt| {
                     let client = client.clone();
-                    let rule = rule.clone();
-                    let chapter = chapter.clone();
+                    let rule = Arc::clone(&rule);
+                    let chapter = Arc::clone(&chapter);
                     let cf = cf.clone();
                     let cancel = cancel.clone();
                     async move {
@@ -254,14 +258,19 @@ pub async fn download_chapters(
 
             match result {
                 Ok(parsed) => {
-                    let (final_title, body) = crate::export::render_chapter(
+                    let Some(rule_chapter) = rule.chapter.as_ref() else {
+                        // 预检已保证存在；防御性处理，别让整本下载 panic。
+                        tracing::error!(order, "章节规则在预检后消失");
+                        return ChapterOutcome::Failed;
+                    };
+                    let (final_title, body) = export::render_chapter(
                         &parsed,
-                        &rule_chapter,
+                        rule_chapter,
                         render_target,
                         &rule_lang,
                         target_lang,
                     );
-                    if let Err(e) = write_single_chapter(
+                    if let Err(e) = export::write_single_chapter(
                         &ch_dir,
                         order,
                         &final_title,
@@ -356,7 +365,7 @@ pub async fn download_chapters(
         None
     };
 
-    let exporter = exporter_for(cfg.download.ext_name, &cfg.download.txt_encoding);
+    let exporter = export::exporter_for(cfg.download.ext_name, &cfg.download.txt_encoding);
     let out_dir = std::path::Path::new(&cfg.download.download_path);
     let final_path =
         exporter.merge_with_cover(book, &chapters_dir, out_dir, cover_bytes.as_deref())?;
@@ -433,7 +442,7 @@ fn cleanup_chapters_dir_if_empty(dir: &std::path::Path) {
 }
 
 /// 下载封面字节 (EPUB 专属), 失败 soft-skip。
-async fn download_cover(client: &reqwest::Client, cover_url: Option<&str>) -> Option<Vec<u8>> {
+async fn download_cover(client: &Client, cover_url: Option<&str>) -> Option<Vec<u8>> {
     let url = cover_url?.trim();
     if url.is_empty() {
         return None;
@@ -477,7 +486,7 @@ mod tests {
             crawl,
             ..Rule::default()
         };
-        Source::from(rule, &cfg)
+        Source::from(Arc::new(rule), &cfg)
     }
 
     #[test]

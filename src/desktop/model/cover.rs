@@ -3,15 +3,19 @@
 //! `CoverEntry` 是 UI 中立结构: 只存原始图片字节 + 源 / URL 元信息,
 //! 解码成可显示格式由 UI 层负责。
 
+use image::ImageReader;
+
 /// 封面缓存条目。`Ready` 持有 `Vec<u8>` (已校验为有效图片的原始字节);
 /// `Failed` 保留错误文案, 以便 UI 给出可见反馈而非静默。
 pub enum CoverEntry {
+    /// 下载并解码成功。
     Ready {
         /// 原始图片字节（PNG / JPEG / WebP 等）。
         bytes: Vec<u8>,
         /// 唯一 URI（`cover://{source_id}/{hash}`），用于 GPUI 端做纹理缓存去重。
         uri: String,
     },
+    /// 下载或解码失败，附展示用文案。
     Failed(String),
 }
 
@@ -29,7 +33,7 @@ pub fn cover_entry_from_bytes(
         },
         |b| {
             // 提前用 image::ImageReader 验证字节是真的图片 (避免 lazy 解码时 ui.add 失败)。
-            let probe = image::ImageReader::new(std::io::Cursor::new(&b))
+            let probe = ImageReader::new(std::io::Cursor::new(&b))
                 .with_guessed_format()
                 .ok()
                 .and_then(|r| r.decode().ok());
@@ -45,6 +49,7 @@ pub fn cover_entry_from_bytes(
 }
 
 /// 短哈希 (fnv-like 64-bit → 16 hex), 仅用于 URI 去重 key, **不是**密码学用途。
+#[must_use]
 pub fn hash_short(s: &str) -> String {
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
     for b in s.as_bytes() {
@@ -56,15 +61,18 @@ pub fn hash_short(s: &str) -> String {
 
 #[cfg(test)]
 mod cover_tests {
-    use super::*;
     use std::io::Cursor;
+
+    use image::{ImageFormat, Rgba, RgbaImage};
+
+    use super::*;
 
     /// 构造一个 2x2 RGBA 红色像素的 PNG 字节流。
     fn make_png_bytes() -> Vec<u8> {
-        let img = image::RgbaImage::from_pixel(2, 2, image::Rgba([255, 0, 0, 255]));
+        let img = RgbaImage::from_pixel(2, 2, Rgba([255, 0, 0, 255]));
         let mut buf = Vec::new();
         // 小图写入内存 cursor 不会失败; 失败时仍返回空 buf 让测试失败。
-        let _ = img.write_to(&mut Cursor::new(&mut buf), image::ImageFormat::Png);
+        let _ = img.write_to(&mut Cursor::new(&mut buf), ImageFormat::Png);
         buf
     }
 

@@ -7,14 +7,19 @@ use thiserror::Error;
 
 pub use crate::models::ContentType;
 
+/// CSS 选择器 / `@js:` 后处理错误。
 #[derive(Debug, Error)]
 pub enum SelectError {
+    /// CSS 选择器语法错误。
     #[error("无效的 CSS 选择器: {0}")]
     BadSelector(String),
+    /// 规则用了尚未实现的 `XPath`。
     #[error("XPath 选择器暂不支持（阶段 2a），原始查询: {0}")]
     XPathNotSupported(String),
+    /// `@js:` 后处理返回错误。
     #[error("JS 后处理失败: {0}")]
     JsFailed(String),
+    /// `@java:` 后处理无法执行（本项目不提供 Java 运行时）。
     #[error("Java 后处理失败: {0}")]
     JavaFailed(String),
 }
@@ -30,7 +35,8 @@ pub enum SelectError {
 ///
 /// ```ignore
 /// let html = scraper::Html::parse_document(r#"<div class="a">作者: 苹果</div>"#);
-/// let s = select_and_invoke_js(&html, r#".a@js:r=r.replace('作者: ','')"#, ContentType::Text).unwrap();
+/// let s = select_and_invoke_js(&html, r#".a@js:r=r.replace('作者: ','')"#, ContentType::Text)
+///     .expect("example selector resolves");
 /// assert_eq!(s, "苹果");
 /// ```
 ///
@@ -51,6 +57,10 @@ pub fn select_and_invoke_js(
 
 /// 同上, 但作用于已选中的 `ElementRef` (嵌套查询场景, 例如搜索结果列表里
 /// 对每条 result 元素再选 bookName/author 等子字段)。
+///
+/// # Errors
+///
+/// 选择器非法、`XPath` 未支持或 `@js:` 后处理失败时返回 [`SelectError`]。
 pub fn select_and_invoke_js_within(
     el: ElementRef<'_>,
     query: &str,
@@ -94,6 +104,10 @@ fn select_and_invoke_js_impl(
 }
 
 /// 仅做选择 + 内容抽取, 不做 JS 后处理。
+///
+/// # Errors
+///
+/// 选择器非法或 `XPath` 未支持时返回 [`SelectError`]。
 pub fn dom_select_text(
     document: &Html,
     selector: &str,
@@ -128,10 +142,7 @@ fn extract_from_elements(els: &[ElementRef<'_>], content_type: ContentType) -> S
                 .collect();
             parts.join(" ")
         }
-        ContentType::Html => els
-            .iter()
-            .map(scraper::ElementRef::inner_html)
-            .collect::<String>(),
+        ContentType::Html => els.iter().map(ElementRef::inner_html).collect::<String>(),
         ContentType::AttrSrc | ContentType::AttrHref => {
             // 只取原始 attr 值; 与 jsoup `absUrl` 等价的拼绝对路径由 parser 层
             // 拿到 baseUri 后用 `url::Url::join` 完成。该臂只覆盖 attr 类型,
@@ -166,6 +177,7 @@ fn strip_at_suffix(query: &str, ct: ContentType) -> (&str, ContentType) {
 }
 
 /// 拆 query 里 `<sel>@js:<body>` 这两段。
+#[must_use]
 pub fn split_js(query: &str) -> (&str, Option<&str>) {
     query.find("@js:").map_or((query, None), |idx| {
         (&query[..idx], Some(&query[idx + 4..]))
@@ -192,8 +204,9 @@ fn is_xpath(s: &str) -> bool {
 ///
 /// 引入完整 `XPath` 引擎的成本远高于改写这几条规则, 故其它 `XPath` 一律返回 `None`。
 fn xpath_to_css(s: &str) -> Option<String> {
-    use regex::Regex;
     use std::sync::LazyLock;
+
+    use regex::Regex;
 
     /// 编译期确定的正则：用 match + panic 避免 `clippy::expect_used`，与项目里
     /// 其它 `LazyLock` 静态正则统一风格。

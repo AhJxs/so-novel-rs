@@ -13,11 +13,18 @@ pub enum RulesError {
     /// 规则文件读取失败 (含 IO 错误源)。
     #[error("规则文件读取失败 {path}: {source}")]
     Io {
+        /// 出问题的规则文件路径。
         path: PathBuf,
+        /// 底层 IO 错误。
         #[source]
         source: std::io::Error,
     },
     /// 规则文件解析失败 (json / json5 错误信息已格式化)。
     #[error("规则文件解析失败 {path}: {message}")]
-    Parse { path: PathBuf, message: String },
+    Parse {
+        /// 出问题的规则文件路径。
+        path: PathBuf,
+        /// 已格式化的解析错误信息。
+        message: String,
+    },
 }

@@ -2,9 +2,8 @@
 //!
 //! 全部 thin delegator, 实际逻辑在 `crate::desktop::model::ops::download`。
 
-use crate::models::{Book, Chapter, SearchResult};
-
 use super::{AppModel, ops};
+use crate::models::{Book, Chapter, SearchResult};
 
 impl AppModel {
     /// 派一个新的下载任务。返回新任务 id。
@@ -20,15 +19,8 @@ impl AppModel {
         let (id, task) = ops::spawn_download(&ctx, self.next_task_id, target);
         self.next_task_id += 1;
         self.tasks.push(task);
-        // Fire-and-forget 落盘: UI 线程不能同步等 fsync, 派到 blocking pool;
-        // 失败仅 warn (best-effort), 下次保存会覆盖。
-        let path = self.paths.tasks_file.clone();
-        let tasks = self.tasks.clone();
-        self.runtime.spawn_blocking(move || {
-            if let Err(e) = crate::db::save_with_trim(&path, &tasks) {
-                tracing::warn!("保存任务到文件失败: {e:#}");
-            }
-        });
+        // Fire-and-forget 落盘: UI 线程不能同步等 fsync; 序列化在本线程, 写盘进 blocking pool。
+        self.persist_tasks();
         id
     }
 
@@ -52,13 +44,7 @@ impl AppModel {
         self.next_task_id += 1;
         self.tasks.push(task);
         // 同 spawn_download: fire-and-forget 落盘。
-        let path = self.paths.tasks_file.clone();
-        let tasks = self.tasks.clone();
-        self.runtime.spawn_blocking(move || {
-            if let Err(e) = crate::db::save_with_trim(&path, &tasks) {
-                tracing::warn!("保存任务到文件失败: {e:#}");
-            }
-        });
+        self.persist_tasks();
         id
     }
 }

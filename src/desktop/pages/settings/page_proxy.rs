@@ -2,22 +2,21 @@
 //!
 //! 2 个 group：代理（模式下拉 / Host / Port / 系统代理探测结果）与起点 Cookie（多行 textarea）。
 
-use gpui_kit::component::{
-    ActiveTheme as _, AxisExt, Sizable as _,
-    input::Textarea,
-    setting::{NumberFieldOptions, SettingField, SettingGroup, SettingItem, SettingPage},
+use gpui_kit::component::input::Textarea;
+use gpui_kit::component::setting::{
+    NumberFieldOptions, SettingField, SettingGroup, SettingItem, SettingPage,
 };
+use gpui_kit::component::{ActiveTheme as _, AxisExt, Sizable as _};
 use gpui_kit::{App, Entity, ParentElement, SharedString, Styled, div, px};
 use rust_i18n::t;
 
+use super::ctx::PageContext;
+use super::fields::{dropdown_field, number_field_u16, string_field};
 use crate::config::ProxyMode;
 use crate::desktop::model::AppModel;
 use crate::http::{AbsentReason, SystemProxy};
 
-use super::ctx::PageCtx;
-use super::fields::{dropdown_field, number_field_u16, string_field};
-
-pub(super) fn build(ctx: &PageCtx<'_>, cx: &App) -> SettingPage {
+pub(super) fn build(ctx: &PageContext<'_>, cx: &App) -> SettingPage {
     let m = ctx.model.clone();
     // `build_pages` 每帧被 `SettingsPage::render` 调一次，所以这里的 `disabled` 状态
     // 每帧重算 —— 改完下拉立刻生效（配合 `after_proxy_mode` 的 refresh_windows）。

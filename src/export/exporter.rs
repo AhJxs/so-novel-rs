@@ -13,20 +13,27 @@ use thiserror::Error;
 
 use crate::config::ExportFormat;
 use crate::models::Book;
-use crate::utils::fs::sanitize_filename;
+use crate::utils::fs;
 
+/// 导出阶段的统一错误。
 #[derive(Debug, Error)]
 pub enum ExportError {
+    /// 待导出的章节缓存目录为空或不存在。
     #[error("章节缓存目录为空: {0}")]
     EmptyChaptersDir(PathBuf),
+    /// 读写章节文件或输出文件失败。
     #[error("IO 错误: {0}")]
     Io(#[from] std::io::Error),
+    /// EPUB 构建失败。
     #[error("EPUB 生成失败: {0}")]
     Epub(String),
+    /// ZIP 容器打包失败。
     #[error("ZIP 打包失败: {0}")]
     Zip(String),
+    /// 目标编码不支持或转换失败。
     #[error("编码转换失败: {0}")]
     Encoding(String),
+    /// PDF 排版 / 生成失败。
     #[error("PDF 生成失败: {0}")]
     Pdf(String),
 }
@@ -40,6 +47,10 @@ pub trait Exporter {
     fn ext(&self) -> &'static str;
 
     /// 执行合并（不带封面）。
+    ///
+    /// # Errors
+    ///
+    /// 读取章节文件或写成品失败时返回 [`ExportError`]。
     fn merge(
         &self,
         book: &Book,
@@ -49,6 +60,10 @@ pub trait Exporter {
 
     /// 带封面的合并入口。默认实现忽略封面、与 `merge` 等价；EPUB 覆写它把封面字节写入电子书。
     /// `cover_bytes`：调用方（调度层）负责下载，失败时传 `None`，实现者降级为不带封面继续。
+    ///
+    /// # Errors
+    ///
+    /// 读取章节文件或写成品失败时返回 [`ExportError`]。
     fn merge_with_cover(
         &self,
         book: &Book,
@@ -63,6 +78,7 @@ pub trait Exporter {
 /// 按 `ExportFormat` 选择导出器。Pdf 走 `pdf_oxide` 真生成 PDF（章节文件由
 /// `render_chapter(target=Pdf)` 写成 Html，`PdfExporter` 内部再合并成 PDF）；
 /// Markdown 由 `md.rs` 输出单个 `.md`（含 YAML front matter、TOC 与 `<a id="chapter-N">` 锚点）。
+#[must_use]
 pub fn exporter_for(format: ExportFormat, txt_encoding: &str) -> Box<dyn Exporter + Send + Sync> {
     match format {
         ExportFormat::Txt => Box::new(super::txt::TxtExporter::new(txt_encoding)),
@@ -77,6 +93,10 @@ pub fn exporter_for(format: ExportFormat, txt_encoding: &str) -> Box<dyn Exporte
 ///
 /// 命名约定与 Java 端 `Crawler#generateChapterPath` 一致：`html`/`pdf` → `001_.html`
 /// （下划线后无标题，便于翻页脚本拼前缀），`txt` → `001_<标题>.txt`，`epub` → `001_<标题>.html`。
+///
+/// # Errors
+///
+/// 创建章节目录或写入某个章节文件失败时返回带路径上下文的错误。
 pub fn write_chapter_files(
     chapters_dir: &Path,
     rendered: &[RenderedChapter],
@@ -91,7 +111,7 @@ pub fn write_chapter_files(
 
     for ch in rendered {
         let order = pad_zero(ch.order, digit_count);
-        let safe_title = sanitize_filename(&ch.title);
+        let safe_title = fs::sanitize_filename(&ch.title);
         let filename = match format {
             ExportFormat::Html | ExportFormat::Pdf => format!("{order}_.html"),
             ExportFormat::Txt => format!("{order}_{safe_title}.txt"),
@@ -107,6 +127,10 @@ pub fn write_chapter_files(
 
 /// 把单章写入 `chapters_dir`（并发安全：order 唯一不会冲突）。不检查文件是否已存在
 /// （全新下载不可能冲突），省掉每章一次额外 syscall。
+///
+/// # Errors
+///
+/// 写章节文件失败时返回对应的 `std::io::Error`。
 pub fn write_single_chapter(
     dir: &Path,
     order: u32,
@@ -117,7 +141,7 @@ pub fn write_single_chapter(
 ) -> std::io::Result<PathBuf> {
     let digit_count = total_chapters.to_string().len().max(3);
     let order_str = pad_zero(order, digit_count);
-    let safe_title = sanitize_filename(title);
+    let safe_title = fs::sanitize_filename(title);
     let filename = match format {
         ExportFormat::Html | ExportFormat::Pdf => format!("{order_str}_.html"),
         ExportFormat::Txt => format!("{order_str}_{safe_title}.txt"),
@@ -131,6 +155,10 @@ pub fn write_single_chapter(
 
 /// 按"前缀数字"升序枚举目录下的章节文件。
 /// 跳过 `0_`（书目索引、封面这类）开头的辅助文件以避免被当成正文章节。
+///
+/// # Errors
+///
+/// 目录不可读时返回 [`ExportError`]。
 pub fn sort_chapter_files(dir: &Path) -> Result<Vec<PathBuf>, ExportError> {
     let mut files: Vec<PathBuf> = std::fs::read_dir(dir)?
         .filter_map(std::result::Result::ok)
@@ -150,6 +178,7 @@ pub fn sort_chapter_files(dir: &Path) -> Result<Vec<PathBuf>, ExportError> {
 
 /// 工厂：用书名 + 作者构造目录名。与 Java 端
 /// `"%s (%s) %s".formatted(bookName, author, extName.toUpperCase())` 一致。
+#[must_use]
 pub fn build_book_dir_name(book: &Book, format: ExportFormat) -> String {
     let raw = format!(
         "{} ({}) {}",
@@ -157,7 +186,7 @@ pub fn build_book_dir_name(book: &Book, format: ExportFormat) -> String {
         book.author,
         format.as_lower().to_uppercase()
     );
-    sanitize_filename(&raw)
+    fs::sanitize_filename(&raw)
 }
 
 /// 单个已渲染章节。
@@ -165,13 +194,17 @@ pub fn build_book_dir_name(book: &Book, format: ExportFormat) -> String {
 /// `title` 是 `ChapterFilter` 重写过的最终标题。
 #[derive(Debug, Clone)]
 pub struct RenderedChapter {
+    /// 章节顺序号（1-based），决定输出文件排序。
     pub order: u32,
+    /// 经过 `ChapterFilter` 重写后的最终标题。
     pub title: String,
+    /// 渲染后的正文 HTML / 文本。
     pub body: String,
 }
 
 /// 如果 `dir/filename` 已存在，追加 ` (1)` / ` (2)` 后缀直到不冲突。
 /// 正常路径（无冲突）零开销：只做一次 `exists()` 检查。
+#[must_use]
 pub fn unique_path(dir: &Path, filename: &str) -> PathBuf {
     let path = dir.join(filename);
     if !path.exists() {
@@ -208,8 +241,9 @@ pub(crate) fn pad_zero(n: u32, width: usize) -> String {
 /// 极简 HTML 标签清理（仅用于 intro 文本）：删除 `<...>`、HTML 实体、多余空白。
 /// 不引入 ammonia / scraper（intro 一般几百字，正则足够）。
 pub(crate) fn strip_html_tags(s: &str) -> String {
-    use regex::Regex;
     use std::sync::LazyLock;
+
+    use regex::Regex;
 
     // 正则由源码字面量构造，编译期确定能编译；用 `match` 走 panic 路径避免 `clippy::expect_used`。
     // panic 即设计：字面量写错是程序员错误，启动期炸出来比在 lazy init 崩在半成品状态更易诊断。

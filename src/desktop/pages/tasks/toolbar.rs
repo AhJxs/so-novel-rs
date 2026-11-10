@@ -2,11 +2,8 @@
 //!
 //! label 在 render 里现取 `t!(...)` + 当前 counts，切语言自动同步。
 
-use gpui_kit::component::{
-    Selectable, Sizable,
-    button::{Button, ButtonVariants as _},
-    h_flex,
-};
+use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::{Selectable, Sizable, h_flex};
 use gpui_kit::{Context, IntoElement, ParentElement, Styled};
 use rust_i18n::t;
 

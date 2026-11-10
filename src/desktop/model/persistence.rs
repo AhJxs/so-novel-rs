@@ -1,11 +1,12 @@
-//! `AppModel` 持久化方法 (`save_sources_config` / `persist_settings`)。
+//! `AppModel` 持久化方法 (`save_sources_config` / `persist_settings` / `persist_tasks`)。
 //!
-//! 任务落盘 (`tasks.json`) 不在这里 —— 调用方直接 `spawn_blocking` + `db::save_with_trim`
-//! 拿 fire-and-forget 语义, 不需要绕一圈 impl method。
+//! 任务落盘 (`tasks.json`) 统一走 [`AppModel::persist_tasks`]：UI 线程只序列化，
+//! 写盘丢给 blocking pool，调用方拿到 fire-and-forget 语义。
 
 use super::AppModel;
 
 impl AppModel {
+    /// 把书源选择状态写回 `sources_config.json`；失败仅记日志。
     pub fn save_sources_config(&self) {
         if let Err(e) = self.sources_config.save(&self.paths.sources_config) {
             tracing::warn!("保存书源配置失败: {e:#}");
@@ -37,5 +38,25 @@ impl AppModel {
             tracing::warn!("{msg}");
             self.push_error(msg);
         }
+    }
+
+    /// 把当前任务列表 fire-and-forget 落盘。
+    ///
+    /// 序列化（含超额完成任务的裁剪）留在调用线程，避免把整张 `DownloadTask` 表
+    /// clone 进 blocking pool；写盘本身仍是异步的，失败只记日志。
+    pub fn persist_tasks(&self) {
+        let path = self.paths.tasks_file.clone();
+        let json = match crate::db::tasks_json_with_trim(&self.tasks) {
+            Ok(json) => json,
+            Err(e) => {
+                tracing::warn!("序列化任务列表失败: {e:#}");
+                return;
+            }
+        };
+        self.runtime.spawn_blocking(move || {
+            if let Err(e) = crate::db::write_json(&path, &json) {
+                tracing::warn!("保存任务到文件失败: {e:#}");
+            }
+        });
     }
 }

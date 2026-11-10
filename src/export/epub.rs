@@ -10,14 +10,16 @@
 use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 use epub_builder::{EpubBuilder, EpubContent, EpubVersion, ReferenceType, ZipLibrary};
 
 use super::exporter::pad_zero;
 use crate::export::exporter::{ExportError, Exporter, sort_chapter_files, unique_path};
 use crate::models::Book;
-use crate::utils::fs::sanitize_filename;
+use crate::utils::fs;
 
+/// 把章节缓存目录打包成 EPUB。
 pub struct EpubExporter;
 
 impl Exporter for EpubExporter {
@@ -49,6 +51,10 @@ impl Exporter for EpubExporter {
 ///
 /// `cover_bytes` 为 None 时不写封面；Some 时按 magic number 判 mime (PNG/JPEG/GIF/WEBP/BMP,
 /// 未知降级 `image/jpeg`), 与 Java 端把 cover bytes 写到 `cover.jpg` 一致。
+///
+/// # Errors
+///
+/// 章节文件读取 / 排序失败、epub 打包写入失败时返回 [`ExportError`]。
 pub fn merge_with_cover_bytes(
     book: &Book,
     chapters_dir: &Path,
@@ -110,7 +116,7 @@ pub fn merge_with_cover_bytes(
 
     let total_chapters = files.len();
     let digit = total_chapters.to_string().len().max(3);
-    let started = std::time::Instant::now();
+    let started = Instant::now();
     for (idx, path) in files.iter().enumerate() {
         // 流式: File 直接作为 `Read` 传给 `EpubContent`, 避免 `read_to_end` 把整章字节
         // 先吃进 Vec (1000 章 × 50KB 会白占 50MB)。
@@ -134,7 +140,7 @@ pub fn merge_with_cover_bytes(
     );
 
     std::fs::create_dir_all(out_dir)?;
-    let out_name = sanitize_filename(&format!("{}({}).epub", book.book_name, book.author));
+    let out_name = fs::sanitize_filename(&format!("{}({}).epub", book.book_name, book.author));
     let out_path = unique_path(out_dir, &out_name);
     let file = File::create(&out_path)?;
     let mut writer = BufWriter::new(file);
@@ -174,7 +180,7 @@ fn chapter_title_from_filename(p: &Path) -> Option<String> {
 fn detect_image_mime(bytes: &[u8]) -> &'static str {
     if bytes.starts_with(&[0x89, b'P', b'N', b'G']) {
         "image/png"
-    } else if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
+    } else if bytes.starts_with(&[0xff, 0xd8, 0xff]) {
         "image/jpeg"
     } else if bytes.starts_with(b"GIF8") {
         "image/gif"
@@ -218,6 +224,8 @@ fn html_escape(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
+    use zip::ZipArchive;
+
     use super::*;
     use crate::config::ExportFormat;
     use crate::export::exporter::{RenderedChapter, write_chapter_files};
@@ -273,7 +281,7 @@ mod tests {
         );
 
         let f = File::open(&path).unwrap();
-        let mut zr = zip::ZipArchive::new(f).unwrap();
+        let mut zr = ZipArchive::new(f).unwrap();
         let names: Vec<String> = (0..zr.len())
             .map(|i| zr.by_index(i).unwrap().name().to_string())
             .collect();
@@ -298,12 +306,12 @@ mod tests {
         write_chapter_files(&chapters, &sample_chapters(), ExportFormat::Epub).unwrap();
 
         // 用 PNG signature + 任意字节构造输入 (epub-builder 只校验文件头)。
-        let mut png = vec![0x89u8, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
+        let mut png = vec![0x89u8, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
         png.extend_from_slice(&[0u8; 32]);
 
         let path = merge_with_cover_bytes(&sample_book(), &chapters, &out, Some(&png)).unwrap();
         let f = File::open(&path).unwrap();
-        let mut zr = zip::ZipArchive::new(f).unwrap();
+        let mut zr = ZipArchive::new(f).unwrap();
         let names: Vec<String> = (0..zr.len())
             .map(|i| zr.by_index(i).unwrap().name().to_string())
             .collect();
@@ -334,7 +342,7 @@ mod tests {
     fn detect_image_mime_for_png_and_jpeg() {
         let png = [0x89u8, b'P', b'N', b'G', 0, 0, 0, 0];
         assert_eq!(detect_image_mime(&png), "image/png");
-        let jpeg = [0xFFu8, 0xD8, 0xFF, 0xE0];
+        let jpeg = [0xffu8, 0xd8, 0xff, 0xe0];
         assert_eq!(detect_image_mime(&jpeg), "image/jpeg");
         let unknown = [0u8, 0, 0, 0];
         assert_eq!(detect_image_mime(&unknown), "image/jpeg");
@@ -360,7 +368,7 @@ mod tests {
     fn detect_image_mime_short_input_does_not_panic() {
         assert_eq!(detect_image_mime(&[]), "image/jpeg");
         assert_eq!(detect_image_mime(&[0x89]), "image/jpeg");
-        assert_eq!(detect_image_mime(&[0xFF, 0xD8]), "image/jpeg");
+        assert_eq!(detect_image_mime(&[0xff, 0xd8]), "image/jpeg");
         // RIFF 但不够 12 字节 → 降级
         assert_eq!(detect_image_mime(b"RIFF"), "image/jpeg");
     }

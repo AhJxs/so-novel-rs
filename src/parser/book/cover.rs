@@ -1,7 +1,7 @@
 //! 详情页封面 URL 处理 + `CoverUpdater` 集成: 单页抽取的相对→绝对转换,
 //! 以及 `parse_book_detail` 末尾的 3 站 `CoverUpdater` fan-out。
 
-use crate::http::abs_url;
+use crate::http::absolute_url;
 use crate::models::Book;
 use crate::parser::dom::ContentType;
 
@@ -10,7 +10,7 @@ pub(super) fn extract_cover_url(raw: String, base_url: &str) -> Option<String> {
     if raw.is_empty() {
         return None;
     }
-    abs_url(base_url, &raw).or(Some(raw))
+    absolute_url(base_url, &raw).or(Some(raw))
 }
 
 /// `CoverUpdater` 触发条件 + 替换判断。
@@ -34,6 +34,7 @@ pub(super) fn maybe_replace_cover(book: &mut Book, new_cover: String) -> bool {
 /// 其他走 text。
 ///
 /// book 模块独享, 不进 `dom::selector` (search/toc/chapter 不需要这层判断)。
+#[must_use]
 pub fn content_type_for(query: &str) -> ContentType {
     if query.trim_start().starts_with("meta[") {
         ContentType::AttrContent

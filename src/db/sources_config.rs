@@ -5,8 +5,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use super::write_atomically;
-
+/// 书源选择状态，持久化为 `~/.sonovel/sources_config.json`。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SourcesConfig {
     /// 当前选中的书源 JSON 文件名（相对于 `~/.sonovel/rules/`）。
@@ -44,12 +43,16 @@ impl SourcesConfig {
     }
 
     /// 保存到 JSON 文件（原子写入）。
+    ///
+    /// # Errors
+    ///
+    /// JSON 序列化或写盘失败时返回错误。
     pub fn save(&self, path: &Path) -> anyhow::Result<()> {
         let content = serde_json::to_string_pretty(self)?;
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).ok();
         }
-        write_atomically(path, content.as_bytes())?;
+        super::write_atomically(path, content.as_bytes())?;
         Ok(())
     }
 

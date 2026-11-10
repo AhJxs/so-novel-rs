@@ -1,22 +1,18 @@
 //! Library 行渲染（序号 / 书名 + tag / 时间 / 操作 列）。
 //!
-//! 删除按钮经 `page.update(|p| p.prompt_delete(...))` 转发到 `mod.rs` 的
+//! 删除按钮经 `page.update(|p| p.prompt_delete(...))` 转发到 `library_page.rs` 的
 //! `LibraryPage::prompt_delete`。
 
-use gpui_kit::component::{
-    ActiveTheme as _, Icon, IconName, Sizable,
-    button::{Button, ButtonVariants as _},
-    h_flex,
-    tag::Tag,
-};
+use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::tag::Tag;
+use gpui_kit::component::{ActiveTheme as _, Icon, IconName, Sizable, h_flex};
 use gpui_kit::{App, Entity, IntoElement, ParentElement, Styled, div, px};
 use rust_i18n::t;
 
+use super::LibraryPage;
 use crate::desktop::components::truncate;
 use crate::desktop::model::LibraryEntry;
 use crate::utils::system::{open_path, reveal_in_folder};
-
-use super::LibraryPage;
 
 /// 渲染一行 entry。
 pub(super) fn render_row(
@@ -92,13 +88,9 @@ pub(super) fn render_row(
                                 .items_center()
                                 .gap_1()
                                 .child(Tag::secondary().small().child(ext_upper))
-                                .child(
-                                    Tag::secondary()
-                                        .small()
-                                        .child(crate::utils::formatting::format_size(
-                                            entry.size_bytes,
-                                        )),
-                                ),
+                                .child(Tag::secondary().small().child(
+                                    crate::utils::formatting::format_size(entry.size_bytes),
+                                )),
                         ),
                 ),
         )

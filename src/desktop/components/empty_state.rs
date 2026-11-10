@@ -4,9 +4,9 @@
 //! 颜色全部走 `cx.theme()`；不写自定义调色板。
 
 use gpui_kit::component::{ActiveTheme as _, Icon, IconName, Sizable};
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    App, IntoElement, ParentElement, RenderOnce, SharedString, Styled, Window, div,
-    prelude::FluentBuilder as _,
+    App, FontWeight, IntoElement, ParentElement, RenderOnce, SharedString, Styled, Window, div,
 };
 
 /// 空态展示。`RenderOnce` — 没有内部状态，构造即可用。
@@ -18,17 +18,20 @@ pub struct EmptyState {
 }
 
 impl EmptyState {
-    pub fn new(icon: IconName, title: impl Into<SharedString>) -> Self {
+    /// 以图标和主标题构造，副标题默认为空。
+    #[must_use]
+    pub const fn new(icon: IconName, title: SharedString) -> Self {
         Self {
             icon,
-            title: title.into(),
+            title,
             subtitle: None,
         }
     }
 
     #[must_use]
-    pub fn subtitle(mut self, subtitle: impl Into<SharedString>) -> Self {
-        self.subtitle = Some(subtitle.into());
+    /// 追加一行补充说明文字。
+    pub fn subtitle(mut self, subtitle: SharedString) -> Self {
+        self.subtitle = Some(subtitle);
         self
     }
 }
@@ -50,7 +53,7 @@ impl RenderOnce for EmptyState {
             .child(
                 div()
                     .text_base()
-                    .font_weight(gpui_kit::FontWeight::MEDIUM)
+                    .font_weight(FontWeight::MEDIUM)
                     .text_color(cx.theme().foreground)
                     .child(self.title),
             )

@@ -5,13 +5,12 @@
 
 use tokio::sync::mpsc;
 
-use crate::core::{DrainOutcome, try_drain_all};
-
 // 保留旧 re-export, 免得 `desktop::model::*` 的外部 user 受影响。
 pub use crate::core::update::{
-    UpdateCheckResult, UpdateOutcome, check_latest_release as check_github_latest_release,
-    classify, is_new_version_available,
+    UpdateCheckResult, UpdateError, UpdateOutcome,
+    check_latest_release as check_github_latest_release, classify, is_new_version_available,
 };
+use crate::core::{DrainOutcome, try_drain_all};
 
 /// 当前进程内的"更新检查中 / 最新版本 / 错误"状态聚合。
 ///
@@ -30,13 +29,21 @@ pub struct UpdateState {
 }
 
 impl UpdateState {
-    /// 排空通道; 只在状态刚跃迁到终态时返回 [`Some(UpdateOutcome)`], 否则 `None`。
+    /// 排空通道; 只在状态刚跃迁到终态时返回 `Some(UpdateOutcome)`, 否则 `None`。
     pub fn drain(&mut self) -> Option<UpdateOutcome> {
         let mut outcome = None;
         let result = try_drain_all(&mut self.rx, |res: UpdateCheckResult| {
             self.checking = false;
-            self.latest_version.clone_from(&res.latest_version);
-            self.error.clone_from(&res.error);
+            match &res {
+                Ok(latest) => {
+                    self.latest_version.clone_from(latest);
+                    self.error = None;
+                }
+                Err(e) => {
+                    self.latest_version = None;
+                    self.error = Some(e.to_string());
+                }
+            }
             outcome = Some(classify(&res));
         });
         // sender 已 drop（用户中断 / 异常退出）→ 收敛 `checking` 让 spinner 消失。

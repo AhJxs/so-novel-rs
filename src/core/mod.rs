@@ -17,5 +17,4 @@ pub mod sources;
 pub mod update;
 
 pub use async_progress::{DrainOutcome, try_drain_all};
-
 pub use download_task::DownloadTask;

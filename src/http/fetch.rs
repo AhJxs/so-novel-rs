@@ -13,31 +13,38 @@ use anyhow::{Context, Result};
 use reqwest::Client;
 use reqwest::header::{ACCEPT, COOKIE, REFERER, USER_AGENT};
 
-use crate::http::encoding::decode_response_bytes;
-use crate::http::ua::random_ua;
-use crate::http::url_join::origin_or_self;
+use crate::http::{encoding, url_join, user_agent};
 
 /// 一次抓取的入参。
-pub struct FetchRequest<'a> {
-    pub url: &'a str,
-    pub method: HttpMethod<'a>,
+pub struct FetchRequest<'request> {
+    /// 目标地址。
+    pub url: &'request str,
+    /// 请求方法与（POST 时的）表单数据。
+    pub method: HttpMethod<'request>,
     /// 形如 `"k=v;k2=v2"` 的 cookie 字符串（与 Java 端规则字段直接拼）。
-    pub cookies: Option<&'a str>,
+    pub cookies: Option<&'request str>,
     /// 单次请求超时（秒）。规则里以秒为单位；None 时用 client 默认。
     pub timeout_secs: Option<u32>,
     /// 自定义 Referer 头。非空时覆盖默认的 origin Referer。
-    pub referer: Option<&'a str>,
+    pub referer: Option<&'request str>,
 }
 
-pub enum HttpMethod<'a> {
+/// 抓取使用的 HTTP 方法。
+pub enum HttpMethod<'raw> {
+    /// 无请求体的 GET。
     Get,
-    Post(&'a [(String, String)]),
+    /// 带表单键值对的 POST。
+    Post(&'raw [(String, String)]),
 }
 
 /// 抓取结果：解码后的 HTML、最终 URL（处理重定向后的）、状态码。
+#[derive(Debug, Clone)]
 pub struct FetchResponse {
+    /// 按响应头 charset 解码后的 HTML。
     pub html: String,
+    /// 跟随重定向后的最终地址。
     pub final_url: String,
+    /// HTTP 状态码。
     pub status: u16,
 }
 
@@ -73,11 +80,11 @@ pub struct FetchResponse {
     )
 )]
 pub async fn fetch(client: &Client, req: &FetchRequest<'_>) -> Result<FetchResponse> {
-    let referer = req
-        .referer
-        .filter(|s| !s.trim().is_empty())
-        .map_or_else(|| origin_or_self(req.url), std::string::ToString::to_string);
-    let ua = random_ua();
+    let referer = req.referer.filter(|s| !s.trim().is_empty()).map_or_else(
+        || url_join::origin_or_self(req.url),
+        std::string::ToString::to_string,
+    );
+    let ua = user_agent::random_user_agent();
 
     let mut builder = match req.method {
         HttpMethod::Get => client.get(req.url),
@@ -117,7 +124,7 @@ pub async fn fetch(client: &Client, req: &FetchRequest<'_>) -> Result<FetchRespo
         .await
         .with_context(|| format!("read body failed: {}", req.url))?;
 
-    let html = decode_response_bytes(&bytes, content_type.as_deref());
+    let html = encoding::decode_response_bytes(&bytes, content_type.as_deref());
 
     Ok(FetchResponse {
         html,
@@ -186,7 +193,7 @@ mod tests {
     fields(url, has_bypass = cf_bypass_base.is_some())
 )]
 pub async fn fetch_with_cf_fallback(
-    client: &reqwest::Client,
+    client: &Client,
     url: &str,
     timeout: Option<u32>,
     cf_bypass_base: Option<&str>,
@@ -222,6 +229,8 @@ pub async fn fetch_with_cf_fallback(
 /// `fetch_with_cf_fallback` 的错误类型。
 #[derive(Debug)]
 pub enum CfFallbackError {
+    /// 常规请求阶段失败。
     Http(String),
+    /// 命中 Cloudflare 且 bypass 也失败。
     Cloudflare(String),
 }

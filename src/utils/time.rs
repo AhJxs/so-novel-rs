@@ -7,6 +7,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 /// 当前 unix 时间戳（秒）。系统时钟早于 `UNIX_EPOCH` 这种罕见情况返回 0 —— UI 显示
 /// "未知"远比 panic 友好，且 `started_at_unix = 0` 语义上本就表示"任务还没开始"。
+#[must_use]
 pub fn now_unix_secs() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -16,6 +17,7 @@ pub fn now_unix_secs() -> i64 {
 /// 把 unix 秒数（可能为负或 0）格式化为 `YYYY-MM-DD HH:MM`（本地时区）。`unix_secs <= 0`
 /// 一律返回 "未知"：`started_at_unix=0` 表示任务未开始、`modified_unix_secs=0` 表示读不到
 /// mtime，让 UI 直接显示而不必各自判 0。
+#[must_use]
 pub fn format_unix_local(unix_secs: i64) -> String {
     if unix_secs <= 0 {
         return "未知".to_string();
@@ -27,6 +29,7 @@ pub fn format_unix_local(unix_secs: i64) -> String {
 }
 
 /// 把 `Duration` 渲染为人类可读的"X 秒 / X 分 Y 秒 / X 时 Y 分 / X 天 Y 时"。
+#[must_use]
 pub fn format_duration(d: Duration) -> String {
     let total = d.as_secs();
     if total < 60 {
@@ -121,6 +124,7 @@ fn local_tz_offset_secs() -> i64 {
 }
 
 /// `u64` 版本，便于 `LibraryEntry::modified_unix_secs` 这种非负时间戳；内部夹到 `i64::MAX`。
+#[must_use]
 pub fn format_unix_local_u64(unix_secs: u64) -> String {
     let s = i64::try_from(unix_secs).unwrap_or(i64::MAX);
     format_unix_local(s)

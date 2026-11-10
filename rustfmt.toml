@@ -1,21 +1,22 @@
-# rustfmt 配置。需要 nightly 的选项已注释掉，切到 nightly 工具链后可按需恢复。
-
+# rustfmt 配置。fmt 需 nightly（imports_granularity / group_imports 等仍是 unstable），
+# 构建与测试仍用 stable。CI 的 fmt 作业使用 `cargo +nightly fmt`。
 edition = "2024"
 max_width = 100
 use_field_init_shorthand = true
 use_try_shorthand = true
 
 reorder_imports = true
-# 以下需要 nightly：
-# imports_granularity = "Crate"
-# group_imports = "StdExternalCrate"
+imports_granularity = "Module"
+group_imports = "StdExternalCrate"
 
-# 以下同样需要 nightly：
+hex_literal_case = "Lower"
+format_macro_matchers = true
+format_code_in_doc_comments = true
+
+# 中文注释不重排：CJK 宽度与 rustfmt 的列宽计算不稳定。
 # wrap_comments = true
 # comment_width = 98
-# format_code_in_doc_comments = true
 # normalize_comments = false
 
 chain_width = 60
-# 函数参数列表单行长度
 fn_params_layout = "Tall"

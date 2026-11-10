@@ -9,8 +9,7 @@
 
 use rust_i18n::t;
 
-use super::AppModel;
-use super::UpdateOutcome;
+use super::{AppModel, UpdateOutcome};
 
 /// 唤醒信号 handle。**仅在 GPUI/smol executor 上使用** —— `cx.spawn` 跑在 smol
 /// 之上, 其 channel 在该 executor 原生工作, **不**触碰 tokio runtime。
@@ -113,13 +112,7 @@ pub fn drain(model: &mut AppModel) -> bool {
     }
     // 批量保存任务到文件 — fire-and-forget, 不阻塞 drain_loop。
     if need_save {
-        let path = model.paths.tasks_file.clone();
-        let tasks = model.tasks.clone();
-        model.runtime.spawn_blocking(move || {
-            if let Err(e) = crate::db::save_with_trim(&path, &tasks) {
-                tracing::warn!("保存任务到文件失败: {e:#}");
-            }
-        });
+        model.persist_tasks();
     }
     for ev in finished_events {
         model.pending_ui_events.push(ev);
@@ -133,12 +126,12 @@ pub fn drain(model: &mut AppModel) -> bool {
     if let Some(outcome) = model.update_state.drain() {
         use UpdateOutcome::{Failed, NewVersion, UpToDate};
         match outcome {
-            UpToDate => model.push_success(t!("Toasts.update_up_to_date")),
+            UpToDate => model.push_success(t!("Toasts.update_up_to_date").to_string()),
             NewVersion(latest) => model.push_open_link(
-                t!("Toasts.update_new_version", ver = &latest),
-                "https://github.com/AhJxs/so-novel-rs/releases/latest",
+                t!("Toasts.update_new_version", ver = &latest).to_string(),
+                "https://github.com/AhJxs/so-novel-rs/releases/latest".to_string(),
             ),
-            Failed(err) => model.push_error(t!("Toasts.update_failed", err = &err)),
+            Failed(err) => model.push_error(t!("Toasts.update_failed", err = &err).to_string()),
         }
     }
 

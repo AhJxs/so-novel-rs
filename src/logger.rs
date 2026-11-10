@@ -8,8 +8,7 @@
 //!
 //! tracing macro 本身与 `TraceId` 链路（`app::trace`）不在本模块。
 
-use std::str::FromStr;
-use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
+use tracing_subscriber::{EnvFilter, fmt};
 
 /// 日志输出格式。
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -21,7 +20,7 @@ pub enum LogFormat {
     Json,
 }
 
-impl FromStr for LogFormat {
+impl std::str::FromStr for LogFormat {
     type Err = String;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.trim().to_ascii_lowercase().as_str() {
@@ -39,15 +38,17 @@ impl FromStr for LogFormat {
 /// ```
 /// // 启动时调一次; 二次 init 会 panic
 /// so_novel_rs::logger::init();
-/// tracing::info!("hello");  // 默认输出可读文本
+/// tracing::info!("hello"); // 默认输出可读文本
 /// ```
 ///
 /// 切到 JSON: `LOG_FORMAT=json so-novel-rs ...`.
 ///
-/// # Errors
+/// # Panics
 ///
 /// `LOG_FORMAT` 是无效值时 panic；需非 panic 路径用 `init_with_format`。
 pub fn init() {
+    use std::str::FromStr;
+
     let format = std::env::var("LOG_FORMAT")
         .ok()
         .and_then(|s| LogFormat::from_str(&s).ok())
@@ -56,7 +57,14 @@ pub fn init() {
 }
 
 /// 用显式配置初始化, 不读 env. 测试友好.
+///
+/// # Errors
+///
+/// 日志过滤表达式非法或全局 subscriber 已初始化时返回错误文案。
 pub fn init_with_format(format: LogFormat) -> Result<(), String> {
+    use tracing_subscriber::layer::SubscriberExt;
+    use tracing_subscriber::util::SubscriberInitExt;
+
     let filter = EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| EnvFilter::new("info,so_novel_rs=debug"));
 

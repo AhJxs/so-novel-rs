@@ -8,16 +8,17 @@
 use std::fs::File;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::LazyLock;
 
 use regex::Regex;
-use std::sync::LazyLock;
-use zip::CompressionMethod;
 use zip::write::SimpleFileOptions;
+use zip::{CompressionMethod, ZipWriter};
 
 use crate::export::exporter::{ExportError, Exporter, sort_chapter_files, unique_path};
 use crate::models::Book;
-use crate::utils::fs::sanitize_filename;
+use crate::utils::fs;
 
+/// 把章节缓存目录打包成单文件 HTML。
 pub struct HtmlExporter;
 
 impl Exporter for HtmlExporter {
@@ -51,7 +52,7 @@ impl Exporter for HtmlExporter {
         std::fs::write(&toc_path, toc_lines.join("\n"))?;
 
         std::fs::create_dir_all(out_dir)?;
-        let zip_name = sanitize_filename(&format!("{}({}).zip", book.book_name, book.author));
+        let zip_name = fs::sanitize_filename(&format!("{}({}).zip", book.book_name, book.author));
         let zip_path = unique_path(out_dir, &zip_name);
         zip_directory(chapters_dir, &zip_path)?;
 
@@ -90,7 +91,7 @@ fn extract_title(html: &str) -> Option<String> {
 fn zip_directory(src: &Path, dst: &Path) -> Result<(), ExportError> {
     let file = File::create(dst)
         .map_err(|e| ExportError::Zip(format!("create {} failed: {e}", dst.display())))?;
-    let mut writer = zip::ZipWriter::new(file);
+    let mut writer = ZipWriter::new(file);
     let options = SimpleFileOptions::default()
         .compression_method(CompressionMethod::Deflated)
         .unix_permissions(0o644);
@@ -124,10 +125,13 @@ fn zip_directory(src: &Path, dst: &Path) -> Result<(), ExportError> {
 #[cfg(test)]
 mod tests {
     #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
+    use std::io::Read;
+
+    use zip::ZipArchive;
+
     use super::*;
     use crate::config::ExportFormat;
     use crate::export::exporter::{RenderedChapter, write_chapter_files};
-    use std::io::Read;
 
     fn sample_book() -> Book {
         Book {
@@ -175,7 +179,7 @@ mod tests {
         );
 
         let f = File::open(&zip_path).unwrap();
-        let mut zr = zip::ZipArchive::new(f).unwrap();
+        let mut zr = ZipArchive::new(f).unwrap();
         let names: Vec<String> = (0..zr.len())
             .map(|i| zr.by_index(i).unwrap().name().to_string())
             .collect();

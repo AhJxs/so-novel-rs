@@ -2,11 +2,10 @@
 
 use anyhow::Result;
 use reqwest::Client;
-use scraper::{Html, Selector};
-
-use crate::http::abs_url;
+use scraper::{ElementRef, Html, Selector};
 
 use super::utils::{TocError, resolve_base_for_join};
+use crate::http::absolute_url;
 
 /// 在已抓的第一页里找全部分页 URL。
 ///
@@ -55,11 +54,11 @@ pub(super) async fn collect_pagination_urls(
     for _ in 0..200 {
         let next_url_opt: Option<String> = {
             let doc = Html::parse_document(&current_html);
-            let elements: Vec<scraper::ElementRef<'_>> = doc.select(&sel).collect();
+            let elements: Vec<ElementRef<'_>> = doc.select(&sel).collect();
             (|| {
                 let next_el = elements.first()?;
                 let href = next_el.value().attr("href")?;
-                let next = abs_url(&resolve_base_for_join(toc_base_uri, &current_url), href)?;
+                let next = absolute_url(&resolve_base_for_join(toc_base_uri, &current_url), href)?;
                 if next == current_url || out.contains(&next) {
                     return None;
                 }
@@ -90,7 +89,7 @@ pub(super) fn collect_option_pagination_urls(
         TocError::Parse(format!("无效的 nextPage 选择器 `{next_page_query}`: {e:?}"))
     })?;
 
-    let elements: Vec<scraper::ElementRef<'_>> = document.select(&sel).collect();
+    let elements: Vec<ElementRef<'_>> = document.select(&sel).collect();
     let base = resolve_base_for_join(toc_base_uri, first_url);
 
     let any_value = elements.iter().any(|e| e.value().attr("value").is_some());
@@ -105,7 +104,7 @@ pub(super) fn collect_option_pagination_urls(
     let mut out = Vec::new();
     for e in &elements {
         if let Some(raw) = e.value().attr(attr_key)
-            && let Some(abs) = abs_url(&base, raw)
+            && let Some(abs) = absolute_url(&base, raw)
         {
             out.push(abs);
         }

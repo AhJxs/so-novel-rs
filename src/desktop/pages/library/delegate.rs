@@ -1,13 +1,11 @@
 //! `LibraryDelegate`: `gpui_kit::component::list::List` 的 delegate，持有 page handle + 当前页条目。
 
-use gpui_kit::component::list::{ListItem, ListState};
-use gpui_kit::component::{ActiveTheme as _, IndexPath, list::ListDelegate};
+use gpui_kit::component::list::{ListDelegate, ListItem, ListState};
+use gpui_kit::component::{ActiveTheme as _, IndexPath};
 use gpui_kit::{App, Context, Entity, ParentElement, Styled, Window, px};
 
+use super::{LibraryPage, row};
 use crate::desktop::model::LibraryEntry;
-
-use super::LibraryPage;
-use super::row;
 
 /// `List` 的 delegate —— 把当前页的 `LibraryEntry` 切片渲染成行，结构同 tasks / sources /
 /// search 的 delegate。
@@ -40,13 +38,14 @@ impl ListDelegate for LibraryDelegate {
         _window: &mut Window,
         cx: &mut Context<ListState<Self>>,
     ) -> Option<Self::Item> {
-        let (global_index, entry) = self.page_items.get(ix.row)?.clone();
+        // 借用当前页条目即可 —— 渲染只读，不复制文件元信息。
+        let (global_index, entry) = self.page_items.get(ix.row)?;
         Some(
             ListItem::new(ix)
                 .selected(Some(ix) == self.selected_index)
                 .rounded(cx.theme().radius)
                 .mb(px(4.))
-                .child(row::render_row(global_index, &entry, &self.page, &*cx)),
+                .child(row::render_row(*global_index, entry, &self.page, &*cx)),
         )
     }
 

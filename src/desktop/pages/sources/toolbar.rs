@@ -2,21 +2,17 @@
 //!
 //! 状态过滤不走 SelectState（options 的翻译字段冻在 state 里，切语言失效），改用
 //! 3 个 Button：label 在 render 里现取 `t!(...)`，`selected` style 标记当前项。
-//! 名字过滤的 placeholder 只能设在 `InputState` 上，见 `mod.rs` 里的 sentinel 刷新。
+//! 名字过滤的 placeholder 只能设在 `InputState` 上，见 `sources_page.rs` 里的 sentinel 刷新。
 
-use gpui_kit::component::{
-    ActiveTheme as _, Icon, IconName, Selectable, Sizable,
-    button::{Button, ButtonVariants as _},
-    h_flex,
-    input::{Input, InputState},
-    select::{SearchableVec, Select, SelectState},
-};
-use gpui_kit::{Context, Entity, IntoElement, ParentElement, Styled, div, px};
+use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::input::{Input, InputState};
+use gpui_kit::component::select::{SearchableVec, Select, SelectState};
+use gpui_kit::component::{ActiveTheme as _, Icon, IconName, Selectable, Sizable, h_flex};
+use gpui_kit::{Context, Entity, IntoElement, ParentElement, SharedString, Styled, div, px};
 use rust_i18n::t;
 
-use crate::desktop::model::SourcesFilterStatus;
-
 use super::SourcesPage;
+use crate::desktop::model::SourcesFilterStatus;
 
 /// 输入行：文件名前缀 Search 图标 + Input + 活跃书源文件下拉 + 3-Button 状态过滤组。
 pub(super) fn render(
@@ -84,7 +80,7 @@ fn status_filter_buttons(
 /// 单个 status 过滤 Button：点击 → `set_status_filter(new_status)`。
 fn status_button(
     id: &'static str,
-    label: gpui_kit::SharedString,
+    label: SharedString,
     value: SourcesFilterStatus,
     current_status: SourcesFilterStatus,
     cx: &Context<'_, SourcesPage>,

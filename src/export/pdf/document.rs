@@ -2,19 +2,18 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 use pdf_oxide::writer::{DocumentBuilder, DocumentMetadata, EmbeddedFont, PageSize};
-
-use crate::export::exporter::{
-    ExportError, Exporter, sort_chapter_files, strip_html_tags, unique_path,
-};
-use crate::models::Book;
-use crate::utils::fs::sanitize_filename;
 
 use super::chapters::{
     extract_body, extract_chapter_content, html_to_text, strip_nav_bar, wrap_text,
 };
 use super::fonts::{CJK_FONT, Measurer, find_cjk_font};
+use crate::export::exporter::{
+    ExportError, Exporter, sort_chapter_files, strip_html_tags, unique_path,
+};
+use crate::models::Book;
 
 /// PDF 导出器 (实现 [`Exporter`] trait)。
 pub struct PdfExporter;
@@ -57,7 +56,10 @@ impl Exporter for PdfExporter {
         }
 
         std::fs::create_dir_all(out_dir)?;
-        let out_name = sanitize_filename(&format!("{}({}).pdf", book.book_name, book.author));
+        let out_name = crate::utils::fs::sanitize_filename(&format!(
+            "{}({}).pdf",
+            book.book_name, book.author
+        ));
         let out_path = unique_path(out_dir, &out_name);
 
         // CJK 字体: 找到则量宽用 EmbeddedFont 并注册到 builder;
@@ -105,7 +107,7 @@ impl Exporter for PdfExporter {
             "Helvetica"
         };
         let total_chapters = chapters.len();
-        let started = std::time::Instant::now();
+        let started = Instant::now();
         {
             let mut pg = Paginator::new(&mut builder, &measurer, font_name);
             pg.render_cover(book);
@@ -161,16 +163,20 @@ const COVER_AUTHOR_SIZE: f32 = 14.0;
 const COVER_INTRO_SIZE: f32 = 11.0;
 
 /// 流式分页器: 边排边把满页 flush 到 `DocumentBuilder`, 内存只占一页。
-struct Paginator<'b> {
-    builder: &'b mut DocumentBuilder,
-    measurer: &'b Measurer,
+struct Paginator<'pdf> {
+    builder: &'pdf mut DocumentBuilder,
+    measurer: &'pdf Measurer,
     font: &'static str,
     y: f32, // 下一行的"顶"坐标 (PDF y 向上), 触底 flush
     runs: Vec<Run>,
 }
 
-impl<'b> Paginator<'b> {
-    fn new(builder: &'b mut DocumentBuilder, measurer: &'b Measurer, font: &'static str) -> Self {
+impl<'pdf> Paginator<'pdf> {
+    fn new(
+        builder: &'pdf mut DocumentBuilder,
+        measurer: &'pdf Measurer,
+        font: &'static str,
+    ) -> Self {
         Self {
             builder,
             measurer,

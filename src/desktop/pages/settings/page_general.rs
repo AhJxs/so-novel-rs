@@ -3,31 +3,27 @@
 //! 外观 = 主题模式 + 按模式条件渲染的主题 item + 语言 + 字号滑块；
 //! 网络 = GitHub 代理 / Cloudflare bypass；下载 = 目录 / 默认格式 / TXT 编码 / 章节缓存。
 
-use gpui_kit::component::{
-    ActiveTheme as _, AxisExt as _, IconName, Sizable as _, WindowExt as _,
-    button::{Button, ButtonVariants as _},
-    dialog::AlertDialog,
-    input::Input,
-    select::Select,
-    setting::{SettingField, SettingGroup, SettingItem, SettingPage},
-    slider::SliderValue,
-};
+use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::dialog::AlertDialog;
+use gpui_kit::component::input::Input;
+use gpui_kit::component::select::Select;
+use gpui_kit::component::setting::{SettingField, SettingGroup, SettingItem, SettingPage};
+use gpui_kit::component::slider::SliderValue;
+use gpui_kit::component::{ActiveTheme as _, AxisExt as _, IconName, Sizable as _, WindowExt as _};
 use gpui_kit::{App, Entity, ParentElement, SharedString, Styled, div};
 use rust_i18n::t;
 use tracing;
 
-use crate::config::ExportFormat;
-use crate::config::{Language, ThemeDynMode, ThemeKind};
-use crate::desktop::model::AppModel;
-use crate::desktop::themes;
-
-use super::ctx::PageCtx;
+use super::ctx::PageContext;
 use super::fields::{
     TXT_ENCODINGS, bool_field, dropdown_field, ext_from_str, ext_value, string_field,
 };
+use crate::config::{ExportFormat, Language, ThemeDynMode, ThemeKind};
+use crate::desktop::model::AppModel;
+use crate::desktop::themes;
 
 /// 构造 Page 1（常规）= 外观 + 网络 + 下载。
-pub(super) fn build(ctx: &PageCtx<'_>, cx: &App) -> SettingPage {
+pub(super) fn build(ctx: &PageContext<'_>, cx: &App) -> SettingPage {
     let m = ctx.model.clone();
     let theme_kind = ctx.model.read(cx).config.global.theme_pref.kind;
 
@@ -278,7 +274,11 @@ pub(super) fn build(ctx: &PageCtx<'_>, cx: &App) -> SettingPage {
 
 /// 按主题模式构建条件渲染的主题 item。整 item 显隐（不是返回空 div 占位）：切模式后下一帧
 /// `build_pages` 读到新 `kind`，本函数返回不同 item 集。
-fn theme_mode_items(ctx: &PageCtx<'_>, kind: ThemeKind, m: &Entity<AppModel>) -> Vec<SettingItem> {
+fn theme_mode_items(
+    ctx: &PageContext<'_>,
+    kind: ThemeKind,
+    m: &Entity<AppModel>,
+) -> Vec<SettingItem> {
     match kind {
         ThemeKind::Static => vec![
             SettingItem::new(

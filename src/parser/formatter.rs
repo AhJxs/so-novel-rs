@@ -7,8 +7,9 @@
 //!    差异只在嵌套结构上, 而源站正文几乎没有正文级嵌套。
 //! 2. **非闭合标签** (`false`)：按规则的 `paragraphTag` 正则（如 `<br>+`）切分，逐段包 `<p>`。
 
-use regex::Regex;
 use std::sync::LazyLock;
+
+use regex::{Captures, Regex};
 
 use crate::models::RuleChapter;
 use crate::parser::dom::clear_all_attributes;
@@ -34,6 +35,7 @@ static NON_P_PAIR_RE: LazyLock<Regex> = LazyLock::new(|| {
 /// 把规则化清洗后的章节内容整形为"一段一行 `<p>` 的 HTML"。
 ///
 /// 入参 `content` 通常来自 `filter_chapter(...).content`。
+#[must_use]
 pub fn format_chapter(content: &str, rule_chapter: &RuleChapter) -> String {
     // 与 Java 一致：先把属性全清掉，避免被 class/style 影响匹配。
     let cleared = clear_all_attributes(content);
@@ -48,7 +50,7 @@ pub fn format_chapter(content: &str, rule_chapter: &RuleChapter) -> String {
 /// 处理闭合标签模式：把成对开闭标签全部改写为 `<p>...</p>`（含 `<p>` 自身）。
 fn format_closed(html: &str) -> String {
     NON_P_PAIR_RE
-        .replace_all(html, |caps: &regex::Captures<'_>| {
+        .replace_all(html, |caps: &Captures<'_>| {
             let inner = caps.get(2).map_or("", |m| m.as_str());
             format!("<p>{inner}</p>")
         })

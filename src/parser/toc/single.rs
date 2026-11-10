@@ -3,14 +3,13 @@
 
 use anyhow::Result;
 use reqwest::Client;
-use scraper::{Html, Selector};
-
-use crate::http::abs_url;
-use crate::models::{Chapter, ContentType, Rule};
-use crate::parser::dom::select_and_invoke_js;
+use scraper::{ElementRef, Html, Selector};
 
 use super::paginated::{collect_pagination_urls, fetch_with_cf_fallback};
 use super::utils::{TocError, extract_book_id, format_with_id, resolve_base_for_join};
+use crate::http::absolute_url;
+use crate::models::{Chapter, ContentType, Rule};
+use crate::parser::dom::select_and_invoke_js;
 
 /// 抓取并解析整本书的目录。
 ///
@@ -166,7 +165,7 @@ pub fn parse_one_toc_page(
         .map_err(|e| TocError::Parse(format!("无效的 item 选择器 `{}`: {e:?}", toc_rule.item)))?;
 
     // 配了 toc.list 时 (极少数书源), 先把 list 的 inner_html 当新文档处理 (同 Java 端)。
-    let elements: Vec<scraper::ElementRef<'_>> = if toc_rule.list.is_empty() {
+    let elements: Vec<ElementRef<'_>> = if toc_rule.list.is_empty() {
         document.select(&item_selector).collect()
     } else {
         let inner = select_and_invoke_js(&document, &toc_rule.list, ContentType::Html)?;
@@ -195,7 +194,7 @@ pub fn parse_one_toc_page(
 
 fn parse_items_from_fragment(
     frag: &Html,
-    sel: &std::sync::Arc<Selector>,
+    sel: &Selector,
     base_for_href: &str,
     order_counter: &mut u32,
 ) -> Vec<Chapter> {
@@ -207,7 +206,7 @@ fn parse_items_from_fragment(
 }
 
 fn push_chapter(
-    el: &scraper::ElementRef<'_>,
+    el: &ElementRef<'_>,
     base_for_href: &str,
     order_counter: &mut u32,
     out: &mut Vec<Chapter>,
@@ -217,7 +216,7 @@ fn push_chapter(
         return;
     }
     let href = el.value().attr("href").unwrap_or_default();
-    let url = abs_url(base_for_href, href).unwrap_or_default();
+    let url = absolute_url(base_for_href, href).unwrap_or_default();
     if url.is_empty() {
         return;
     }
@@ -375,7 +374,7 @@ mod tests {
         let base = "https://www.22biqu.com/biqu5/";
         let urls: Vec<String> = elements
             .iter()
-            .filter_map(|e| e.value().attr("value").and_then(|v| abs_url(base, v)))
+            .filter_map(|e| e.value().attr("value").and_then(|v| absolute_url(base, v)))
             .collect();
 
         assert_eq!(
