@@ -23,13 +23,7 @@ impl AppModel {
         ops::clear_finished_tasks(&mut self.tasks);
         let removed = before - self.tasks.len();
         if removed > 0 {
-            let path = self.paths.tasks_file.clone();
-            let tasks = self.tasks.clone();
-            self.runtime.spawn_blocking(move || {
-                if let Err(e) = crate::db::save_with_trim(&path, &tasks) {
-                    tracing::warn!("保存任务到文件失败: {e:#}");
-                }
-            });
+            self.persist_tasks();
             self.push_success(t!("Toasts.clear_tasks_ok", n = &removed.to_string()).to_string());
         }
     }
@@ -41,13 +35,7 @@ impl AppModel {
     pub fn delete_task(&mut self, id: u64) -> DeleteTaskResult {
         let result = delete_task_inner(&mut self.tasks, id);
         if result == DeleteTaskResult::Deleted {
-            let path = self.paths.tasks_file.clone();
-            let tasks = self.tasks.clone();
-            self.runtime.spawn_blocking(move || {
-                if let Err(e) = crate::db::save_with_trim(&path, &tasks) {
-                    tracing::warn!("保存任务到文件失败: {e:#}");
-                }
-            });
+            self.persist_tasks();
         }
         result
     }

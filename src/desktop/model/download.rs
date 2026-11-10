@@ -19,15 +19,8 @@ impl AppModel {
         let (id, task) = ops::spawn_download(&ctx, self.next_task_id, target);
         self.next_task_id += 1;
         self.tasks.push(task);
-        // Fire-and-forget 落盘: UI 线程不能同步等 fsync, 派到 blocking pool;
-        // 失败仅 warn (best-effort), 下次保存会覆盖。
-        let path = self.paths.tasks_file.clone();
-        let tasks = self.tasks.clone();
-        self.runtime.spawn_blocking(move || {
-            if let Err(e) = crate::db::save_with_trim(&path, &tasks) {
-                tracing::warn!("保存任务到文件失败: {e:#}");
-            }
-        });
+        // Fire-and-forget 落盘: UI 线程不能同步等 fsync; 序列化在本线程, 写盘进 blocking pool。
+        self.persist_tasks();
         id
     }
 
@@ -51,13 +44,7 @@ impl AppModel {
         self.next_task_id += 1;
         self.tasks.push(task);
         // 同 spawn_download: fire-and-forget 落盘。
-        let path = self.paths.tasks_file.clone();
-        let tasks = self.tasks.clone();
-        self.runtime.spawn_blocking(move || {
-            if let Err(e) = crate::db::save_with_trim(&path, &tasks) {
-                tracing::warn!("保存任务到文件失败: {e:#}");
-            }
-        });
+        self.persist_tasks();
         id
     }
 }

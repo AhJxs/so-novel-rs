@@ -167,9 +167,11 @@ pub fn spawn_download_range(
     let tx_for_task = tx.clone();
 
     let total = chapters.len();
-    let book_for_meta = book.clone();
+    // 书籍元信息在进度事件、任务字段与下载流程之间共享同一份 `Arc<Book>`。
+    let book = Arc::new(book);
+    let book_for_meta = Arc::clone(&book);
     let _ = tx_for_task.send(Progress::BookResolved {
-        book: Box::new(book.clone()),
+        book: Arc::clone(&book),
         total_chapters: total,
     });
     let wakeup_guard = ctx.wakeup.clone();

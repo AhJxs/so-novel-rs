@@ -3,6 +3,7 @@
 //! `Progress` 是调度层 → UI 的消息协议, 通过 `mpsc::UnboundedSender<Progress>` 推送, UI 端排空后重绘。
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use crate::models::Book;
 
@@ -11,7 +12,7 @@ use crate::models::Book;
 /// # Examples
 ///
 /// ```ignore
-/// tx.send(Progress::BookResolved { book: Box::new(b), total_chapters: 100 })?;
+/// tx.send(Progress::BookResolved { book: Arc::new(b), total_chapters: 100 })?;
 /// tx.send(Progress::ChapterDone { index: 1, title: "第1章".into() })?;
 /// tx.send(Progress::Finished { output_path: out_path })?;
 /// ```
@@ -19,8 +20,8 @@ use crate::models::Book;
 pub enum Progress {
     /// 详情解析完成, 得到书籍元信息。
     BookResolved {
-        /// 已解析的 Book (heap-allocated 避免单事件大拷贝)。
-        book: Box<Book>,
+        /// 已解析的 Book；与下载流程共享同一份，UI 侧不复制元信息。
+        book: Arc<Book>,
         /// 目录总章节数 (用户界面估算进度用)。
         total_chapters: usize,
     },

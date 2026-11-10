@@ -582,9 +582,9 @@ impl Render for SearchPage {
                     data_version: model.search.results_version,
                     filter_sig,
                     page_index: 0, // 缓存全表 results，分页在 render 末尾 slice
-                    elem_type: std::any::TypeId::of::<SearchResult>(),
+                    elem_type: std::any::TypeId::of::<Arc<SearchResult>>(),
                 };
-                let results = if let Some(arc) = model.list_cache.get::<SearchResult>(key) {
+                let results = if let Some(arc) = model.list_cache.get::<Arc<SearchResult>>(key) {
                     arc
                 } else {
                     model.list_cache.insert(key, model.search.results.clone())
@@ -598,7 +598,7 @@ impl Render for SearchPage {
 
         let total = results.len();
         let w = compute_page_window(total, &mut self.current_page);
-        let page_items: Vec<(usize, SearchResult)> = if w.is_empty() {
+        let page_items: Vec<(usize, Arc<SearchResult>)> = if w.is_empty() {
             Vec::new()
         } else {
             results[w.start..w.end]
@@ -640,7 +640,7 @@ impl Render for SearchPage {
             .when(!source_status.is_empty(), |this| {
                 this.child(super::toolbar::source_status_row(
                     &self.model,
-                    &source_status,
+                    source_status.as_slice(),
                     running,
                     received,
                     expected,

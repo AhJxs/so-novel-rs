@@ -112,13 +112,7 @@ pub fn drain(model: &mut AppModel) -> bool {
     }
     // 批量保存任务到文件 — fire-and-forget, 不阻塞 drain_loop。
     if need_save {
-        let path = model.paths.tasks_file.clone();
-        let tasks = model.tasks.clone();
-        model.runtime.spawn_blocking(move || {
-            if let Err(e) = crate::db::save_with_trim(&path, &tasks) {
-                tracing::warn!("保存任务到文件失败: {e:#}");
-            }
-        });
+        model.persist_tasks();
     }
     for ev in finished_events {
         model.pending_ui_events.push(ev);

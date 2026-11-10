@@ -1,5 +1,6 @@
 //! 一个正在跑的下载任务（由搜索页"下载"按钮触发，下载页/任务页消费）。
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use tokio::sync::mpsc;
@@ -55,8 +56,8 @@ pub struct DownloadTask {
     /// 任务结束的 unix 时间戳（秒）；None = 还没结束。给 UI 算"耗时"。
     pub finished_at_unix: Option<i64>,
 
-    /// 抓取到的书籍详情；详情页失败时为空。
-    pub book_meta: Option<Book>,
+    /// 抓取到的书籍详情；详情页失败时为空。与进度事件共享同一份 `Arc`。
+    pub book_meta: Option<Arc<Book>>,
     /// 目录解析出的章节总数。
     pub total_chapters: usize,
     /// 已成功下载的章节数。
@@ -83,7 +84,7 @@ impl DownloadTask {
                 book,
                 total_chapters,
             } => {
-                self.book_meta = Some(*book);
+                self.book_meta = Some(book);
                 self.total_chapters = total_chapters;
             }
             Progress::ChapterDone { index, title } => {
@@ -207,7 +208,7 @@ impl DownloadTask {
             origin: self.origin.clone(),
             started_at_unix: self.started_at_unix,
             finished_at_unix: self.finished_at_unix,
-            book_meta: self.book_meta.clone(),
+            book_meta: self.book_meta.as_deref().cloned(),
             total_chapters: self.total_chapters,
             completed: self.completed,
             failed: self.failed,
@@ -231,7 +232,7 @@ impl DownloadTask {
             cancelling: false,
             started_at_unix: rec.started_at_unix,
             finished_at_unix: rec.finished_at_unix,
-            book_meta: rec.book_meta,
+            book_meta: rec.book_meta.map(Arc::new),
             total_chapters: rec.total_chapters,
             completed: rec.completed,
             failed: rec.failed,

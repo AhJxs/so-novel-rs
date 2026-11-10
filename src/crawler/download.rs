@@ -68,8 +68,9 @@ pub async fn download_book(
         return Err(CrawlerError::EmptyToc);
     }
 
+    let book = Arc::new(book);
     let _ = progress.send(Progress::BookResolved {
-        book: Box::new(book.clone()),
+        book: Arc::clone(&book),
         total_chapters: toc.len(),
     });
     if let Some(ref n) = notify {
@@ -144,14 +145,15 @@ pub async fn download_chapters(
 
     let max_concurrent = compute_concurrency(source, chapters.len());
     let render_target: RenderTarget = cfg.download.ext_name.into();
-    let rule_chapter = Arc::new(
-        rule.chapter
-            .clone()
-            .ok_or(CrawlerError::Toc(TocError::TocRuleMissing))?,
-    );
+    // 章节规则在整本书里共享；预检一次后由每个 task 从 `rule` 借用，不再逐章深拷贝。
+    if rule.chapter.is_none() {
+        return Err(CrawlerError::Toc(TocError::TocRuleMissing));
+    }
 
     let semaphore = Arc::new(Semaphore::new(max_concurrent));
     let eff = source.effective_crawl.clone();
+    // 源语言整本书共享，用 `Arc<str>` 免去逐章 `String` 深拷贝。
+    let rule_lang: Arc<str> = Arc::from(source.rule.language.as_str());
     let mut handles = Vec::with_capacity(chapters.len());
     let chapter_count = chapters.len();
 
@@ -171,15 +173,13 @@ pub async fn download_chapters(
         let permit = Arc::clone(&semaphore);
         let client = client.clone();
         let rule = Arc::clone(&rule);
-        let rule_chapter = Arc::clone(&rule_chapter);
         let cf = cf_bypass_owned.as_ref().map(Arc::clone);
         let progress = progress.clone();
         let cancel = cancel.clone();
         let eff = eff.clone();
         let enable_retry = cfg.crawl.enable_retry;
-        // 简繁转换需要源/目标语言: `source` / `cfg` 是借用, 闭包 'static 要求 owned 值,
-        // 故 clone Rule (Arc 浅拷贝, 开销小) 与 target LangType (Copy)。
-        let rule_lang = source.rule.language.clone();
+        // 简繁转换需要源/目标语言: 源语言是整本共享的 `Arc<str>`, 目标语言 `Copy`。
+        let rule_lang = Arc::clone(&rule_lang);
         let target_lang = cfg.global.language.to_book_target_lang();
 
         let ch_dir = chapters_dir.clone();
@@ -215,7 +215,8 @@ pub async fn download_chapters(
                 return ChapterOutcome::Cancelled;
             }
 
-            // 抓 + 重试
+            // 抓 + 重试。章节用 `Arc` 共享给每次尝试，避免每次重试深拷贝标题/URL。
+            let chapter = Arc::new(chapter);
             let max_attempts = if enable_retry { eff.max_retries } else { 0 };
             let order = chapter.order;
             let title = chapter.title.clone();
@@ -225,8 +226,8 @@ pub async fn download_chapters(
             let fetch_future = retry_mod::retry_with_backoff(
                 |_attempt| {
                     let client = client.clone();
-                    let rule = rule.clone();
-                    let chapter = chapter.clone();
+                    let rule = Arc::clone(&rule);
+                    let chapter = Arc::clone(&chapter);
                     let cf = cf.clone();
                     let cancel = cancel.clone();
                     async move {
@@ -257,9 +258,14 @@ pub async fn download_chapters(
 
             match result {
                 Ok(parsed) => {
+                    let Some(rule_chapter) = rule.chapter.as_ref() else {
+                        // 预检已保证存在；防御性处理，别让整本下载 panic。
+                        tracing::error!(order, "章节规则在预检后消失");
+                        return ChapterOutcome::Failed;
+                    };
                     let (final_title, body) = export::render_chapter(
                         &parsed,
-                        &rule_chapter,
+                        rule_chapter,
                         render_target,
                         &rule_lang,
                         target_lang,

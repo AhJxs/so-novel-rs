@@ -36,10 +36,36 @@ pub fn save(path: &Path, tasks: &[DownloadTask]) -> anyhow::Result<()> {
 
 fn save_records(path: &Path, records: &[DownloadTaskRecord]) -> anyhow::Result<()> {
     let content = serde_json::to_string_pretty(records)?;
+    write_json(path, &content)
+}
+
+/// 把任务切片序列化成待写盘的 JSON 文本，并顺带清理超额的已完成任务。
+///
+/// 拆出这一步是为了让 UI 线程只做序列化（`DownloadTask` 含通道，克隆整表代价大），
+/// 真正的写盘交给 `spawn_blocking`。
+///
+/// # Errors
+///
+/// `serde_json` 序列化失败。
+pub fn tasks_json_with_trim(tasks: &[DownloadTask]) -> serde_json::Result<String> {
+    let mut records: Vec<DownloadTaskRecord> = tasks.iter().map(DownloadTask::to_record).collect();
+    let trimmed = trim_completed(&mut records);
+    if trimmed > 0 {
+        tracing::info!("自动清理了 {trimmed} 条旧的已完成任务");
+    }
+    serde_json::to_string_pretty(&records)
+}
+
+/// 把已序列化的 JSON 文本原子写入 `path`（父目录缺失时补建）。
+///
+/// # Errors
+///
+/// 写文件失败；父目录创建失败只记日志、不中断写入。
+pub fn write_json(path: &Path, json: &str) -> anyhow::Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).ok();
     }
-    super::write_atomically(path, content.as_bytes())?;
+    super::write_atomically(path, json.as_bytes())?;
     Ok(())
 }
 
@@ -86,12 +112,8 @@ pub fn trim_completed(tasks: &mut Vec<DownloadTaskRecord>) -> usize {
 /// - `std::io::Error` — 序列化或写文件失败
 #[tracing::instrument(name = "db::tasks::save_with_trim", skip_all, fields(path = %path.display(), count = tasks.len()))]
 pub fn save_with_trim(path: &Path, tasks: &[DownloadTask]) -> anyhow::Result<()> {
-    let mut records: Vec<DownloadTaskRecord> = tasks.iter().map(DownloadTask::to_record).collect();
-    let trimmed = trim_completed(&mut records);
-    if trimmed > 0 {
-        tracing::info!("自动清理了 {trimmed} 条旧的已完成任务");
-    }
-    save_records(path, &records)
+    let json = tasks_json_with_trim(tasks)?;
+    write_json(path, &json)
 }
 
 #[cfg(test)]

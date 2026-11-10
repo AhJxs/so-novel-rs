@@ -119,7 +119,7 @@ pub fn delete_source(
 
         // 清掉这条源的健康检查结果。
         if let Some(id) = doomed_id {
-            sources_state.health.remove(&id);
+            Arc::make_mut(&mut sources_state.health).remove(&id);
         }
     }
 
@@ -168,7 +168,7 @@ pub fn spawn_health_check(
         return;
     }
 
-    sources_state.health.clear();
+    Arc::make_mut(&mut sources_state.health).clear();
     sources_state.received = 0;
     sources_state.expected = rules.len();
     sources_state.running = true;

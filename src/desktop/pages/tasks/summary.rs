@@ -5,6 +5,7 @@
 //! 只剩组装逻辑。
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use crate::core::DownloadTask;
 use crate::desktop::model::AppModel;
@@ -18,7 +19,7 @@ pub struct TaskSummary {
     pub index: usize,
     pub origin: SearchResult,
     pub started_at_unix: i64,
-    pub book_meta: Option<Book>,
+    pub book_meta: Option<Arc<Book>>,
     pub total_chapters: usize,
     pub completed: u32,
     pub failed: u32,

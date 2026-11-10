@@ -25,7 +25,8 @@ pub enum SourcesFilterStatus {
 #[derive(Default)]
 pub struct SourcesState {
     /// `source_id` → 探测结果（按到达顺序覆盖, 不要求全部到齐）。
-    pub health: HashMap<i32, SourceHealth>,
+    /// `Arc` 快照：渲染时整体 clone 只是 refcount bump，drain 时 `make_mut` 写回。
+    pub health: Arc<HashMap<i32, SourceHealth>>,
     /// 是否正在跑探测（true 时禁用按钮 + 显示 spinner）。
     pub running: bool,
     /// 本轮预计探测的书源数。
@@ -43,7 +44,7 @@ pub struct SourcesState {
 impl SourcesState {
     /// 清空探测结果与进度计数，回到未探测状态。
     pub fn clear_health(&mut self) {
-        self.health.clear();
+        Arc::make_mut(&mut self.health).clear();
         self.received = 0;
         self.expected = 0;
         self.running = false;
@@ -56,7 +57,7 @@ impl SourcesState {
         let outcome = try_drain_all(&mut self.rx, |h: SourceHealth| {
             any = true;
             self.received += 1;
-            self.health.insert(h.source_id, h);
+            Arc::make_mut(&mut self.health).insert(h.source_id, h);
         });
         if matches!(outcome, DrainOutcome::Disconnected) {
             self.running = false;
@@ -68,28 +69,30 @@ impl SourcesState {
         any
     }
 
-    /// 应用 `filter_text` + `filter_status` 过滤 rules, 返回克隆后的 Vec。
+    /// 应用 `filter_text` + `filter_status` 过滤 rules, 返回命中项在 `rules` 中的下标
+    /// （按 id 升序）。
     ///
-    /// 不改 self、不改传入的 rules, 返回 owned Vec 方便 caller 排序 / 分页。
-    pub fn filtered_rules(&self, rules: &[Arc<Rule>]) -> Vec<Rule> {
+    /// 只返回下标、不复制 `Rule`：调用方按需对当前页的项做 `Arc::clone`。
+    pub fn filtered_rule_indices(&self, rules: &[Arc<Rule>]) -> Vec<usize> {
         let kw = self.filter_text.trim().to_lowercase();
-        let mut out: Vec<Rule> = rules
+        let mut out: Vec<usize> = rules
             .iter()
-            .filter(|r| match self.filter_status {
+            .enumerate()
+            .filter(|(_, r)| match self.filter_status {
                 SourcesFilterStatus::All => true,
                 SourcesFilterStatus::Enabled => !r.disabled,
                 SourcesFilterStatus::Disabled => r.disabled,
             })
-            .filter(|r| {
+            .filter(|(_, r)| {
                 if kw.is_empty() {
                     return true;
                 }
                 r.name.to_lowercase().contains(&kw) || core_sources::rule_key(r).contains(&kw)
             })
-            .map(|r| r.as_ref().clone())
+            .map(|(i, _)| i)
             .collect();
         // 按 id 升序（id 是加载时分配的自增主键）。
-        out.sort_by_key(|r| r.id);
+        out.sort_by_key(|&i| rules[i].id);
         out
     }
 }

@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use gpui_kit::component::button::Button;
 use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::component::list::{List, ListState};
@@ -204,16 +206,21 @@ impl Render for SourcesPage {
             }
         });
 
-        let filtered = self.model.read(cx).sources_state.filtered_rules(&all_rules);
+        let filtered = self
+            .model
+            .read(cx)
+            .sources_state
+            .filtered_rule_indices(&all_rules);
         let total = filtered.len();
         let w = compute_page_window(total, &mut self.current_page);
-        let page_items: Vec<(usize, Rule)> = if total == 0 {
+        // 过滤只产出下标；只有当前页的项才做 `Arc` 浅拷贝给 delegate。
+        let page_items: Vec<(usize, Arc<Rule>)> = if total == 0 {
             Vec::new()
         } else {
             filtered[w.start..w.end]
                 .iter()
                 .enumerate()
-                .map(|(local_ix, r)| (w.start + local_ix, r.clone()))
+                .map(|(local_ix, &i)| (w.start + local_ix, Arc::clone(&all_rules[i])))
                 .collect()
         };
 

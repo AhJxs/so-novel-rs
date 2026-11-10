@@ -2,6 +2,8 @@
 //!
 //! 固定宽度列 + `flex_1` 撑满 + `ListItem` 内部选中样式；`page` 只用于按钮 `on_click` 转发。
 
+use std::sync::Arc;
+
 use gpui_kit::component::button::Button;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::notification::{Notification, NotificationType};
@@ -16,7 +18,7 @@ use crate::models::SearchResult;
 /// 渲染一条搜索结果行（6 列：序号 / 书名 / 元信息 / 源 id / 选章 / 全本）。
 pub(super) fn render(
     idx: usize,
-    r: &SearchResult,
+    r: &Arc<SearchResult>,
     page: Entity<SearchPage>,
     cx: &App,
 ) -> impl IntoElement {
@@ -37,7 +39,7 @@ pub(super) fn render(
     };
 
     // 三个 on_click 都是 Fn（可能触发多次），所以 result / page 只 clone 到闭包外，
-    // 每次点击时再 clone 一份。
+    // 每次点击时再 clone 一份（`Arc` 浅拷贝）。
     let result_for_whole = r.clone();
     let page_for_whole = page.clone();
     // 详情 Dialog 的 builder 每帧重调以重读 live cover_cache（封面到达后自动刷新），
@@ -159,8 +161,8 @@ pub(super) fn render(
                 .icon(Icon::new(IconName::ChevronRight))
                 .label(t!("Search.action.select_chapters"))
                 .on_click(move |_, window, cx| {
-                    // on_click 是 Fn → 每次点击重新 clone 一份 result。
-                    let r = result_for_range.clone();
+                    // on_click 是 Fn → 每次点击重新 clone 一份 result（此处需要 owned，深拷贝一次）。
+                    let r = (*result_for_range).clone();
                     page_for_range.update(cx, |p, cx| p.open_range_dialog(r, window, cx));
                 }),
         )
@@ -172,8 +174,8 @@ pub(super) fn render(
                 .icon(Icon::new(IconName::BookOpen))
                 .label(t!("Search.action.download_whole"))
                 .on_click(move |_, window, cx| {
-                    // on_click 是 Fn（可多次触发），每次点击重新 clone 一份。
-                    let result_for_click = result_for_whole.clone();
+                    // on_click 是 Fn（可多次触发），每次点击重新取一份（任务字段要 owned，深拷贝一次）。
+                    let result_for_click = (*result_for_whole).clone();
                     // spawn_download 在 AppModel 上，经 page.update 转发。
                     let _ = page_for_whole.update(cx, |p, cx| {
                         p.model

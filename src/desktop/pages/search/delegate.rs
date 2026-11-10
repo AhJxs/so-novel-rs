@@ -1,5 +1,7 @@
 //! `SearchDelegate`: `gpui_kit::component::list::List` 的 delegate，持有 page handle + 当前页条目。
 
+use std::sync::Arc;
+
 use gpui_kit::component::list::{ListDelegate, ListItem, ListState};
 use gpui_kit::component::{ActiveTheme as _, IndexPath};
 use gpui_kit::{App, Context, Entity, ParentElement, Styled, Window, px};
@@ -13,7 +15,7 @@ use crate::models::SearchResult;
 /// 每帧写入，`render_item` 直接取；选中态由 `ListItem::selected` + `set_selected_index` 配对管。
 pub(super) struct SearchDelegate {
     /// 当前页条目，每条带全局 0-based 序号（跨分页连续）。显示时 +1。
-    pub(super) page_items: Vec<(usize, SearchResult)>,
+    pub(super) page_items: Vec<(usize, Arc<SearchResult>)>,
     /// 当前选中项，`None` = 未选中。
     pub(super) selected_index: Option<IndexPath>,
     /// 给按钮 `on_click` 转发回 page 用。
@@ -43,14 +45,15 @@ impl ListDelegate for SearchDelegate {
         _window: &mut Window,
         cx: &mut Context<ListState<Self>>,
     ) -> Option<Self::Item> {
-        let (global_index, result) = self.page_items.get(ix.row)?.clone();
+        // 借用当前页条目即可 —— 渲染只读，不复制结果。
+        let (global_index, result) = self.page_items.get(ix.row)?;
         let page = self.page.clone();
         Some(
             ListItem::new(ix)
                 .selected(Some(ix) == self.selected_index)
                 .rounded(cx.theme().radius)
                 .mb(px(4.))
-                .child(result_row::render(global_index, &result, page, &*cx)),
+                .child(result_row::render(*global_index, result, page, &*cx)),
         )
     }
 

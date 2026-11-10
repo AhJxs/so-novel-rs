@@ -34,7 +34,7 @@ pub fn spawn_search(
     search.last_error = None;
     search.last_keyword = Some(keyword.clone());
     search.results.clear();
-    search.source_status.clear();
+    search.source_status = Arc::new(Vec::new());
     search.received = 0;
     search.selected = None;
 
@@ -50,10 +50,12 @@ pub fn spawn_search(
         return false;
     }
 
-    search.source_status = target_sources
-        .iter()
-        .map(|s| (s.rule.id, s.rule.name.clone(), SourceStatus::Pending))
-        .collect();
+    search.source_status = Arc::new(
+        target_sources
+            .iter()
+            .map(|s| (s.rule.id, s.rule.name.clone(), SourceStatus::Pending))
+            .collect(),
+    );
     search.expected = target_sources.len();
     search.running = true;
     search.filter_after_done = config.source.search_filter;

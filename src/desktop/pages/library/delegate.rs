@@ -38,13 +38,14 @@ impl ListDelegate for LibraryDelegate {
         _window: &mut Window,
         cx: &mut Context<ListState<Self>>,
     ) -> Option<Self::Item> {
-        let (global_index, entry) = self.page_items.get(ix.row)?.clone();
+        // 借用当前页条目即可 —— 渲染只读，不复制文件元信息。
+        let (global_index, entry) = self.page_items.get(ix.row)?;
         Some(
             ListItem::new(ix)
                 .selected(Some(ix) == self.selected_index)
                 .rounded(cx.theme().radius)
                 .mb(px(4.))
-                .child(row::render_row(global_index, &entry, &self.page, &*cx)),
+                .child(row::render_row(*global_index, entry, &self.page, &*cx)),
         )
     }
 

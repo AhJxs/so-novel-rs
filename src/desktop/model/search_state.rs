@@ -2,6 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::num::NonZeroUsize;
+use std::sync::Arc;
 use std::time::Duration;
 
 use lru::LruCache;
@@ -51,12 +52,13 @@ pub struct SearchState {
 
     /// 上一次真正提交的关键词，用于判断是否重复搜索。
     pub last_keyword: Option<String>,
-    /// 当前展示的搜索结果列表。
-    pub results: Vec<SearchResult>,
+    /// 当前展示的搜索结果列表。元素共享 `Arc`，过滤/分页/渲染只搬引用。
+    pub results: Vec<Arc<SearchResult>>,
     /// 结果集版本号，UI 列表缓存用它作 key 的一部分。
     pub results_version: u64,
     /// 各源搜索状态 (true = 跑完), 让 UI 显示哪个源还在等。
-    pub source_status: Vec<(i32, String, SourceStatus)>,
+    /// 用 `Arc` 快照：渲染时整体 clone 只是 refcount bump，drain 时 `make_mut` 写回。
+    pub source_status: Arc<Vec<(i32, String, SourceStatus)>>,
     /// 是否有搜索正在进行。
     pub running: bool,
     /// 最近一次搜索的整体错误。
@@ -108,7 +110,7 @@ impl Default for SearchState {
             last_keyword: None,
             results: Vec::new(),
             results_version: 0,
-            source_status: Vec::new(),
+            source_status: Arc::new(Vec::new()),
             running: false,
             last_error: None,
             rx: None,
@@ -216,7 +218,7 @@ impl SearchState {
             let status = match ev.result {
                 Ok(list) => {
                     let n = list.len();
-                    self.results.extend(list);
+                    self.results.extend(list.into_iter().map(Arc::new));
                     SourceStatus::Ok(n)
                 }
                 Err(e) => {
@@ -225,15 +227,14 @@ impl SearchState {
                     SourceStatus::Err(truncated)
                 }
             };
-            if let Some(slot) = self
-                .source_status
+            let source_status = Arc::make_mut(&mut self.source_status);
+            if let Some(slot) = source_status
                 .iter_mut()
                 .find(|(id, _, _)| *id == ev.source_id)
             {
                 slot.2 = status;
             } else {
-                self.source_status
-                    .push((ev.source_id, ev.source_name, status));
+                source_status.push((ev.source_id, ev.source_name, status));
             }
         });
         if self.received >= self.expected && self.expected > 0 {
@@ -490,13 +491,13 @@ mod search_state_tests {
         };
         s.source_id = Some(3);
         s.last_keyword = Some("校花".to_string());
-        s.results.push(SearchResult {
+        s.results.push(Arc::new(SearchResult {
             source_id: 3,
             source_name: "梦书中文".to_string(),
             url: "http://www.mcxs.la/148_148487/".to_string(),
             book_name: "校花别追了".to_string(),
             ..Default::default()
-        });
+        }));
         s.detail_cache.insert(
             (3, "http://www.mcxs.la/148_148487/".to_string()),
             DetailState::Loaded(Box::default()),

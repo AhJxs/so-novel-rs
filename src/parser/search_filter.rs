@@ -7,6 +7,8 @@
 //! 降序后按书名字典序稳定排序。**不用全列表累加总分**, 否则上百条碰巧相似的噪声会翻盘
 //! 正确的单条匹配。阈值 0.25；全被过滤时退回得分 > 0 的结果。
 
+use std::sync::Arc;
+
 use crate::models::SearchResult;
 
 /// 计算两字符串相似度，结合编辑距离与子串包含度，防止长文本稀释
@@ -53,7 +55,10 @@ fn calculate_hybrid_score(sr: &SearchResult, kw: &str) -> f64 {
 }
 
 /// 过滤 + 排序聚合搜索结果。
-pub fn filter_sort(results: &[SearchResult], kw: &str) -> Vec<SearchResult> {
+///
+/// 入参与返回值都是 `Arc<SearchResult>`：过滤只搬引用，不复制结果字段
+/// （结果集常驻内存直到下一次搜索）。
+pub fn filter_sort(results: &[Arc<SearchResult>], kw: &str) -> Vec<Arc<SearchResult>> {
     if results.is_empty() {
         return Vec::new();
     }
@@ -62,7 +67,7 @@ pub fn filter_sort(results: &[SearchResult], kw: &str) -> Vec<SearchResult> {
         return results.to_vec();
     }
 
-    let mut scored: Vec<(usize, f64, &SearchResult)> = results
+    let mut scored: Vec<(usize, f64, &Arc<SearchResult>)> = results
         .iter()
         .enumerate()
         .map(|(i, sr)| (i, calculate_hybrid_score(sr, kw), sr))
@@ -76,10 +81,10 @@ pub fn filter_sort(results: &[SearchResult], kw: &str) -> Vec<SearchResult> {
             .then_with(|| a.0.cmp(&b.0))
     });
 
-    let filtered: Vec<SearchResult> = scored
+    let filtered: Vec<Arc<SearchResult>> = scored
         .iter()
         .filter(|(_, s, _)| *s >= 0.25)
-        .map(|(_, _, sr)| (*sr).clone())
+        .map(|(_, _, sr)| Arc::clone(sr))
         .collect();
 
     if !filtered.is_empty() {
@@ -90,7 +95,7 @@ pub fn filter_sort(results: &[SearchResult], kw: &str) -> Vec<SearchResult> {
     scored
         .iter()
         .filter(|(_, s, _)| *s > 0.0)
-        .map(|(_, _, sr)| (*sr).clone())
+        .map(|(_, _, sr)| Arc::clone(sr))
         .collect()
 }
 
@@ -99,15 +104,15 @@ mod tests {
     #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
     use super::*;
 
-    fn sr(book: &str, author: &str, source_id: i32) -> SearchResult {
-        SearchResult {
+    fn sr(book: &str, author: &str, source_id: i32) -> Arc<SearchResult> {
+        Arc::new(SearchResult {
             source_id,
             source_name: format!("源{source_id}"),
             url: format!("https://x/{source_id}/{book}"),
             book_name: book.to_string(),
             author: Some(author.to_string()),
             ..SearchResult::default()
-        }
+        })
     }
 
     #[test]

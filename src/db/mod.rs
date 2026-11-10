@@ -23,5 +23,7 @@ pub use rules::{
     init_rules_dir, list_rule_files, load_active_rules, load_rules_from_path,
 };
 pub use sources_config::SourcesConfig;
-pub use tasks::{load as load_tasks, save as save_tasks, save_with_trim};
+pub use tasks::{
+    load as load_tasks, save as save_tasks, save_with_trim, tasks_json_with_trim, write_json,
+};
 pub use tasks_init::{LoadedTasks, load_tasks_from_file};
