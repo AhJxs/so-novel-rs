@@ -19,7 +19,7 @@ use crate::models::Rule;
 /// rule.url = "https://example.com".into();
 /// apply_default_rule(&mut rule, LangType::ZhCn);
 /// assert_eq!(rule.language, "zh-CN");
-/// assert!(rule.book.as_ref().unwrap().base_uri == "https://example.com");
+/// assert!(rule.book.as_ref().expect("rule has book").base_uri == "https://example.com");
 /// ```
 pub fn apply_default_rule(rule: &mut Rule, system_lang: LangType) {
     if rule.language.trim().is_empty() {

@@ -192,7 +192,7 @@ mod tests {
     fn parse_invalid_bytes_returns_error() {
         let garbage = "not even close to JSON or JSON5 }{][";
         let result = parse_rules_bytes(garbage.as_bytes(), Path::new("bad.json"));
-        assert!(result.is_err());
+        assert!(result.is_err(), "非法规则应返回错误: {result:?}");
         let msg = format!("{:#}", result.unwrap_err());
         assert!(msg.contains("bad.json"), "error should mention path: {msg}");
     }

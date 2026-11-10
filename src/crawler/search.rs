@@ -148,7 +148,7 @@ mod tests {
         let cfg = AppConfig::default();
         let http = crate::http::HttpClients::new(&cfg).unwrap();
         let outcomes = search_aggregated(&http, Vec::new(), "any".into(), Some(10), None).await;
-        assert!(outcomes.is_empty());
+        assert!(outcomes.is_empty(), "没有书源时不应产生结果");
     }
 
     #[tokio::test(flavor = "multi_thread")]

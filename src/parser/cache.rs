@@ -88,7 +88,7 @@ mod tests {
     fn cached_selector_distinct_strings_get_distinct_arcs() {
         let a = cached_selector("div.book").unwrap();
         let b = cached_selector("span.title").unwrap();
-        assert!(!Arc::ptr_eq(&a, &b));
+        assert!(!Arc::ptr_eq(&a, &b), "不同选择器字符串不得共享同一 Arc");
     }
 
     #[test]

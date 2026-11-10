@@ -35,7 +35,8 @@ pub enum SelectError {
 ///
 /// ```ignore
 /// let html = scraper::Html::parse_document(r#"<div class="a">作者: 苹果</div>"#);
-/// let s = select_and_invoke_js(&html, r#".a@js:r=r.replace('作者: ','')"#, ContentType::Text).unwrap();
+/// let s = select_and_invoke_js(&html, r#".a@js:r=r.replace('作者: ','')"#, ContentType::Text)
+///     .expect("example selector resolves");
 /// assert_eq!(s, "苹果");
 /// ```
 ///

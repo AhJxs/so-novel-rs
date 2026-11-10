@@ -92,9 +92,9 @@ mod tests {
         .await;
 
         assert_eq!(result, Ok(42));
-        assert_eq!(*count.borrow(), 3);
+        assert_eq!(*count.borrow(), 3, "应在第 3 次尝试成功，共调用 3 次");
         // 失败 2 次 → sleep 2 次（重试前都 sleep）
-        assert_eq!(*sleeps.borrow(), 2);
+        assert_eq!(*sleeps.borrow(), 2, "失败 2 次 → 重试前 sleep 2 次");
     }
 
     #[tokio::test]
@@ -114,7 +114,7 @@ mod tests {
         )
         .await;
         assert_eq!(result, Err("permanent"));
-        assert_eq!(*count.borrow(), 4);
+        assert_eq!(*count.borrow(), 4, "max_attempts=3 → 共 4 次尝试");
     }
 
     #[tokio::test]

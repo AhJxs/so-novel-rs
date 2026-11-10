@@ -106,7 +106,11 @@ fn round_trip_through_save_and_load() {
     assert_eq!(loaded.global.language, Language::English);
     assert_eq!(loaded.global.theme_pref, cfg.global.theme_pref);
     assert!(loaded.global.sidebar_collapsed);
-    assert!((loaded.global.font_size - 20.0).abs() < f32::EPSILON);
+    assert!(
+        (loaded.global.font_size - 20.0).abs() < f32::EPSILON,
+        "round-trip 后 font_size 应为 20.0，实际 {}",
+        loaded.global.font_size
+    );
 }
 
 #[test]
@@ -227,7 +231,11 @@ fn save_config_overwrites_existing_without_leaving_tmp() {
 
     // load 回来确实拿到新值（兼容性：原子写后的文件能被 load_config 正确解析）。
     let cfg_loaded = load_config(&path).unwrap();
-    assert!((cfg_loaded.global.font_size - 22.0).abs() < 1e-3);
+    assert!(
+        (cfg_loaded.global.font_size - 22.0).abs() < 1e-3,
+        "原子写后重新加载应得到 font_size 22.0，实际 {}",
+        cfg_loaded.global.font_size
+    );
 }
 
 /// 原子写：写完后没有 panic，且文件可重新加载。
@@ -236,7 +244,7 @@ fn save_config_writes_to_new_path() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("nested/sub/config.toml");
     save_config(&path, &AppConfig::default()).unwrap();
-    assert!(path.exists());
+    assert!(path.exists(), "save_config 应创建缺失的父目录");
     let cfg = load_config(&path).unwrap();
     assert!((cfg.global.font_size - AppConfig::default().global.font_size).abs() < f32::EPSILON);
 }

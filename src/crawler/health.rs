@@ -198,7 +198,7 @@ mod tests {
         // 任何超时 / 网络错误都行；只断言"有错误"
         assert!(h.error.is_some(), "expected error; got {h:?}");
         assert!(h.http_status.is_none());
-        assert!(rx.try_recv().is_err());
+        assert!(rx.try_recv().is_err(), "每个源只应发一条 SourceHealth 事件");
     }
 
     #[test]

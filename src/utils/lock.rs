@@ -14,7 +14,7 @@ use std::sync::{Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
 /// use so_novel_rs::utils::lock::mutex_or;
 ///
 /// let m = Mutex::new(42_u32);
-/// let g = mutex_or("counter", &m).unwrap();
+/// let g = mutex_or("counter", &m).expect("lock available");
 /// assert_eq!(*g, 42);
 /// ```
 pub fn mutex_or<'a, T>(label: &str, mtx: &'a Mutex<T>) -> Result<MutexGuard<'a, T>, String> {

@@ -364,9 +364,12 @@ mod tests {
         })
         .expect("send");
         let any = task.drain();
-        assert!(any);
+        assert!(any, "有待处理事件时 drain 不应返回 false");
         assert_eq!(task.completed, 1, "ChapterDone → completed += 1");
-        assert_eq!(task.last_chapter_title, "第五章");
+        assert_eq!(
+            task.last_chapter_title, "第五章",
+            "ChapterDone 的 title 应写入 last_chapter_title"
+        );
         assert_eq!(task.version, 1, "收到事件 → version += 1");
     }
 
@@ -379,7 +382,11 @@ mod tests {
         })
         .expect("send");
         task.drain();
-        assert!(matches!(task.finished, Some(Ok(ref p)) if p == &out));
+        assert!(
+            matches!(task.finished, Some(Ok(ref p)) if p == &out),
+            "Finished 事件应写入输出路径，实际 {:?}",
+            task.finished
+        );
         assert!(
             task.finished_at_unix.is_some(),
             "Finished 事件应触发 finished_at_unix 兜底"

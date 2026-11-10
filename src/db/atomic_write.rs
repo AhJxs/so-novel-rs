@@ -86,7 +86,7 @@ mod tests {
         let path = dir.path().join("data.json");
         std::fs::create_dir(&path).unwrap();
         let result = write_atomically(&path, b"x");
-        assert!(result.is_err());
+        assert!(result.is_err(), "目标是目录，写入必须失败，实际 {result:?}");
 
         let leftover: Vec<_> = std::fs::read_dir(dir.path())
             .unwrap()

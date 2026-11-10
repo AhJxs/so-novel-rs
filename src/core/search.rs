@@ -89,7 +89,7 @@ mod tests {
         ];
         let cfg = cfg_no_limit();
         let sources = select_sources(&rules, &cfg, None);
-        assert_eq!(sources.len(), 2);
+        assert_eq!(sources.len(), 2, "只应选中 enabled 的源");
         assert_eq!(sources[0].rule.id, 1);
         assert_eq!(sources[1].rule.id, 4);
     }
@@ -121,15 +121,21 @@ mod tests {
         let rules = vec![Arc::new(rule(1, false, false))];
         let cfg = cfg_no_limit();
         let sources = select_sources(&rules, &cfg, Some(99));
-        assert!(sources.is_empty());
+        assert!(sources.is_empty(), "缺失的 source_id 应返回空结果");
     }
 
     #[test]
     fn select_sources_empty_rules_returns_empty_vec() {
         let rules: Vec<Arc<Rule>> = vec![];
         let cfg = cfg_no_limit();
-        assert!(select_sources(&rules, &cfg, None).is_empty());
-        assert!(select_sources(&rules, &cfg, Some(1)).is_empty());
+        assert!(
+            select_sources(&rules, &cfg, None).is_empty(),
+            "空规则列表 → 空结果"
+        );
+        assert!(
+            select_sources(&rules, &cfg, Some(1)).is_empty(),
+            "空规则列表即使指定 id 也应为空"
+        );
     }
 
     #[test]
@@ -140,7 +146,10 @@ mod tests {
             Arc::new(rule(3, false, true)),
         ];
         let cfg = cfg_no_limit();
-        assert!(select_sources(&rules, &cfg, None).is_empty());
+        assert!(
+            select_sources(&rules, &cfg, None).is_empty(),
+            "全部禁用时结果应为空"
+        );
     }
 
     #[test]

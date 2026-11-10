@@ -61,7 +61,7 @@ mod tests {
         let mut slot: Option<mpsc::UnboundedReceiver<i32>> = None;
         let outcome = try_drain_all(&mut slot, |_| panic!("on_each 绝不能被调"));
         assert_eq!(outcome, DrainOutcome::NoReceiver);
-        assert!(slot.is_none());
+        assert!(slot.is_none(), "NoReceiver 分支不应创建或触碰 slot");
     }
 
     #[test]
@@ -119,7 +119,7 @@ mod tests {
         let outcome = try_drain_all(&mut slot, |v| collected.push(v));
         assert_eq!(outcome, DrainOutcome::Disconnected);
         assert_eq!(collected, vec![1, 2, 3], "发的事件必须全部 drain");
-        assert!(slot.is_none());
+        assert!(slot.is_none(), "Disconnected 不应放回 rx");
     }
 
     #[test]
@@ -132,7 +132,7 @@ mod tests {
         let mut sum = 0_i32;
         let outcome = try_drain_all(&mut slot, |v| sum += v);
         assert_eq!(outcome, DrainOutcome::Continue);
-        assert_eq!(sum, 30);
+        assert_eq!(sum, 30, "闭包应按顺序收到全部已发事件");
     }
 
     #[test]
@@ -145,7 +145,7 @@ mod tests {
             try_drain_all(&mut slot, |_| panic!("不应被调")),
             DrainOutcome::Continue
         );
-        assert!(slot.is_some());
+        assert!(slot.is_some(), "Empty 分支必须把 rx 放回 slot");
 
         tx.send(99).expect("send");
         let mut got = 0;
@@ -153,7 +153,7 @@ mod tests {
             try_drain_all(&mut slot, |v| got = v),
             DrainOutcome::Continue
         );
-        assert_eq!(got, 99);
+        assert_eq!(got, 99, "Empty 之后 drain 仍应读到新事件");
 
         tx.send(100).expect("send");
         let mut got2 = 0;
@@ -161,6 +161,6 @@ mod tests {
             try_drain_all(&mut slot, |v| got2 = v),
             DrainOutcome::Continue
         );
-        assert_eq!(got2, 100);
+        assert_eq!(got2, 100, "多次 drain 后仍应读到新事件");
     }
 }
