@@ -12,7 +12,8 @@ use gpui_kit::component::{ActiveTheme as _, Icon, TitleBar, WindowExt as _};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::{
     AnyElement, AppContext, ClickEvent, Context, Div, Entity, FocusHandle, FontWeight,
-    InteractiveElement, IntoElement, MouseButton, ParentElement, Render, Styled, Window, div, px,
+    InteractiveElement, IntoElement, MouseButton, ParentElement, Render, StyleRefinement, Styled,
+    Window, div, px,
 };
 use rust_i18n::t;
 
@@ -114,6 +115,11 @@ impl RootView {
     fn render_sidebar(&self, cx: &Context<Self>) -> impl IntoElement {
         let collapsed = self.sidebar_collapsed;
 
+        // 展开态行高被组件库定死为 h_7 (1.75rem), 折叠态却是 icon + 上下 p_2, 每项
+        // 差一截, 5 项叠起来就是切换时的「散开 → 收拢」。图标固定 1rem、纵向内边距
+        // 0.375rem 后两态行高都是 1.75rem, 图标也正好填满展开态内容区。
+        let item_style = StyleRefinement::default().py_1p5();
+
         let items: Vec<SidebarMenuItem> = [
             NavPage::Search,
             NavPage::Tasks,
@@ -125,20 +131,25 @@ impl RootView {
         .map(|page| {
             let active = *page == self.current_page;
             let page = *page;
-            SidebarMenuItem::new(page.label())
-                .icon(Icon::new(page.icon()))
+            let mut item = SidebarMenuItem::new(page.label())
+                .icon(Icon::new(page.icon()).size_4())
                 .active(active)
                 // 必须显式设 `accessibility_label`: 折叠态下菜单项只剩 icon,
                 // 不设标签屏幕阅读器读不出这是哪个页面。
                 .accessibility_label(page.label())
                 .on_click(cx.listener(move |this, _: &ClickEvent, _window, cx| {
                     this.navigate(page, cx);
-                }))
+                }));
+            *item.style() = item_style.clone();
+            item
         })
         .collect();
 
         // Header: logo + 全大写细体 app 名。折叠态保留 logo, 文字由 `when(!collapsed)`
         // 隐藏; gpui 无 letter_spacing API, 靠大写 + 细体 + 小字营造 logo 字感。
+        // 两态内边距不同 (header pt_3/pt_2、折叠态根节点多 gap_2、内容区 p_2/px_3),
+        // 由 header 自身的 pt_1 / pb_4 补齐; 标题行高钉 20px 与 logo 同高,
+        // 两态 logo 与首个菜单项的 y 坐标才一致 (实测见 tasks/todo.md)。
         let title_text = t!("App.title").to_uppercase();
         let header = div()
             .w_full()
@@ -146,11 +157,14 @@ impl RootView {
             .items_center()
             .justify_center()
             .gap_2()
+            .when(collapsed, Styled::pt_1)
+            .when(!collapsed, Styled::pb_4)
             .child(render_logo(px(20.0)))
             .when(!collapsed, |h| {
                 h.child(
                     div()
                         .text_sm()
+                        .line_height(px(20.0))
                         .font_weight(FontWeight::LIGHT)
                         .child(title_text),
                 )
