@@ -283,7 +283,7 @@ mod tests {
         let f = File::open(&path).unwrap();
         let mut zr = ZipArchive::new(f).unwrap();
         let names: Vec<String> = (0..zr.len())
-            .map(|i| zr.by_index(i).unwrap().name().to_string())
+            .map(|i| zr.by_index(i).unwrap().name().unwrap().to_string())
             .collect();
         assert!(names.iter().any(|n| n == "mimetype"), "names={names:?}");
         assert!(names.iter().any(|n| n == "META-INF/container.xml"));
@@ -313,7 +313,7 @@ mod tests {
         let f = File::open(&path).unwrap();
         let mut zr = ZipArchive::new(f).unwrap();
         let names: Vec<String> = (0..zr.len())
-            .map(|i| zr.by_index(i).unwrap().name().to_string())
+            .map(|i| zr.by_index(i).unwrap().name().unwrap().to_string())
             .collect();
         assert!(
             names.iter().any(|n| n.ends_with("cover.png")),

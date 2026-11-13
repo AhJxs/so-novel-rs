@@ -181,7 +181,7 @@ mod tests {
         let f = File::open(&zip_path).unwrap();
         let mut zr = ZipArchive::new(f).unwrap();
         let names: Vec<String> = (0..zr.len())
-            .map(|i| zr.by_index(i).unwrap().name().to_string())
+            .map(|i| zr.by_index(i).unwrap().name().unwrap().to_string())
             .collect();
         assert!(names.iter().any(|n| n == "001_.html"));
         assert!(names.iter().any(|n| n == "002_.html"));

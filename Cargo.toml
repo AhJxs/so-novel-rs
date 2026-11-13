@@ -12,7 +12,7 @@ name = "so-novel-rs"
 path = "src/main.rs"
 
 [dependencies]
-gpui-kit = "0.9.0"
+gpui-kit = "0.9.1"
 # 国际化 —— 复用 gpui-kit 组件库内部用的同一套 rust-i18n 机制。
 rust-i18n = "4.2.4"
 
@@ -44,7 +44,7 @@ toml_edit = { version = "0.25", features = ["serde"] }
 directories = "6"
 
 # HTTP client（rustls 免 OpenSSL；cookies 供规则注入 Cookie 头；gzip/brotli 透明解压）。
-reqwest = { version = "0.13.4", default-features = false, features = [
+reqwest = { version = "0.13.5", default-features = false, features = [
     "rustls",
     "cookies",
     "gzip",
@@ -55,7 +55,7 @@ reqwest = { version = "0.13.4", default-features = false, features = [
 ] }
 
 # HTML / 选择器 / 正则
-scraper = "0.27"
+scraper = "0.29"
 regex = "1"
 
 # 编码兜底（GBK / Big5 等老站点）
@@ -67,7 +67,8 @@ chardetng = "1"
 boa_engine = "0.22"
 
 # 上游书源 DSL 的 `@java:base64.decode()` 后处理（少年小说网 / 新笔趣阁等）。
-base64 = "0.22"
+# 默认特性里的 `simd-unsafe` 对逐行短文本没有收益，只留 std。
+base64 = { version = "0.23", default-features = false, features = ["std"] }
 
 # rand（UA 池等）。惰性初始化改用 std::sync::LazyLock，不再需要 once_cell。
 rand = "0.10"
@@ -86,22 +87,22 @@ epub-builder = "0.8"
 
 # zip 打包（HTML 整本下载用）。关掉 bzip2/lzma 等带 C 依赖的特性，只留 deflate，
 # 减少 Windows MSVC 编译时对 cl.exe 的依赖。
-zip = { version = "8", default-features = false, features = ["deflate-flate2"] }
+zip = { version = "9", default-features = false, features = ["deflate-flate2"] }
 
 # 原生文件选择对话框（书源管理「添加」按钮：选 JSON 文件导入）。
 # 用 xdg-portal 而非默认 GTK3，避免引入 gtk3 系统依赖；它自带 pollster，
 # 不再需要 ashpd / tokio runtime。AsyncFileDialog 返回 impl Future，由调用方 executor 驱动。
-rfd = { version = "^0.17.2", default-features = false, features = ["xdg-portal"] }
+rfd = { version = "^0.18.0", default-features = false, features = ["xdg-portal"] }
 
 # 读系统本地时区（UtcOffset::current_local_offset）；local-offset 在三个平台各自调 OS API。
 time = { version = "0.3", default-features = false, features = ["local-offset"] }
 zhconv = "0.4.1"
 # 不启用 `rendering` feature：只用 pdf_oxide::writer 直接拼文本，不走 from_html_css 渲染流水线；
 # `rendering` 会拉入整套 HTML/CSS 解析依赖，编译时间显著增加而无功能收益。
-pdf_oxide = { version = "0.3.77" }
+pdf_oxide = { version = "0.3.78" }
 
 # LRU 缓存（`SearchState::cover_cache` 用有界 LRU 替代无界 HashMap，避免长会话累积封面字节）。
-lru = "0.18"
+lru = "0.19"
 
 [dev-dependencies]
 tempfile = "3"
@@ -110,9 +111,9 @@ image = "0.25"
 
 # Windows 系统代理探测：读 WinINET 注册表
 # （HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings）。
-# 版本与 Cargo.lock 里已有的 winreg 一致，不引入新下载。
+# 版本与 gpui-pre 构建依赖带入的 winreg 一致，别让 lock 里出现两份。
 [target.'cfg(target_os = "windows")'.dependencies]
-winreg = "0.55"
+winreg = "0.56"
 
 # 在 Windows 上把 assets/logo.ico 嵌入 exe 资源段（build.rs 调用，仅 Windows 需要）。
 [target.'cfg(target_os = "windows")'.build-dependencies]
