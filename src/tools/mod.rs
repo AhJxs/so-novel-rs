@@ -6,6 +6,7 @@
 
 pub mod encoding;
 pub mod source_book;
+pub mod split;
 
 use std::path::PathBuf;
 
