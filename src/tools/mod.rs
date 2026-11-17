@@ -10,6 +10,7 @@ pub mod load;
 pub mod render;
 pub mod source_book;
 pub mod split;
+pub mod zhconv;
 
 use std::path::PathBuf;
 
@@ -98,6 +99,47 @@ impl ToolError {
     }
 }
 
+/// 执行一次工具请求，返回产物路径。
+///
+/// # Errors
+///
+/// 透传各业务流程的 [`ToolError`]。
+pub fn run(request: ToolRequest) -> Result<PathBuf, ToolError> {
+    match request {
+        ToolRequest::Convert {
+            source,
+            out_dir,
+            target,
+            txt_encoding,
+            source_encoding,
+            chapter_regex,
+        } => convert::run_convert(
+            &source,
+            &out_dir,
+            target,
+            &txt_encoding,
+            source_encoding.as_deref(),
+            chapter_regex.as_deref(),
+        ),
+        ToolRequest::Encoding {
+            source,
+            out_dir,
+            source_encoding,
+            target_encoding,
+        } => encoding::run_encoding(
+            &source,
+            &out_dir,
+            source_encoding.as_deref(),
+            &target_encoding,
+        ),
+        ToolRequest::Zhconv {
+            source,
+            out_dir,
+            target,
+        } => zhconv::run_zhconv(&source, &out_dir, target),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
@@ -115,5 +157,24 @@ mod tests {
             ToolError::UnknownEncoding("x".to_string()).message_key(),
             "Tools.error.unknown_encoding"
         );
+    }
+
+    #[test]
+    fn run_dispatches_convert() {
+        let tmp = tempfile::tempdir().unwrap();
+        let source = tmp.path().join("书.txt");
+        std::fs::write(&source, "第1章 开始\n\n正文\n").unwrap();
+
+        let path = super::run(super::ToolRequest::Convert {
+            source,
+            out_dir: tmp.path().join("out"),
+            target: crate::config::ExportFormat::Txt,
+            txt_encoding: "UTF-8".to_string(),
+            source_encoding: None,
+            chapter_regex: None,
+        })
+        .unwrap();
+
+        assert_eq!(path.extension().and_then(|ext| ext.to_str()), Some("txt"));
     }
 }
