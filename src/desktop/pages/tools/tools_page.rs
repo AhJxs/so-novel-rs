@@ -8,9 +8,8 @@ use std::path::{Path, PathBuf};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputState};
-use gpui_kit::component::{
-    ActiveTheme as _, Disableable, Icon, Selectable, Sizable, h_flex, v_flex,
-};
+use gpui_kit::component::scroll::ScrollableElement as _;
+use gpui_kit::component::{ActiveTheme as _, Disableable, Icon, Sizable, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AppContext, Context, Entity, FontWeight, InteractiveElement as _, IntoElement, ParentElement,
@@ -299,81 +298,132 @@ impl ToolsPage {
 
     /// 一排工具卡片（同屏 tab）：点卡片切换下方表单，选中卡片描边 + 高亮底色 + 右侧圆点。
     fn render_kind_cards(&self, cx: &Context<Self>) -> impl IntoElement {
-        h_flex().gap_3().items_stretch().children(ToolKind::ALL.iter().map(|kind| {
-            let kind = *kind;
-            let selected = self.kind == kind;
-            let theme = cx.theme();
-            // accent 在多数主题里是中性灰，选中态用 primary 才有明显对比。
-            let highlight = theme.primary;
-            let hover_bg = theme.muted;
-            let border = if selected { highlight } else { theme.border };
-            let icon_color = if selected {
-                highlight
-            } else {
-                theme.muted_foreground
-            };
-            v_flex()
-                .id(("tool-card", kind.index() as u64))
-                .flex_1()
-                .min_w_0()
-                .gap_2()
-                .p_3()
-                .rounded(theme.radius)
-                .border_1()
-                .border_color(border)
-                .when(selected, |card| card.bg(hover_bg))
-                .cursor_pointer()
-                .hover(|style| style.bg(hover_bg))
-                .child(
-                    h_flex()
-                        .w_full()
-                        .items_center()
-                        .justify_between()
-                        .gap_2()
-                        .child(
-                            h_flex()
-                                .min_w_0()
-                                .items_center()
-                                .gap_2()
-                                .child(Icon::new(kind.icon()).text_color(icon_color))
-                                .child(
-                                    div()
-                                        .min_w_0()
-                                        .overflow_hidden()
-                                        .whitespace_nowrap()
-                                        .text_ellipsis()
-                                        .text_sm()
-                                        .font_weight(FontWeight::SEMIBOLD)
-                                        .child(t!(kind.label_key()).to_string()),
-                                ),
-                        )
-                        .when(selected, |row| {
-                            row.child(div().size(px(6.0)).rounded_full().bg(highlight))
-                        }),
-                )
-                .child(
-                    div()
-                        .text_xs()
-                        .text_color(theme.muted_foreground)
-                        .child(t!(kind.description_key()).to_string()),
-                )
-                .on_click(cx.listener(move |this, _, _window, cx| {
-                    this.kind = kind;
-                    cx.notify();
-                }))
-        }))
+        h_flex()
+            .gap_3()
+            .items_stretch()
+            .children(ToolKind::ALL.iter().map(|kind| {
+                let kind = *kind;
+                let selected = self.kind == kind;
+                let theme = cx.theme();
+                // accent 在多数主题里是中性灰，选中态用 primary 才有明显对比。
+                let highlight = theme.primary;
+                let hover_bg = theme.muted;
+                let border = if selected { highlight } else { theme.border };
+                let icon_color = if selected {
+                    highlight
+                } else {
+                    theme.muted_foreground
+                };
+                v_flex()
+                    .id(("tool-card", kind.index() as u64))
+                    .flex_1()
+                    .min_w_0()
+                    .gap_2()
+                    .p_3()
+                    .rounded(theme.radius)
+                    .border_1()
+                    .border_color(border)
+                    .when(selected, |card| card.bg(hover_bg))
+                    .cursor_pointer()
+                    .hover(|style| style.bg(hover_bg))
+                    .child(
+                        h_flex()
+                            .w_full()
+                            .items_center()
+                            .justify_between()
+                            .gap_2()
+                            .child(
+                                h_flex()
+                                    .min_w_0()
+                                    .items_center()
+                                    .gap_2()
+                                    .child(Icon::new(kind.icon()).text_color(icon_color))
+                                    .child(
+                                        div()
+                                            .min_w_0()
+                                            .overflow_hidden()
+                                            .whitespace_nowrap()
+                                            .text_ellipsis()
+                                            .text_sm()
+                                            .font_weight(FontWeight::SEMIBOLD)
+                                            .child(t!(kind.label_key()).to_string()),
+                                    ),
+                            )
+                            .when(selected, |row| {
+                                row.child(div().size(px(6.0)).rounded_full().bg(highlight))
+                            }),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(theme.muted_foreground)
+                            .child(t!(kind.description_key()).to_string()),
+                    )
+                    .on_click(cx.listener(move |this, _, _window, cx| {
+                        this.kind = kind;
+                        cx.notify();
+                    }))
+            }))
     }
 
     fn render_form(&self, cx: &Context<Self>) -> impl IntoElement {
         let form = &self.forms[self.kind.index()];
+        let theme = cx.theme();
         v_flex()
             .w_full()
             .min_w_0()
             .gap_4()
+            .p_5()
+            .rounded(theme.radius)
+            .border_1()
+            .border_color(theme.border)
             .child(self.render_source_row(form, cx))
+            .child(Self::divider(cx))
             .child(self.render_out_dir_row(form, cx))
+            .child(Self::divider(cx))
             .child(self.render_options(cx))
+            .child(Self::divider(cx))
             .child(self.render_actions(form, cx))
+    }
+
+    /// 字段块：小号灰标签 + 内容，与上方卡片的说明文字同一视觉层级。
+    fn field(
+        label: SharedString,
+        content: impl IntoElement,
+        cx: &Context<Self>,
+    ) -> impl IntoElement {
+        v_flex()
+            .w_full()
+            .min_w_0()
+            .gap_2()
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(label),
+            )
+            .child(content)
+    }
+
+    fn divider(cx: &Context<Self>) -> impl IntoElement {
+        div().h(px(1.0)).w_full().bg(cx.theme().border.opacity(0.6))
+    }
+
+    /// 只读路径框：浅底色 + 圆角，和卡片、选项胶囊共用一套描边语言。
+    fn path_box(text: SharedString, cx: &Context<Self>) -> impl IntoElement {
+        let theme = cx.theme();
+        div()
+            .flex_1()
+            .min_w_0()
+            .px_3()
+            .py_2()
+            .rounded(theme.radius)
+            .bg(theme.muted)
+            .text_sm()
+            .overflow_hidden()
+            .whitespace_nowrap()
+            .text_ellipsis()
+            .child(text)
     }
 
     fn render_source_row(&self, form: &ToolForm, cx: &Context<Self>) -> impl IntoElement {
@@ -381,20 +431,11 @@ impl ToolsPage {
             || t!("Tools.pick.none").into(),
             |path| path.display().to_string().into(),
         );
-        let mut column = v_flex().gap_1().child(
+        let mut column = v_flex().w_full().min_w_0().gap_2().child(
             h_flex()
                 .gap_2()
                 .items_center()
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .text_sm()
-                        .overflow_hidden()
-                        .whitespace_nowrap()
-                        .text_ellipsis()
-                        .child(path_text),
-                )
+                .child(Self::path_box(path_text, cx))
                 .child(
                     Button::new(("tool-pick-source", self.kind.index() as u64))
                         .small()
@@ -411,7 +452,7 @@ impl ToolsPage {
                     .child(t!("Tools.pick.detected", encoding = detected.to_string()).to_string()),
             );
         }
-        column
+        Self::field(t!("Tools.field.source").into(), column, cx)
     }
 
     fn render_out_dir_row(&self, form: &ToolForm, cx: &Context<Self>) -> impl IntoElement {
@@ -419,31 +460,26 @@ impl ToolsPage {
             || t!("Tools.pick.out_dir_default").into(),
             |path| path.display().to_string().into(),
         );
-        h_flex()
-            .gap_2()
-            .items_center()
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .text_sm()
-                    .overflow_hidden()
-                    .whitespace_nowrap()
-                    .text_ellipsis()
-                    .child(dir_text),
-            )
-            .child(
-                Button::new(("tool-pick-out", self.kind.index() as u64))
-                    .small()
-                    .flex_none()
-                    .label(t!("Tools.pick.choose_folder"))
-                    .on_click(cx.listener(|this, _, _window, cx| this.pick_out_dir(cx))),
-            )
+        Self::field(
+            t!("Tools.field.out_dir").into(),
+            h_flex()
+                .gap_2()
+                .items_center()
+                .child(Self::path_box(dir_text, cx))
+                .child(
+                    Button::new(("tool-pick-out", self.kind.index() as u64))
+                        .small()
+                        .flex_none()
+                        .label(t!("Tools.pick.choose_folder"))
+                        .on_click(cx.listener(|this, _, _window, cx| this.pick_out_dir(cx))),
+                ),
+            cx,
+        )
     }
 
     fn render_options(&self, cx: &Context<Self>) -> impl IntoElement {
         let form = &self.forms[self.kind.index()];
-        let mut panel = v_flex().gap_3();
+        let mut panel = v_flex().w_full().min_w_0().gap_4();
         match self.kind {
             ToolKind::Convert => {
                 let mut row = h_flex().flex_wrap().gap_2();
@@ -457,120 +493,86 @@ impl ToolsPage {
                 .into_iter()
                 .enumerate()
                 {
-                    let selected = form.target_format == format;
-                    row = row.child(
-                        Button::new(("tool-format", index as u64))
-                            .small()
-                            .ghost()
-                            .selected(selected)
-                            .label(t!(format_key(format)))
-                            .on_click(cx.listener(move |this, _, _window, cx| {
-                                this.forms[ToolKind::Convert.index()].target_format = format;
-                                cx.notify();
-                            })),
-                    );
+                    row = row.child(option_chip(
+                        ("tool-format", index as u64),
+                        t!(format_key(format)).to_string(),
+                        form.target_format == format,
+                        move |page| {
+                            page.forms[ToolKind::Convert.index()].target_format = format;
+                        },
+                        cx,
+                    ));
                 }
-                panel = panel.child(
-                    v_flex()
-                        .gap_2()
-                        .child(
-                            div()
-                                .text_sm()
-                                .child(t!("Tools.convert.output_format").to_string()),
-                        )
-                        .child(row),
-                );
+                panel = panel.child(Self::field(
+                    t!("Tools.convert.output_format").into(),
+                    row,
+                    cx,
+                ));
                 if form.target_format == ExportFormat::Txt {
-                    panel = panel.child(
-                        v_flex()
-                            .gap_2()
-                            .child(
-                                div()
-                                    .text_sm()
-                                    .child(t!("Tools.convert.txt_encoding").to_string()),
-                            )
-                            .child(chip_row(
-                                "tool-txt-enc",
-                                TARGET_ENCODINGS,
-                                &form.txt_encoding,
-                                |page, value| {
-                                    page.forms[ToolKind::Convert.index()].txt_encoding = value;
-                                },
-                                cx,
-                            )),
-                    );
+                    panel = panel.child(Self::field(
+                        t!("Tools.convert.txt_encoding").into(),
+                        chip_row(
+                            "tool-txt-enc",
+                            TARGET_ENCODINGS,
+                            &form.txt_encoding,
+                            |page, value| {
+                                page.forms[ToolKind::Convert.index()].txt_encoding = value;
+                            },
+                            cx,
+                        ),
+                        cx,
+                    ));
                 }
                 if form.source.as_deref().is_some_and(supports_chapter_regex) {
                     panel = panel
-                        .child(
-                            v_flex()
-                                .gap_2()
-                                .child(
-                                    div()
-                                        .text_sm()
-                                        .child(t!("Tools.encoding.source_encoding").to_string()),
-                                )
-                                .child(chip_row(
-                                    "tool-conv-src-enc",
-                                    SOURCE_ENCODINGS,
-                                    &form.source_encoding,
-                                    |page, value| {
-                                        page.forms[ToolKind::Convert.index()].source_encoding =
-                                            value;
-                                    },
-                                    cx,
-                                )),
-                        )
-                        .child(
-                            v_flex()
-                                .gap_2()
-                                .child(
-                                    div()
-                                        .text_sm()
-                                        .child(t!("Tools.convert.chapter_regex").to_string()),
-                                )
-                                .child(Input::new(&self.regex_input).w_full()),
-                        );
+                        .child(Self::field(
+                            t!("Tools.encoding.source_encoding").into(),
+                            chip_row(
+                                "tool-conv-src-enc",
+                                SOURCE_ENCODINGS,
+                                &form.source_encoding,
+                                |page, value| {
+                                    page.forms[ToolKind::Convert.index()].source_encoding = value;
+                                },
+                                cx,
+                            ),
+                            cx,
+                        ))
+                        .child(Self::field(
+                            t!("Tools.convert.chapter_regex").into(),
+                            Input::new(&self.regex_input).w_full(),
+                            cx,
+                        ));
                 }
             }
             ToolKind::Encoding => {
                 panel = panel
-                    .child(
-                        v_flex()
-                            .gap_2()
-                            .child(
-                                div()
-                                    .text_sm()
-                                    .child(t!("Tools.encoding.source_encoding").to_string()),
-                            )
-                            .child(chip_row(
-                                "tool-src-enc",
-                                SOURCE_ENCODINGS,
-                                &form.source_encoding,
-                                |page, value| {
-                                    page.forms[ToolKind::Encoding.index()].source_encoding = value;
-                                },
-                                cx,
-                            )),
-                    )
-                    .child(
-                        v_flex()
-                            .gap_2()
-                            .child(
-                                div()
-                                    .text_sm()
-                                    .child(t!("Tools.encoding.target_encoding").to_string()),
-                            )
-                            .child(chip_row(
-                                "tool-dst-enc",
-                                TARGET_ENCODINGS,
-                                &form.target_encoding,
-                                |page, value| {
-                                    page.forms[ToolKind::Encoding.index()].target_encoding = value;
-                                },
-                                cx,
-                            )),
-                    );
+                    .child(Self::field(
+                        t!("Tools.encoding.source_encoding").into(),
+                        chip_row(
+                            "tool-src-enc",
+                            SOURCE_ENCODINGS,
+                            &form.source_encoding,
+                            |page, value| {
+                                page.forms[ToolKind::Encoding.index()].source_encoding = value;
+                            },
+                            cx,
+                        ),
+                        cx,
+                    ))
+                    .child(Self::field(
+                        t!("Tools.encoding.target_encoding").into(),
+                        chip_row(
+                            "tool-dst-enc",
+                            TARGET_ENCODINGS,
+                            &form.target_encoding,
+                            |page, value| {
+                                page.forms[ToolKind::Encoding.index()].target_encoding = value;
+                            },
+                            cx,
+                        ),
+                        cx,
+                    ));
             }
             ToolKind::Zhconv => {
                 let mut row = h_flex().flex_wrap().gap_2();
@@ -582,24 +584,17 @@ impl ToolsPage {
                 .into_iter()
                 .enumerate()
                 {
-                    row = row.child(
-                        Button::new(("tool-zhconv", index as u64))
-                            .small()
-                            .ghost()
-                            .selected(form.zhconv_target == target)
-                            .label(t!(key))
-                            .on_click(cx.listener(move |this, _, _window, cx| {
-                                this.forms[ToolKind::Zhconv.index()].zhconv_target = target;
-                                cx.notify();
-                            })),
-                    );
+                    row = row.child(option_chip(
+                        ("tool-zhconv", index as u64),
+                        t!(key).to_string(),
+                        form.zhconv_target == target,
+                        move |page| {
+                            page.forms[ToolKind::Zhconv.index()].zhconv_target = target;
+                        },
+                        cx,
+                    ));
                 }
-                panel = panel.child(
-                    v_flex()
-                        .gap_2()
-                        .child(div().text_sm().child(t!("Tools.zhconv.target").to_string()))
-                        .child(row),
-                );
+                panel = panel.child(Self::field(t!("Tools.zhconv.target").into(), row, cx));
             }
         }
         panel
@@ -611,13 +606,7 @@ impl ToolsPage {
         } else {
             t!("Tools.run.start").into()
         };
-        let mut column = v_flex().gap_2().items_start().child(
-            Button::new(("tool-run", self.kind.index() as u64))
-                .label(label)
-                .loading(form.running)
-                .disabled(form.source.is_none() || form.running)
-                .on_click(cx.listener(|this, _, _window, cx| this.run_tool(cx))),
-        );
+        let mut column = v_flex().w_full().min_w_0().gap_3();
         if let Some(result) = &form.result {
             let result = result.clone();
             column = column.child(
@@ -625,16 +614,7 @@ impl ToolsPage {
                     .gap_2()
                     .items_center()
                     .w_full()
-                    .child(
-                        div()
-                            .flex_1()
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground)
-                            .overflow_hidden()
-                            .whitespace_nowrap()
-                            .text_ellipsis()
-                            .child(result.display().to_string()),
-                    )
+                    .child(Self::path_box(result.display().to_string().into(), cx))
                     .child(
                         Button::new("tool-reveal")
                             .small()
@@ -667,7 +647,16 @@ impl ToolsPage {
                     ),
             );
         }
-        column
+        column.child(
+            h_flex().w_full().justify_end().child(
+                Button::new(("tool-run", self.kind.index() as u64))
+                    .primary()
+                    .label(label)
+                    .loading(form.running)
+                    .disabled(form.source.is_none() || form.running)
+                    .on_click(cx.listener(|this, _, _window, cx| this.run_tool(cx))),
+            ),
+        )
     }
 }
 
@@ -682,18 +671,57 @@ impl Render for ToolsPage {
                     .subtitle(t!("Tools.page_subtitle").into()),
             )
             .child(
-                v_flex()
+                div()
+                    .id("tools-scroll")
                     .flex_1()
+                    .min_h_0()
                     .w_full()
                     .min_w_0()
-                    .gap_5()
-                    .child(self.render_kind_cards(cx))
-                    .child(self.render_form(cx)),
+                    .overflow_y_scrollbar()
+                    .child(
+                        v_flex()
+                            .w_full()
+                            .min_w_0()
+                            .gap_5()
+                            .child(self.render_kind_cards(cx))
+                            .child(self.render_form(cx)),
+                    ),
             )
     }
 }
 
 /// 一排单选胶囊按钮：点哪项就把 `String` 值交给 `on_pick`。
+/// 单选胶囊：与上方工具卡片共用一套描边语言，选中态用主题主色。
+fn option_chip(
+    id: (&'static str, u64),
+    label: impl Into<SharedString>,
+    selected: bool,
+    on_pick: impl Fn(&mut ToolsPage) + 'static,
+    cx: &Context<ToolsPage>,
+) -> impl IntoElement {
+    let theme = cx.theme();
+    let accent = theme.primary;
+    let muted_bg = theme.muted;
+    let border = theme.border;
+    div()
+        .id(id)
+        .px_3()
+        .py_1p5()
+        .rounded(theme.radius)
+        .border_1()
+        .border_color(if selected { accent } else { border })
+        .when(selected, |chip| chip.bg(muted_bg))
+        .cursor_pointer()
+        .hover(move |style| style.bg(muted_bg))
+        .text_sm()
+        .when(selected, move |chip| chip.text_color(accent))
+        .child(label.into())
+        .on_click(cx.listener(move |this, _, _window, cx| {
+            on_pick(this);
+            cx.notify();
+        }))
+}
+
 fn chip_row(
     prefix: &'static str,
     options: &'static [&'static str],
@@ -704,20 +732,15 @@ fn chip_row(
     let on_pick: std::rc::Rc<dyn Fn(&mut ToolsPage, String)> = std::rc::Rc::new(on_pick);
     let mut row = h_flex().flex_wrap().gap_2();
     for (index, option) in options.iter().enumerate() {
-        let is_selected = *option == selected;
         let value = (*option).to_string();
         let on_pick = on_pick.clone();
-        row = row.child(
-            Button::new((prefix, index as u64))
-                .small()
-                .ghost()
-                .selected(is_selected)
-                .label(*option)
-                .on_click(cx.listener(move |this, _, _window, cx| {
-                    on_pick(this, value.clone());
-                    cx.notify();
-                })),
-        );
+        row = row.child(option_chip(
+            (prefix, index as u64),
+            *option,
+            *option == selected,
+            move |page| on_pick(page, value.clone()),
+            cx,
+        ));
     }
     row
 }

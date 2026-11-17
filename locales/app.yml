@@ -95,6 +95,15 @@ Tools:
       en: "Convert TXT / Markdown between Simplified and Traditional Chinese"
       zh-CN: "在简体与繁体之间转换 TXT / Markdown"
       zh-TW: "在簡體與繁體之間轉換 TXT / Markdown"
+  field:
+    source:
+      en: "Source file"
+      zh-CN: "源文件"
+      zh-TW: "來源檔案"
+    out_dir:
+      en: "Output folder"
+      zh-CN: "输出目录"
+      zh-TW: "輸出目錄"
   pick:
     filter:
       en: "Novel files"
