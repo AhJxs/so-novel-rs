@@ -54,4 +54,5 @@ pub mod js;
 pub mod logger;
 pub mod models;
 pub mod parser;
+pub mod tools;
 pub mod utils;
