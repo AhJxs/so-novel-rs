@@ -104,4 +104,65 @@ mod tests {
             }
         }
     }
+
+    const TOOLS_KEYS: &[&str] = &[
+        "Tools.page_title",
+        "Tools.kind.convert",
+        "Tools.kind.encoding",
+        "Tools.kind.zhconv",
+        "Tools.desc.convert",
+        "Tools.desc.encoding",
+        "Tools.desc.zhconv",
+        "Tools.pick.title",
+        "Tools.pick.filter",
+        "Tools.pick.choose_file",
+        "Tools.pick.choose_folder",
+        "Tools.pick.detected",
+        "Tools.pick.none",
+        "Tools.pick.out_dir_default",
+        "Tools.convert.output_format",
+        "Tools.convert.chapter_regex",
+        "Tools.convert.chapter_regex_placeholder",
+        "Tools.convert.txt_encoding",
+        "Tools.format.epub",
+        "Tools.format.txt",
+        "Tools.format.html",
+        "Tools.format.pdf",
+        "Tools.format.markdown",
+        "Tools.encoding.source_encoding",
+        "Tools.encoding.target_encoding",
+        "Tools.zhconv.target",
+        "Tools.zhconv.zh_cn",
+        "Tools.zhconv.zh_tw",
+        "Tools.zhconv.zh_hant",
+        "Tools.run.start",
+        "Tools.run.running",
+        "Tools.run.reveal",
+        "Tools.toast.success",
+        "Tools.error.unsupported_format",
+        "Tools.error.io",
+        "Tools.error.decode",
+        "Tools.error.invalid_regex",
+        "Tools.error.zip_structure",
+        "Tools.error.epub_structure",
+        "Tools.error.no_content",
+        "Tools.error.unencodable",
+        "Tools.error.unknown_encoding",
+        "Tools.error.export",
+    ];
+
+    #[test]
+    fn tools_translated_in_all_three_locales() {
+        for &key in TOOLS_KEYS {
+            for locale in ["en", "zh-CN", "zh-TW"] {
+                let v = rust_i18n::t!(key, locale = locale);
+                assert!(!v.is_empty(), "{key} 在 locale={locale} 翻译为空字符串");
+                assert_ne!(
+                    v.as_ref(),
+                    key,
+                    "{key} 在 locale={locale} 缺失（返回 key 本身）"
+                );
+            }
+        }
+    }
 }

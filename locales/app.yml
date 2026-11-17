@@ -137,6 +137,36 @@ Tools:
       en: "Leave blank to use the built-in 第N章 pattern"
       zh-CN: "留空使用内置“第N章”规则"
       zh-TW: "留空使用內建「第N章」規則"
+    txt_encoding:
+      en: "TXT encoding"
+      zh-CN: "TXT 编码"
+      zh-TW: "TXT 編碼"
+  encoding:
+    source_encoding:
+      en: "Source encoding"
+      zh-CN: "源编码"
+      zh-TW: "來源編碼"
+    target_encoding:
+      en: "Target encoding"
+      zh-CN: "目标编码"
+      zh-TW: "目標編碼"
+  zhconv:
+    target:
+      en: "Target script"
+      zh-CN: "目标字形"
+      zh-TW: "目標字形"
+    zh_cn:
+      en: "Simplified (China)"
+      zh-CN: "简体（大陆）"
+      zh-TW: "簡體（大陸）"
+    zh_tw:
+      en: "Traditional (Taiwan)"
+      zh-CN: "繁体（台湾）"
+      zh-TW: "繁體（台灣）"
+    zh_hant:
+      en: "Traditional (Hong Kong)"
+      zh-CN: "繁体（香港）"
+      zh-TW: "繁體（香港）"
   format:
     epub:
       en: EPUB

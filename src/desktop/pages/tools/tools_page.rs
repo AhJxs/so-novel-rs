@@ -25,6 +25,12 @@ use crate::tools::{ToolRequest, detect_file_encoding, run};
 /// 支持的源文件扩展名（文件选择器过滤用）。
 const SOURCE_EXTENSIONS: &[&str] = &["txt", "md", "markdown", "html", "htm", "epub", "zip"];
 
+/// 可选的源编码；`auto` 表示自动探测。
+const SOURCE_ENCODINGS: &[&str] = &["auto", "UTF-8", "GBK", "GB18030", "Big5", "Big5-HKSCS"];
+
+/// 可选的输出编码；不含 UTF-16（`encoding_rs` 的 UTF-16 只支持解码）。
+const TARGET_ENCODINGS: &[&str] = &["UTF-8", "GBK", "GB18030", "Big5", "Big5-HKSCS"];
+
 /// 三个工具。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ToolKind {
@@ -441,20 +447,127 @@ impl ToolsPage {
                         )
                         .child(row),
                 );
-                if form.source.as_deref().is_some_and(supports_chapter_regex) {
+                if form.target_format == ExportFormat::Txt {
                     panel = panel.child(
                         v_flex()
                             .gap_2()
                             .child(
                                 div()
                                     .text_sm()
-                                    .child(t!("Tools.convert.chapter_regex").to_string()),
+                                    .child(t!("Tools.convert.txt_encoding").to_string()),
                             )
-                            .child(Input::new(&self.regex_input).w_full()),
+                            .child(chip_row(
+                                "tool-txt-enc",
+                                TARGET_ENCODINGS,
+                                &form.txt_encoding,
+                                |page, value| {
+                                    page.forms[ToolKind::Convert.index()].txt_encoding = value;
+                                },
+                                cx,
+                            )),
                     );
                 }
+                if form.source.as_deref().is_some_and(supports_chapter_regex) {
+                    panel = panel
+                        .child(
+                            v_flex()
+                                .gap_2()
+                                .child(
+                                    div()
+                                        .text_sm()
+                                        .child(t!("Tools.encoding.source_encoding").to_string()),
+                                )
+                                .child(chip_row(
+                                    "tool-conv-src-enc",
+                                    SOURCE_ENCODINGS,
+                                    &form.source_encoding,
+                                    |page, value| {
+                                        page.forms[ToolKind::Convert.index()].source_encoding =
+                                            value;
+                                    },
+                                    cx,
+                                )),
+                        )
+                        .child(
+                            v_flex()
+                                .gap_2()
+                                .child(
+                                    div()
+                                        .text_sm()
+                                        .child(t!("Tools.convert.chapter_regex").to_string()),
+                                )
+                                .child(Input::new(&self.regex_input).w_full()),
+                        );
+                }
             }
-            ToolKind::Encoding | ToolKind::Zhconv => {}
+            ToolKind::Encoding => {
+                panel = panel
+                    .child(
+                        v_flex()
+                            .gap_2()
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .child(t!("Tools.encoding.source_encoding").to_string()),
+                            )
+                            .child(chip_row(
+                                "tool-src-enc",
+                                SOURCE_ENCODINGS,
+                                &form.source_encoding,
+                                |page, value| {
+                                    page.forms[ToolKind::Encoding.index()].source_encoding = value;
+                                },
+                                cx,
+                            )),
+                    )
+                    .child(
+                        v_flex()
+                            .gap_2()
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .child(t!("Tools.encoding.target_encoding").to_string()),
+                            )
+                            .child(chip_row(
+                                "tool-dst-enc",
+                                TARGET_ENCODINGS,
+                                &form.target_encoding,
+                                |page, value| {
+                                    page.forms[ToolKind::Encoding.index()].target_encoding = value;
+                                },
+                                cx,
+                            )),
+                    );
+            }
+            ToolKind::Zhconv => {
+                let mut row = h_flex().gap_2();
+                for (index, (target, key)) in [
+                    (LangType::ZhCn, "Tools.zhconv.zh_cn"),
+                    (LangType::ZhTw, "Tools.zhconv.zh_tw"),
+                    (LangType::ZhHant, "Tools.zhconv.zh_hant"),
+                ]
+                .into_iter()
+                .enumerate()
+                {
+                    row = row.child(
+                        Button::new(("tool-zhconv", index as u64))
+                            .small()
+                            .ghost()
+                            .selected(form.zhconv_target == target)
+                            .label(t!(key))
+                            .on_click(cx.listener(move |this, _, _window, cx| {
+                                this.forms[ToolKind::Zhconv.index()].zhconv_target = target;
+                                cx.notify();
+                            })),
+                    );
+                }
+                panel = panel.child(
+                    v_flex()
+                        .gap_2()
+                        .child(div().text_sm().child(t!("Tools.zhconv.target").to_string()))
+                        .child(row),
+                );
+            }
         }
         panel
     }
@@ -533,6 +646,35 @@ impl Render for ToolsPage {
             .child(self.render_rail(cx))
             .child(self.render_form(cx))
     }
+}
+
+/// 一排单选胶囊按钮：点哪项就把 `String` 值交给 `on_pick`。
+fn chip_row(
+    prefix: &'static str,
+    options: &'static [&'static str],
+    selected: &str,
+    on_pick: impl Fn(&mut ToolsPage, String) + 'static,
+    cx: &Context<ToolsPage>,
+) -> impl IntoElement {
+    let on_pick: std::rc::Rc<dyn Fn(&mut ToolsPage, String)> = std::rc::Rc::new(on_pick);
+    let mut row = h_flex().gap_2();
+    for (index, option) in options.iter().enumerate() {
+        let is_selected = *option == selected;
+        let value = (*option).to_string();
+        let on_pick = on_pick.clone();
+        row = row.child(
+            Button::new((prefix, index as u64))
+                .small()
+                .ghost()
+                .selected(is_selected)
+                .label(*option)
+                .on_click(cx.listener(move |this, _, _window, cx| {
+                    on_pick(this, value.clone());
+                    cx.notify();
+                })),
+        );
+    }
+    row
 }
 
 /// 是否为可切章的纯文本文档（TXT / Markdown / HTML）。
