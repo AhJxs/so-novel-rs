@@ -5,6 +5,7 @@
 //! `encoding` / `zhconv`（三条流程）。
 
 pub mod encoding;
+pub mod load;
 pub mod source_book;
 pub mod split;
 
