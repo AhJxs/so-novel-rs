@@ -1,5 +1,6 @@
 //! 本地文件 → [`SourceBook`]。按扩展名分派，所有文本都归一化为纯文本段落。
 
+pub mod epub;
 pub mod html;
 pub mod markdown;
 pub mod txt;
@@ -39,6 +40,7 @@ pub fn load_path(path: &Path, opts: &LoadOptions<'_>) -> Result<SourceBook, Tool
         }
         "html" | "htm" => html::load_file(path, opts, &split::compile_pattern(opts.chapter_regex)?),
         "zip" => html::load_zip(path),
+        "epub" => epub::load(path),
         _ => Err(ToolError::UnsupportedFormat(ext)),
     }
 }

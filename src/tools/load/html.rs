@@ -41,11 +41,7 @@ pub(super) fn load_file(
     let title = extract_tag_text(&html, "title").unwrap_or_else(|| stem(path));
     let author = meta_content(&html, "author").unwrap_or_default();
     let intro = meta_content(&html, "description");
-    let body = BODY_RE
-        .captures(&html)
-        .map_or(html.as_str(), |cap| cap.get(1).map_or("", |m| m.as_str()))
-        .to_string();
-    let paragraphs = html_to_paragraphs(&body);
+    let paragraphs = html_to_paragraphs(body_fragment(&html));
     if paragraphs.is_empty() {
         return Err(ToolError::NoContent);
     }
@@ -135,10 +131,7 @@ pub(super) fn load_zip(path: &Path) -> Result<SourceBook, ToolError> {
             .or_else(|| extract_tag_text(&html, "title"))
             .unwrap_or_else(|| format!("第 {} 章", chapters.len() + 1));
         // 只取 <body>，避免 <title> 等头部文本混进正文。
-        let body = BODY_RE
-            .captures(&html)
-            .map_or(&*html, |cap| cap.get(1).map_or("", |m| m.as_str()));
-        let mut paragraphs = html_to_paragraphs(body);
+        let mut paragraphs = html_to_paragraphs(body_fragment(&html));
         if paragraphs
             .first()
             .is_some_and(|paragraph| paragraph.trim() == title.trim())
@@ -201,7 +194,7 @@ fn meta_content(html: &str, name: &str) -> Option<String> {
     None
 }
 
-fn attr(tag: &str, name: &str) -> Option<String> {
+pub(crate) fn attr(tag: &str, name: &str) -> Option<String> {
     let mut from = 0;
     while let Some(pos) = tag[from..].find(name) {
         let start = from + pos;
@@ -224,6 +217,13 @@ fn attr(tag: &str, name: &str) -> Option<String> {
         from = start + name.len();
     }
     None
+}
+
+/// 取 `<body>` 内容；没有 body 标签时退回整篇。
+pub(crate) fn body_fragment(html: &str) -> &str {
+    BODY_RE
+        .captures(html)
+        .map_or(html, |cap| cap.get(1).map_or("", |m| m.as_str()))
 }
 
 pub(crate) fn extract_tag_text(html: &str, tag: &str) -> Option<String> {
