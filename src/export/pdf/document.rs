@@ -1,6 +1,5 @@
 //! PDF 文档构建主流程: `PdfExporter` + `Paginator` (流式分页) + `Run` (单行文本) + 排版常量。
 
-use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -11,7 +10,7 @@ use super::chapters::{
 };
 use super::fonts::{CJK_FONT, Measurer, find_cjk_font};
 use crate::export::exporter::{
-    ExportError, Exporter, sort_chapter_files, strip_html_tags, unique_path,
+    ExportError, Exporter, RenderedChapter, strip_html_tags, unique_path,
 };
 use crate::models::Book;
 
@@ -26,33 +25,25 @@ impl Exporter for PdfExporter {
     #[tracing::instrument(
         name = "pdf_merge",
         skip_all,
-        fields(book = %book.book_name, chapters_dir = %chapters_dir.display())
+        fields(book = %book.book_name, chapters = chapters.len())
     )]
     fn merge(
         &self,
         book: &Book,
-        chapters_dir: &Path,
+        chapters: &[RenderedChapter],
         out_dir: &Path,
     ) -> Result<PathBuf, ExportError> {
-        let files = sort_chapter_files(chapters_dir)?
-            .into_iter()
-            // 跳过 0_ 开头的辅助文件 (封面 / 目录索引), 与 html/epub 一致
-            .filter(|p| {
-                p.file_name()
-                    .and_then(|s| s.to_str())
-                    .is_some_and(|s| !s.starts_with("0_"))
-            })
-            .collect::<Vec<_>>();
-        if files.is_empty() {
-            return Err(ExportError::EmptyChaptersDir(chapters_dir.to_path_buf()));
+        if chapters.is_empty() {
+            return Err(ExportError::NoChapters);
         }
 
-        let mut chapters: Vec<(Option<String>, Vec<String>)> = Vec::with_capacity(files.len());
-        for path in &files {
-            let raw = fs::read_to_string(path)?;
-            let body = extract_body(&raw).unwrap_or_else(|| raw.trim().to_string());
+        let mut contents: Vec<(String, Vec<String>)> = Vec::with_capacity(chapters.len());
+        for chapter in chapters {
+            let body =
+                extract_body(&chapter.body).unwrap_or_else(|| chapter.body.trim().to_string());
             let body = strip_nav_bar(&body);
-            chapters.push(extract_chapter_content(&body));
+            let (_title, paras) = extract_chapter_content(&body);
+            contents.push((chapter.title.clone(), paras));
         }
 
         std::fs::create_dir_all(out_dir)?;
@@ -106,13 +97,13 @@ impl Exporter for PdfExporter {
         } else {
             "Helvetica"
         };
-        let total_chapters = chapters.len();
+        let total_chapters = contents.len();
         let started = Instant::now();
         {
             let mut pg = Paginator::new(&mut builder, &measurer, font_name);
             pg.render_cover(book);
-            for (idx, (title, paras)) in chapters.iter().enumerate() {
-                pg.render_chapter(title.as_deref(), paras);
+            for (idx, (title, paras)) in contents.iter().enumerate() {
+                pg.render_chapter(Some(title), paras);
                 tracing::debug!(
                     chapter = idx + 1,
                     total = total_chapters,
@@ -337,6 +328,11 @@ mod tests {
         write_chapter_files(dir, &chapters, ExportFormat::Pdf).unwrap();
     }
 
+    fn load_and_merge(book: &Book, dir: &Path, out: &Path) -> PathBuf {
+        let chapters = crate::export::load_chapter_files(dir, ExportFormat::Pdf).unwrap();
+        PdfExporter.merge(book, &chapters, out).unwrap()
+    }
+
     #[test]
     fn produces_pdf_file() {
         let dir = tempfile::tempdir().unwrap();
@@ -346,7 +342,7 @@ mod tests {
         std::fs::create_dir_all(&out).unwrap();
         write_chapters(&chapters);
 
-        let path = PdfExporter.merge(&sample_book(), &chapters, &out).unwrap();
+        let path = load_and_merge(&sample_book(), &chapters, &out);
         assert!(path.exists(), "missing pdf: {}", path.display());
         assert!(
             std::path::Path::new(path.file_name().and_then(|s| s.to_str()).unwrap())
@@ -368,15 +364,11 @@ mod tests {
     #[test]
     fn empty_chapters_dir_returns_typed_error() {
         let dir = tempfile::tempdir().unwrap();
-        let chapters = dir.path().join("chapters");
         let out = dir.path().join("out");
-        std::fs::create_dir_all(&chapters).unwrap();
         std::fs::create_dir_all(&out).unwrap();
 
-        let err = PdfExporter
-            .merge(&sample_book(), &chapters, &out)
-            .unwrap_err();
-        assert!(matches!(err, ExportError::EmptyChaptersDir(_)));
+        let err = PdfExporter.merge(&sample_book(), &[], &out).unwrap_err();
+        assert!(matches!(err, ExportError::NoChapters));
     }
 
     #[test]
@@ -390,7 +382,7 @@ mod tests {
         // 加一个 0_ 前缀的"目录"文件 — 不该被当成章节
         std::fs::write(chapters.join("0_目录.txt"), "ignore me").unwrap();
 
-        let path = PdfExporter.merge(&sample_book(), &chapters, &out).unwrap();
+        let path = load_and_merge(&sample_book(), &chapters, &out);
         assert!(path.exists());
         let len = std::fs::metadata(&path).unwrap().len();
         assert!(len > 100, "pdf too small: {len} bytes");

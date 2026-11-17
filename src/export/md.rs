@@ -1,4 +1,4 @@
-//! Markdown 导出: 合并 `chapters_dir` 下每章 `.md` 为单文件 (与 TXT 同形态)。
+//! Markdown 导出: 合并章节为单文件 (与 TXT 同形态)。
 //!
 //! 多出两点: YAML front matter (Hugo/Jekyll 风格) 与章节锚点 TOC (`- [标题](#chapter-N)`)。
 
@@ -6,12 +6,12 @@ use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 
 use crate::export::exporter::{
-    ExportError, Exporter, sort_chapter_files, strip_html_tags, unique_path,
+    ExportError, Exporter, RenderedChapter, strip_html_tags, unique_path,
 };
 use crate::models::Book;
 use crate::utils::fs;
 
-/// 把章节缓存目录合并成单个 Markdown 文件。
+/// 把渲染好的章节合并成单个 Markdown 文件。
 pub struct MdExporter;
 
 impl Exporter for MdExporter {
@@ -22,32 +22,11 @@ impl Exporter for MdExporter {
     fn merge(
         &self,
         book: &Book,
-        chapters_dir: &Path,
+        chapters: &[RenderedChapter],
         out_dir: &Path,
     ) -> Result<PathBuf, ExportError> {
-        let files: Vec<PathBuf> = sort_chapter_files(chapters_dir)?
-            .into_iter()
-            .filter(|p| {
-                p.file_name()
-                    .and_then(|s| s.to_str())
-                    .is_some_and(|s| !s.starts_with("0_"))
-            })
-            .filter(|p| {
-                p.extension()
-                    .and_then(|e| e.to_str())
-                    .is_some_and(|e| e.eq_ignore_ascii_case("md"))
-            })
-            .collect();
-        if files.is_empty() {
-            return Err(ExportError::EmptyChaptersDir(chapters_dir.to_path_buf()));
-        }
-
-        // 单遍预读 (title, body): 避免写 TOC + 正文时两次打开同一文件。
-        let mut chapters: Vec<(String, String)> = Vec::with_capacity(files.len());
-        for path in &files {
-            let title = chapter_title_from_path(path);
-            let body = std::fs::read_to_string(path)?;
-            chapters.push((title, body));
+        if chapters.is_empty() {
+            return Err(ExportError::NoChapters);
         }
 
         std::fs::create_dir_all(out_dir)?;
@@ -78,15 +57,15 @@ impl Exporter for MdExporter {
         w.write_all(format!("# {}\n\n", book.book_name).as_bytes())?;
 
         w.write_all("## 目录\n\n".as_bytes())?;
-        for (idx, (title, _)) in chapters.iter().enumerate() {
-            w.write_all(format!("- [{title}](#chapter-{})\n", idx + 1).as_bytes())?;
+        for (idx, chapter) in chapters.iter().enumerate() {
+            w.write_all(format!("- [{}](#chapter-{})\n", chapter.title, idx + 1).as_bytes())?;
         }
         w.write_all(b"\n")?;
 
         // 每章正文前置内联 HTML 锚点 (GFM / Obsidian / Hugo 均识别); `## 标题` 行由渲染自带。
-        for (idx, (_title, body)) in chapters.iter().enumerate() {
+        for (idx, chapter) in chapters.iter().enumerate() {
             w.write_all(format!("<a id=\"chapter-{}\"></a>\n\n", idx + 1).as_bytes())?;
-            w.write_all(body.trim_end().as_bytes())?;
+            w.write_all(chapter.body.trim_end().as_bytes())?;
             w.write_all(b"\n\n")?;
         }
 
@@ -95,19 +74,10 @@ impl Exporter for MdExporter {
     }
 }
 
-/// 从 `001_第1章 起航.md` 抽出 `第1章 起航`。
-/// `sanitize_filename` 已把文件系统非法字符替换成 `_`，回看时无需再清洗。
-pub(crate) fn chapter_title_from_path(path: &Path) -> String {
-    path.file_stem()
-        .and_then(|s| s.to_str())
-        .map(|s| s.split_once('_').map_or(s, |(_, t)| t).to_string())
-        .unwrap_or_default()
-}
-
 #[cfg(test)]
 mod tests {
     #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
 
     use super::super::md::MdExporter;
     use crate::config::ExportFormat;
@@ -141,6 +111,11 @@ mod tests {
         ]
     }
 
+    fn load_and_merge(book: &Book, dir: &Path, out: &Path) -> PathBuf {
+        let chapters = crate::export::load_chapter_files(dir, ExportFormat::Markdown).unwrap();
+        MdExporter.merge(book, &chapters, out).unwrap()
+    }
+
     fn write_and_merge() -> (tempfile::TempDir, PathBuf) {
         let dir = tempfile::tempdir().unwrap();
         let chapters = dir.path().join("chapters");
@@ -148,8 +123,7 @@ mod tests {
         std::fs::create_dir_all(&chapters).unwrap();
         std::fs::create_dir_all(&out).unwrap();
         write_chapter_files(&chapters, &sample_chapters(), ExportFormat::Markdown).unwrap();
-        let exp = MdExporter;
-        let p = exp.merge(&sample_book(), &chapters, &out).unwrap();
+        let p = load_and_merge(&sample_book(), &chapters, &out);
         (dir, p)
     }
 
@@ -194,7 +168,7 @@ mod tests {
             intro: None,
             ..Book::default()
         };
-        let p = MdExporter.merge(&book, &chapters, &out).unwrap();
+        let p = load_and_merge(&book, &chapters, &out);
         let s = std::fs::read_to_string(&p).unwrap();
         let header_end = s.find("\n---\n").unwrap();
         let header = &s[..header_end];
@@ -220,32 +194,6 @@ mod tests {
     }
 
     #[test]
-    fn chapter_title_from_path_strips_order_prefix() {
-        use super::super::md::chapter_title_from_path;
-        let s = chapter_title_from_path(std::path::Path::new("001_第1章 起航.md"));
-        assert_eq!(s, "第1章 起航");
-        // 没下划线时回退整 stem
-        let s2 = chapter_title_from_path(std::path::Path::new("无名.md"));
-        assert_eq!(s2, "无名");
-    }
-
-    #[test]
-    fn empty_chapters_dir_returns_typed_error() {
-        let dir = tempfile::tempdir().unwrap();
-        let chapters = dir.path().join("chapters");
-        let out = dir.path().join("out");
-        std::fs::create_dir_all(&chapters).unwrap();
-        std::fs::create_dir_all(&out).unwrap();
-        let err = MdExporter
-            .merge(&sample_book(), &chapters, &out)
-            .unwrap_err();
-        assert!(
-            matches!(err, ExportError::EmptyChaptersDir(_)),
-            "expected EmptyChaptersDir, got {err:?}"
-        );
-    }
-
-    #[test]
     fn skips_zero_prefixed_files() {
         let dir = tempfile::tempdir().unwrap();
         let chapters = dir.path().join("chapters");
@@ -256,10 +204,22 @@ mod tests {
         // 加一个伪封面 / 索引
         std::fs::write(chapters.join("0_目录.md"), "应该被忽略").unwrap();
 
-        let p = MdExporter.merge(&sample_book(), &chapters, &out).unwrap();
+        let p = load_and_merge(&sample_book(), &chapters, &out);
         let s = std::fs::read_to_string(&p).unwrap();
         assert!(!s.contains("应该被忽略"));
         assert!(s.contains("正文一"));
+    }
+
+    #[test]
+    fn empty_chapters_dir_returns_typed_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let out = dir.path().join("out");
+        std::fs::create_dir_all(&out).unwrap();
+        let err = MdExporter.merge(&sample_book(), &[], &out).unwrap_err();
+        assert!(
+            matches!(err, ExportError::NoChapters),
+            "expected NoChapters, got {err:?}"
+        );
     }
 
     #[test]
@@ -273,8 +233,8 @@ mod tests {
         write_chapter_files(&chapters, &sample_chapters(), ExportFormat::Markdown).unwrap();
 
         let book = sample_book();
-        let p1 = MdExporter.merge(&book, &chapters, &out).unwrap();
-        let p2 = MdExporter.merge(&book, &chapters, &out).unwrap();
+        let p1 = load_and_merge(&book, &chapters, &out);
+        let p2 = load_and_merge(&book, &chapters, &out);
 
         assert!(p1.exists());
         assert!(p2.exists());

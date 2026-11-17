@@ -188,8 +188,6 @@ impl From<crate::parser::SearchError> for AppError {
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
-
     use super::*;
 
     #[test]
@@ -202,10 +200,10 @@ mod tests {
 
     #[test]
     fn from_export_error() {
-        let e = crate::export::ExportError::EmptyChaptersDir(PathBuf::from("/x"));
+        let e = crate::export::ExportError::NoChapters;
         let a: AppError = e.into();
         assert!(matches!(a, AppError::Export(_)));
-        assert!(a.message().contains("/x"));
+        assert!(a.message().contains("没有可合并的章节"));
     }
 
     #[test]

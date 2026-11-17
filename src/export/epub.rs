@@ -1,8 +1,7 @@
 //! EPUB 导出。对应 Java `handle.EpubMergeHandler`。
 //!
 //! 输出 `<outDir>/<bookName>(<author>).epub`: metadata 写 title/author/description/language
-//! (与 Java 一致); 章节从 `chapters_dir` 按文件名升序读 `001_<标题>.html`, 截第一个 `_` 之后
-//! 作为 TOC 标题。
+//! (与 Java 一致); 章节正文由调用方渲染好后按内存传入, TOC 标题取 `RenderedChapter.title`。
 //!
 //! 封面字节由调度层下载后经 `merge_with_cover_bytes` 传入 (export 层不依赖 reqwest);
 //! 未传或写入失败时 soft-skip 封面、继续产出。
@@ -15,11 +14,11 @@ use std::time::Instant;
 use epub_builder::{EpubBuilder, EpubContent, EpubVersion, ReferenceType, ZipLibrary};
 
 use super::exporter::pad_zero;
-use crate::export::exporter::{ExportError, Exporter, sort_chapter_files, unique_path};
+use crate::export::exporter::{ExportError, Exporter, RenderedChapter, unique_path};
 use crate::models::Book;
 use crate::utils::fs;
 
-/// 把章节缓存目录打包成 EPUB。
+/// 把渲染好的章节打包成 EPUB。
 pub struct EpubExporter;
 
 impl Exporter for EpubExporter {
@@ -30,20 +29,20 @@ impl Exporter for EpubExporter {
     fn merge(
         &self,
         book: &Book,
-        chapters_dir: &Path,
+        chapters: &[RenderedChapter],
         out_dir: &Path,
     ) -> Result<PathBuf, ExportError> {
-        merge_with_cover_bytes(book, chapters_dir, out_dir, None)
+        merge_with_cover_bytes(book, chapters, out_dir, None)
     }
 
     fn merge_with_cover(
         &self,
         book: &Book,
-        chapters_dir: &Path,
+        chapters: &[RenderedChapter],
         out_dir: &Path,
         cover_bytes: Option<&[u8]>,
     ) -> Result<PathBuf, ExportError> {
-        merge_with_cover_bytes(book, chapters_dir, out_dir, cover_bytes)
+        merge_with_cover_bytes(book, chapters, out_dir, cover_bytes)
     }
 }
 
@@ -54,19 +53,15 @@ impl Exporter for EpubExporter {
 ///
 /// # Errors
 ///
-/// 章节文件读取 / 排序失败、epub 打包写入失败时返回 [`ExportError`]。
+/// 章节为空、epub 打包写入失败时返回 [`ExportError`]。
 pub fn merge_with_cover_bytes(
     book: &Book,
-    chapters_dir: &Path,
+    chapters: &[RenderedChapter],
     out_dir: &Path,
     cover_bytes: Option<&[u8]>,
 ) -> Result<PathBuf, ExportError> {
-    let files: Vec<PathBuf> = sort_chapter_files(chapters_dir)?
-        .into_iter()
-        .filter(|p| is_chapter_xhtml(p))
-        .collect();
-    if files.is_empty() {
-        return Err(ExportError::EmptyChaptersDir(chapters_dir.to_path_buf()));
+    if chapters.is_empty() {
+        return Err(ExportError::NoChapters);
     }
 
     let zip = ZipLibrary::new().map_err(|e| ExportError::Epub(format!("ZipLibrary: {e}")))?;
@@ -114,21 +109,21 @@ pub fn merge_with_cover_bytes(
         }
     }
 
-    let total_chapters = files.len();
-    let digit = total_chapters.to_string().len().max(3);
+    let total_chapters = chapters.len();
+    let max_order = chapters
+        .iter()
+        .map(|c| c.order)
+        .max()
+        .unwrap_or(total_chapters as u32);
+    let digit = max_order.to_string().len().max(3);
     let started = Instant::now();
-    for (idx, path) in files.iter().enumerate() {
-        // 流式: File 直接作为 `Read` 传给 `EpubContent`, 避免 `read_to_end` 把整章字节
-        // 先吃进 Vec (1000 章 × 50KB 会白占 50MB)。
-        let file = File::open(path)?;
-        let title =
-            chapter_title_from_filename(path).unwrap_or_else(|| format!("第 {} 章", idx + 1));
-        let id = pad_zero((idx + 1) as u32, digit);
+    for chapter in chapters {
+        let id = pad_zero(chapter.order, digit);
         let entry_name = format!("{id}.xhtml");
         builder
             .add_content(
-                EpubContent::new(&entry_name, file)
-                    .title(title)
+                EpubContent::new(&entry_name, chapter.body.as_bytes())
+                    .title(&chapter.title)
                     .reftype(ReferenceType::Text),
             )
             .map_err(|e| ExportError::Epub(format!("add chapter {entry_name}: {e}")))?;
@@ -150,31 +145,6 @@ pub fn merge_with_cover_bytes(
     writer.flush()?;
 
     Ok(out_path)
-}
-
-fn is_chapter_xhtml(p: &Path) -> bool {
-    let Some(ext) = p.extension().and_then(|e| e.to_str()) else {
-        return false;
-    };
-    let is_html = ext.eq_ignore_ascii_case("html") || ext.eq_ignore_ascii_case("xhtml");
-    if !is_html {
-        return false;
-    }
-    // 跳过 0_ 开头的辅助文件（封面、目录索引）
-    let name = p.file_name().and_then(|s| s.to_str()).unwrap_or_default();
-    !name.starts_with("0_")
-}
-
-/// `001_第1章 楔子.html` → `第1章 楔子`。无 `_` 时回退到 stem。
-fn chapter_title_from_filename(p: &Path) -> Option<String> {
-    let stem = p.file_stem().and_then(|s| s.to_str())?;
-    if let Some(idx) = stem.find('_') {
-        let title = &stem[idx + 1..];
-        if !title.is_empty() {
-            return Some(title.to_string());
-        }
-    }
-    Some(stem.to_string())
 }
 
 fn detect_image_mime(bytes: &[u8]) -> &'static str {
@@ -263,6 +233,16 @@ mod tests {
         ]
     }
 
+    fn load_and_merge(book: &Book, dir: &Path, out: &Path) -> PathBuf {
+        let chapters = crate::export::load_chapter_files(dir, ExportFormat::Epub).unwrap();
+        EpubExporter.merge(book, &chapters, out).unwrap()
+    }
+
+    fn load_and_merge_cover(book: &Book, dir: &Path, out: &Path, cover: &[u8]) -> PathBuf {
+        let chapters = crate::export::load_chapter_files(dir, ExportFormat::Epub).unwrap();
+        merge_with_cover_bytes(book, &chapters, out, Some(cover)).unwrap()
+    }
+
     #[test]
     fn produces_epub_file_without_cover() {
         let dir = tempfile::tempdir().unwrap();
@@ -272,7 +252,7 @@ mod tests {
         std::fs::create_dir_all(&out).unwrap();
         write_chapter_files(&chapters, &sample_chapters(), ExportFormat::Epub).unwrap();
 
-        let path = EpubExporter.merge(&sample_book(), &chapters, &out).unwrap();
+        let path = load_and_merge(&sample_book(), &chapters, &out);
         assert!(path.exists(), "missing epub: {}", path.display());
         assert!(
             std::path::Path::new(path.file_name().and_then(|s| s.to_str()).unwrap())
@@ -309,7 +289,7 @@ mod tests {
         let mut png = vec![0x89u8, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
         png.extend_from_slice(&[0u8; 32]);
 
-        let path = merge_with_cover_bytes(&sample_book(), &chapters, &out, Some(&png)).unwrap();
+        let path = load_and_merge_cover(&sample_book(), &chapters, &out, &png);
         let f = File::open(&path).unwrap();
         let mut zr = ZipArchive::new(f).unwrap();
         let names: Vec<String> = (0..zr.len())
@@ -328,14 +308,10 @@ mod tests {
     #[test]
     fn empty_chapters_dir_returns_typed_error() {
         let dir = tempfile::tempdir().unwrap();
-        let chapters = dir.path().join("chapters");
         let out = dir.path().join("out");
-        std::fs::create_dir_all(&chapters).unwrap();
         std::fs::create_dir_all(&out).unwrap();
-        let err = EpubExporter
-            .merge(&sample_book(), &chapters, &out)
-            .unwrap_err();
-        assert!(matches!(err, ExportError::EmptyChaptersDir(_)));
+        let err = EpubExporter.merge(&sample_book(), &[], &out).unwrap_err();
+        assert!(matches!(err, ExportError::NoChapters));
     }
 
     #[test]
@@ -371,17 +347,5 @@ mod tests {
         assert_eq!(detect_image_mime(&[0xff, 0xd8]), "image/jpeg");
         // RIFF 但不够 12 字节 → 降级
         assert_eq!(detect_image_mime(b"RIFF"), "image/jpeg");
-    }
-
-    #[test]
-    fn chapter_title_from_filename_extracts_after_first_underscore() {
-        let p = std::path::PathBuf::from("001_第1章 楔子.html");
-        assert_eq!(
-            chapter_title_from_filename(&p).as_deref(),
-            Some("第1章 楔子")
-        );
-        let p2 = std::path::PathBuf::from("002_.html");
-        // 下划线后为空 → 回退到 stem
-        assert_eq!(chapter_title_from_filename(&p2).as_deref(), Some("002_"));
     }
 }

@@ -367,8 +367,9 @@ pub async fn download_chapters(
 
     let exporter = export::exporter_for(cfg.download.ext_name, &cfg.download.txt_encoding);
     let out_dir = std::path::Path::new(&cfg.download.download_path);
-    let final_path =
-        exporter.merge_with_cover(book, &chapters_dir, out_dir, cover_bytes.as_deref())?;
+    // 章节文件仍落盘以支持断点续传; 合并前一次性读回内存, 导出器不再触碰目录。
+    let chapters = export::load_chapter_files(&chapters_dir, cfg.download.ext_name)?;
+    let final_path = exporter.merge_with_cover(book, &chapters, out_dir, cover_bytes.as_deref())?;
 
     if !cfg.download.preserve_chapter_cache
         && let Err(e) = std::fs::remove_dir_all(&chapters_dir)

@@ -1,24 +1,22 @@
 //! HTML 导出。对应 Java `handle.HtmlTocHandler`。
 //!
-//! `chapters_dir` 下每章一个 `NNN_.html` (已由 `write_chapter_files` 写好); 先生成
-//! `0_目录.txt` (列出 `文件名\t\t章节名`), 再把整个目录打包成 `<书名>(<作者>).zip` 放入 `out_dir`。
+//! 每章一个 `NNN_.html`; 先生成 `0_目录.txt` (列出 `文件名\t\t章节名`), 再一起打包成
+//! `<书名>(<作者>).zip` 放入 `out_dir`。章节直接来自内存, 不落章节缓存目录。
 //!
 //! HTML 导出**不**下载封面 —— 网络属调度层, 封面归 `EpubExporter`。
 
 use std::fs::File;
-use std::io::{Read, Write};
+use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::LazyLock;
 
-use regex::Regex;
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipWriter};
 
-use crate::export::exporter::{ExportError, Exporter, sort_chapter_files, unique_path};
+use crate::export::exporter::{ExportError, Exporter, RenderedChapter, unique_path};
 use crate::models::Book;
 use crate::utils::fs;
 
-/// 把章节缓存目录打包成单文件 HTML。
+/// 把章节打包成单文件 HTML (zip)。
 pub struct HtmlExporter;
 
 impl Exporter for HtmlExporter {
@@ -29,97 +27,53 @@ impl Exporter for HtmlExporter {
     fn merge(
         &self,
         book: &Book,
-        chapters_dir: &Path,
+        chapters: &[RenderedChapter],
         out_dir: &Path,
     ) -> Result<PathBuf, ExportError> {
-        let files = sort_chapter_files(chapters_dir)?;
-        if !files.iter().any(|p| is_chapter_html(p)) {
-            return Err(ExportError::EmptyChaptersDir(chapters_dir.to_path_buf()));
+        if chapters.is_empty() {
+            return Err(ExportError::NoChapters);
         }
 
         // 目录索引: 文件名 + 章节名 (TAB 分隔)
-        let toc_path = chapters_dir.join("0_目录.txt");
         let mut toc_lines = vec!["文件名\t\t\t\t章节名".to_string()];
-        for f in &files {
-            if !is_chapter_html(f) {
-                continue;
-            }
-            let name = f.file_name().and_then(|n| n.to_str()).unwrap_or_default();
-            let html = std::fs::read_to_string(f)?;
-            let title = extract_title(&html).unwrap_or_else(|| name.to_string());
-            toc_lines.push(format!("{name}\t\t{title}"));
+        for chapter in chapters {
+            let name = format!("{:03}_.html", chapter.order);
+            toc_lines.push(format!("{name}\t\t{}", chapter.title));
         }
-        std::fs::write(&toc_path, toc_lines.join("\n"))?;
 
         std::fs::create_dir_all(out_dir)?;
         let zip_name = fs::sanitize_filename(&format!("{}({}).zip", book.book_name, book.author));
         let zip_path = unique_path(out_dir, &zip_name);
-        zip_directory(chapters_dir, &zip_path)?;
 
+        let file = File::create(&zip_path)
+            .map_err(|e| ExportError::Zip(format!("create {} failed: {e}", zip_path.display())))?;
+        let mut writer = ZipWriter::new(file);
+        let options = SimpleFileOptions::default()
+            .compression_method(CompressionMethod::Deflated)
+            .unix_permissions(0o644);
+
+        writer
+            .start_file("0_目录.txt", options)
+            .map_err(|e| ExportError::Zip(format!("start_file: {e}")))?;
+        writer
+            .write_all(toc_lines.join("\n").as_bytes())
+            .map_err(|e| ExportError::Zip(format!("write: {e}")))?;
+
+        for chapter in chapters {
+            let name = format!("{:03}_.html", chapter.order);
+            writer
+                .start_file(&name, options)
+                .map_err(|e| ExportError::Zip(format!("start_file: {e}")))?;
+            writer
+                .write_all(chapter.body.as_bytes())
+                .map_err(|e| ExportError::Zip(format!("write: {e}")))?;
+        }
+
+        writer
+            .finish()
+            .map_err(|e| ExportError::Zip(format!("finish: {e}")))?;
         Ok(zip_path)
     }
-}
-
-fn is_chapter_html(p: &Path) -> bool {
-    p.extension()
-        .and_then(|e| e.to_str())
-        .is_some_and(|e| e.eq_ignore_ascii_case("html"))
-}
-
-/// 从单章 HTML 里提取 `<title>...</title>` 文本。
-fn extract_title(html: &str) -> Option<String> {
-    /// 编译期确定的正则: 用 match 走 panic 路径避免 `clippy::expect_used` (panic 即设计)。
-    #[allow(
-        clippy::panic,
-        reason = "static regex literal must compile; failure = programmer error"
-    )]
-    fn compile_static_re(pattern: &'static str) -> Regex {
-        match Regex::new(pattern) {
-            Ok(re) => re,
-            Err(e) => panic!("static regex `{pattern}` should compile: {e}"),
-        }
-    }
-    static TITLE_RE: LazyLock<Regex> =
-        LazyLock::new(|| compile_static_re(r"(?is)<title[^>]*>(.*?)</title>"));
-    TITLE_RE
-        .captures(html)
-        .and_then(|c| c.get(1))
-        .map(|m| m.as_str().trim().to_string())
-}
-
-/// 把 `src` 目录下所有文件平铺打包成 `dst` 这个 zip 文件。
-fn zip_directory(src: &Path, dst: &Path) -> Result<(), ExportError> {
-    let file = File::create(dst)
-        .map_err(|e| ExportError::Zip(format!("create {} failed: {e}", dst.display())))?;
-    let mut writer = ZipWriter::new(file);
-    let options = SimpleFileOptions::default()
-        .compression_method(CompressionMethod::Deflated)
-        .unix_permissions(0o644);
-
-    for entry in std::fs::read_dir(src)? {
-        let entry = entry?;
-        let path = entry.path();
-        if !path.is_file() {
-            continue;
-        }
-        let file_name = path
-            .file_name()
-            .and_then(|s| s.to_str())
-            .ok_or_else(|| ExportError::Zip(format!("bad file name: {}", path.display())))?;
-
-        writer
-            .start_file(file_name, options)
-            .map_err(|e| ExportError::Zip(format!("start_file: {e}")))?;
-        let mut buf = Vec::new();
-        File::open(&path)?.read_to_end(&mut buf)?;
-        writer
-            .write_all(&buf)
-            .map_err(|e| ExportError::Zip(format!("write: {e}")))?;
-    }
-    writer
-        .finish()
-        .map_err(|e| ExportError::Zip(format!("finish: {e}")))?;
-    Ok(())
 }
 
 #[cfg(test)]
@@ -158,6 +112,11 @@ mod tests {
         ]
     }
 
+    fn load_and_merge(book: &Book, dir: &Path, out: &Path) -> PathBuf {
+        let chapters = crate::export::load_chapter_files(dir, ExportFormat::Html).unwrap();
+        HtmlExporter.merge(book, &chapters, out).unwrap()
+    }
+
     #[test]
     fn produces_zip_with_chapters_and_toc() {
         let dir = tempfile::tempdir().unwrap();
@@ -167,8 +126,7 @@ mod tests {
         std::fs::create_dir_all(&out).unwrap();
         write_chapter_files(&chapters, &sample_chapters(), ExportFormat::Html).unwrap();
 
-        let exp = HtmlExporter;
-        let zip_path = exp.merge(&sample_book(), &chapters, &out).unwrap();
+        let zip_path = load_and_merge(&sample_book(), &chapters, &out);
         assert!(zip_path.exists(), "missing zip: {}", zip_path.display());
         assert!(
             zip_path
@@ -200,20 +158,10 @@ mod tests {
     #[test]
     fn empty_chapters_dir_returns_typed_error() {
         let dir = tempfile::tempdir().unwrap();
-        let chapters = dir.path().join("chapters");
         let out = dir.path().join("out");
-        std::fs::create_dir_all(&chapters).unwrap();
         std::fs::create_dir_all(&out).unwrap();
 
-        let exp = HtmlExporter;
-        let err = exp.merge(&sample_book(), &chapters, &out).unwrap_err();
-        assert!(matches!(err, ExportError::EmptyChaptersDir(_)));
-    }
-
-    #[test]
-    fn extract_title_handles_multiline_and_attrs() {
-        let html = "<html><head><title id=\"x\">\n  hello\n</title></head></html>";
-        assert_eq!(extract_title(html).as_deref(), Some("hello"));
-        assert_eq!(extract_title("<html><body>nope</body></html>"), None);
+        let err = HtmlExporter.merge(&sample_book(), &[], &out).unwrap_err();
+        assert!(matches!(err, ExportError::NoChapters));
     }
 }

@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use encoding_rs::{Encoding, UTF_8};
 
 use crate::export::exporter::{
-    ExportError, Exporter, sort_chapter_files, strip_html_tags, unique_path,
+    ExportError, Exporter, RenderedChapter, strip_html_tags, unique_path,
 };
 use crate::models::Book;
 use crate::utils::fs;
@@ -87,12 +87,11 @@ impl Exporter for TxtExporter {
     fn merge(
         &self,
         book: &Book,
-        chapters_dir: &Path,
+        chapters: &[RenderedChapter],
         out_dir: &Path,
     ) -> Result<PathBuf, ExportError> {
-        let files = sort_chapter_files(chapters_dir)?;
-        if files.is_empty() {
-            return Err(ExportError::EmptyChaptersDir(chapters_dir.to_path_buf()));
+        if chapters.is_empty() {
+            return Err(ExportError::NoChapters);
         }
 
         std::fs::create_dir_all(out_dir)?;
@@ -116,17 +115,9 @@ impl Exporter for TxtExporter {
             }
         ))?;
 
-        // 章节合并 (每个文件已是 `render::render_txt` 的输出: 标题 + 缩进段落 + \n)
-        for path in &files {
-            // 跳过 0_ 开头的辅助文件（封面图、目录索引）
-            if let Some(name) = path.file_name().and_then(|s| s.to_str())
-                && (name.starts_with("0_") || name == "0_目录.txt")
-            {
-                continue;
-            }
-            let content = std::fs::read_to_string(path)?;
-            writer.write_str(&content)?;
-            if !content.ends_with("\n\n") {
+        for chapter in chapters {
+            writer.write_str(&chapter.body)?;
+            if !chapter.body.ends_with("\n\n") {
                 writer.write_str("\n")?;
             }
         }
@@ -167,6 +158,17 @@ mod tests {
         ]
     }
 
+    fn load_and_merge(
+        exp: &dyn Exporter,
+        book: &Book,
+        dir: &Path,
+        out: &Path,
+        format: ExportFormat,
+    ) -> PathBuf {
+        let chapters = crate::export::load_chapter_files(dir, format).unwrap();
+        exp.merge(book, &chapters, out).unwrap()
+    }
+
     fn write_and_export(encoding: &str) -> tempfile::TempDir {
         let dir = tempfile::tempdir().unwrap();
         let chapters = dir.path().join("chapters");
@@ -176,7 +178,7 @@ mod tests {
 
         write_chapter_files(&chapters, &sample_chapters(), ExportFormat::Txt).unwrap();
         let exp = TxtExporter::new(encoding);
-        let p = exp.merge(&sample_book(), &chapters, &out).unwrap();
+        let p = load_and_merge(&exp, &sample_book(), &chapters, &out, ExportFormat::Txt);
         assert!(p.exists(), "expected output file: {}", p.display());
         let _ = p;
         dir
@@ -215,7 +217,7 @@ mod tests {
             ..Book::default()
         };
         let exp = TxtExporter::new("UTF-8");
-        let p = exp.merge(&book, &chapters, &out).unwrap();
+        let p = load_and_merge(&exp, &book, &chapters, &out, ExportFormat::Txt);
         let s = std::fs::read_to_string(&p).unwrap();
         assert!(s.contains("简介：暂无"));
     }
@@ -249,7 +251,7 @@ mod tests {
         std::fs::write(chapters.join("0_目录.txt"), "应该被忽略").unwrap();
 
         let exp = TxtExporter::new("UTF-8");
-        let p = exp.merge(&sample_book(), &chapters, &out).unwrap();
+        let p = load_and_merge(&exp, &sample_book(), &chapters, &out, ExportFormat::Txt);
         let s = std::fs::read_to_string(&p).unwrap();
         assert!(!s.contains("应该被忽略"));
         assert!(s.contains("正文一"));
@@ -258,16 +260,14 @@ mod tests {
     #[test]
     fn empty_chapters_dir_returns_typed_error() {
         let dir = tempfile::tempdir().unwrap();
-        let chapters = dir.path().join("chapters");
         let out = dir.path().join("out");
-        std::fs::create_dir_all(&chapters).unwrap();
         std::fs::create_dir_all(&out).unwrap();
 
         let exp = TxtExporter::new("UTF-8");
-        let err = exp.merge(&sample_book(), &chapters, &out).unwrap_err();
+        let result = exp.merge(&sample_book(), &[], &out);
         assert!(
-            matches!(err, ExportError::EmptyChaptersDir(_)),
-            "expected EmptyChaptersDir, got {err:?}"
+            matches!(result, Err(ExportError::NoChapters)),
+            "expected NoChapters"
         );
     }
 
@@ -289,8 +289,8 @@ mod tests {
 
         let exp = TxtExporter::new("UTF-8");
         let book = sample_book();
-        let p1 = exp.merge(&book, &chapters, &out).unwrap();
-        let p2 = exp.merge(&book, &chapters, &out).unwrap();
+        let p1 = load_and_merge(&exp, &book, &chapters, &out, ExportFormat::Txt);
+        let p2 = load_and_merge(&exp, &book, &chapters, &out, ExportFormat::Txt);
 
         assert!(p1.exists());
         assert!(p2.exists());

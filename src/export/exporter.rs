@@ -1,14 +1,18 @@
 //! 导出器统一抽象 + 共用工具。
 //!
 //! 三层流程：`render` 把章节正文渲染成目标格式字符串 → `write_chapter_files` 写入临时章节目录
-//! (文件名形如 `001_标题.html` / `001_.html` / `001_标题.txt`) → `Exporter` 的具体实现
-//! (txt/html/epub/pdf/md) 从该目录读回所有章节、输出最终成品。
+//! (文件名形如 `001_标题.html` / `001_.html` / `001_标题.txt`) → `load_chapter_files` 按序读回
+//! 内存 → `Exporter` 的具体实现 (txt/html/epub/pdf/md) 消费内存章节、输出最终成品。
+//!
+//! 写盘 + 读回只在下载链路用于断点续传；工具页等新调用方可直接构造 [`RenderedChapter`]。
 //!
 //! 本层只做**同步**文件 IO；网络下载（如 EPUB 封面字节）由调用方或 epub.rs 自己处理。
 
 use std::path::{Path, PathBuf};
+use std::sync::LazyLock;
 
 use anyhow::{Context, Result};
+use regex::Regex;
 use thiserror::Error;
 
 use crate::config::ExportFormat;
@@ -18,9 +22,9 @@ use crate::utils::fs;
 /// 导出阶段的统一错误。
 #[derive(Debug, Error)]
 pub enum ExportError {
-    /// 待导出的章节缓存目录为空或不存在。
-    #[error("章节缓存目录为空: {0}")]
-    EmptyChaptersDir(PathBuf),
+    /// 没有任何可合并的章节（目录不存在、为空或全是 `0_` 辅助文件）。
+    #[error("没有可合并的章节")]
+    NoChapters,
     /// 读写章节文件或输出文件失败。
     #[error("IO 错误: {0}")]
     Io(#[from] std::io::Error),
@@ -40,7 +44,7 @@ pub enum ExportError {
 
 /// 导出器统一接口。
 ///
-/// 实现方读取 `chapters_dir` 下按文件名升序排序的章节文件，写入 `out_dir`
+/// 实现方消费调用方渲染好的章节（按 `order` 升序），写入 `out_dir`
 /// 下的最终成品（`<书名>(<作者>).<ext>` 或一个目录）。返回成品路径。
 pub trait Exporter {
     /// 文件扩展名（不带点）：`txt`/`html`/`epub`。`html` 模式实际产物是 zip。
@@ -50,11 +54,11 @@ pub trait Exporter {
     ///
     /// # Errors
     ///
-    /// 读取章节文件或写成品失败时返回 [`ExportError`]。
+    /// 章节为空或写成品失败时返回 [`ExportError`]。
     fn merge(
         &self,
         book: &Book,
-        chapters_dir: &Path,
+        chapters: &[RenderedChapter],
         out_dir: &Path,
     ) -> Result<PathBuf, ExportError>;
 
@@ -63,15 +67,15 @@ pub trait Exporter {
     ///
     /// # Errors
     ///
-    /// 读取章节文件或写成品失败时返回 [`ExportError`]。
+    /// 章节为空或写成品失败时返回 [`ExportError`]。
     fn merge_with_cover(
         &self,
         book: &Book,
-        chapters_dir: &Path,
+        chapters: &[RenderedChapter],
         out_dir: &Path,
         _cover_bytes: Option<&[u8]>,
     ) -> Result<PathBuf, ExportError> {
-        self.merge(book, chapters_dir, out_dir)
+        self.merge(book, chapters, out_dir)
     }
 }
 
@@ -154,7 +158,6 @@ pub fn write_single_chapter(
 }
 
 /// 按"前缀数字"升序枚举目录下的章节文件。
-/// 跳过 `0_`（书目索引、封面这类）开头的辅助文件以避免被当成正文章节。
 ///
 /// # Errors
 ///
@@ -174,6 +177,89 @@ pub fn sort_chapter_files(dir: &Path) -> Result<Vec<PathBuf>, ExportError> {
             .unwrap_or(u32::MAX)
     });
     Ok(files)
+}
+
+/// 读取章节缓存目录，按顺序号排序并跳过 `0_` 辅助文件。
+///
+/// 标题来源：TXT / Markdown / EPUB 取文件名第一个 `_` 之后的部分；
+/// HTML / PDF 优先取正文 `<title>`，再取 `<h1>`，最后回退文件名。
+///
+/// # Errors
+///
+/// 读取目录或章节文件失败时返回 [`ExportError::Io`]；没有章节时返回
+/// [`ExportError::NoChapters`]。
+pub fn load_chapter_files(
+    dir: &Path,
+    format: ExportFormat,
+) -> Result<Vec<RenderedChapter>, ExportError> {
+    let files = sort_chapter_files(dir)?;
+    let mut chapters = Vec::new();
+    for path in files {
+        let Some(name) = path.file_name().and_then(|s| s.to_str()) else {
+            continue;
+        };
+        if name.starts_with("0_") || !has_format_ext(&path, format) {
+            continue;
+        }
+        let body = std::fs::read_to_string(&path)?;
+        let order = (chapters.len() + 1) as u32;
+        let mut title = match format {
+            ExportFormat::Html | ExportFormat::Pdf => extract_body_title(&body).unwrap_or_default(),
+            ExportFormat::Txt | ExportFormat::Markdown | ExportFormat::Epub => String::new(),
+        };
+        if title.trim().is_empty() {
+            title = title_from_filename(name);
+        }
+        if title.is_empty() {
+            title = format!("第 {order} 章");
+        }
+        chapters.push(RenderedChapter { order, title, body });
+    }
+    if chapters.is_empty() {
+        return Err(ExportError::NoChapters);
+    }
+    Ok(chapters)
+}
+
+fn has_format_ext(path: &Path, format: ExportFormat) -> bool {
+    let ext = path
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    match format {
+        ExportFormat::Txt => ext == "txt",
+        ExportFormat::Markdown => ext == "md",
+        ExportFormat::Html | ExportFormat::Pdf => ext == "html",
+        ExportFormat::Epub => ext == "html" || ext == "xhtml",
+    }
+}
+
+fn title_from_filename(name: &str) -> String {
+    let stem = Path::new(name)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or(name);
+    match stem.split_once('_') {
+        Some((_, title)) => title.trim().to_string(),
+        None => stem.trim().to_string(),
+    }
+}
+
+fn extract_body_title(body: &str) -> Option<String> {
+    static TITLE_RE: LazyLock<Regex> =
+        LazyLock::new(|| compile_static_re(r"(?is)<title[^>]*>(.*?)</title>"));
+    static H1_RE: LazyLock<Regex> =
+        LazyLock::new(|| compile_static_re(r"(?is)<h1[^>]*>(.*?)</h1>"));
+    for re in [&*TITLE_RE, &*H1_RE] {
+        if let Some(cap) = re.captures(body) {
+            let title = strip_html_tags(&cap[1]);
+            if !title.is_empty() {
+                return Some(title);
+            }
+        }
+    }
+    None
 }
 
 /// 工厂：用书名 + 作者构造目录名。与 Java 端
@@ -238,25 +324,22 @@ pub(crate) fn pad_zero(n: u32, width: usize) -> String {
     }
 }
 
+// 正则由源码字面量构造，编译期确定能编译；用 `match` 走 panic 路径避免 `clippy::expect_used`。
+// panic 即设计：字面量写错是程序员错误，启动期炸出来比在 lazy init 崩在半成品状态更易诊断。
+#[allow(
+    clippy::panic,
+    reason = "static regex literal must compile; failure = programmer error"
+)]
+fn compile_static_re(pattern: &'static str) -> Regex {
+    match Regex::new(pattern) {
+        Ok(re) => re,
+        Err(e) => panic!("static regex `{pattern}` should compile: {e}"),
+    }
+}
+
 /// 极简 HTML 标签清理（仅用于 intro 文本）：删除 `<...>`、HTML 实体、多余空白。
 /// 不引入 ammonia / scraper（intro 一般几百字，正则足够）。
 pub(crate) fn strip_html_tags(s: &str) -> String {
-    use std::sync::LazyLock;
-
-    use regex::Regex;
-
-    // 正则由源码字面量构造，编译期确定能编译；用 `match` 走 panic 路径避免 `clippy::expect_used`。
-    // panic 即设计：字面量写错是程序员错误，启动期炸出来比在 lazy init 崩在半成品状态更易诊断。
-    #[allow(
-        clippy::panic,
-        reason = "static regex literal must compile; failure = programmer error"
-    )]
-    fn compile_static_re(pattern: &'static str) -> Regex {
-        match Regex::new(pattern) {
-            Ok(re) => re,
-            Err(e) => panic!("static regex `{pattern}` should compile: {e}"),
-        }
-    }
     static TAG_RE: LazyLock<Regex> = LazyLock::new(|| compile_static_re(r"(?s)<[^>]+>"));
     static ENTITY_RE: LazyLock<Regex> = LazyLock::new(|| compile_static_re(r"&[^;]+;"));
     static WS_RE: LazyLock<Regex> = LazyLock::new(|| compile_static_re(r"\s+"));
@@ -270,6 +353,40 @@ pub(crate) fn strip_html_tags(s: &str) -> String {
 mod tests {
     #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
     use super::*;
+
+    #[test]
+    fn load_chapter_files_sorts_and_skips_zero_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        std::fs::write(
+            dir.join("002_.html"),
+            "<html><head><title>第二章</title></head><body><h1>第二章</h1><p>b</p></body></html>",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("001_.html"),
+            "<html><head><title>第一章</title></head><body><h1>第一章</h1><p>a</p></body></html>",
+        )
+        .unwrap();
+        std::fs::write(dir.join("0_目录.txt"), "toc").unwrap();
+        std::fs::write(dir.join("notes.txt"), "ignored").unwrap();
+
+        let chapters = load_chapter_files(dir, ExportFormat::Html).unwrap();
+
+        assert_eq!(chapters.len(), 2);
+        assert_eq!(chapters[0].order, 1);
+        assert_eq!(chapters[0].title, "第一章");
+        assert!(chapters[0].body.contains("<p>a</p>"));
+        assert_eq!(chapters[1].order, 2);
+        assert_eq!(chapters[1].title, "第二章");
+    }
+
+    #[test]
+    fn load_chapter_files_empty_returns_no_chapters() {
+        let tmp = tempfile::tempdir().unwrap();
+        let result = load_chapter_files(tmp.path(), ExportFormat::Txt);
+        assert!(matches!(result, Err(ExportError::NoChapters)));
+    }
 
     #[test]
     fn pad_zero_basic() {
