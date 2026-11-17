@@ -6,6 +6,7 @@
 
 pub mod encoding;
 pub mod load;
+pub mod render;
 pub mod source_book;
 pub mod split;
 
