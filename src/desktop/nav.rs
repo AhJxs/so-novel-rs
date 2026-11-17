@@ -1,4 +1,4 @@
-//! 5 个一级导航页面 (`NavPage`) + 全局 key bindings + GPUI actions 注册。
+//! 6 个一级导航页面 (`NavPage`) + 全局 key bindings + GPUI actions 注册。
 //!
 //! - `NavPage` enum + label/icon/next/prev helpers;
 //! - [`register_key_bindings`] 在 `desktop::run` 启动时调一次 (actions 声明在 `desktop/actions.rs`)。
@@ -7,21 +7,21 @@
 //! 自己的 `IndentInline` / `OutdentInline`, 焦点在 Input 时 Tab 事件被消费, 应用级翻页
 //! action 拿不到。改用 `F6` 避开。
 
-use gpui_kit::component::IconName;
+use gpui_kit::assets::IconName;
 use gpui_kit::{App, KeyBinding, SharedString};
 use rust_i18n::t;
 
 // `actions!` 宏在 `crate::desktop::actions` 调用, 生成的 action 类型经 `desktop` re-export
 // 暴露为 `desktop::*`, 这里只 re-export 给 root.rs 用。
 pub(super) use crate::desktop::{
-    NextPage, PrevPage, ShowLibrary, ShowSearch, ShowSettings, ShowSources, ShowTasks,
+    NextPage, PrevPage, ShowLibrary, ShowSearch, ShowSettings, ShowSources, ShowTasks, ShowTools,
     ToggleSidebar,
 };
 
 /// GPUI key context 名。`div().key_context("AppShell")` 时激活。
 pub(super) const KEY_CONTEXT: &str = "AppShell";
 
-/// 5 个一级导航页面。
+/// 6 个一级导航页面。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum NavPage {
     /// 搜索页（默认页）。
@@ -33,6 +33,8 @@ pub enum NavPage {
     Library,
     /// 书源管理页。
     Sources,
+    /// 工具箱页。
+    Tools,
     /// 设置页。
     Settings,
 }
@@ -45,6 +47,7 @@ impl NavPage {
             Self::Tasks => "Nav.tasks",
             Self::Library => "Nav.library",
             Self::Sources => "Nav.sources",
+            Self::Tools => "Nav.tools",
             Self::Settings => "Nav.settings",
         }
     }
@@ -61,15 +64,17 @@ impl NavPage {
             Self::Tasks => IconName::Inbox,
             Self::Library => IconName::BookOpen,
             Self::Sources => IconName::Globe,
+            Self::Tools => IconName::SlidersHorizontal,
             Self::Settings => IconName::Settings,
         }
     }
 
-    pub(super) const ALL: [Self; 5] = [
+    pub(super) const ALL: [Self; 6] = [
         Self::Search,
         Self::Tasks,
         Self::Library,
         Self::Sources,
+        Self::Tools,
         Self::Settings,
     ];
 
@@ -88,7 +93,7 @@ impl NavPage {
 
 /// 全局 key bindings 注册。`desktop::run` 启动时调一次。
 ///
-/// `cmd-1..5` 跳 5 个 page, `F6`/`Shift+F6` 循环翻页, `cmd-b` 折叠 sidebar。
+/// `cmd-1..6` 跳 6 个 page, `F6`/`Shift+F6` 循环翻页, `cmd-b` 折叠 sidebar。
 #[tracing::instrument(name = "nav::register_key_bindings", skip_all)]
 pub fn register_key_bindings(cx: &mut App) {
     cx.bind_keys([
@@ -96,7 +101,8 @@ pub fn register_key_bindings(cx: &mut App) {
         KeyBinding::new("cmd-2", ShowTasks, Some(KEY_CONTEXT)),
         KeyBinding::new("cmd-3", ShowLibrary, Some(KEY_CONTEXT)),
         KeyBinding::new("cmd-4", ShowSources, Some(KEY_CONTEXT)),
-        KeyBinding::new("cmd-5", ShowSettings, Some(KEY_CONTEXT)),
+        KeyBinding::new("cmd-5", ShowTools, Some(KEY_CONTEXT)),
+        KeyBinding::new("cmd-6", ShowSettings, Some(KEY_CONTEXT)),
         KeyBinding::new("f6", NextPage, Some(KEY_CONTEXT)),
         KeyBinding::new("shift-f6", PrevPage, Some(KEY_CONTEXT)),
         KeyBinding::new("cmd-b", ToggleSidebar, Some(KEY_CONTEXT)),

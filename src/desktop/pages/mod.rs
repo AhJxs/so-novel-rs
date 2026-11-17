@@ -1,4 +1,4 @@
-//! 5 个一级导航页面的渲染入口。
+//! 6 个一级导航页面的渲染入口。
 //!
 //! 每个 page 是独立 entity，由 `RootView` 在 `current_page` 切换时挂载。
 //! 这种"每页一个 entity"模式便于：
@@ -10,9 +10,11 @@ pub mod search;
 pub mod settings;
 pub mod sources;
 pub mod tasks;
+pub mod tools;
 
 pub use library::LibraryPage;
 pub use search::SearchPage;
 pub use settings::SettingsPage;
 pub use sources::SourcesPage;
 pub use tasks::TasksPage;
+pub use tools::ToolsPage;

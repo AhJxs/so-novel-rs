@@ -20,7 +20,7 @@ pub mod themes;
 
 pub use actions::{
     NextPage, PrevPage, Quit, ShowLibrary, ShowSearch, ShowSettings, ShowSources, ShowTasks,
-    ToggleSidebar,
+    ShowTools, ToggleSidebar,
 };
 pub use nav::{NavPage, register_key_bindings};
 pub use root::RootView;

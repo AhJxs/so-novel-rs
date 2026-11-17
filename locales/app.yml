@@ -51,10 +51,172 @@ Nav:
     en: Sources
     zh-CN: 书源管理
     zh-TW: 書源管理
+  tools:
+    en: Tools
+    zh-CN: 工具箱
+    zh-TW: 工具箱
   settings:
     en: Settings
     zh-CN: 设置
     zh-TW: 設定
+
+Tools:
+  page_title:
+    en: "Toolbox"
+    zh-CN: "工具箱"
+    zh-TW: "工具箱"
+  page_subtitle:
+    en: "Convert local novel files"
+    zh-CN: "转换本地小说文件"
+    zh-TW: "轉換本地小說檔案"
+  kind:
+    convert:
+      en: "Format conversion"
+      zh-CN: "格式转换"
+      zh-TW: "格式轉換"
+    encoding:
+      en: "Encoding"
+      zh-CN: "编码转换"
+      zh-TW: "編碼轉換"
+    zhconv:
+      en: "Simplified / Traditional"
+      zh-CN: "简繁转换"
+      zh-TW: "簡繁轉換"
+  desc:
+    convert:
+      en: "TXT / Markdown / HTML / EPUB / ZIP to EPUB, TXT, HTML, PDF or Markdown"
+      zh-CN: "TXT / Markdown / HTML / EPUB / ZIP 转为 EPUB、TXT、HTML、PDF 或 Markdown"
+      zh-TW: "TXT / Markdown / HTML / EPUB / ZIP 轉為 EPUB、TXT、HTML、PDF 或 Markdown"
+    encoding:
+      en: "Re-encode a TXT file to UTF-8, GBK or Big5"
+      zh-CN: "把 TXT 重新编码为 UTF-8、GBK 或 Big5"
+      zh-TW: "把 TXT 重新編碼為 UTF-8、GBK 或 Big5"
+    zhconv:
+      en: "Convert TXT / Markdown between Simplified and Traditional Chinese"
+      zh-CN: "在简体与繁体之间转换 TXT / Markdown"
+      zh-TW: "在簡體與繁體之間轉換 TXT / Markdown"
+  pick:
+    filter:
+      en: "Novel files"
+      zh-CN: "小说文件"
+      zh-TW: "小說檔案"
+    title:
+      en: "Choose a novel file"
+      zh-CN: "选择小说文件"
+      zh-TW: "選擇小說檔案"
+    none:
+      en: "No file selected"
+      zh-CN: "尚未选择文件"
+      zh-TW: "尚未選擇檔案"
+    choose_file:
+      en: "Choose file"
+      zh-CN: "选择文件"
+      zh-TW: "選擇檔案"
+    choose_folder:
+      en: "Choose output folder"
+      zh-CN: "选择输出目录"
+      zh-TW: "選擇輸出目錄"
+    detected:
+      en: "Detected encoding: %{encoding}"
+      zh-CN: "检测到编码：%{encoding}"
+      zh-TW: "偵測到編碼：%{encoding}"
+    out_dir_default:
+      en: "Output folder defaults to the source folder"
+      zh-CN: "输出目录默认与源文件相同"
+      zh-TW: "輸出目錄預設與來源檔案相同"
+  convert:
+    output_format:
+      en: "Output format"
+      zh-CN: "输出格式"
+      zh-TW: "輸出格式"
+    chapter_regex:
+      en: "Chapter heading regex (optional)"
+      zh-CN: "章节标题正则（可选）"
+      zh-TW: "章節標題正則（可選）"
+    chapter_regex_placeholder:
+      en: "Leave blank to use the built-in 第N章 pattern"
+      zh-CN: "留空使用内置“第N章”规则"
+      zh-TW: "留空使用內建「第N章」規則"
+  format:
+    epub:
+      en: EPUB
+      zh-CN: EPUB
+      zh-TW: EPUB
+    txt:
+      en: TXT
+      zh-CN: TXT
+      zh-TW: TXT
+    html:
+      en: HTML
+      zh-CN: HTML
+      zh-TW: HTML
+    pdf:
+      en: PDF
+      zh-CN: PDF
+      zh-TW: PDF
+    markdown:
+      en: Markdown
+      zh-CN: Markdown
+      zh-TW: Markdown
+  run:
+    start:
+      en: "Convert"
+      zh-CN: "开始转换"
+      zh-TW: "開始轉換"
+    running:
+      en: "Converting…"
+      zh-CN: "转换中…"
+      zh-TW: "轉換中…"
+    reveal:
+      en: "Show in folder"
+      zh-CN: "打开所在文件夹"
+      zh-TW: "開啟所在資料夾"
+  toast:
+    success:
+      en: "Saved to %{name}"
+      zh-CN: "已保存到 %{name}"
+      zh-TW: "已儲存到 %{name}"
+  error:
+    unsupported_format:
+      en: "Unsupported file format"
+      zh-CN: "不支持的文件格式"
+      zh-TW: "不支援的檔案格式"
+    io:
+      en: "Could not read or write the file"
+      zh-CN: "文件读写失败"
+      zh-TW: "檔案讀寫失敗"
+    decode:
+      en: "Could not decode the file"
+      zh-CN: "文件解码失败"
+      zh-TW: "檔案解碼失敗"
+    invalid_regex:
+      en: "Invalid chapter regex"
+      zh-CN: "章节正则无效"
+      zh-TW: "章節正則無效"
+    zip_structure:
+      en: "Malformed ZIP archive"
+      zh-CN: "ZIP 结构异常"
+      zh-TW: "ZIP 結構異常"
+    epub_structure:
+      en: "Malformed EPUB file"
+      zh-CN: "EPUB 结构异常"
+      zh-TW: "EPUB 結構異常"
+    no_content:
+      en: "No chapter text found"
+      zh-CN: "文件没有可转换的正文"
+      zh-TW: "檔案沒有可轉換的正文"
+    unencodable:
+      en: "Target encoding cannot represent every character"
+      zh-CN: "目标编码无法表示全部字符"
+      zh-TW: "目標編碼無法表示全部字元"
+    unknown_encoding:
+      en: "Unknown encoding"
+      zh-CN: "未知编码"
+      zh-TW: "未知編碼"
+    export:
+      en: "Export failed"
+      zh-CN: "导出失败"
+      zh-TW: "匯出失敗"
 
 # 跨页面 / 跨模块的通用 toast 文案（不归属某个页面）。
 Toasts:

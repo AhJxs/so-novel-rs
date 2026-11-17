@@ -12,6 +12,8 @@ gpui_kit::actions!(
         ShowLibrary,
         /// 切到书源管理页。
         ShowSources,
+        /// 切到工具箱页。
+        ShowTools,
         /// 切到设置页。
         ShowSettings,
         /// 翻到下一页。
@@ -28,6 +30,7 @@ impl Eq for ShowSearch {}
 impl Eq for ShowTasks {}
 impl Eq for ShowLibrary {}
 impl Eq for ShowSources {}
+impl Eq for ShowTools {}
 impl Eq for ShowSettings {}
 impl Eq for NextPage {}
 impl Eq for PrevPage {}

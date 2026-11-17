@@ -1,8 +1,8 @@
 //! 顶层 `RootView`: `TitleBar` + 可折叠 Sidebar + 内容区。
 //!
-//! - Sidebar: `SidebarMenuItem` × 5, 可折叠到 48px 图标宽度, `Cmd+B` 或 `TitleBar`
+//! - Sidebar: `SidebarMenuItem` × 6, 可折叠到 48px 图标宽度, `Cmd+B` 或 `TitleBar`
 //!   最左侧按钮切换; **无 footer**。
-//! - 内容区按 `current_page` 渲染对应 page; `cmd-1`~`cmd-5` 直接跳, `F6`/`Shift+F6`
+//! - 内容区按 `current_page` 渲染对应 page; `cmd-1`~`cmd-6` 直接跳, `F6`/`Shift+F6`
 //!   循环翻页, `Escape` 关顶层覆盖层由 `gpui_kit::base::Root` 处理。
 //! - 覆盖层 (dialog / sheet / notification / menu) 由外层 `Root` 上挂的 `RootPlugin`
 //!   叠加, 不由本 view 渲染。
@@ -21,9 +21,11 @@ use super::logo::render_logo;
 use super::nav::{KEY_CONTEXT, NavPage};
 use super::notifications::ui_event_to_notification;
 use crate::desktop::model::AppModel;
-use crate::desktop::pages::{LibraryPage, SearchPage, SettingsPage, SourcesPage, TasksPage};
+use crate::desktop::pages::{
+    LibraryPage, SearchPage, SettingsPage, SourcesPage, TasksPage, ToolsPage,
+};
 use crate::desktop::{
-    NextPage, PrevPage, ShowLibrary, ShowSearch, ShowSettings, ShowSources, ShowTasks,
+    NextPage, PrevPage, ShowLibrary, ShowSearch, ShowSettings, ShowSources, ShowTasks, ShowTools,
     ToggleSidebar,
 };
 
@@ -37,16 +39,17 @@ pub struct RootView {
     /// `KEY_CONTEXT` 快捷键依赖 focus 落到哪个子元素, 不稳定。
     focus: FocusHandle,
 
-    // 5 个 page entity 一次性创建, 跨切换保持内部状态 (输入框 / 滚动位置)。
+    // 6 个 page entity 一次性创建, 跨切换保持内部状态 (输入框 / 滚动位置)。
     library_page: Entity<LibraryPage>,
     search_page: Entity<SearchPage>,
     tasks_page: Entity<TasksPage>,
     sources_page: Entity<SourcesPage>,
+    tools_page: Entity<ToolsPage>,
     settings_page: Entity<SettingsPage>,
 }
 
 impl RootView {
-    /// 建根视图，并实例化五个页面各自持有同一个 `AppModel`。
+    /// 建根视图，并实例化六个页面各自持有同一个 `AppModel`。
     pub fn new(model: Entity<AppModel>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let focus = cx.focus_handle();
         // `Window::focus` 传 `cx` (Context 自动 deref 成 `&mut App`)。
@@ -56,6 +59,7 @@ impl RootView {
         let search_page = cx.new(|cx| SearchPage::new(model.clone(), window, cx));
         let tasks_page = cx.new(|cx| TasksPage::new(model.clone(), window, cx));
         let sources_page = cx.new(|cx| SourcesPage::new(model.clone(), window, cx));
+        let tools_page = cx.new(|cx| ToolsPage::new(model.clone(), window, cx));
         let settings_page = cx.new(|cx| SettingsPage::new(model.clone(), window, cx));
 
         // 从 config 恢复上次折叠状态, 否则每次启动 sidebar 都会弹开。
@@ -70,6 +74,7 @@ impl RootView {
             search_page,
             tasks_page,
             sources_page,
+            tools_page,
             settings_page,
         }
     }
@@ -106,6 +111,7 @@ impl RootView {
             NavPage::Search => self.search_page.clone().into_any_element(),
             NavPage::Tasks => self.tasks_page.clone().into_any_element(),
             NavPage::Sources => self.sources_page.clone().into_any_element(),
+            NavPage::Tools => self.tools_page.clone().into_any_element(),
             NavPage::Settings => self.settings_page.clone().into_any_element(),
         }
     }
@@ -116,7 +122,7 @@ impl RootView {
         let collapsed = self.sidebar_collapsed;
 
         // 展开态行高被组件库定死为 h_7 (1.75rem), 折叠态却是 icon + 上下 p_2, 每项
-        // 差一截, 5 项叠起来就是切换时的「散开 → 收拢」。图标固定 1rem、纵向内边距
+        // 差一截, 各项叠起来就是切换时的「散开 → 收拢」。图标固定 1rem、纵向内边距
         // 0.375rem 后两态行高都是 1.75rem, 图标也正好填满展开态内容区。
         let item_style = StyleRefinement::default().py_1p5();
 
@@ -125,6 +131,7 @@ impl RootView {
             NavPage::Tasks,
             NavPage::Library,
             NavPage::Sources,
+            NavPage::Tools,
             NavPage::Settings,
         ]
         .iter()
@@ -223,7 +230,7 @@ impl RootView {
             .child(self.render_current_page())
     }
 
-    /// 8 个导航 action 的 listener 挂到传入的 div 上。
+    /// 9 个导航 action 的 listener 挂到传入的 div 上。
     fn bind_nav_actions(root: Div, cx: &Context<Self>) -> Div {
         root.on_action(
             cx.listener(|this, _: &ShowSearch, _, cx| this.navigate(NavPage::Search, cx)),
@@ -231,6 +238,7 @@ impl RootView {
         .on_action(cx.listener(|this, _: &ShowTasks, _, cx| this.navigate(NavPage::Tasks, cx)))
         .on_action(cx.listener(|this, _: &ShowLibrary, _, cx| this.navigate(NavPage::Library, cx)))
         .on_action(cx.listener(|this, _: &ShowSources, _, cx| this.navigate(NavPage::Sources, cx)))
+        .on_action(cx.listener(|this, _: &ShowTools, _, cx| this.navigate(NavPage::Tools, cx)))
         .on_action(
             cx.listener(|this, _: &ShowSettings, _, cx| this.navigate(NavPage::Settings, cx)),
         )
