@@ -336,11 +336,9 @@ impl ToolsPage {
         let form = &self.forms[self.kind.index()];
         v_flex()
             .flex_1()
+            .min_w_0()
+            .max_w(px(560.0))
             .gap_4()
-            .child(
-                PageHeader::new(t!("Tools.page_title").into())
-                    .subtitle(t!(self.kind.description_key()).into()),
-            )
             .child(self.render_source_row(form, cx))
             .child(self.render_out_dir_row(form, cx))
             .child(self.render_options(cx))
@@ -359,6 +357,7 @@ impl ToolsPage {
                 .child(
                     div()
                         .flex_1()
+                        .min_w_0()
                         .text_sm()
                         .overflow_hidden()
                         .whitespace_nowrap()
@@ -368,6 +367,7 @@ impl ToolsPage {
                 .child(
                     Button::new(("tool-pick-source", self.kind.index() as u64))
                         .small()
+                        .flex_none()
                         .label(t!("Tools.pick.choose_file"))
                         .on_click(cx.listener(|this, _, _window, cx| this.pick_source(cx))),
                 ),
@@ -394,6 +394,7 @@ impl ToolsPage {
             .child(
                 div()
                     .flex_1()
+                    .min_w_0()
                     .text_sm()
                     .overflow_hidden()
                     .whitespace_nowrap()
@@ -403,6 +404,7 @@ impl ToolsPage {
             .child(
                 Button::new(("tool-pick-out", self.kind.index() as u64))
                     .small()
+                    .flex_none()
                     .label(t!("Tools.pick.choose_folder"))
                     .on_click(cx.listener(|this, _, _window, cx| this.pick_out_dir(cx))),
             )
@@ -413,7 +415,7 @@ impl ToolsPage {
         let mut panel = v_flex().gap_3();
         match self.kind {
             ToolKind::Convert => {
-                let mut row = h_flex().gap_2();
+                let mut row = h_flex().flex_wrap().gap_2();
                 for (index, format) in [
                     ExportFormat::Epub,
                     ExportFormat::Txt,
@@ -540,7 +542,7 @@ impl ToolsPage {
                     );
             }
             ToolKind::Zhconv => {
-                let mut row = h_flex().gap_2();
+                let mut row = h_flex().flex_wrap().gap_2();
                 for (index, (target, key)) in [
                     (LangType::ZhCn, "Tools.zhconv.zh_cn"),
                     (LangType::ZhTw, "Tools.zhconv.zh_tw"),
@@ -578,7 +580,7 @@ impl ToolsPage {
         } else {
             t!("Tools.run.start").into()
         };
-        let mut column = v_flex().gap_2().child(
+        let mut column = v_flex().gap_2().items_start().child(
             Button::new(("tool-run", self.kind.index() as u64))
                 .label(label)
                 .loading(form.running)
@@ -591,6 +593,7 @@ impl ToolsPage {
                 h_flex()
                     .gap_2()
                     .items_center()
+                    .w_full()
                     .child(
                         div()
                             .flex_1()
@@ -639,12 +642,23 @@ impl ToolsPage {
 
 impl Render for ToolsPage {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        h_flex()
+        v_flex()
             .size_full()
             .p_6()
             .gap_4()
-            .child(self.render_rail(cx))
-            .child(self.render_form(cx))
+            .child(
+                PageHeader::new(t!("Tools.page_title").into())
+                    .subtitle(t!("Tools.page_subtitle").into()),
+            )
+            .child(
+                h_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .items_start()
+                    .gap_4()
+                    .child(self.render_rail(cx))
+                    .child(self.render_form(cx)),
+            )
     }
 }
 
@@ -657,7 +671,7 @@ fn chip_row(
     cx: &Context<ToolsPage>,
 ) -> impl IntoElement {
     let on_pick: std::rc::Rc<dyn Fn(&mut ToolsPage, String)> = std::rc::Rc::new(on_pick);
-    let mut row = h_flex().gap_2();
+    let mut row = h_flex().flex_wrap().gap_2();
     for (index, option) in options.iter().enumerate() {
         let is_selected = *option == selected;
         let value = (*option).to_string();

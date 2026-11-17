@@ -1,11 +1,13 @@
+use std::borrow::Cow;
+
 use anyhow::Result;
 #[cfg(target_os = "linux")]
 use gpui_kit::WindowDecorations;
 use gpui_kit::assets::Assets;
 use gpui_kit::component::TitleBar;
 use gpui_kit::{
-    App, AppContext, Bounds, KeyBinding, QuitMode, WindowBackgroundAppearance, WindowBounds,
-    WindowOptions, px, size,
+    App, AppContext, AssetSource, Bounds, KeyBinding, QuitMode, SharedString,
+    WindowBackgroundAppearance, WindowBounds, WindowOptions, px, size,
 };
 #[cfg(target_os = "macos")]
 use gpui_kit::{Menu, MenuItem};
@@ -17,6 +19,30 @@ use super::{RootView, drain_loop, register_key_bindings, themes};
 //
 // **只**对应"应用 UI 语言"（`Language`），跟"书源语言"（`LangType`）无关。
 use crate::i18n;
+
+// 组件默认图标集（`Assets`）只含 106 个常用 Lucide 图标，工具箱用到的这几个不在其中；
+// 单独嵌入，避免为 4 个图标引入完整的 1830 个 SVG 目录。
+gpui_kit::assets::icon_assets!(
+    ExtraIcons,
+    [SlidersHorizontal, ArrowRightLeft, FileOutput, Languages]
+);
+
+/// 应用资源源：先查工具箱额外图标，再回落组件默认图标集。
+struct AppAssets;
+
+impl AssetSource for AppAssets {
+    fn load(&self, path: &str) -> gpui_kit::Result<Option<Cow<'static, [u8]>>> {
+        ExtraIcons
+            .load(path)?
+            .map_or_else(|| Assets.load(path), |bytes| Ok(Some(bytes)))
+    }
+
+    fn list(&self, path: &str) -> gpui_kit::Result<Vec<SharedString>> {
+        let mut paths = ExtraIcons.list(path)?;
+        paths.extend(Assets.list(path)?);
+        Ok(paths)
+    }
+}
 
 /// 启动 GPUI 应用。`main.rs` 在无参数分支调用。
 ///
@@ -43,7 +69,7 @@ pub fn run() -> Result<()> {
     // GPUI's default leaves the process running after the last window closes.
     let app = gpui_kit::application()
         .with_quit_mode(QuitMode::LastWindowClosed)
-        .with_assets(Assets);
+        .with_assets(AppAssets);
     app.run(move |cx: &mut App| {
         // rust-i18n 扩展注册 —— **必须在 `component::init` 之前**, 且只调一次。
         // 方向: 组件查 key 时先查我们的 `app.yml`, 查不到再回落组件内置 `ui.yml`（反向不成立）。
