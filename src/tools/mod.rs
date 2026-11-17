@@ -4,6 +4,7 @@
 //! `load`（输入解析）、`split`（切章）、`render`（章节渲染）、`convert` /
 //! `encoding` / `zhconv`（三条流程）。
 
+pub mod convert;
 pub mod encoding;
 pub mod load;
 pub mod render;
