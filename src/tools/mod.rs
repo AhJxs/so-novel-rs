@@ -99,12 +99,92 @@ impl ToolError {
     }
 }
 
-/// 执行一次工具请求，返回产物路径。
+/// 工具运行阶段；决定进度条文案与权重。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolStage {
+    /// 读取并解析源文件。
+    Loading,
+    /// 逐章渲染正文。
+    Rendering,
+    /// 合并导出 / 写盘。
+    Writing,
+}
+
+impl ToolStage {
+    /// 阶段文案的 i18n key（`Tools.stage.*`）。
+    #[must_use]
+    pub const fn label_key(self) -> &'static str {
+        match self {
+            Self::Loading => "Tools.stage.loading",
+            Self::Rendering => "Tools.stage.rendering",
+            Self::Writing => "Tools.stage.writing",
+        }
+    }
+}
+
+/// 一次进度回报：阶段 + 阶段内完成量。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ToolProgress {
+    pub stage: ToolStage,
+    pub done: usize,
+    pub total: usize,
+}
+
+impl ToolProgress {
+    /// 构造一次进度回报。
+    #[must_use]
+    pub const fn new(stage: ToolStage, done: usize, total: usize) -> Self {
+        Self { stage, done, total }
+    }
+
+    /// 映射到整条流程的 0.0~1.0 进度。
+    ///
+    /// 权重按耗时分配：读取 15%、逐章渲染 75%、写盘 10%；没有分章的文件（编码 / 简繁）
+    /// 只有读取与写盘两段，中间直接跨过。
+    #[must_use]
+    pub fn fraction(self) -> f32 {
+        // 先在整数域算千分比，再精确转 f32，避免 usize→f32 的精度损失告警。
+        let permille = self
+            .done
+            .min(self.total)
+            .saturating_mul(1000)
+            .checked_div(self.total)
+            .and_then(|value| u16::try_from(value).ok())
+            .unwrap_or(0);
+        let ratio = f32::from(permille) / 1000.0;
+        match self.stage {
+            ToolStage::Loading => 0.15 * ratio,
+            ToolStage::Rendering => 0.75_f32.mul_add(ratio, 0.15),
+            ToolStage::Writing => 0.10_f32.mul_add(ratio, 0.90),
+        }
+    }
+
+    /// 百分比（0.0~100.0），直接喂给 `Progress::value`。
+    #[must_use]
+    pub fn percent(self) -> f32 {
+        self.fraction() * 100.0
+    }
+}
+
+/// 执行一次工具请求，返回产物路径（不关心进度）。
 ///
 /// # Errors
 ///
 /// 透传各业务流程的 [`ToolError`]。
 pub fn run(request: ToolRequest) -> Result<PathBuf, ToolError> {
+    run_with_progress(request, |_| {})
+}
+
+/// 执行一次工具请求，并回报进度。
+///
+/// # Errors
+///
+/// 透传各业务流程的 [`ToolError`]。
+pub fn run_with_progress(
+    request: ToolRequest,
+    mut on_progress: impl FnMut(ToolProgress),
+) -> Result<PathBuf, ToolError> {
+    let on_progress: &mut dyn FnMut(ToolProgress) = &mut on_progress;
     match request {
         ToolRequest::Convert {
             source,
@@ -120,6 +200,7 @@ pub fn run(request: ToolRequest) -> Result<PathBuf, ToolError> {
             &txt_encoding,
             source_encoding.as_deref(),
             chapter_regex.as_deref(),
+            on_progress,
         ),
         ToolRequest::Encoding {
             source,
@@ -131,12 +212,13 @@ pub fn run(request: ToolRequest) -> Result<PathBuf, ToolError> {
             &out_dir,
             source_encoding.as_deref(),
             &target_encoding,
+            on_progress,
         ),
         ToolRequest::Zhconv {
             source,
             out_dir,
             target,
-        } => zhconv::run_zhconv(&source, &out_dir, target),
+        } => zhconv::run_zhconv(&source, &out_dir, target, on_progress),
     }
 }
 
@@ -176,5 +258,56 @@ mod tests {
         .unwrap();
 
         assert_eq!(path.extension().and_then(|ext| ext.to_str()), Some("txt"));
+    }
+
+    #[test]
+    fn progress_walks_stages_monotonically_to_full() {
+        let tmp = tempfile::tempdir().unwrap();
+        let source = tmp.path().join("书.txt");
+        std::fs::write(&source, "第1章 开始\n\n正文\n\n第2章 继续\n\n正文\n").unwrap();
+
+        let mut samples = Vec::new();
+        super::run_with_progress(
+            super::ToolRequest::Convert {
+                source,
+                out_dir: tmp.path().join("out"),
+                target: crate::config::ExportFormat::Txt,
+                txt_encoding: "UTF-8".to_string(),
+                source_encoding: None,
+                chapter_regex: None,
+            },
+            |progress| samples.push(progress),
+        )
+        .unwrap();
+
+        assert!(samples.iter().all(|p| (0.0..=100.0).contains(&p.percent())));
+        assert!(
+            samples
+                .windows(2)
+                .all(|pair| pair[0].percent() <= pair[1].percent()),
+            "进度不应回退: {samples:?}"
+        );
+        let first = samples.first().unwrap();
+        let last = samples.last().unwrap();
+        assert_eq!(first.stage, super::ToolStage::Loading);
+        assert_eq!(last.stage, super::ToolStage::Writing);
+        assert!((last.percent() - 100.0).abs() < f32::EPSILON);
+        assert!(
+            samples
+                .iter()
+                .any(|p| p.stage == super::ToolStage::Rendering)
+        );
+    }
+
+    #[test]
+    fn progress_fraction_weights_stages() {
+        use super::{ToolProgress as P, ToolStage as S};
+        assert!(P::new(S::Loading, 0, 1).percent().abs() < f32::EPSILON);
+        assert!((P::new(S::Loading, 1, 1).percent() - 15.0).abs() < 0.001);
+        assert!((P::new(S::Rendering, 0, 10).percent() - 15.0).abs() < 0.001);
+        assert!((P::new(S::Rendering, 10, 10).percent() - 90.0).abs() < 0.001);
+        assert!((P::new(S::Writing, 1, 1).percent() - 100.0).abs() < 0.001);
+        // total 为 0 时不除零，按阶段起点算。
+        assert!((P::new(S::Rendering, 0, 0).percent() - 15.0).abs() < 0.001);
     }
 }

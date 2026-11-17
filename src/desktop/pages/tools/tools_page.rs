@@ -8,19 +8,21 @@ use std::path::{Path, PathBuf};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputState};
+use gpui_kit::component::progress::Progress;
 use gpui_kit::component::scroll::ScrollableElement as _;
-use gpui_kit::component::{ActiveTheme as _, Disableable, Icon, Sizable, h_flex, v_flex};
+use gpui_kit::component::{ActiveTheme as _, Disableable, Icon, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AppContext, Context, Entity, FontWeight, InteractiveElement as _, IntoElement, ParentElement,
     Render, SharedString, StatefulInteractiveElement as _, Styled, Window, div, px,
 };
 use rust_i18n::t;
+use tokio::sync::mpsc;
 
 use crate::config::{ExportFormat, LangType};
 use crate::desktop::components::PageHeader;
 use crate::desktop::model::AppModel;
-use crate::tools::{ToolRequest, detect_file_encoding, run};
+use crate::tools::{ToolProgress, ToolRequest, ToolStage, detect_file_encoding, run_with_progress};
 
 /// 支持的源文件扩展名（文件选择器过滤用）。
 const SOURCE_EXTENSIONS: &[&str] = &["txt", "md", "markdown", "html", "htm", "epub", "zip"];
@@ -87,6 +89,7 @@ struct ToolForm {
     target_encoding: String,
     zhconv_target: LangType,
     running: bool,
+    progress: Option<ToolProgress>,
     result: Option<PathBuf>,
     error: Option<(SharedString, String)>,
 }
@@ -103,6 +106,7 @@ impl Default for ToolForm {
             target_encoding: "UTF-8".to_string(),
             zhconv_target: LangType::ZhTw,
             running: false,
+            progress: None,
             result: None,
             error: None,
         }
@@ -261,19 +265,37 @@ impl ToolsPage {
         {
             let form = &mut self.forms[kind.index()];
             form.running = true;
+            form.progress = None;
             form.result = None;
             form.error = None;
         }
         cx.notify();
 
+        // 进度走 channel：工作线程只发不碰 UI，前台再逐条回写，避免跨线程改 entity。
+        let (progress_tx, mut progress_rx) = mpsc::unbounded_channel::<ToolProgress>();
+        cx.spawn(async move |this, async_cx| {
+            while let Some(progress) = progress_rx.recv().await {
+                let _ = this.update(async_cx, |this, cx| {
+                    this.forms[kind.index()].progress = Some(progress);
+                    cx.notify();
+                });
+            }
+        })
+        .detach();
+
         cx.spawn(async move |this, async_cx| {
             let outcome = async_cx
                 .background_executor()
-                .spawn(async move { run(request) })
+                .spawn(async move {
+                    run_with_progress(request, |progress| {
+                        let _ = progress_tx.send(progress);
+                    })
+                })
                 .await;
             let _ = this.update(async_cx, |this, cx| {
                 let form = &mut this.forms[kind.index()];
                 form.running = false;
+                form.progress = None;
                 match outcome {
                     Ok(path) => {
                         form.result = Some(path.clone());
@@ -409,14 +431,15 @@ impl ToolsPage {
         div().h(px(1.0)).w_full().bg(cx.theme().border.opacity(0.6))
     }
 
-    /// 只读路径框：浅底色 + 圆角，和卡片、选项胶囊共用一套描边语言。
+    /// 只读路径框：浅底色 + 圆角，高度和默认按钮（32px）对齐。
     fn path_box(text: SharedString, cx: &Context<Self>) -> impl IntoElement {
         let theme = cx.theme();
-        div()
+        h_flex()
             .flex_1()
             .min_w_0()
+            .h(px(32.0))
+            .items_center()
             .px_3()
-            .py_2()
             .rounded(theme.radius)
             .bg(theme.muted)
             .text_sm()
@@ -438,7 +461,6 @@ impl ToolsPage {
                 .child(Self::path_box(path_text, cx))
                 .child(
                     Button::new(("tool-pick-source", self.kind.index() as u64))
-                        .small()
                         .flex_none()
                         .label(t!("Tools.pick.choose_file"))
                         .on_click(cx.listener(|this, _, _window, cx| this.pick_source(cx))),
@@ -468,7 +490,6 @@ impl ToolsPage {
                 .child(Self::path_box(dir_text, cx))
                 .child(
                     Button::new(("tool-pick-out", self.kind.index() as u64))
-                        .small()
                         .flex_none()
                         .label(t!("Tools.pick.choose_folder"))
                         .on_click(cx.listener(|this, _, _window, cx| this.pick_out_dir(cx))),
@@ -617,7 +638,6 @@ impl ToolsPage {
                     .child(Self::path_box(result.display().to_string().into(), cx))
                     .child(
                         Button::new("tool-reveal")
-                            .small()
                             .ghost()
                             .label(t!("Tools.run.reveal"))
                             .on_click(cx.listener(move |_this, _, _window, _cx| {
@@ -644,6 +664,36 @@ impl ToolsPage {
                             .text_xs()
                             .text_color(cx.theme().muted_foreground)
                             .child(detail.clone()),
+                    ),
+            );
+        }
+        if form.running {
+            let progress = form
+                .progress
+                .unwrap_or(ToolProgress::new(ToolStage::Loading, 0, 1));
+            let stage: SharedString = t!(progress.stage.label_key()).into();
+            let detail: SharedString = if progress.total > 1 {
+                format!("{stage} {}/{}", progress.done, progress.total).into()
+            } else {
+                stage
+            };
+            let percent: SharedString = format!("{:.0}%", progress.percent()).into();
+            column = column.child(
+                v_flex()
+                    .w_full()
+                    .gap_2()
+                    .child(
+                        h_flex()
+                            .w_full()
+                            .justify_between()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(detail)
+                            .child(percent),
+                    )
+                    .child(
+                        Progress::new(("tool-progress", self.kind.index() as u64))
+                            .value(progress.percent()),
                     ),
             );
         }

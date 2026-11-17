@@ -3,8 +3,8 @@
 use std::path::{Path, PathBuf};
 
 use crate::config::LangType;
-use crate::tools::ToolError;
 use crate::tools::encoding::decode_bytes;
+use crate::tools::{ToolError, ToolProgress, ToolStage};
 use crate::utils::zhconv::convert_text;
 
 /// 执行简繁转换，返回产物路径。
@@ -12,7 +12,12 @@ use crate::utils::zhconv::convert_text;
 /// # Errors
 ///
 /// 源文件不是 `.txt` / `.md`、读取失败或目标编码无法表示转换结果时返回 [`ToolError`]。
-pub fn run_zhconv(source: &Path, out_dir: &Path, target: LangType) -> Result<PathBuf, ToolError> {
+pub fn run_zhconv(
+    source: &Path,
+    out_dir: &Path,
+    target: LangType,
+    on_progress: &mut dyn FnMut(ToolProgress),
+) -> Result<PathBuf, ToolError> {
     let extension = source
         .extension()
         .and_then(|ext| ext.to_str())
@@ -22,8 +27,12 @@ pub fn run_zhconv(source: &Path, out_dir: &Path, target: LangType) -> Result<Pat
         return Err(ToolError::UnsupportedFormat(extension));
     }
 
+    on_progress(ToolProgress::new(ToolStage::Loading, 0, 1));
     let bytes = std::fs::read(source)?;
     let (text, detected) = decode_bytes(&bytes, None);
+    on_progress(ToolProgress::new(ToolStage::Loading, 1, 1));
+
+    on_progress(ToolProgress::new(ToolStage::Writing, 0, 1));
     let converted = convert_text(&text, &target);
 
     std::fs::create_dir_all(out_dir)?;
@@ -47,6 +56,7 @@ pub fn run_zhconv(source: &Path, out_dir: &Path, target: LangType) -> Result<Pat
         }
         std::fs::write(&path, encoded.as_ref())?;
     }
+    on_progress(ToolProgress::new(ToolStage::Writing, 1, 1));
     Ok(path)
 }
 
@@ -64,7 +74,7 @@ mod tests {
         let source = tmp.path().join("书.txt");
         std::fs::write(&source, "国家的书").unwrap();
 
-        let path = run_zhconv(&source, tmp.path(), LangType::ZhTw).unwrap();
+        let path = run_zhconv(&source, tmp.path(), LangType::ZhTw, &mut |_| {}).unwrap();
 
         assert!(
             path.file_name()
@@ -81,7 +91,7 @@ mod tests {
         let source = tmp.path().join("书.md");
         std::fs::write(&source, "# 国家\n").unwrap();
 
-        let path = run_zhconv(&source, tmp.path(), LangType::ZhHant).unwrap();
+        let path = run_zhconv(&source, tmp.path(), LangType::ZhHant, &mut |_| {}).unwrap();
 
         assert_eq!(path.extension().and_then(|ext| ext.to_str()), Some("md"));
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "# 國家\n");
@@ -93,7 +103,7 @@ mod tests {
         let source = tmp.path().join("书.epub");
         std::fs::write(&source, b"x").unwrap();
 
-        let result = run_zhconv(&source, tmp.path(), LangType::ZhCn);
+        let result = run_zhconv(&source, tmp.path(), LangType::ZhCn, &mut |_| {});
 
         assert!(matches!(
             result,

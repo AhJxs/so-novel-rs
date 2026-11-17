@@ -210,6 +210,19 @@ Tools:
       en: "Show in folder"
       zh-CN: "打开所在文件夹"
       zh-TW: "開啟所在資料夾"
+  stage:
+    loading:
+      en: "Reading file"
+      zh-CN: "读取文件"
+      zh-TW: "讀取檔案"
+    rendering:
+      en: "Rendering chapters"
+      zh-CN: "逐章渲染"
+      zh-TW: "逐章渲染"
+    writing:
+      en: "Writing output"
+      zh-CN: "写出文件"
+      zh-TW: "寫出檔案"
   toast:
     success:
       en: "Saved to %{name}"

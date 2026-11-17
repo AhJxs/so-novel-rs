@@ -4,10 +4,10 @@ use std::path::{Path, PathBuf};
 
 use crate::config::ExportFormat;
 use crate::export::{RenderedChapter, exporter_for};
-use crate::tools::ToolError;
 use crate::tools::encoding::parse_encoding;
 use crate::tools::load::{LoadOptions, load_path};
 use crate::tools::render::render_chapter;
+use crate::tools::{ToolError, ToolProgress, ToolStage};
 
 /// 执行格式转换，返回产物路径。
 ///
@@ -21,31 +21,43 @@ pub fn run_convert(
     txt_encoding: &str,
     source_encoding: Option<&str>,
     chapter_regex: Option<&str>,
+    on_progress: &mut dyn FnMut(ToolProgress),
 ) -> Result<PathBuf, ToolError> {
+    on_progress(ToolProgress::new(ToolStage::Loading, 0, 1));
     let options = LoadOptions {
         source_encoding: parse_encoding(source_encoding)?,
         chapter_regex,
     };
     let book = load_path(source, &options)?;
-    let rendered: Vec<RenderedChapter> = book
-        .chapters
-        .iter()
-        .enumerate()
-        .map(|(index, chapter)| RenderedChapter {
+    on_progress(ToolProgress::new(ToolStage::Loading, 1, 1));
+
+    // 逐章渲染是整个流程里最耗时的一段，按章回报进度；跨步回报避免几千章刷爆 UI。
+    let total = book.chapters.len();
+    let stride = (total / 200).max(1);
+    let mut rendered: Vec<RenderedChapter> = Vec::with_capacity(total);
+    for (index, chapter) in book.chapters.iter().enumerate() {
+        rendered.push(RenderedChapter {
             order: u32::try_from(index + 1).unwrap_or(u32::MAX),
             title: chapter.title.clone(),
             body: render_chapter(chapter, target),
-        })
-        .collect();
+        });
+        let done = index + 1;
+        if done == total || done % stride == 0 {
+            on_progress(ToolProgress::new(ToolStage::Rendering, done, total));
+        }
+    }
 
     std::fs::create_dir_all(out_dir)?;
+    on_progress(ToolProgress::new(ToolStage::Writing, 0, 1));
     let exporter = exporter_for(target, txt_encoding);
     let cover = if matches!(target, ExportFormat::Epub) {
         book.cover.as_deref()
     } else {
         None
     };
-    Ok(exporter.merge_with_cover(&book.to_book(source), &rendered, out_dir, cover)?)
+    let path = exporter.merge_with_cover(&book.to_book(source), &rendered, out_dir, cover)?;
+    on_progress(ToolProgress::new(ToolStage::Writing, 1, 1));
+    Ok(path)
 }
 
 #[cfg(test)]
@@ -70,6 +82,7 @@ mod tests {
             "UTF-8",
             None,
             None,
+            &mut |_| {},
         )
         .unwrap();
 
@@ -92,6 +105,7 @@ mod tests {
             "UTF-8",
             None,
             None,
+            &mut |_| {},
         )
         .unwrap();
 
@@ -112,6 +126,7 @@ mod tests {
             "UTF-8",
             None,
             Some("^[一二]$"),
+            &mut |_| {},
         )
         .unwrap();
 
@@ -128,7 +143,15 @@ mod tests {
         let source = tmp.path().join("书.docx");
         std::fs::write(&source, b"x").unwrap();
 
-        let result = run_convert(&source, tmp.path(), ExportFormat::Txt, "UTF-8", None, None);
+        let result = run_convert(
+            &source,
+            tmp.path(),
+            ExportFormat::Txt,
+            "UTF-8",
+            None,
+            None,
+            &mut |_| {},
+        );
 
         assert!(matches!(result, Err(ToolError::UnsupportedFormat(_))));
     }

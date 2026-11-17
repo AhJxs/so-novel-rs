@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use encoding_rs::{Encoding, UTF_8, UTF_16BE, UTF_16LE};
 
-use super::ToolError;
+use super::{ToolError, ToolProgress, ToolStage};
 
 /// 解码字节；返回 (文本, 实际使用的编码)。
 #[must_use]
@@ -67,6 +67,7 @@ pub fn run_encoding(
     out_dir: &Path,
     source_encoding: Option<&str>,
     target_encoding: &str,
+    on_progress: &mut dyn FnMut(ToolProgress),
 ) -> Result<PathBuf, ToolError> {
     let extension = source
         .extension()
@@ -77,9 +78,12 @@ pub fn run_encoding(
         return Err(ToolError::UnsupportedFormat(extension));
     }
 
+    on_progress(ToolProgress::new(ToolStage::Loading, 0, 1));
     let bytes = std::fs::read(source)?;
     let (text, _detected) = decode_bytes(&bytes, parse_encoding(source_encoding)?);
+    on_progress(ToolProgress::new(ToolStage::Loading, 1, 1));
 
+    on_progress(ToolProgress::new(ToolStage::Writing, 0, 1));
     let target = parse_target_encoding(target_encoding)?;
     let (encoded, _, had_errors) = target.encode(&text);
     if had_errors {
@@ -94,6 +98,7 @@ pub fn run_encoding(
     let filename = format!("{stem} ({}).txt", target.name());
     let path = crate::export::exporter::unique_path(out_dir, &filename);
     std::fs::write(&path, encoded.as_ref())?;
+    on_progress(ToolProgress::new(ToolStage::Writing, 1, 1));
     Ok(path)
 }
 
@@ -158,7 +163,7 @@ mod tests {
         let source = tmp.path().join("书.txt");
         std::fs::write(&source, "中文测试").unwrap();
 
-        let path = super::run_encoding(&source, tmp.path(), None, "GBK").unwrap();
+        let path = super::run_encoding(&source, tmp.path(), None, "GBK", &mut |_| {}).unwrap();
 
         assert!(
             path.file_name()
@@ -179,7 +184,7 @@ mod tests {
         bytes.extend_from_slice("中文".as_bytes());
         std::fs::write(&source, bytes).unwrap();
 
-        let path = super::run_encoding(&source, tmp.path(), None, "UTF-8").unwrap();
+        let path = super::run_encoding(&source, tmp.path(), None, "UTF-8", &mut |_| {}).unwrap();
 
         assert_eq!(std::fs::read(&path).unwrap(), "中文".as_bytes());
     }
@@ -190,7 +195,7 @@ mod tests {
         let source = tmp.path().join("书.txt");
         std::fs::write(&source, "中文").unwrap();
 
-        let result = super::run_encoding(&source, tmp.path(), None, "nope");
+        let result = super::run_encoding(&source, tmp.path(), None, "nope", &mut |_| {});
 
         assert!(matches!(result, Err(super::ToolError::UnknownEncoding(_))));
     }
@@ -201,7 +206,7 @@ mod tests {
         let source = tmp.path().join("书.md");
         std::fs::write(&source, "中文").unwrap();
 
-        let result = super::run_encoding(&source, tmp.path(), None, "GBK");
+        let result = super::run_encoding(&source, tmp.path(), None, "GBK", &mut |_| {});
 
         assert!(matches!(
             result,
