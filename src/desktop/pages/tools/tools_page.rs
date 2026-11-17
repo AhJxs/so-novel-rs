@@ -1,6 +1,6 @@
 //! 工具箱：格式转换 / 编码转换 / 简繁转换。
 //!
-//! 左侧工具导航 + 右侧表单；三种工具共享「源文件 / 输出目录 / 运行 / 结果」骨架，
+//! 顶部一排工具卡片 + 下方表单；三种工具共享「源文件 / 输出目录 / 运行 / 结果」骨架，
 //! 只有选项区不同。任务在 `background_executor` 上跑，避免阻塞 UI。
 
 use std::path::{Path, PathBuf};
@@ -11,9 +11,10 @@ use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::component::{
     ActiveTheme as _, Disableable, Icon, Selectable, Sizable, h_flex, v_flex,
 };
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AppContext, Context, Entity, IntoElement, ParentElement, Render, SharedString, Styled, Window,
-    div, px,
+    AppContext, Context, Entity, FontWeight, InteractiveElement as _, IntoElement, ParentElement,
+    Render, SharedString, StatefulInteractiveElement as _, Styled, Window, div, px,
 };
 use rust_i18n::t;
 
@@ -296,48 +297,78 @@ impl ToolsPage {
         .detach();
     }
 
-    fn render_rail(&self, cx: &Context<Self>) -> impl IntoElement {
-        v_flex()
-            .w(px(220.0))
-            .flex_none()
-            .gap_1()
-            .p_2()
-            .rounded(cx.theme().radius)
-            .bg(cx.theme().muted)
-            .children(ToolKind::ALL.iter().map(|kind| {
-                let kind = *kind;
-                let selected = self.kind == kind;
-                let mut item = v_flex().gap_1().child(
-                    Button::new(("tool-rail", kind.index() as u64))
-                        .ghost()
+    /// 一排工具卡片（同屏 tab）：点卡片切换下方表单，选中卡片描边 + 高亮底色 + 右侧圆点。
+    fn render_kind_cards(&self, cx: &Context<Self>) -> impl IntoElement {
+        h_flex().gap_3().items_stretch().children(ToolKind::ALL.iter().map(|kind| {
+            let kind = *kind;
+            let selected = self.kind == kind;
+            let theme = cx.theme();
+            // accent 在多数主题里是中性灰，选中态用 primary 才有明显对比。
+            let highlight = theme.primary;
+            let hover_bg = theme.muted;
+            let border = if selected { highlight } else { theme.border };
+            let icon_color = if selected {
+                highlight
+            } else {
+                theme.muted_foreground
+            };
+            v_flex()
+                .id(("tool-card", kind.index() as u64))
+                .flex_1()
+                .min_w_0()
+                .gap_2()
+                .p_3()
+                .rounded(theme.radius)
+                .border_1()
+                .border_color(border)
+                .when(selected, |card| card.bg(hover_bg))
+                .cursor_pointer()
+                .hover(|style| style.bg(hover_bg))
+                .child(
+                    h_flex()
                         .w_full()
-                        .selected(selected)
-                        .icon(Icon::new(kind.icon()))
-                        .label(t!(kind.label_key()))
-                        .on_click(cx.listener(move |this, _, _window, cx| {
-                            this.kind = kind;
-                            cx.notify();
-                        })),
-                );
-                if selected {
-                    item = item.child(
-                        div()
-                            .px_2()
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(t!(kind.description_key()).to_string()),
-                    );
-                }
-                item
-            }))
+                        .items_center()
+                        .justify_between()
+                        .gap_2()
+                        .child(
+                            h_flex()
+                                .min_w_0()
+                                .items_center()
+                                .gap_2()
+                                .child(Icon::new(kind.icon()).text_color(icon_color))
+                                .child(
+                                    div()
+                                        .min_w_0()
+                                        .overflow_hidden()
+                                        .whitespace_nowrap()
+                                        .text_ellipsis()
+                                        .text_sm()
+                                        .font_weight(FontWeight::SEMIBOLD)
+                                        .child(t!(kind.label_key()).to_string()),
+                                ),
+                        )
+                        .when(selected, |row| {
+                            row.child(div().size(px(6.0)).rounded_full().bg(highlight))
+                        }),
+                )
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(theme.muted_foreground)
+                        .child(t!(kind.description_key()).to_string()),
+                )
+                .on_click(cx.listener(move |this, _, _window, cx| {
+                    this.kind = kind;
+                    cx.notify();
+                }))
+        }))
     }
 
     fn render_form(&self, cx: &Context<Self>) -> impl IntoElement {
         let form = &self.forms[self.kind.index()];
         v_flex()
-            .flex_1()
+            .w_full()
             .min_w_0()
-            .max_w(px(560.0))
             .gap_4()
             .child(self.render_source_row(form, cx))
             .child(self.render_out_dir_row(form, cx))
@@ -651,12 +682,12 @@ impl Render for ToolsPage {
                     .subtitle(t!("Tools.page_subtitle").into()),
             )
             .child(
-                h_flex()
+                v_flex()
                     .flex_1()
+                    .w_full()
                     .min_w_0()
-                    .items_start()
-                    .gap_4()
-                    .child(self.render_rail(cx))
+                    .gap_5()
+                    .child(self.render_kind_cards(cx))
                     .child(self.render_form(cx)),
             )
     }
