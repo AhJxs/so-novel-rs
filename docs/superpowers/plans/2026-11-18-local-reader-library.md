@@ -11169,6 +11169,30 @@ git commit -m "feat(reader): 沉浸模式与书籍信息抽屉"
 
 ### Task 23: 三语文案、README 与端到端验收
 
+> **Task 22 定案、本任务必须照做。**
+>
+> 1. **key 清单以代码为准，不以本任务正文的清单为准。** 正文的 `LIBRARY_KEYS` / `READER_KEYS`
+>    是用单行 `t!(` 正则抓的，漏了两类：跨行写的 `t!(`（`Reader.search.scanning` 等）与直接传
+>    字符串字面量的 key（`Library.info.unknown`、`Reader.bookmarks.*_time` 等）。
+>    权威命令是多行安全的这条：
+>
+>    ```bash
+>    grep -rhoE '"(Library|Reader)\.[A-Za-z0-9_.]+"' src | tr -d '"' | sort -u
+>    ```
+>
+>    当前实测 **Reader 69 个、Library 85 个**（含 `Library.time.*` 三个只在 `utils/formatting`
+>    测试里用的）。**正文清单只漏 `Library.error.cover_failed`**，其余都能对上；把模块级常量做成
+>    上面命令输出的超集，两个覆盖面测试才有意义。
+> 2. **Step 3 里那条 `grep -rhoE 't!\("...'` 命令作废**，用上面这条替代：旧命令对跨行 `t!(` 返回
+>    空，会给出「全覆盖」的假结论。
+> 3. **只补不删。** `locales/app.yml` 的 `Library:` 段里有一批改造前的死词条（`Library.action_delete`、
+>    `action_open`、`action_refresh`、`action_reveal` 等已无代码引用）。不删：删词条要证明没有动态
+>    拼接引用，风险大于收益，未引用的词条不占界面。
+> 4. **Step 6 的 GUI 验收不要做**，由控制器统一在真机上跑（本机有 `snap.ps1`/`click.ps1`/`focus.ps1`
+>    驱动脚本，历史运行日志也在）。实施者的范围是 Step 1–5 + Step 7，报告里不要写「未验证」，直接
+>    说明 GUI 验收由控制器另行执行。
+> 5. `Reader.error.action.*` 三个 key 是 Task 24 的恢复按钮文案，可以现在就加，加了不算越界。
+
 **Files:**
 - Modify: `locales/app.yml`
 - Modify: `src/i18n.rs`
