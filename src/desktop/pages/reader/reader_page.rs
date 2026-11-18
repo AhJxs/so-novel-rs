@@ -56,8 +56,8 @@ pub enum LoadState {
 
 /// 阅读器页面。
 pub struct ReaderPage {
-    model: Entity<AppModel>,
-    book_id: String,
+    pub(super) model: Entity<AppModel>,
+    pub(super) book_id: String,
     /// 打开时的书籍快照；关闭时用于落盘。
     pub(super) book: Book,
     pub(super) content: Option<ReaderBook>,
@@ -93,6 +93,8 @@ pub struct ReaderPage {
     pub(super) search: SearchPanel,
     pub(super) search_input: Entity<InputState>,
     pub(super) search_open: bool,
+    /// 书签抽屉。
+    pub(super) bookmarks_open: bool,
     /// 在跑的扫描任务的取消旗标。
     pub(super) search_cancel: Option<Arc<AtomicBool>>,
     pub(super) toc_open: bool,
@@ -157,6 +159,7 @@ impl ReaderPage {
             search: SearchPanel::new(),
             search_input,
             search_open: false,
+            bookmarks_open: false,
             search_cancel: None,
             toc_open: false,
             typography_open: false,
@@ -505,6 +508,10 @@ impl ReaderPage {
     ) {
         self.search_open = open;
         if open {
+            // 书签与搜索是两个右侧抽屉：开搜索前先收掉书签（关它会把焦点还给正文）。
+            if self.bookmarks_open {
+                self.set_bookmarks_open(false, window, cx);
+            }
             let handle = self.search_input.read(cx).focus_handle(cx);
             window.focus(&handle, cx);
         } else {
@@ -513,13 +520,39 @@ impl ReaderPage {
         }
     }
 
+    /// 开 / 关书签抽屉：开时关掉另一个右侧抽屉，关时把焦点收回正文。
+    ///
+    /// 与 `set_search_open` 同理，开合只走这一个入口：抽屉卸掉后焦点若还留在里面，
+    /// 除 Esc 外的快捷键会全部失灵（Task 18 / 20 的同类坑）。
+    pub(super) fn set_bookmarks_open(
+        &mut self,
+        open: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.bookmarks_open = open;
+        if open {
+            if self.toc_open {
+                self.close_toc(window, cx);
+            }
+            if self.search_open {
+                self.set_search_open(false, window, cx);
+            }
+        } else {
+            self.focus_body(window, cx);
+        }
+    }
+
     fn toggle_toc(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.toc_open {
             self.close_toc(window, cx);
         } else {
-            // 两个右侧抽屉不共存：开目录就关搜索，正文列宽只按一个抽屉算。
+            // 三个右侧抽屉不共存：开目录先关搜索与书签，正文列宽只按一个抽屉算。
             if self.search_open {
                 self.set_search_open(false, window, cx);
+            }
+            if self.bookmarks_open {
+                self.set_bookmarks_open(false, window, cx);
             }
             self.toc_open = true;
             self.typography_open = false;
@@ -588,6 +621,12 @@ impl ReaderPage {
                 self.set_search_open(open, window, cx);
                 cx.notify();
             }
+            "b" => {
+                self.typography_open = false;
+                let open = !self.bookmarks_open;
+                self.set_bookmarks_open(open, window, cx);
+                cx.notify();
+            }
             "m" => self.toggle_mode(cx),
             "escape" => {
                 if self.typography_open {
@@ -596,6 +635,9 @@ impl ReaderPage {
                     cx.notify();
                 } else if self.search_open {
                     self.set_search_open(false, window, cx);
+                    cx.notify();
+                } else if self.bookmarks_open {
+                    self.set_bookmarks_open(false, window, cx);
                     cx.notify();
                 } else if self.toc_open {
                     self.toc_open = false;
@@ -680,6 +722,21 @@ impl ReaderPage {
                     this.typography_open = false;
                     let open = !this.search_open;
                     this.set_search_open(open, window, cx);
+                    cx.notify();
+                }))
+            })
+            .child({
+                let mut bookmark_button =
+                    Button::new("reader-bookmarks-toggle").label(t!("Reader.action.bookmarks"));
+                bookmark_button = if self.bookmarks_open {
+                    bookmark_button.primary()
+                } else {
+                    bookmark_button.ghost()
+                };
+                bookmark_button.on_click(cx.listener(|this, _event, window, cx| {
+                    this.typography_open = false;
+                    let open = !this.bookmarks_open;
+                    this.set_bookmarks_open(open, window, cx);
                     cx.notify();
                 }))
             })
@@ -798,14 +855,18 @@ impl ReaderPage {
     fn ensure_pagination(&mut self, window: &Window, cx: &mut Context<Self>) {
         let previous_ratio = self.chapter_ratio;
         let reader = self.reader_config(cx);
-        // 目录 / 搜索抽屉都是根 flex row 里的正常子元素，会把正文列压窄；宽度进了指纹，
-        // 开合抽屉会自动触发重排。两个抽屉理论上不共存，这里仍按和算，免得将来放开互斥时漏掉。
+        // 目录 / 搜索 / 书签抽屉都是根 flex row 里的正常子元素，会把正文列压窄；宽度进了指纹，
+        // 开合抽屉会自动触发重排。三者互斥，这里仍按逐个累加写，免得将来放开互斥时漏掉。
         let dock = (if self.toc_open {
             super::toc::TOC_WIDTH
         } else {
             0.0
         }) + (if self.search_open {
             search_panel::SEARCH_WIDTH
+        } else {
+            0.0
+        }) + (if self.bookmarks_open {
+            super::bookmarks_panel::BOOKMARKS_WIDTH
         } else {
             0.0
         });
@@ -1229,6 +1290,11 @@ impl Render for ReaderPage {
         } else {
             None
         };
+        let bookmarks = if self.bookmarks_open {
+            Some(self.render_bookmarks(cx))
+        } else {
+            None
+        };
         let typography = if self.typography_open {
             Some(self.render_typography(cx))
         } else {
@@ -1254,7 +1320,8 @@ impl Render for ReaderPage {
                     .min_h_0()
                     .children(toc)
                     .child(body)
-                    .children(search),
+                    .children(search)
+                    .children(bookmarks),
             )
             .children(typography)
     }
