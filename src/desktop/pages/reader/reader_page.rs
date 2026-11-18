@@ -258,6 +258,8 @@ impl ReaderPage {
     pub(super) fn toggle_immersive(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.immersive = !self.immersive;
         self.toolbar_visible = false;
+        // 作废在途的收起任务：否则退出→再进入的 1.5 s 内，旧任务会把新唤出的工具栏关掉。
+        self.toolbar_hide_gen = self.toolbar_hide_gen.wrapping_add(1);
         if self.immersive {
             self.close_drawers(window, cx);
         }
@@ -689,7 +691,7 @@ impl ReaderPage {
                 cx.notify();
             }
             "m" => self.toggle_mode(cx),
-            "f11" => self.toggle_immersive(window, cx),
+            "f11" if !event.is_held => self.toggle_immersive(window, cx),
             "escape" => {
                 if self.toc_open
                     || self.search_open
@@ -825,15 +827,11 @@ impl ReaderPage {
             )
             .child(
                 typography_button.on_click(cx.listener(|this, _event, window, cx| {
-                    this.typography_open = !this.typography_open;
-                    if this.toc_open {
-                        // 走 `close_toc`：过滤框聚焦时要先把焦点收回正文，
-                        // 否则抽屉一卸，除 Esc 外的快捷键全部失灵。
-                        this.close_toc(window, cx);
-                    }
-                    if !this.typography_open {
-                        this.persist_settings(cx);
-                    }
+                    let open = !this.typography_open;
+                    // Aa 浮层与四个右侧抽屉不共存；关掉正在开的那个时 `close_drawers`
+                    // 已经替它 `persist_settings` 了，这里不必再写一次。
+                    this.close_drawers(window, cx);
+                    this.typography_open = open;
                     cx.notify();
                 })),
             )
@@ -885,6 +883,8 @@ impl ReaderPage {
                 .h(px(8.0))
                 .on_hover(cx.listener(|this, hovered: &bool, _window, cx| {
                     if *hovered {
+                        // 唤出也是一次新的可见期，旧的收起任务一律作废。
+                        this.toolbar_hide_gen = this.toolbar_hide_gen.wrapping_add(1);
                         this.toolbar_visible = true;
                         cx.notify();
                     }
@@ -1458,7 +1458,8 @@ impl Render for ReaderPage {
         };
         // 放到最后取：Rust 2024 下 `impl IntoElement` 会捕获 `&Context` 的生命周期，
         // 先拿 `toolbar` 再调需要 `&mut Context` 的渲染方法会撞借用冲突。
-        let toolbar = self.render_toolbar(cx);
+        // 沉浸模式的工具栏由悬浮层渲染，这里不要再白算一份。
+        let toolbar = (!self.immersive).then(|| self.render_toolbar(cx));
 
         div()
             .relative()
@@ -1470,7 +1471,7 @@ impl Render for ReaderPage {
             .bg(colors.background)
             .text_color(colors.foreground)
             .on_key_down(cx.listener(Self::on_key_down))
-            .when(!self.immersive, |this| this.child(toolbar))
+            .when_some(toolbar, ParentElement::child)
             .child(
                 div()
                     .flex()
