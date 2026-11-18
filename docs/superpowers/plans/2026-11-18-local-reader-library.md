@@ -3682,7 +3682,7 @@ pub struct LayoutFingerprint {
 
 impl ReaderLayout {
     /// 首行缩进前缀（两个全角空格，UTF-8 下 6 字节）。
-    pub const INDENT: &'static str = "　　";
+    pub const INDENT: &str = "　　";
 
     /// 构造排版参数；`line_height` 传倍数，构造后 `line_height_px()` 得到实际像素。
     #[must_use]
