@@ -4,7 +4,7 @@
 //! 翻页模式由分页表换算，切换模式时按比例恢复。
 
 use std::cell::Cell;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -32,6 +32,10 @@ use crate::reader::layout::{page_for_ratio, ratio_for_page};
 use crate::reader::{
     LayoutFingerprint, ParagraphMetrics, ReaderBook, ReaderError, ReaderLayout, load_book, paginate,
 };
+use crate::utils::system;
+
+/// 解码失败时的候选编码（`encoding_rs` 认识这些标签）。
+const ENCODING_CHOICES: &[&str] = &["UTF-8", "GB18030", "GBK", "Big5", "UTF-16LE", "UTF-16BE"];
 
 /// 关闭阅读器：由 `RootView` 注入（需要同时改 `RootView` 状态与全屏标记）。
 pub type CloseReaderFn = Rc<dyn Fn(&mut Window, &mut App)>;
@@ -311,6 +315,80 @@ impl ReaderPage {
             let _ = this.update(cx, |page, cx| page.finish_load(generation, result, cx));
         })
         .detach();
+    }
+
+    /// 清掉旧的正文 / 分页 / 搜索状态，从磁盘重新加载。
+    fn reload_from_disk(&mut self, cx: &mut Context<Self>) {
+        self.cancel_search();
+        self.search = SearchPanel::new();
+        self.content = None;
+        self.page_cache = None;
+        self.toc_titles = None;
+        self.chapter = 0;
+        self.chapter_ratio = 0.0;
+        self.page_index = 0;
+        self.page_turn_to_last = false;
+        self.restore_pending = true;
+        self.load_state = LoadState::Loading;
+        self.generation = self.generation.wrapping_add(1);
+        self.spawn_load(cx);
+        cx.notify();
+    }
+
+    /// 换一种编码重新解码：写回 store 后再走一遍加载。
+    fn retry_with_encoding(&mut self, encoding: &'static str, cx: &mut Context<Self>) {
+        let book_id = self.book_id.clone();
+        let value = encoding.to_string();
+        self.model.update(cx, |model, _cx| {
+            model.set_book_encoding(&book_id, Some(value));
+        });
+        self.book.encoding = Some(encoding.to_string());
+        self.reload_from_disk(cx);
+    }
+
+    /// 文件丢了：选一个新路径，选完交给 `apply_relink`。
+    fn pick_relink(&self, cx: &Context<Self>) {
+        let format = self.book.format;
+        let book_id = self.book_id.clone();
+        let page = cx.entity().downgrade();
+        cx.spawn(async move |_weak, async_cx| {
+            let file = rfd::AsyncFileDialog::new()
+                .add_filter(format.label(), &[format.extension()])
+                .set_title(t!("Reader.error.action.relink").as_ref())
+                .pick_file()
+                .await;
+            let Some(file) = file else {
+                return;
+            };
+            let path = file.path().to_path_buf();
+            let _ = page.update(async_cx, |page, cx| {
+                page.apply_relink(&book_id, &path, cx);
+            });
+        })
+        .detach();
+    }
+
+    /// 重新定位：换 ID / 路径后按新书记录重载。
+    fn apply_relink(&mut self, book_id: &str, path: &Path, cx: &mut Context<Self>) {
+        let result = self
+            .model
+            .update(cx, |model, _cx| model.relink_book(book_id, path));
+        match result {
+            Ok(new_id) => {
+                let snapshot = self.model.read(cx).book_snapshot(&new_id);
+                if let Some(book) = snapshot {
+                    self.book_id = new_id;
+                    self.book = book;
+                }
+                self.reload_from_disk(cx);
+            }
+            Err(error) => {
+                let message = error.message();
+                self.model
+                    .update(cx, |model, _cx| model.push_error(message));
+                cx.notify();
+            }
+        }
     }
 
     fn finish_load(
@@ -858,7 +936,78 @@ impl ReaderPage {
             })
     }
 
-    fn render_error(error: &ReaderError) -> impl IntoElement {
+    /// 出错时的正文区：原因 + 该错误支持的操作按钮。
+    fn render_error(&self, error: &ReaderError, cx: &Context<Self>) -> impl IntoElement {
+        let close_handler = self.close_handler.clone();
+        let mut actions: Vec<AnyElement> = Vec::new();
+
+        if matches!(error, ReaderError::MissingFile) {
+            actions.push(
+                Button::new("reader-error-relink")
+                    .primary()
+                    .compact()
+                    .label(t!("Reader.error.action.relink"))
+                    .on_click(cx.listener(|this, _event, _window, cx| {
+                        this.pick_relink(cx);
+                    }))
+                    .into_any_element(),
+            );
+        }
+
+        if matches!(
+            error,
+            ReaderError::Decode(..) | ReaderError::InvalidEncoding(_)
+        ) {
+            for label in ENCODING_CHOICES {
+                actions.push(
+                    Button::new(format!("reader-encoding-{label}"))
+                        .ghost()
+                        .compact()
+                        .label(*label)
+                        .on_click(cx.listener(move |this, _event, _window, cx| {
+                            this.retry_with_encoding(label, cx);
+                        }))
+                        .into_any_element(),
+                );
+            }
+        }
+
+        if matches!(
+            error,
+            ReaderError::Epub(_)
+                | ReaderError::UnsupportedFormat(_)
+                | ReaderError::NoContent
+                | ReaderError::Io(_)
+        ) {
+            let path = self.book.path.clone();
+            actions.push(
+                Button::new("reader-error-external")
+                    .ghost()
+                    .compact()
+                    .label(t!("Reader.error.action.open_external"))
+                    .on_click(cx.listener(move |this, _event, _window, cx| {
+                        if let Err(message) = system::open_path(&PathBuf::from(&path)) {
+                            this.model
+                                .update(cx, |model, _cx| model.push_error(message.to_string()));
+                        }
+                    }))
+                    .into_any_element(),
+            );
+        }
+
+        actions.push(
+            Button::new("reader-error-back")
+                .ghost()
+                .compact()
+                .label(t!("Reader.error.action.back"))
+                .on_click(move |_event, window, cx| {
+                    if let Some(handler) = &close_handler {
+                        handler(window, cx);
+                    }
+                })
+                .into_any_element(),
+        );
+
         div()
             .flex_1()
             .flex()
@@ -869,6 +1018,16 @@ impl ReaderPage {
             .p_8()
             .child(div().text_lg().child(t!(error.message_key()).to_string()))
             .child(div().text_sm().child(error.detail()))
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .flex_wrap()
+                    .items_center()
+                    .justify_center()
+                    .gap_2()
+                    .children(actions),
+            )
     }
 
     /// 沉浸模式：顶部 8px 热区唤出悬浮工具栏，鼠标移出 1.5 s 后收起。
@@ -1423,7 +1582,7 @@ impl Render for ReaderPage {
                 .justify_center()
                 .child(t!("Reader.loading").to_string())
                 .into_any_element(),
-            LoadState::Error(error) => Self::render_error(error).into_any_element(),
+            LoadState::Error(error) => self.render_error(error, cx).into_any_element(),
             LoadState::Ready => self.render_body(cx),
         };
         let toc = if self.toc_open {

@@ -564,6 +564,14 @@ impl LibraryStore {
             self.dirty = true;
         }
     }
+
+    /// 覆盖 TXT 编码（阅读器里「换编码重试」写回的结果）。
+    pub fn set_encoding(&mut self, id: &str, encoding: Option<String>) {
+        if let Some(book) = self.books.iter_mut().find(|book| book.id == id) {
+            book.encoding = encoding;
+            self.dirty = true;
+        }
+    }
 }
 
 /// 损坏文件的备份名：`library.json.corrupt-<unix>`，已被占用就追加 `-1`、`-2`…

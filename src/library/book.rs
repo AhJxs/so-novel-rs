@@ -191,6 +191,19 @@ impl BookFormat {
             Self::Pdf => "PDF",
         }
     }
+
+    /// 文件对话框过滤用的扩展名（无点、小写）。
+    #[must_use]
+    pub const fn extension(self) -> &'static str {
+        match self {
+            Self::Txt => "txt",
+            Self::Epub => "epub",
+            Self::Markdown => "md",
+            Self::Html => "html",
+            Self::Zip => "zip",
+            Self::Pdf => "pdf",
+        }
+    }
 }
 
 /// 书籍来源。

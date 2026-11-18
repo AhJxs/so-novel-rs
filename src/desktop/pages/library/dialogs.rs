@@ -18,7 +18,7 @@ use rust_i18n::t;
 
 use super::library_page::LibraryPage;
 use crate::desktop::components::format_size;
-use crate::library::{BookFormat, write_cover};
+use crate::library::write_cover;
 use crate::utils::formatting::format_local_unix_secs;
 use crate::utils::system;
 
@@ -530,7 +530,7 @@ impl LibraryPage {
         let id = book.id;
         cx.spawn(async move |_weak, async_cx| {
             let file = rfd::AsyncFileDialog::new()
-                .add_filter(format.label(), &[extension_of(format)])
+                .add_filter(format.label(), &[format.extension()])
                 .set_title(t!("Library.relink.dialog_title").as_ref())
                 .pick_file()
                 .await;
@@ -596,16 +596,4 @@ fn info_row(label: String, value: String, cx: &App) -> Div {
                 .child(label),
         )
         .child(div().flex_1().child(value))
-}
-
-/// 文件对话框过滤用的扩展名（无点、小写）。
-const fn extension_of(format: BookFormat) -> &'static str {
-    match format {
-        BookFormat::Txt => "txt",
-        BookFormat::Epub => "epub",
-        BookFormat::Markdown => "md",
-        BookFormat::Html => "html",
-        BookFormat::Zip => "zip",
-        BookFormat::Pdf => "pdf",
-    }
 }
