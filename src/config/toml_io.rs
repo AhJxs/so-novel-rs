@@ -54,6 +54,9 @@ fn toml_float(doc: &DocumentMut, table: &str, key: &str) -> Option<f32> {
                 .and_then(|i| i32::try_from(i).ok())
                 .map(|i| (i as f64) as f32)
         })
+        // TOML 合法接受 `nan` / `inf`，而 `f32::clamp` 对 NaN 原样返回——
+        // 必须在解析层挡掉，否则越界值会被当成有效值传下去。
+        .filter(|f| f.is_finite())
 }
 
 fn sat_i32(v: i64) -> i32 {

@@ -412,3 +412,18 @@ fn reader_out_of_range_rejected_by_validate() {
     let cfg = AppConfig::default();
     assert!(cfg.validate().is_ok());
 }
+
+#[test]
+fn nan_float_values_fall_back_to_defaults() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    // TOML 合法写法 `nan`；f32::clamp 对 NaN 原样返回，必须在解析层就挡掉。
+    std::fs::write(
+        &path,
+        "[global]\nfont-size = nan\n[reader]\nfont-size = nan\n",
+    )
+    .unwrap();
+    let cfg = load_config(&path).unwrap();
+    assert!((cfg.reader.font_size - 19.0).abs() < f32::EPSILON);
+    assert!((cfg.global.font_size - 16.0).abs() < f32::EPSILON);
+}
