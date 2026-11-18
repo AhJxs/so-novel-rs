@@ -16,7 +16,6 @@ mod notifications;
 mod pages;
 mod root;
 mod run;
-pub(crate) mod system_open;
 pub mod themes;
 
 pub use actions::{

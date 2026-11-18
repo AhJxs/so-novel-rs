@@ -18,9 +18,9 @@ use rust_i18n::t;
 
 use super::library_page::LibraryPage;
 use crate::desktop::components::format_size;
-use crate::desktop::system_open;
 use crate::library::{BookFormat, write_cover};
 use crate::utils::formatting::format_local_unix_secs;
+use crate::utils::system;
 
 /// 编辑信息弹窗的临时状态：保存前不改动 store。
 pub(super) struct EditState {
@@ -36,9 +36,6 @@ pub(super) struct EditState {
 
 impl LibraryPage {
     /// 书籍操作弹窗（「…」按钮）。
-    // builder 是 `Fn`（每帧重跑）：最后一个按钮必须从捕获值 clone 出 owned 副本，
-    // 直接移出会让 builder 变成 `FnOnce`。clippy 的 `redundant_clone` 看不到这层约束。
-    #[allow(clippy::redundant_clone)]
     pub(super) fn open_actions_dialog(
         &self,
         book_id: &str,
@@ -131,6 +128,7 @@ impl LibraryPage {
             };
 
             let reveal_button = {
+                let page = page.clone();
                 let path = path.clone();
                 Button::new("book-action-reveal")
                     .w_full()
@@ -138,23 +136,29 @@ impl LibraryPage {
                     .label(t!("Library.actions.reveal").to_string())
                     .on_click(move |_ev, window, cx| {
                         window.close_dialog(cx);
-                        if let Err(error) = system_open::reveal_in_file_manager(&path) {
-                            tracing::warn!("在文件管理器中显示失败: {error}");
-                        }
+                        let _ = page.update(cx, |page, cx| {
+                            if let Err(error) = system::reveal_in_folder(&path) {
+                                page.model
+                                    .update(cx, |model, _cx| model.push_error(error.to_string()));
+                            }
+                        });
                     })
             };
 
             let open_external_button = {
-                let path = path.clone();
+                let page = page.clone();
                 Button::new("book-action-open-external")
                     .w_full()
                     .ghost()
                     .label(t!("Library.actions.open_external").to_string())
                     .on_click(move |_ev, window, cx| {
                         window.close_dialog(cx);
-                        if let Err(error) = system_open::open_with_default_app(&path) {
-                            tracing::warn!("用系统程序打开失败: {error}");
-                        }
+                        let _ = page.update(cx, |page, cx| {
+                            if let Err(error) = system::open_path(&path) {
+                                page.model
+                                    .update(cx, |model, _cx| model.push_error(error.to_string()));
+                            }
+                        });
                     })
             };
 
@@ -172,8 +176,6 @@ impl LibraryPage {
             };
 
             let delete_button = {
-                let page = page.clone();
-                let id = id.clone();
                 Button::new("book-action-delete")
                     .w_full()
                     .danger()
@@ -383,7 +385,7 @@ impl LibraryPage {
                 .primary()
                 .label(t!("Library.edit.save").to_string())
                 .on_click(move |_ev, window, cx| {
-                    let title = save_title.read(cx).value().to_string();
+                    let raw_title = save_title.read(cx).value().to_string();
                     let author = save_author.read(cx).value().to_string();
                     let (id, picked, remove, old_cover) = {
                         let form = save_state.read(cx);
@@ -395,17 +397,34 @@ impl LibraryPage {
                         )
                     };
                     let cover_file = if let Some(path) = picked {
-                        std::fs::read(&path)
+                        let written = std::fs::read(&path)
                             .ok()
-                            .and_then(|bytes| write_cover(&save_covers_dir, &id, &bytes))
-                            .or(old_cover)
+                            .and_then(|bytes| write_cover(&save_covers_dir, &id, &bytes));
+                        let Some(written) = written else {
+                            // 读取 / 转码失败：不关窗，让用户重选，并把原因推给用户。
+                            save_model.update(cx, |model, _cx| {
+                                model.push_error(t!("Library.error.cover_failed").to_string());
+                            });
+                            return;
+                        };
+                        Some(written)
                     } else if remove {
                         None
                     } else {
                         old_cover
                     };
+                    // 空书名回退到 store 里的旧标题：卡片不能没有名字。
+                    let trimmed = raw_title.trim();
+                    let title = if trimmed.is_empty() {
+                        save_model
+                            .read(cx)
+                            .book_snapshot(&id)
+                            .map_or_else(|| trimmed.to_string(), |book| book.title)
+                    } else {
+                        trimmed.to_string()
+                    };
                     save_model.update(cx, |model, _cx| {
-                        model.update_book_metadata(&id, title.trim(), author.trim(), cover_file);
+                        model.update_book_metadata(&id, &title, author.trim(), cover_file);
                     });
                     window.close_dialog(cx);
                 });
