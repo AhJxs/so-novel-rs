@@ -726,12 +726,11 @@ impl ReaderPage {
             (2.0_f32.mul_add(-COLUMN_PADDING, f32::from(window.viewport_size().width)) - dock)
                 .min(reader.page_width)
                 .max(160.0);
-        // 探针量的是裁剪盒的 padding box（绝对定位的 inset 相对 padding box 解析），
-        // 里面上下各有 `COLUMN_PADDING` 的留白，能排字的高度要减掉它们。
-        let viewport_height = self.viewport_height.map_or_else(
-            || (f32::from(window.viewport_size().height) - 160.0).max(120.0),
-            |height| 2.0_f32.mul_add(-COLUMN_PADDING, height).max(120.0),
-        );
+        // 探针量到的就是可排字区域（裁剪盒没有上下留白），直接用它；
+        // `- 160` 只是首帧探针还没回报时的保守兜底。
+        let viewport_height = self
+            .viewport_height
+            .unwrap_or_else(|| (f32::from(window.viewport_size().height) - 160.0).max(120.0));
         let layout = ReaderLayout::new(
             reader.font_size,
             reader.line_height,
@@ -936,28 +935,38 @@ impl ReaderPage {
             .bg(colors.background)
             .text_color(colors.foreground)
             .child(
+                // 上下留白必须在裁剪区之外：gpui 的 `overflow_hidden` 按 border box 裁剪
+                // （`style.rs:646-660` 只在有边框时才内缩），padding 带会一并露出来，
+                // 页顶 / 页底就会各露出相邻行的一条。
                 div()
-                    .relative()
                     .flex_1()
                     .min_h_0()
-                    .overflow_hidden()
-                    .px(px(COLUMN_PADDING))
+                    .flex()
+                    .flex_col()
                     .py(px(COLUMN_PADDING))
-                    .child(probe)
                     .child(
                         div()
                             .relative()
-                            .top(px(-start))
-                            .w_full()
-                            .flex()
-                            .flex_row()
-                            .justify_center()
-                            .child(content_view::chapter_column(
-                                &title,
-                                &paragraphs,
-                                &reader,
-                                line_height,
-                            )),
+                            .flex_1()
+                            .min_h_0()
+                            .overflow_hidden()
+                            .px(px(COLUMN_PADDING))
+                            .child(probe)
+                            .child(
+                                div()
+                                    .relative()
+                                    .top(px(-start))
+                                    .w_full()
+                                    .flex()
+                                    .flex_row()
+                                    .justify_center()
+                                    .child(content_view::chapter_column(
+                                        &title,
+                                        &paragraphs,
+                                        &reader,
+                                        line_height,
+                                    )),
+                            ),
                     ),
             )
             .child(self.render_page_nav(pages, count, cx))
