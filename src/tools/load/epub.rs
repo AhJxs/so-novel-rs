@@ -25,42 +25,89 @@ struct ManifestItem {
     properties: String,
 }
 
-pub(super) fn load(path: &Path) -> Result<SourceBook, ToolError> {
-    let file = std::fs::File::open(path)?;
-    let mut archive =
-        ZipArchive::new(file).map_err(|error| ToolError::EpubStructure(error.to_string()))?;
+/// 只读元数据的结果；封面是原始字节，由调用方决定落盘位置。
+#[derive(Debug, Clone, Default)]
+pub struct EpubMetadata {
+    pub title: Option<String>,
+    pub author: Option<String>,
+    pub intro: Option<String>,
+    pub language: Option<String>,
+    pub cover: Option<Vec<u8>>,
+}
 
+/// container.xml + OPF 解析后的公共部分，正文加载与元数据读取共用。
+struct Package {
+    base: String,
+    opf: String,
+    items: Vec<ManifestItem>,
+}
+
+/// 读 container.xml → OPF → manifest。DRM / 结构损坏在这里报错。
+fn open_package(archive: &mut ZipArchive<std::fs::File>) -> Result<Package, ToolError> {
     if archive.by_name("META-INF/encryption.xml").is_ok() {
         return Err(ToolError::EpubStructure(
             "不支持 DRM 加密的 EPUB".to_string(),
         ));
     }
-
     let container =
-        String::from_utf8_lossy(&read_entry(&mut archive, "META-INF/container.xml")?).into_owned();
+        String::from_utf8_lossy(&read_entry(archive, "META-INF/container.xml")?).into_owned();
     let opf_path = ROOTFILE_RE
         .captures(&container)
         .and_then(|cap| attr(&cap[0], "full-path"))
         .ok_or_else(|| ToolError::EpubStructure("container.xml 缺少 rootfile".to_string()))?;
-    let opf = String::from_utf8_lossy(&read_entry(&mut archive, &opf_path)?).into_owned();
+    let opf = String::from_utf8_lossy(&read_entry(archive, &opf_path)?).into_owned();
     let base = opf_path
         .rsplit_once('/')
         .map(|(dir, _file)| dir.to_string())
         .unwrap_or_default();
-
     let items = manifest_items(&opf);
-    let spine = spine_ids(&opf);
-    let cover_id = cover_manifest_id(&opf, &items);
+    Ok(Package { base, opf, items })
+}
+
+/// 只读 EPUB 元数据与封面，不解析 spine 正文 —— 书架扫描用它，避免为了书名读整本书。
+///
+/// # Errors
+///
+/// 文件打不开、不是合法 ZIP、缺 container.xml / OPF、或带 DRM 加密时返回
+/// [`ToolError::EpubStructure`] / [`ToolError::Io`]。
+pub fn read_metadata(path: &Path) -> Result<EpubMetadata, ToolError> {
+    let file = std::fs::File::open(path)?;
+    let mut archive =
+        ZipArchive::new(file).map_err(|error| ToolError::EpubStructure(error.to_string()))?;
+    let package = open_package(&mut archive)?;
+    let cover = cover_manifest_id(&package.opf, &package.items)
+        .and_then(|id| package.items.iter().find(|item| item.id == id))
+        .and_then(|item| {
+            let name = resolve_path(&package.base, &item.href);
+            let bytes = read_entry(&mut archive, &name).ok()?;
+            (!bytes.is_empty()).then_some(bytes)
+        });
+    Ok(EpubMetadata {
+        title: dc_text(&package.opf, "title"),
+        author: dc_text(&package.opf, "creator"),
+        intro: dc_text(&package.opf, "description"),
+        language: dc_text(&package.opf, "language"),
+        cover,
+    })
+}
+
+pub(super) fn load(path: &Path) -> Result<SourceBook, ToolError> {
+    let file = std::fs::File::open(path)?;
+    let mut archive =
+        ZipArchive::new(file).map_err(|error| ToolError::EpubStructure(error.to_string()))?;
+    let package = open_package(&mut archive)?;
+    let spine = spine_ids(&package.opf);
+    let cover_id = cover_manifest_id(&package.opf, &package.items);
 
     let mut chapters = Vec::new();
     for idref in spine {
-        let Some(item) = items.iter().find(|item| item.id == idref) else {
+        let Some(item) = package.items.iter().find(|item| item.id == idref) else {
             continue;
         };
         if !item.media_type.contains("html") {
             continue;
         }
-        let name = resolve_path(&base, &item.href);
+        let name = resolve_path(&package.base, &item.href);
         let html = String::from_utf8_lossy(&read_entry(&mut archive, &name)?).into_owned();
         let title = extract_tag_text(&html, "h1")
             .or_else(|| extract_tag_text(&html, "h2"))
@@ -85,18 +132,18 @@ pub(super) fn load(path: &Path) -> Result<SourceBook, ToolError> {
     }
 
     let cover = cover_id
-        .and_then(|id| items.iter().find(|item| item.id == id))
+        .and_then(|id| package.items.iter().find(|item| item.id == id))
         .and_then(|item| {
-            let name = resolve_path(&base, &item.href);
+            let name = resolve_path(&package.base, &item.href);
             let bytes = read_entry(&mut archive, &name).ok()?;
             (!bytes.is_empty()).then_some(bytes)
         });
 
     Ok(SourceBook {
-        title: dc_text(&opf, "title").unwrap_or_else(|| stem(path)),
-        author: dc_text(&opf, "creator").unwrap_or_default(),
-        intro: dc_text(&opf, "description"),
-        language: dc_text(&opf, "language").unwrap_or_else(|| "zh".to_string()),
+        title: dc_text(&package.opf, "title").unwrap_or_else(|| stem(path)),
+        author: dc_text(&package.opf, "creator").unwrap_or_default(),
+        intro: dc_text(&package.opf, "description"),
+        language: dc_text(&package.opf, "language").unwrap_or_else(|| "zh".to_string()),
         cover,
         chapters,
     })
@@ -216,6 +263,7 @@ mod tests {
     use epub_builder::{EpubBuilder, EpubContent, ZipLibrary};
 
     use super::super::{LoadOptions, load_path};
+    use super::*;
 
     const PNG: &[u8] = &[0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0];
 
@@ -285,6 +333,36 @@ mod tests {
         let result = load_path(&path, &LoadOptions::default());
         assert!(matches!(
             result,
+            Err(crate::tools::ToolError::EpubStructure(_))
+        ));
+    }
+
+    #[test]
+    fn read_metadata_reads_opf_without_touching_spine() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("书.epub");
+        write_epub(&path);
+
+        let meta = read_metadata(&path).unwrap();
+        assert_eq!(meta.title.as_deref(), Some("测试书"));
+        assert_eq!(meta.author.as_deref(), Some("作者甲"));
+        assert_eq!(meta.intro.as_deref(), Some("一本书"));
+        assert_eq!(meta.language.as_deref(), Some("zh-CN"));
+        assert!(meta.cover.as_ref().is_some_and(|bytes| !bytes.is_empty()));
+    }
+
+    #[test]
+    fn read_metadata_reports_broken_container() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("坏.epub");
+        let file = std::fs::File::create(&path).unwrap();
+        let mut zip = zip::ZipWriter::new(file);
+        zip.start_file("mimetype", zip::write::SimpleFileOptions::default())
+            .unwrap();
+        zip.finish().unwrap();
+
+        assert!(matches!(
+            read_metadata(&path),
             Err(crate::tools::ToolError::EpubStructure(_))
         ));
     }
