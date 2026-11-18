@@ -3394,8 +3394,8 @@ pub enum ReaderError {
     /// 读盘失败。
     #[error("读取文件失败: {0}")]
     Io(#[from] std::io::Error),
-    /// 解码失败。
-    #[error("无法解码: {0}")]
+    /// 解码失败。`BookFormat` 没有 `Display`，借 `label()` 拼文案。
+    #[error("无法解码 {} 文件: {}", .0.label(), .1)]
     Decode(BookFormat, String),
     /// EPUB 结构 / DRM 问题。
     #[error("EPUB 文件无法打开: {0}")]
