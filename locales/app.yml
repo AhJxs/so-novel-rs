@@ -996,7 +996,7 @@ Library:
     zh-TW: 本地書庫
   # PageHeader 副标题：%{count} 本书 + 扫描目录 %{dir}。
   subtitle:
-    en: "%{count} books · %{dir}"
+    en: "Books: %{count} · %{dir}"
     zh-CN: "共 %{count} 本 · %{dir}"
     zh-TW: "共 %{count} 本 · %{dir}"
   search_placeholder:
@@ -1086,9 +1086,9 @@ Library:
     zh-CN: 本地书库为空
     zh-TW: 本地書庫為空
   empty_subtitle:
-    en: "Scanner finds no txt / epub in the download directory."
-    zh-CN: 下载目录里没有找到 txt / epub 书籍。
-    zh-TW: 下載目錄裡沒有找到 txt / epub 書籍。
+    en: "No book files found in the download directory."
+    zh-CN: 下载目录里没有扫描到书籍文件。
+    zh-TW: 下載目錄裡沒有掃描到書籍檔案。
   empty_filtered_title:
     en: "Nothing matches"
     zh-CN: 没有符合条件的书
@@ -1114,11 +1114,11 @@ Library:
       en: "All files"
       zh-CN: 所有文件
       zh-TW: 所有檔案
-    # %{added} 新增本数，%{existing} 已在书架的本数。
+    # %{added} 新增本数，%{existing} 其中已在书架的本数。
     done:
-      en: "Imported %{added}, already in library %{existing}"
-      zh-CN: 已导入 %{added} 本，已在书架 %{existing} 本
-      zh-TW: 已匯入 %{added} 本，已在書架 %{existing} 本
+      en: "Imported %{added}; %{existing} already in the library."
+      zh-CN: 已导入 %{added} 本，其中 %{existing} 本已在书架
+      zh-TW: 已匯入 %{added} 本，其中 %{existing} 本已在書架
     # %{file} 文件名，%{err} 失败原因。
     failed_item:
       en: "%{file}: %{err}"
@@ -1136,7 +1136,7 @@ Library:
       zh-CN: 不支持的文件格式
       zh-TW: 不支援的檔案格式
     book_not_found:
-      en: "That book is no longer on the shelf"
+      en: "That book is no longer in the library"
       zh-CN: 书籍已不在书架中
       zh-TW: 書籍已不在書架中
     format_mismatch:
@@ -1144,7 +1144,7 @@ Library:
       zh-CN: 选择的文件格式与书籍不一致
       zh-TW: 選擇的檔案格式與書籍不一致
     already_on_shelf:
-      en: "That file is already on the shelf"
+      en: "That file is already in the library"
       zh-CN: 该文件已在书架中
       zh-TW: 該檔案已在書架中
     # %{detail} 系统原始错误。
@@ -1155,8 +1155,8 @@ Library:
     # %{path} 备份文件名，%{detail} 解析错误。
     corrupt_backup:
       en: "library.json could not be parsed and was backed up to %{path}: %{detail}"
-      zh-CN: "library.json 解析失败，已备份为 %{path}：%{detail}"
-      zh-TW: "library.json 解析失敗，已備份為 %{path}：%{detail}"
+      zh-CN: "library.json 解析失败，已备份到 %{path}：%{detail}"
+      zh-TW: "library.json 解析失敗，已備份到 %{path}：%{detail}"
     # %{detail} 备份失败原因；接在 corrupt_backup 之后。
     backup_failed:
       en: " (backup failed: %{detail})"
@@ -1165,30 +1165,30 @@ Library:
     # %{version} 文件版本，%{supported} 当前支持的版本。
     future_version:
       en: "library.json is version %{version}, newer than the supported %{supported}; this run is read-only and will not overwrite it"
-      zh-CN: "library.json 版本 %{version} 高于当前支持的 %{supported}，本次只读，不会覆盖"
-      zh-TW: "library.json 版本 %{version} 高於目前支援的 %{supported}，本次唯讀，不會覆寫"
+      zh-CN: "library.json 版本 %{version} 高于当前支持的 %{supported}，本次运行按只读处理，不会覆盖"
+      zh-TW: "library.json 版本 %{version} 高於目前支援的 %{supported}，本次執行以唯讀處理，不會覆寫"
     save_refused:
       en: "library.json comes from a newer version; refusing to overwrite. Upgrade the app to save."
       zh-CN: "library.json 来自更高版本，拒绝覆盖；请升级应用后再保存"
       zh-TW: "library.json 來自更高版本，拒絕覆寫；請先升級應用程式再儲存"
     # 上次读取失败 / 备份失败：磁盘上的文件没被保住，写回就等于抹掉它。
     save_refused_after_load_failure:
-      en: "The shelf file could not be read or backed up; refusing to overwrite it. Move or delete it, then restart the app."
-      zh-CN: "书架文件读取或备份失败，拒绝覆盖；请移走或删除该文件后重启应用"
-      zh-TW: "書架檔案讀取或備份失敗，拒絕覆寫；請移走或刪除該檔案後重新啟動應用程式"
+      en: "The library file could not be read or backed up; refusing to overwrite it. Move or delete it, then restart the app."
+      zh-CN: "书库文件读取或备份失败，拒绝覆盖；请移走或删除该文件后重启应用"
+      zh-TW: "書庫檔案讀取或備份失敗，拒絕覆寫；請移走或刪除該檔案後重新啟動應用程式"
     create_dir_failed:
-      en: "Could not create the shelf folder"
-      zh-CN: 创建书架目录失败
-      zh-TW: 建立書架目錄失敗
+      en: "Could not create the library folder"
+      zh-CN: 创建书库目录失败
+      zh-TW: 建立書庫目錄失敗
     write_failed:
       en: "Could not write library.json"
       zh-CN: 写入 library.json 失败
       zh-TW: 寫入 library.json 失敗
     # 编辑书籍信息时，选的封面图片读不出来 / 写不进 covers 目录。
     cover_failed:
-      en: "Could not save the chosen cover"
-      zh-CN: 封面保存失败，请换一张图片
-      zh-TW: 封面儲存失敗，請換一張圖片
+      en: "Could not save the chosen cover; try a different image."
+      zh-CN: 封面保存失败，请换一张图片或检查封面目录权限
+      zh-TW: 封面儲存失敗，請換一張圖片或檢查封面目錄權限
   info:
     title:
       en: "Book info"
@@ -1290,9 +1290,9 @@ Library:
       zh-CN: 在文件夹中显示
       zh-TW: 在資料夾中顯示
     open_external:
-      en: "Open with system app"
-      zh-CN: 用系统程序打开
-      zh-TW: 用系統程式開啟
+      en: "Open with default app"
+      zh-CN: 用默认程序打开
+      zh-TW: 用預設程式開啟
     hide:
       en: "Remove from library"
       zh-CN: 从书架移除
@@ -1439,13 +1439,13 @@ Reader:
       zh-CN: 更多
       zh-TW: 更多
     immersive:
-      en: "Full screen"
-      zh-CN: 沉浸
-      zh-TW: 沉浸
+      en: "Immersive mode"
+      zh-CN: 沉浸模式
+      zh-TW: 沉浸模式
     exit_immersive:
-      en: "Exit full screen"
-      zh-CN: 退出沉浸
-      zh-TW: 退出沉浸
+      en: "Exit immersive mode"
+      zh-CN: 退出沉浸模式
+      zh-TW: 退出沉浸模式
     close:
       en: Close
       zh-CN: 关闭
@@ -1470,7 +1470,7 @@ Reader:
     scroll:
       en: Scroll
       zh-CN: 滚动
-      zh-TW: 滑動
+      zh-TW: 捲動
     page:
       en: Pages
       zh-CN: 翻页
@@ -1486,7 +1486,7 @@ Reader:
     zh-TW: 第 %{chapter} / %{total} 章 · 第 %{page} / %{pages} 頁
   loading:
     en: "Loading…"
-    zh-CN: 正在载入…
+    zh-CN: 正在加载…
     zh-TW: 正在載入…
   error:
     io:
@@ -1494,9 +1494,9 @@ Reader:
       zh-CN: 读取文件失败
       zh-TW: 讀取檔案失敗
     missing:
-      en: "File not found — relink it from the shelf"
-      zh-CN: 文件不存在，请回书架重新定位
-      zh-TW: 檔案不存在，請回書架重新定位
+      en: "File not found — relink it from the library"
+      zh-CN: 文件不存在，请回书库重新定位
+      zh-TW: 檔案不存在，請回書庫重新定位
     unsupported:
       en: "This format cannot be read in the app yet"
       zh-CN: 该格式暂不支持应用内阅读
@@ -1510,9 +1510,9 @@ Reader:
       zh-CN: 未知或不支持的编码
       zh-TW: 未知或不支援的編碼
     epub:
-      en: "Broken EPUB"
-      zh-CN: EPUB 结构损坏
-      zh-TW: EPUB 結構損壞
+      en: "Malformed EPUB file"
+      zh-CN: EPUB 结构异常
+      zh-TW: EPUB 結構異常
     no_content:
       en: "No readable content"
       zh-CN: 没有可显示的正文
@@ -1520,21 +1520,21 @@ Reader:
     layout_fallback:
       en: "Window or font too small — switched back to scroll mode"
       zh-CN: 窗口或字号太小，已回退到滚动模式
-      zh-TW: 視窗或字級太小，已回退到滑動模式
+      zh-TW: 視窗或字級太小，已回退到捲動模式
     # 错误面板上的按钮。
     action:
       relink:
         en: "Relink file"
-        zh-CN: 重新定位
-        zh-TW: 重新定位
+        zh-CN: 重新定位文件
+        zh-TW: 重新定位檔案
       open_external:
-        en: "Open with system app"
-        zh-CN: 用系统程序打开
-        zh-TW: 用系統程式開啟
+        en: "Open with default app"
+        zh-CN: 用默认程序打开
+        zh-TW: 用預設程式開啟
       back:
-        en: "Back to shelf"
-        zh-CN: 返回书架
-        zh-TW: 返回書架
+        en: "Back to library"
+        zh-CN: 返回书库
+        zh-TW: 返回書庫
   toc:
     title:
       en: "Contents"
@@ -1549,12 +1549,12 @@ Reader:
       zh-CN: 过滤章节…
       zh-TW: 過濾章節…
     chapter_count:
-      en: "%{count} chapters"
+      en: "Chapters: %{count}"
       zh-CN: "%{count} 章"
       zh-TW: "%{count} 章"
   typography:
     title:
-      en: "Type"
+      en: "Typography"
       zh-CN: 排版
       zh-TW: 排版
     font_size:
@@ -1566,7 +1566,7 @@ Reader:
       zh-CN: 行高
       zh-TW: 行高
     paragraph_spacing:
-      en: "Paragraph gap"
+      en: "Paragraph spacing"
       zh-CN: 段距
       zh-TW: 段距
     page_width:
@@ -1579,7 +1579,7 @@ Reader:
       zh-TW: 首行縮排
     theme:
       app:
-        en: "App theme"
+        en: "Match app"
         zh-CN: 跟随应用
         zh-TW: 跟隨應用程式
       paper:
@@ -1604,7 +1604,7 @@ Reader:
       zh-CN: 搜索
       zh-TW: 搜尋
     placeholder:
-      en: "Type a keyword, press Enter"
+      en: "Type a keyword and press Enter"
       zh-CN: 输入关键字，回车搜索
       zh-TW: 輸入關鍵字，按 Enter 搜尋
     hint:
@@ -1617,7 +1617,7 @@ Reader:
       zh-CN: 正在扫描 %{done} / %{total} 章
       zh-TW: 正在掃描 %{done} / %{total} 章
     results:
-      en: "%{count} results"
+      en: "Results: %{count}"
       zh-CN: "%{count} 个结果"
       zh-TW: "%{count} 個結果"
   bookmarks:
@@ -1627,8 +1627,8 @@ Reader:
       zh-TW: 書籤
     add:
       en: "Add bookmark"
-      zh-CN: 添加当前书签
-      zh-TW: 新增目前書籤
+      zh-CN: 添加书签
+      zh-TW: 新增書籤
     # 章节标题缺失时的兜底，%{index} 是 1-based 章号。
     chapter:
       en: "Chapter %{index}"
@@ -1712,7 +1712,7 @@ Reader:
       zh-CN: 在文件夹中显示
       zh-TW: 在資料夾中顯示
     open:
-      en: "Open with system app"
+      en: "Open with default app"
       zh-CN: 用默认程序打开
       zh-TW: 用預設程式開啟
     unknown:
