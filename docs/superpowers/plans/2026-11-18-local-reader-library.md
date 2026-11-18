@@ -8488,9 +8488,12 @@ mod typography;
 pub mod reader_page;
 pub mod theme;
 
-pub use reader_page::{CloseReaderFn, LoadState, ReaderPage};
+pub use reader_page::{CloseReaderFn, ReaderPage};
 pub use theme::reader_colors;
 ```
+
+（`LoadState` 不 re-export：Task 15 的定案是「`pages` 是私有模块，别为了自引用养一个
+只有自己用的 `pub use`」；`content_view` 需要它时直接 `super::reader_page::LoadState`。）
 
 - [ ] **Step 3: `reader_page.rs` 的 `use` 与结构体**
 
@@ -8508,14 +8511,14 @@ use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::{ActiveTheme as _, Disableable as _};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyElement, App, Context, Entity, FocusHandle, FontWeight, InteractiveElement as _,
-    IntoElement, KeyDownEvent, ParentElement, Render, ScrollEvent, ScrollHandle, SharedString,
-    Styled, Window, div, point, px,
+    AnyElement, App, AppContext as _, Context, Entity, FocusHandle, Focusable as _, FontWeight,
+    InteractiveElement as _, IntoElement, KeyDownEvent, ParentElement, Render, ScrollEvent,
+    ScrollHandle, SharedString, StatefulInteractiveElement as _, Styled, Window, div, point, px,
 };
 use rust_i18n::t;
 
 use super::content_view::{self, COLUMN_PADDING};
-use super::theme::reader_colors;
+use super::reader_colors;
 use crate::config::{ReaderConfig, ReadingMode};
 use crate::desktop::model::AppModel;
 use crate::library::{Book, ReadingProgress};
@@ -8524,6 +8527,10 @@ use crate::reader::{
     LayoutFingerprint, ParagraphMetrics, ReaderBook, ReaderError, ReaderLayout, load_book, paginate,
 };
 ```
+
+（这是 **Task 18 落地后的真实导入集**，比原稿多 `AppContext as _`（`cx.new` / `cx.entity`）、
+`Focusable as _`（`window.focus` 的 `&FocusHandle`）、`StatefulInteractiveElement as _`（`.id()`）；
+`reader_colors` 走 `super` 的 re-export，不走 `super::theme::`。整段替换时别把这三项再删掉。）
 
 结构体与缓存结构整体替换为：
 
@@ -8591,6 +8598,20 @@ struct PageCache {
             viewport_measured: Rc::new(Cell::new(None)),
             layout_warned: false,
 ```
+
+**Task 18 定案、本任务必须原样保留的四处**（不要因为这些方法看起来与分页无关就顺手删改）：
+
+- `fn scroll_ratio(offset_y: f32, max_y: f32) -> Option<f32>` 与 `fn ratio_offset(ratio: f32, max_y: f32) -> f32`
+  是模块级纯函数：**gpui 的滚动偏移向下为负**，全部换算只走这两个，配有三个单元测试钉住符号。
+  新写的分页代码里若要读写滚动偏移，也必须经由它们 —— 用 `max * ratio` 写正偏移是 Task 18
+  修掉的那个 bug。
+- `const fn invalidate_scroll_commit(&mut self)`：任何在防抖之外改写 `chapter_ratio` 的路径都要调它
+  （已覆盖 `capture_scroll_ratio` / `goto_chapter` / `finish_load`）；`goto_page` 与 `turn_page`
+  也属于这一类，写 `chapter_ratio` 前后要调。
+- `fn close_toc(&mut self, window, cx)` / `fn toggle_toc(&mut self, window, cx)`：关目录抽屉必须走
+  `close_toc`（它把焦点从过滤框收回正文），**不许再直写 `toc_open = false`**。
+- `autosave` 每 5 s 采一次滚动位置、并且只调 `model.persist_library()`（不是 `flush_library()`，
+  后者会顺带重写 `config.toml`）。翻页模式下位置由 `goto_page` 直接写，采样逻辑保持不变。
 
 - [ ] **Step 4: 分页与翻页方法**
 
