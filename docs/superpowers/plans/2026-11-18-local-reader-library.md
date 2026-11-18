@@ -3248,7 +3248,9 @@ mod tests {
 
     use super::*;
 
-    const TXT: &str = "第一章 开始\n正文一\n\n第二章 继续\n正文二\n";
+    // 每行之间都要有空行：标题行必须独占一个段落才会被识别成章节，
+    // 否则「第一章 开始\n正文一」会被当成一段普通正文。
+    const TXT: &str = "第一章 开始\n\n正文一\n\n第二章 继续\n\n正文二\n";
 
     #[test]
     fn loads_utf8_txt_with_chapters() {
@@ -3359,7 +3361,7 @@ pub mod reader;
 
 use std::path::Path;
 
-use super::super::library::BookFormat;
+use crate::library::BookFormat;
 use crate::tools::ToolError;
 use crate::tools::load::{LoadOptions, load_path};
 
@@ -3775,7 +3777,7 @@ pub fn paginate(
 #[must_use]
 pub fn content_height(paragraphs: &[ParagraphMetrics], line_height: f32) -> f32 {
     paragraphs.iter().fold(0.0, |sum, paragraph| {
-        sum + paragraph.lines.max(1) as f32 * line_height.max(1.0)
+        sum + count_f32(paragraph.lines.max(1)) * line_height.max(1.0)
             + paragraph.spacing_after.max(0.0)
     })
 }
@@ -3786,7 +3788,7 @@ pub fn ratio_for_page(page_index: usize, page_count: usize) -> f32 {
     if page_count <= 1 {
         return 0.0;
     }
-    (page_index.min(page_count - 1) as f32) / (page_count - 1) as f32
+    count_f32(page_index.min(page_count - 1)) / count_f32(page_count - 1)
 }
 
 /// 章内相对进度 → 最接近的页号。
@@ -3796,7 +3798,16 @@ pub fn page_for_ratio(ratio: f32, page_count: usize) -> usize {
         return 0;
     }
     let ratio = ratio.clamp(0.0, 1.0);
-    ((ratio * (page_count - 1) as f32).round() as usize).min(page_count - 1)
+    ((ratio * count_f32(page_count - 1)).round() as usize).min(page_count - 1)
+}
+
+/// 计数（行数 / 页数）转 f32。
+///
+/// 一本书的行数、页数以千计，远在 f32 的 2^24 有效位以内；集中在这一处转换，
+/// 省得每个调用点各写一个 allow。
+#[allow(clippy::cast_precision_loss)]
+fn count_f32(count: usize) -> f32 {
+    count as f32
 }
 ```
 
