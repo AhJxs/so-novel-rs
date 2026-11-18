@@ -6,6 +6,7 @@ pub mod book;
 pub mod cover;
 pub mod meta;
 pub mod query;
+pub mod scan;
 
 pub use book::{
     Book, BookFormat, BookOrigin, Bookmark, ReadingProgress, ShelfStatus, absolute_dir, hash64,
@@ -16,5 +17,6 @@ pub use cover::{
 };
 pub use meta::{ExtractedMeta, extract};
 pub use query::{ShelfQuery, ShelfSort, ShelfStatusFilter, visible_books};
+pub use scan::{ScannedFile, scan_download_dir};
 
 pub use crate::config::ReadingMode;
