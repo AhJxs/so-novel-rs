@@ -121,6 +121,17 @@ impl AppModel {
         self.library.bump();
     }
 
+    /// 切换收藏并立即落盘（书架卡片的星标）。
+    pub fn toggle_book_favorite(&mut self, id: &str) {
+        let Some(book) = self.library.store.get(id) else {
+            return;
+        };
+        let next = !book.favorite;
+        self.library.store.set_favorite(id, next);
+        self.library.bump();
+        self.persist_library();
+    }
+
     /// 记录阅读位置（只改内存 + 标脏，由 drain 每 5s 落盘）。
     // 调用方按值交出刚构造好的进度快照；`ReadingProgress` 全字段 Copy，clippy 建议改借用，
     // 但后续阅读器调用点已按 brief 以按值传入，保持签名一致。
