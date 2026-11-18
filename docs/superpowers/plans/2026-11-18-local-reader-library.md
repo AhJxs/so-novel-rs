@@ -1096,7 +1096,8 @@ mod tests {
             .collect::<Vec<_>>()
         };
 
-        assert_eq!(ids(ShelfStatusFilter::All, false), vec!["a", "b", "c"]);
+        // 默认按最近阅读排：未打开过的书（None）排最后，同值按 id 升序。
+        assert_eq!(ids(ShelfStatusFilter::All, false), vec!["b", "c", "a"]);
         assert_eq!(ids(ShelfStatusFilter::Unread, false), vec!["a"]);
         assert_eq!(ids(ShelfStatusFilter::Reading, false), vec!["b"]);
         assert_eq!(ids(ShelfStatusFilter::Finished, false), vec!["c"]);
