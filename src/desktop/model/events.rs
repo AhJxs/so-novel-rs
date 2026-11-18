@@ -73,15 +73,17 @@ pub fn drain(model: &mut AppModel) -> bool {
             .spawn_cover_download(sid, &url, &safe_client, model.runtime);
     }
 
-    // 2b. 书架：扫描 / 元数据通道 + 进度节流落盘（5 秒最多一次）。
+    // 2b. 书架：扫描 / 元数据通道 + 进度节流落盘（5 秒最多一次，失败也计入节流）。
     any |= model.library.drain_scan();
     any |= model.library.drain_meta();
     model.spawn_meta_worker();
     if model.library.store.is_dirty()
-        && crate::library::now_unix() - model.library.last_save_unix >= 5
+        && crate::library::now_unix() - model.library.last_save_attempt_unix >= 5
     {
+        let before = model.library.last_save_error.clone();
         model.persist_library();
-        any = true;
+        // 只有落盘成功（dirty 被清掉）或错误文案变了才需要重绘：失败重试本身不改界面。
+        any |= !model.library.store.is_dirty() || model.library.last_save_error != before;
     }
 
     // 3. 下载任务进度。

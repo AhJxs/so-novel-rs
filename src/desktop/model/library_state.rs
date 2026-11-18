@@ -11,9 +11,14 @@ use crate::error::AppResult;
 use crate::library::{AppliedMeta, LibraryStore, ScannedFile, ShelfQuery, now_unix};
 
 /// 后台扫描结果。
+///
+/// 一次扫描只回送**一个**事件：`drain_scan` 收满一个就丢掉接收端，
+/// 工作线程若再发第二个，会被静默忽略。
 pub type ScanEvent = AppResult<Vec<ScannedFile>>;
 
 /// 单本书的元数据提取结果（封面已由工作线程落盘）。
+///
+/// 与 [`ScanEvent`] 相同：一次任务只回送**一个**事件。
 #[derive(Debug)]
 pub struct MetaEvent {
     pub id: String,
@@ -33,8 +38,12 @@ pub struct LibraryState {
     pub scan_in_flight: bool,
     pub meta_in_flight: bool,
     pub last_error: Option<String>,
-    /// 上次进度落盘时间（unix 秒）。
+    /// 上次**成功**落盘时间（unix 秒）。
     pub last_save_unix: i64,
+    /// 上次**尝试**落盘的时间（unix 秒）；失败也推进，节流靠它。
+    pub last_save_attempt_unix: i64,
+    /// 上一次落盘失败的错误文案；成功后清空。
+    pub last_save_error: Option<String>,
     /// 上次扫描的目录，用于「下载目录变了才重扫」。
     pub scanned_dir: Option<PathBuf>,
 }
@@ -60,6 +69,8 @@ impl LibraryState {
             meta_in_flight: false,
             last_error: None,
             last_save_unix: now_unix(),
+            last_save_attempt_unix: now_unix(),
+            last_save_error: None,
             scanned_dir: None,
         }
     }
@@ -122,7 +133,11 @@ impl LibraryState {
                     match event.outcome {
                         Ok(meta) => self.store.apply_meta(&event.id, meta),
                         Err(error) => {
+                            // 不自动重试：重新入队只在 size/mtime 变化或 missing 时才发生
+                            // （`store::merge_scan`），这里额外加重试队列会无限重试同一份坏文件。
+                            // 至少把失败记进 `last_error`，让书架页显示得出来。
                             tracing::warn!("提取元数据失败 {}: {error}", event.id);
+                            self.last_error = Some(error);
                         }
                     }
                     self.bump();
@@ -190,5 +205,95 @@ mod tests {
 
         assert!(state.drain_scan());
         assert!(state.last_error.is_some());
+    }
+
+    #[test]
+    fn drain_scan_keeps_receiver_when_channel_is_empty() {
+        let (tx, rx) = smol::channel::unbounded::<ScanEvent>();
+        let mut state = LibraryState::new(LibraryStore::default());
+        state.scan_rx = Some(rx);
+        state.scan_in_flight = true;
+
+        // 工作线程还没回送：不能把接收端丢掉，否则扫描结果永远收不到。
+        assert!(!state.drain_scan());
+        assert!(state.scan_rx.is_some());
+        assert!(state.scan_in_flight);
+        drop(tx);
+    }
+
+    #[test]
+    fn drain_scan_error_clears_in_flight() {
+        let (tx, rx) = smol::channel::unbounded::<ScanEvent>();
+        let mut state = LibraryState::new(LibraryStore::default());
+        state.scan_rx = Some(rx);
+        state.scan_in_flight = true;
+        smol::block_on(tx.send(Err(crate::error::AppError::internal("boom".into())))).unwrap();
+        drop(tx);
+
+        assert!(state.drain_scan());
+        assert!(!state.scan_in_flight, "失败路径同样要清掉在途标记");
+        assert!(state.last_error.is_some());
+    }
+
+    #[test]
+    fn drain_meta_applies_metadata() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.txt");
+        std::fs::write(&path, b"x").unwrap();
+        let mut state = LibraryState::new(LibraryStore::default());
+        let id = state
+            .store
+            .merge_scan(&[ScannedFile {
+                path,
+                size_bytes: 1,
+                mtime: 1,
+            }])
+            .first()
+            .cloned()
+            .expect("一本书应入队元数据");
+        let version = state.books_version;
+
+        let (tx, rx) = smol::channel::unbounded::<MetaEvent>();
+        state.meta_rx = Some(rx);
+        state.meta_in_flight = true;
+        smol::block_on(tx.send(MetaEvent {
+            id: id.clone(),
+            outcome: Ok(AppliedMeta {
+                title: Some("元数据书名".to_string()),
+                author: Some("作者".to_string()),
+                intro: None,
+                cover_file: None,
+                encoding: None,
+            }),
+        }))
+        .unwrap();
+        drop(tx);
+
+        assert!(state.drain_meta());
+        assert!(!state.meta_in_flight);
+        assert!(state.meta_rx.is_none());
+        assert!(state.books_version > version);
+        assert_eq!(
+            state.store.get(&id).map(|book| book.title.clone()),
+            Some("元数据书名".to_string())
+        );
+    }
+
+    #[test]
+    fn drain_meta_records_error() {
+        let (tx, rx) = smol::channel::unbounded::<MetaEvent>();
+        let mut state = LibraryState::new(LibraryStore::default());
+        state.meta_rx = Some(rx);
+        state.meta_in_flight = true;
+        smol::block_on(tx.send(MetaEvent {
+            id: "deadbeef".to_string(),
+            outcome: Err("坏了".to_string()),
+        }))
+        .unwrap();
+        drop(tx);
+
+        assert!(state.drain_meta());
+        assert!(!state.meta_in_flight);
+        assert_eq!(state.last_error.as_deref(), Some("坏了"));
     }
 }

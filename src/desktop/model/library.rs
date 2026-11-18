@@ -14,8 +14,8 @@ impl AppModel {
         if self.library.scan_in_flight {
             return;
         }
-        // 与书架页 `maybe_auto_scan` 用同一个规范化函数，否则「相对路径 vs 绝对路径」
-        // 永远不相等 → 每帧重扫。
+        // 与写入 `library.json` 的 `path_key` 共用 `absolute_dir`，否则
+        // 「相对路径 vs 绝对路径」永远对不上 → 同一目录被反复当成新目录扫描。
         let dir = crate::library::absolute_dir(Path::new(&self.config.download.download_path));
         self.library.scanned_dir = Some(dir.clone());
         self.library.last_error = None;
@@ -80,17 +80,23 @@ impl AppModel {
         }
     }
 
-    /// 书架落盘；失败只推一次错误，避免 100ms 循环刷屏。
+    /// 书架落盘；失败只推一次错误，且失败同样计入 5 秒节流。
+    ///
+    /// 落盘错误记在 `last_save_error` 而不是 `last_error`：后者是扫描错误，
+    /// 下一次扫描成功会把它清掉，混用会让两种失败互相掩盖。
     pub fn persist_library(&mut self) {
+        self.library.last_save_attempt_unix = crate::library::now_unix();
         match self.library.store.save(&self.paths.library_file) {
             Ok(()) => {
                 self.library.store.clear_dirty();
                 self.library.last_save_unix = crate::library::now_unix();
+                self.library.last_save_error = None;
             }
             Err(error) => {
                 let message = error.message();
-                if self.library.last_error.as_deref() != Some(message.as_str()) {
-                    self.library.last_error = Some(message.clone());
+                // 同一个错误只推一次 toast：drain 是 100ms 循环，重试失败不能刷屏。
+                if self.library.last_save_error.as_deref() != Some(message.as_str()) {
+                    self.library.last_save_error = Some(message.clone());
                     self.push_error(message);
                 }
             }
@@ -277,7 +283,9 @@ impl AppModel {
             old_cover.as_deref(),
         );
         if old_cover.is_some() {
-            self.library.store.set_cover_file(&new_id, renamed);
+            self.library
+                .store
+                .set_cover_file(&new_id, renamed.or(old_cover));
         }
         self.library.bump();
         self.persist_library();
