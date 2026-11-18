@@ -27,7 +27,10 @@ pub struct SearchGroup {
 #[derive(Debug, Clone)]
 pub struct SearchHit {
     pub paragraph: usize,
-    /// 段落内字节偏移。
+    /// 段落内**原始文本**的字节偏移（不含排版层加的首行缩进）。
+    ///
+    /// 高亮要用 [`SearchHit::snippet`] + [`SearchHit::snippet_match`]，或自己按缩进前缀
+    /// 平移偏移；拿它直接切 `ReaderLayout::display_text` 的结果会高亮错位置。
     pub byte_offset: usize,
     pub byte_len: usize,
     /// 展示用上下文。
@@ -37,6 +40,8 @@ pub struct SearchHit {
 }
 
 /// 在文本中找出所有命中，返回 `(字节偏移, 字节长度)`。
+///
+/// 不 trim；需要忽略首尾空白时由调用方先 `trim()`（[`run`] 已经这么做）。
 #[must_use]
 pub fn find_hits(text: &str, needle: &str) -> Vec<(usize, usize)> {
     let needle_len = needle.len();
@@ -75,7 +80,10 @@ pub fn snippet(text: &str, offset: usize, len: usize) -> (String, Range<usize>) 
     let char_index = starts
         .partition_point(|start| *start <= offset)
         .saturating_sub(1);
-    let match_chars = text[offset..offset + len].chars().count();
+    let Some(matched) = text.get(offset..offset + len) else {
+        return (text.to_string(), 0..0);
+    };
+    let match_chars = matched.chars().count();
     let from_char = char_index.saturating_sub(SNIPPET_RADIUS);
     let to_char = char_index + match_chars + SNIPPET_RADIUS;
     let start = starts[from_char];
@@ -241,5 +249,60 @@ mod tests {
             run(&book, "不存在", &AtomicBool::new(false), |_, _| {}).is_empty(),
             "无匹配关键词不应有任何命中"
         );
+    }
+
+    #[test]
+    fn snippet_offsets_are_relative_to_the_snippet() {
+        let text = format!("{}hello{}", "前缀".repeat(40), "后缀".repeat(40));
+        let hits = find_hits(&text, "hello");
+        assert_eq!(hits.len(), 1);
+        let (byte_offset, byte_len) = hits[0];
+        let (snippet, range) = snippet(&text, byte_offset, byte_len);
+        assert_eq!(&snippet[range.clone()], "hello");
+        assert_ne!(range.start, byte_offset, "range 是相对片段的，不是相对整段");
+        assert!(range.end < snippet.len());
+    }
+
+    #[test]
+    fn search_chapter_wires_snippets() {
+        let group =
+            search_chapter(0, "章", &["你好 hello 世界".to_string()], "hello", 10).expect("group");
+        let hit = &group.hits[0];
+        assert_eq!(&hit.snippet[hit.snippet_match.clone()], "hello");
+        assert_eq!(hit.paragraph, 0);
+    }
+
+    #[test]
+    fn progress_reports_every_scanned_chapter_once() {
+        let book = book();
+        let mut seen = Vec::new();
+        let _ = run(&book, "hello", &AtomicBool::new(false), |done, total| {
+            seen.push((done, total));
+        });
+        assert_eq!(seen, vec![(1, 2), (2, 2)]);
+    }
+
+    #[test]
+    fn caps_come_from_the_constants() {
+        let long = "a".repeat(400);
+        let group = search_chapter(0, "章", &[long], "a", 100).expect("group");
+        assert_eq!(group.hits.len(), HITS_PER_CHAPTER);
+
+        // 每章 20 条上限、共 60 章 = 1200 条，总量必须被 HITS_TOTAL 截住。
+        let chapters = (0..60)
+            .map(|_| ReaderChapter {
+                title: "章".to_string(),
+                paragraphs: vec!["a".repeat(400)],
+            })
+            .collect();
+        let book = ReaderBook {
+            title: "书".to_string(),
+            author: String::new(),
+            encoding: None,
+            chapters,
+        };
+        let groups = run(&book, "a", &AtomicBool::new(false), |_, _| {});
+        let total: usize = groups.iter().map(|group| group.hits.len()).sum();
+        assert_eq!(total, HITS_TOTAL);
     }
 }

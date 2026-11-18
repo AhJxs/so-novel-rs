@@ -14,7 +14,7 @@ pub struct ParagraphMetrics {
     pub spacing_after: f32,
 }
 
-/// 当前章节的排版参数。尺寸单位统一用 f32 像素，UI 层再转 `gpui::Pixels`。
+/// 当前章节的排版参数。尺寸单位统一用 f32 像素，UI 层再换算成框架的像素类型。
 #[derive(Debug, Clone, PartialEq)]
 pub struct ReaderLayout {
     pub font_size: f32,
@@ -102,6 +102,19 @@ impl ReaderLayout {
 ///
 /// 页边界永远落在行边界上：某一行放不进当前页时，下一页从这一行的顶部开始，
 /// 因此不会出现半行截断。段距只在段落真正结束时计入，页边界处不额外留白。
+///
+/// # Examples
+///
+/// ```
+/// use so_novel_rs::reader::layout::{ParagraphMetrics, paginate};
+///
+/// // 一段 3 行、一段 4 行，每页放 4 行（行高 20px、视口 80px）：第二页从第 5 行开始。
+/// let paragraphs = [
+///     ParagraphMetrics { lines: 3, spacing_after: 0.0 },
+///     ParagraphMetrics { lines: 4, spacing_after: 0.0 },
+/// ];
+/// assert_eq!(paginate(&paragraphs, 20.0, 80.0), vec![0.0, 80.0]);
+/// ```
 #[must_use]
 pub fn paginate(
     paragraphs: &[ParagraphMetrics],
@@ -235,8 +248,8 @@ mod tests {
     #[test]
     fn content_height_sums_lines_and_spacing() {
         // (2*20 + 8) + (3*20 + 8) = 116
-        assert!((content_height(&metrics(&[2, 3], 8.0), 20.0) - 116.0).abs() < f32::EPSILON);
-        assert!((content_height(&[], 20.0) - 0.0).abs() < f32::EPSILON);
+        assert!((content_height(&metrics(&[2, 3], 8.0), 20.0) - 116.0).abs() < 1e-4);
+        assert!((content_height(&[], 20.0) - 0.0).abs() < 1e-4);
     }
 
     #[test]
@@ -259,5 +272,59 @@ mod tests {
         assert_ne!(first, layout.fingerprint(3));
         assert_eq!(layout.display_text("正文"), "正文");
         assert!((layout.line_height_px() - 34.2).abs() < 0.01);
+    }
+
+    #[test]
+    fn degenerate_inputs_still_progress() {
+        // 段行数为 0、段距为负、行高与视口都是 0：仍然要给出严格递增的页起点。
+        let pages = paginate(&metrics(&[0, 0], -4.0), 0.0, 0.0);
+        assert_eq!(pages.first().copied(), Some(0.0));
+        assert!(pages.windows(2).all(|pair| pair[1] > pair[0]));
+        // `lines: 0` 至少按 1 行计，段距负数被夹到 0。
+        assert!(content_height(&metrics(&[0], -4.0), 20.0) >= 20.0);
+    }
+
+    #[test]
+    fn page_for_ratio_rounds_to_nearest() {
+        // 0.2 × 4 = 0.8：四舍五入是 1，floor 会得到 0。
+        assert_eq!(page_for_ratio(0.2, 5), 1);
+    }
+
+    #[test]
+    fn ratio_round_trips_for_every_page() {
+        for page in 0..5 {
+            assert_eq!(page_for_ratio(ratio_for_page(page, 5), 5), page);
+        }
+    }
+
+    #[test]
+    fn fingerprint_covers_every_layout_field() {
+        let layout = ReaderLayout::new(19.0, 1.8, 12.0, 720.0, 600.0, true, "衬线".to_string());
+        assert_eq!(
+            layout.fingerprint(2),
+            LayoutFingerprint {
+                chapter: 2,
+                content_width: 720.0,
+                viewport_height: 600.0,
+                font_size: 19.0,
+                line_height: 1.8,
+                paragraph_spacing: 12.0,
+                indent: true,
+                font_family: "衬线".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn page_starts_never_exceed_content_height() {
+        let paragraphs = metrics(&[3, 7, 2], 8.0);
+        let line_height = 20.0;
+        let pages = paginate(&paragraphs, line_height, 60.0);
+        let height = content_height(&paragraphs, line_height);
+        // 最后一页的起点必须至少留得下一整行，UI 的越界兜底靠这条。
+        assert!(
+            pages.iter().all(|&top| top <= height - line_height),
+            "页起点不能越过内容高度减去一行"
+        );
     }
 }

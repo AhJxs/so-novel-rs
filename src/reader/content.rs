@@ -12,7 +12,8 @@ pub struct ReaderBook {
     pub title: String,
     pub author: String,
     pub chapters: Vec<ReaderChapter>,
-    /// TXT 实际使用的编码名；EPUB 为 `None`。
+    /// TXT 请求 / 探测到的编码名（显式标签优先于探测；文件带 BOM 时实际解码可能以 BOM 为准）。
+    /// EPUB 不走编码标签，恒为 `None`。
     pub encoding: Option<String>,
 }
 
@@ -120,11 +121,17 @@ pub fn load_book(
     {
         return Err(ReaderError::NoContent);
     }
+    // EPUB 不经过编码标签（`epub::load` 不接受 `source_encoding`），报了就是假话。
+    let encoding = if format == BookFormat::Txt {
+        explicit.map(|value| value.name().to_string()).or(detected)
+    } else {
+        None
+    };
     Ok(ReaderBook {
         title: source.title,
         author: source.author,
         chapters,
-        encoding: explicit.map(|value| value.name().to_string()).or(detected),
+        encoding,
     })
 }
 
@@ -145,9 +152,29 @@ mod tests {
 
     use super::*;
 
+    use epub_builder::{EpubBuilder, EpubContent, ZipLibrary};
+
     // 每行之间都要有空行：标题行必须独占一个段落才会被识别成章节，
     // 否则「第一章 开始\n正文一」会被当成一段普通正文。
     const TXT: &str = "第一章 开始\n\n正文一\n\n第二章 继续\n\n正文二\n";
+
+    fn write_epub(path: &std::path::Path) {
+        let zip = ZipLibrary::new().unwrap();
+        let mut builder = EpubBuilder::new(zip).unwrap();
+        builder.metadata("title", "元数据书名").unwrap();
+        builder.metadata("author", "作者乙").unwrap();
+        builder
+            .add_content(
+                EpubContent::new(
+                    "c1.xhtml",
+                    "<html><body><h1>第一章</h1><p>正文一</p></body></html>".as_bytes(),
+                )
+                .title("第一章"),
+            )
+            .unwrap();
+        let mut file = std::fs::File::create(path).unwrap();
+        builder.generate(&mut file).unwrap();
+    }
 
     #[test]
     fn loads_utf8_txt_with_chapters() {
@@ -173,7 +200,7 @@ mod tests {
         let book = load_book(&path, BookFormat::Txt, None).unwrap();
         assert_eq!(book.chapters.len(), 2);
         assert_eq!(book.chapters[0].paragraphs, vec!["正文一"]);
-        assert!(book.encoding.is_some());
+        assert_eq!(book.encoding.as_deref(), Some("GBK"));
     }
 
     #[test]
@@ -186,6 +213,38 @@ mod tests {
         let book = load_book(&path, BookFormat::Txt, Some("gbk")).unwrap();
         assert_eq!(book.chapters[0].paragraphs, vec!["正文一"]);
         assert_eq!(book.encoding.as_deref(), Some("GBK"));
+    }
+
+    #[test]
+    fn explicit_label_beats_detection() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("utf8.txt");
+        // UTF-8 字节 + 显式 GBK：探测会说是 UTF-8，只有真的按显式标签解码才会得到乱码。
+        std::fs::write(&path, TXT).unwrap();
+
+        let book = load_book(&path, BookFormat::Txt, Some("gbk")).unwrap();
+        assert_eq!(book.encoding.as_deref(), Some("GBK"));
+        assert_ne!(
+            book.chapters[0].paragraphs[0], "正文一",
+            "显式标签必须真正传给了解码器"
+        );
+    }
+
+    #[test]
+    fn loads_epub_with_chapters_and_no_encoding() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("书.epub");
+        write_epub(&path);
+
+        let book = load_book(&path, BookFormat::Epub, Some("gbk")).unwrap();
+        assert_eq!(book.title, "元数据书名");
+        assert_eq!(book.author, "作者乙");
+        assert_eq!(book.chapters.len(), 1);
+        assert_eq!(book.chapters[0].paragraphs, vec!["正文一"]);
+        assert!(
+            book.encoding.is_none(),
+            "EPUB 不接受编码标签，不能报一个没用过的编码"
+        );
     }
 
     #[test]
