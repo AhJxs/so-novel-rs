@@ -24,11 +24,13 @@ impl Exporter for HtmlExporter {
         "html"
     }
 
-    fn merge(
+    fn merge_with_progress(
         &self,
         book: &Book,
         chapters: &[RenderedChapter],
         out_dir: &Path,
+        _cover_bytes: Option<&[u8]>,
+        on_chapter: &mut dyn FnMut(usize),
     ) -> Result<PathBuf, ExportError> {
         if chapters.is_empty() {
             return Err(ExportError::NoChapters);
@@ -59,7 +61,7 @@ impl Exporter for HtmlExporter {
             .write_all(toc_lines.join("\n").as_bytes())
             .map_err(|e| ExportError::Zip(format!("write: {e}")))?;
 
-        for chapter in chapters {
+        for (idx, chapter) in chapters.iter().enumerate() {
             let name = format!("{:03}_.html", chapter.order);
             writer
                 .start_file(&name, options)
@@ -67,6 +69,7 @@ impl Exporter for HtmlExporter {
             writer
                 .write_all(chapter.body.as_bytes())
                 .map_err(|e| ExportError::Zip(format!("write: {e}")))?;
+            on_chapter(idx + 1);
         }
 
         writer

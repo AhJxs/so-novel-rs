@@ -122,6 +122,48 @@ impl ToolStage {
     }
 }
 
+/// 三个阶段在整条流程里各占多大比例，用于把阶段内进度换算成百分比。
+///
+/// 权重按 10 MB / 3000 章实测分配（读取 0.06 s、渲染 0.01~0.14 s、写盘 0.02~12.4 s）：
+/// TXT / Markdown 几乎只剩读写，EPUB 要把每章压进 zip，PDF 还要排版并嵌入字体。
+/// 写盘耗时随目标格式剧烈变化，所以不能给所有格式同一套权重 —— 否则进度条会在
+/// 写盘阶段长时间卡住不动。三个阶段都会按章回报，权重只影响前进速度是否均匀。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct StageWeights {
+    /// 读取并解析源文件。
+    pub loading: f32,
+    /// 逐章渲染。
+    pub rendering: f32,
+    /// 合并导出 / 写盘。
+    pub writing: f32,
+}
+
+impl StageWeights {
+    /// 格式转换流程：按目标格式取权重。
+    #[must_use]
+    pub const fn for_format(target: ExportFormat) -> Self {
+        match target {
+            ExportFormat::Txt | ExportFormat::Markdown => Self::new(0.50, 0.20, 0.30),
+            ExportFormat::Html | ExportFormat::Epub => Self::new(0.20, 0.10, 0.70),
+            ExportFormat::Pdf => Self::new(0.05, 0.03, 0.92),
+        }
+    }
+
+    /// 编码 / 简繁转换：不分章，只有读取与写盘两段。
+    #[must_use]
+    pub const fn plain_file() -> Self {
+        Self::new(0.6, 0.0, 0.4)
+    }
+
+    const fn new(loading: f32, rendering: f32, writing: f32) -> Self {
+        Self {
+            loading,
+            rendering,
+            writing,
+        }
+    }
+}
+
 /// 一次进度回报：阶段 + 阶段内完成量。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ToolProgress {
@@ -137,12 +179,9 @@ impl ToolProgress {
         Self { stage, done, total }
     }
 
-    /// 映射到整条流程的 0.0~1.0 进度。
-    ///
-    /// 权重按耗时分配：读取 15%、逐章渲染 75%、写盘 10%；没有分章的文件（编码 / 简繁）
-    /// 只有读取与写盘两段，中间直接跨过。
+    /// 百分比（0.0~100.0），直接喂给 `Progress::value`。
     #[must_use]
-    pub fn fraction(self) -> f32 {
+    pub fn percent(self, weights: StageWeights) -> f32 {
         // 先在整数域算千分比，再精确转 f32，避免 usize→f32 的精度损失告警。
         let permille = self
             .done
@@ -152,17 +191,14 @@ impl ToolProgress {
             .and_then(|value| u16::try_from(value).ok())
             .unwrap_or(0);
         let ratio = f32::from(permille) / 1000.0;
-        match self.stage {
-            ToolStage::Loading => 0.15 * ratio,
-            ToolStage::Rendering => 0.75_f32.mul_add(ratio, 0.15),
-            ToolStage::Writing => 0.10_f32.mul_add(ratio, 0.90),
-        }
-    }
-
-    /// 百分比（0.0~100.0），直接喂给 `Progress::value`。
-    #[must_use]
-    pub fn percent(self) -> f32 {
-        self.fraction() * 100.0
+        let fraction = match self.stage {
+            ToolStage::Loading => weights.loading * ratio,
+            ToolStage::Rendering => weights.rendering.mul_add(ratio, weights.loading),
+            ToolStage::Writing => weights
+                .writing
+                .mul_add(ratio, weights.loading + weights.rendering),
+        };
+        fraction * 100.0
     }
 }
 
@@ -280,18 +316,23 @@ mod tests {
         )
         .unwrap();
 
-        assert!(samples.iter().all(|p| (0.0..=100.0).contains(&p.percent())));
+        let weights = super::StageWeights::for_format(crate::config::ExportFormat::Txt);
+        assert!(
+            samples
+                .iter()
+                .all(|p| (0.0..=100.0).contains(&p.percent(weights)))
+        );
         assert!(
             samples
                 .windows(2)
-                .all(|pair| pair[0].percent() <= pair[1].percent()),
+                .all(|pair| pair[0].percent(weights) <= pair[1].percent(weights)),
             "进度不应回退: {samples:?}"
         );
         let first = samples.first().unwrap();
         let last = samples.last().unwrap();
         assert_eq!(first.stage, super::ToolStage::Loading);
         assert_eq!(last.stage, super::ToolStage::Writing);
-        assert!((last.percent() - 100.0).abs() < f32::EPSILON);
+        assert!((last.percent(weights) - 100.0).abs() < 0.01);
         assert!(
             samples
                 .iter()
@@ -300,14 +341,36 @@ mod tests {
     }
 
     #[test]
-    fn progress_fraction_weights_stages() {
-        use super::{ToolProgress as P, ToolStage as S};
-        assert!(P::new(S::Loading, 0, 1).percent().abs() < f32::EPSILON);
-        assert!((P::new(S::Loading, 1, 1).percent() - 15.0).abs() < 0.001);
-        assert!((P::new(S::Rendering, 0, 10).percent() - 15.0).abs() < 0.001);
-        assert!((P::new(S::Rendering, 10, 10).percent() - 90.0).abs() < 0.001);
-        assert!((P::new(S::Writing, 1, 1).percent() - 100.0).abs() < 0.001);
+    fn progress_percent_follows_stage_weights() {
+        use super::{StageWeights as W, ToolProgress as P, ToolStage as S};
+        let w = W::new(0.2, 0.1, 0.7);
+        assert!(P::new(S::Loading, 0, 1).percent(w).abs() < f32::EPSILON);
+        assert!((P::new(S::Loading, 1, 1).percent(w) - 20.0).abs() < 0.001);
+        assert!((P::new(S::Rendering, 0, 10).percent(w) - 20.0).abs() < 0.001);
+        assert!((P::new(S::Rendering, 10, 10).percent(w) - 30.0).abs() < 0.001);
+        assert!((P::new(S::Writing, 1, 1).percent(w) - 100.0).abs() < 0.001);
         // total 为 0 时不除零，按阶段起点算。
-        assert!((P::new(S::Rendering, 0, 0).percent() - 15.0).abs() < 0.001);
+        assert!((P::new(S::Rendering, 0, 0).percent(w) - 20.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn stage_weights_cover_the_whole_bar() {
+        use super::StageWeights as W;
+        for target in [
+            crate::config::ExportFormat::Txt,
+            crate::config::ExportFormat::Markdown,
+            crate::config::ExportFormat::Html,
+            crate::config::ExportFormat::Epub,
+            crate::config::ExportFormat::Pdf,
+        ] {
+            let w = W::for_format(target);
+            let sum = w.loading + w.rendering + w.writing;
+            assert!(
+                (sum - 1.0).abs() < 1e-6,
+                "{target:?} 权重之和应为 1，实际 {sum}"
+            );
+        }
+        let w = W::plain_file();
+        assert!((w.loading + w.rendering + w.writing - 1.0).abs() < 1e-6);
     }
 }

@@ -50,6 +50,23 @@ pub trait Exporter {
     /// 文件扩展名（不带点）：`txt`/`html`/`epub`。`html` 模式实际产物是 zip。
     fn ext(&self) -> &'static str;
 
+    /// 执行合并，并把“已完成章数”报给调用方（进度条用）。每处理完一章回调一次，
+    /// 回调参数从 1 递增到 `chapters.len()`。
+    ///
+    /// 这是唯一的必需实现；[`Self::merge`] / [`Self::merge_with_cover`] 都是它的便捷包装。
+    ///
+    /// # Errors
+    ///
+    /// 章节为空或写成品失败时返回 [`ExportError`]。
+    fn merge_with_progress(
+        &self,
+        book: &Book,
+        chapters: &[RenderedChapter],
+        out_dir: &Path,
+        cover_bytes: Option<&[u8]>,
+        on_chapter: &mut dyn FnMut(usize),
+    ) -> Result<PathBuf, ExportError>;
+
     /// 执行合并（不带封面）。
     ///
     /// # Errors
@@ -60,9 +77,11 @@ pub trait Exporter {
         book: &Book,
         chapters: &[RenderedChapter],
         out_dir: &Path,
-    ) -> Result<PathBuf, ExportError>;
+    ) -> Result<PathBuf, ExportError> {
+        self.merge_with_progress(book, chapters, out_dir, None, &mut |_| {})
+    }
 
-    /// 带封面的合并入口。默认实现忽略封面、与 `merge` 等价；EPUB 覆写它把封面字节写入电子书。
+    /// 带封面的合并入口。默认实现忽略封面；EPUB 用它把封面字节写入电子书。
     /// `cover_bytes`：调用方（调度层）负责下载，失败时传 `None`，实现者降级为不带封面继续。
     ///
     /// # Errors
@@ -73,9 +92,9 @@ pub trait Exporter {
         book: &Book,
         chapters: &[RenderedChapter],
         out_dir: &Path,
-        _cover_bytes: Option<&[u8]>,
+        cover_bytes: Option<&[u8]>,
     ) -> Result<PathBuf, ExportError> {
-        self.merge(book, chapters, out_dir)
+        self.merge_with_progress(book, chapters, out_dir, cover_bytes, &mut |_| {})
     }
 }
 

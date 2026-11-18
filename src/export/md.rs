@@ -19,11 +19,13 @@ impl Exporter for MdExporter {
         "md"
     }
 
-    fn merge(
+    fn merge_with_progress(
         &self,
         book: &Book,
         chapters: &[RenderedChapter],
         out_dir: &Path,
+        _cover_bytes: Option<&[u8]>,
+        on_chapter: &mut dyn FnMut(usize),
     ) -> Result<PathBuf, ExportError> {
         if chapters.is_empty() {
             return Err(ExportError::NoChapters);
@@ -67,6 +69,7 @@ impl Exporter for MdExporter {
             w.write_all(format!("<a id=\"chapter-{}\"></a>\n\n", idx + 1).as_bytes())?;
             w.write_all(chapter.body.trim_end().as_bytes())?;
             w.write_all(b"\n\n")?;
+            on_chapter(idx + 1);
         }
 
         w.flush()?;

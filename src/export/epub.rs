@@ -26,23 +26,15 @@ impl Exporter for EpubExporter {
         "epub"
     }
 
-    fn merge(
-        &self,
-        book: &Book,
-        chapters: &[RenderedChapter],
-        out_dir: &Path,
-    ) -> Result<PathBuf, ExportError> {
-        merge_with_cover_bytes(book, chapters, out_dir, None)
-    }
-
-    fn merge_with_cover(
+    fn merge_with_progress(
         &self,
         book: &Book,
         chapters: &[RenderedChapter],
         out_dir: &Path,
         cover_bytes: Option<&[u8]>,
+        on_chapter: &mut dyn FnMut(usize),
     ) -> Result<PathBuf, ExportError> {
-        merge_with_cover_bytes(book, chapters, out_dir, cover_bytes)
+        merge_epub(book, chapters, out_dir, cover_bytes, on_chapter)
     }
 }
 
@@ -59,6 +51,18 @@ pub fn merge_with_cover_bytes(
     chapters: &[RenderedChapter],
     out_dir: &Path,
     cover_bytes: Option<&[u8]>,
+) -> Result<PathBuf, ExportError> {
+    merge_epub(book, chapters, out_dir, cover_bytes, &mut |_| {})
+}
+
+/// 合并并逐章回调进度（epub-builder 在 `add_content` 时就把每章压进 zip 缓冲，
+/// 因此逐章回调基本等价于真实的写盘进度）。
+fn merge_epub(
+    book: &Book,
+    chapters: &[RenderedChapter],
+    out_dir: &Path,
+    cover_bytes: Option<&[u8]>,
+    on_chapter: &mut dyn FnMut(usize),
 ) -> Result<PathBuf, ExportError> {
     if chapters.is_empty() {
         return Err(ExportError::NoChapters);
@@ -117,7 +121,7 @@ pub fn merge_with_cover_bytes(
         .unwrap_or(total_chapters as u32);
     let digit = max_order.to_string().len().max(3);
     let started = Instant::now();
-    for chapter in chapters {
+    for (idx, chapter) in chapters.iter().enumerate() {
         let id = pad_zero(chapter.order, digit);
         let entry_name = format!("{id}.xhtml");
         builder
@@ -127,6 +131,7 @@ pub fn merge_with_cover_bytes(
                     .reftype(ReferenceType::Text),
             )
             .map_err(|e| ExportError::Epub(format!("add chapter {entry_name}: {e}")))?;
+        on_chapter(idx + 1);
     }
     tracing::info!(
         chapters = total_chapters,
@@ -241,6 +246,23 @@ mod tests {
     fn load_and_merge_cover(book: &Book, dir: &Path, out: &Path, cover: &[u8]) -> PathBuf {
         let chapters = crate::export::load_chapter_files(dir, ExportFormat::Epub).unwrap();
         merge_with_cover_bytes(book, &chapters, out, Some(cover)).unwrap()
+    }
+
+    #[test]
+    fn merge_reports_every_chapter_to_progress_callback() {
+        let dir = tempfile::tempdir().unwrap();
+        let out = dir.path().join("out");
+        std::fs::create_dir_all(&out).unwrap();
+        let chapters = sample_chapters();
+        let mut seen = Vec::new();
+
+        EpubExporter
+            .merge_with_progress(&sample_book(), &chapters, &out, None, &mut |done| {
+                seen.push(done);
+            })
+            .unwrap();
+
+        assert_eq!(seen, vec![1, 2]);
     }
 
     #[test]

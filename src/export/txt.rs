@@ -84,11 +84,13 @@ impl Exporter for TxtExporter {
         "txt"
     }
 
-    fn merge(
+    fn merge_with_progress(
         &self,
         book: &Book,
         chapters: &[RenderedChapter],
         out_dir: &Path,
+        _cover_bytes: Option<&[u8]>,
+        on_chapter: &mut dyn FnMut(usize),
     ) -> Result<PathBuf, ExportError> {
         if chapters.is_empty() {
             return Err(ExportError::NoChapters);
@@ -115,11 +117,12 @@ impl Exporter for TxtExporter {
             }
         ))?;
 
-        for chapter in chapters {
+        for (idx, chapter) in chapters.iter().enumerate() {
             writer.write_str(&chapter.body)?;
             if !chapter.body.ends_with("\n\n") {
                 writer.write_str("\n")?;
             }
+            on_chapter(idx + 1);
         }
         writer.finish()?;
         Ok(out_path)
@@ -303,5 +306,21 @@ mod tests {
                 .unwrap()
                 .contains(" (1).txt")
         );
+    }
+
+    #[test]
+    fn merge_reports_every_chapter_to_progress_callback() {
+        let dir = tempfile::tempdir().unwrap();
+        let chapters = sample_chapters();
+        let mut seen = Vec::new();
+
+        TxtExporter::new("UTF-8")
+            .merge_with_progress(&sample_book(), &chapters, dir.path(), None, &mut |done| {
+                seen.push(done);
+            })
+            .unwrap();
+
+        // 每章回调一次，序号从 1 递增到总章数。
+        assert_eq!(seen, vec![1, 2]);
     }
 }

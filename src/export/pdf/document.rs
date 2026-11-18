@@ -27,11 +27,13 @@ impl Exporter for PdfExporter {
         skip_all,
         fields(book = %book.book_name, chapters = chapters.len())
     )]
-    fn merge(
+    fn merge_with_progress(
         &self,
         book: &Book,
         chapters: &[RenderedChapter],
         out_dir: &Path,
+        _cover_bytes: Option<&[u8]>,
+        on_chapter: &mut dyn FnMut(usize),
     ) -> Result<PathBuf, ExportError> {
         if chapters.is_empty() {
             return Err(ExportError::NoChapters);
@@ -110,6 +112,7 @@ impl Exporter for PdfExporter {
                     paragraphs = paras.len(),
                     "PDF 章节排版"
                 );
+                on_chapter(idx + 1);
             }
             pg.finish();
         }

@@ -12,14 +12,22 @@ pub fn decode_bytes(
     bytes: &[u8],
     explicit: Option<&'static Encoding>,
 ) -> (String, &'static Encoding) {
-    if let Some((encoding, bom_len)) = sniff_bom(bytes) {
-        let (text, _, _) = encoding.decode(&bytes[bom_len..]);
-        return (text.into_owned(), encoding);
+    let (bytes, encoding) = match sniff_bom(bytes) {
+        Some((encoding, bom_len)) => (&bytes[bom_len..], encoding),
+        None => (bytes, explicit.unwrap_or_else(|| detect_encoding(bytes))),
+    };
+    // UTF-8 只是“校验 + 拷贝”：`encoding_rs` 的通用解码要逐字符走转码框架，10 MB 约 0.38 s；
+    // `from_utf8_lossy` 在非法字节处替换 U+FFFD，语义相同但快一个量级。
+    if encoding == UTF_8 {
+        return (String::from_utf8_lossy(bytes).into_owned(), UTF_8);
     }
-    let encoding = explicit.unwrap_or_else(|| detect_encoding(bytes));
     let (text, _, _) = encoding.decode(bytes);
     (text.into_owned(), encoding)
 }
+
+/// `chardetng` 每次探测最多喂入的字节数。整篇喂入代价是线性的（10 MB 约 1.4 s），
+/// 而小说正文前 256 KiB 的字节分布足以判断编码，故截断采样换取秒级启动。
+const DETECT_SAMPLE_LIMIT: usize = 256 * 1024;
 
 /// 只做探测，不消费文本。
 #[must_use]
@@ -27,9 +35,14 @@ pub fn detect_encoding(bytes: &[u8]) -> &'static Encoding {
     if let Some((encoding, _)) = sniff_bom(bytes) {
         return encoding;
     }
+    // 整篇都是合法 UTF-8 时直接判 UTF-8：`from_utf8` 是单遍校验，比 chardetng 快一个量级；
+    // 也避免采样截断到半个多字节字符后被误判成 GB18030。
+    if std::str::from_utf8(bytes).is_ok() {
+        return UTF_8;
+    }
     // 本地小说文件不涉及 ISO-2022-JP；全合法 UTF-8 时优先判为 UTF-8。
     let mut detector = chardetng::EncodingDetector::new(chardetng::Iso2022JpDetection::Deny);
-    detector.feed(bytes, true);
+    detector.feed(&bytes[..bytes.len().min(DETECT_SAMPLE_LIMIT)], true);
     detector.guess(None, chardetng::Utf8Detection::Allow)
 }
 
@@ -155,6 +168,22 @@ mod tests {
         let (decoded, used) = decode_bytes(&bytes, Some(GBK));
         assert_eq!(decoded, text);
         assert_eq!(used, GBK);
+    }
+
+    #[test]
+    fn large_files_are_still_detected_correctly() {
+        // 超过采样上限 (256 KiB) 时只看开头一段；GBK 与 UTF-8 各来一份。
+        let unit = "第一章 起航\n\n这是一段用于检测编码的中文正文，长度足够覆盖采样窗口。\n\n";
+        let repeats = super::DETECT_SAMPLE_LIMIT / unit.len() + 64;
+
+        let utf8 = unit.repeat(repeats);
+        assert!(utf8.len() > super::DETECT_SAMPLE_LIMIT);
+        assert_eq!(detect_encoding(utf8.as_bytes()), UTF_8);
+        assert_eq!(decode_bytes(utf8.as_bytes(), None).0, utf8);
+
+        let (gbk, _, _) = GBK.encode(&utf8);
+        assert_eq!(detect_encoding(&gbk), GBK);
+        assert_eq!(decode_bytes(&gbk, None).0, utf8);
     }
 
     #[test]

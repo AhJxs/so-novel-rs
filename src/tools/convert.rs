@@ -31,7 +31,7 @@ pub fn run_convert(
     let book = load_path(source, &options)?;
     on_progress(ToolProgress::new(ToolStage::Loading, 1, 1));
 
-    // 逐章渲染是整个流程里最耗时的一段，按章回报进度；跨步回报避免几千章刷爆 UI。
+    // 逐章渲染按章回报进度；跨步回报避免几千章刷爆 UI。
     let total = book.chapters.len();
     let stride = (total / 200).max(1);
     let mut rendered: Vec<RenderedChapter> = Vec::with_capacity(total);
@@ -48,15 +48,27 @@ pub fn run_convert(
     }
 
     std::fs::create_dir_all(out_dir)?;
-    on_progress(ToolProgress::new(ToolStage::Writing, 0, 1));
+    on_progress(ToolProgress::new(ToolStage::Writing, 0, total));
     let exporter = exporter_for(target, txt_encoding);
     let cover = if matches!(target, ExportFormat::Epub) {
         book.cover.as_deref()
     } else {
         None
     };
-    let path = exporter.merge_with_cover(&book.to_book(source), &rendered, out_dir, cover)?;
-    on_progress(ToolProgress::new(ToolStage::Writing, 1, 1));
+    // 写盘阶段由导出器逐章回报（EPUB 压缩、PDF 排版都发生在逐章处理里），
+    // 同样跨步上报，避免几千章刷爆 UI 通道。
+    let path = exporter.merge_with_progress(
+        &book.to_book(source),
+        &rendered,
+        out_dir,
+        cover,
+        &mut |done| {
+            if done == total || done % stride == 0 {
+                on_progress(ToolProgress::new(ToolStage::Writing, done, total));
+            }
+        },
+    )?;
+    on_progress(ToolProgress::new(ToolStage::Writing, total, total));
     Ok(path)
 }
 

@@ -22,7 +22,9 @@ use tokio::sync::mpsc;
 use crate::config::{ExportFormat, LangType};
 use crate::desktop::components::PageHeader;
 use crate::desktop::model::AppModel;
-use crate::tools::{ToolProgress, ToolRequest, ToolStage, detect_file_encoding, run_with_progress};
+use crate::tools::{
+    StageWeights, ToolProgress, ToolRequest, ToolStage, detect_file_encoding, run_with_progress,
+};
 
 /// 支持的源文件扩展名（文件选择器过滤用）。
 const SOURCE_EXTENSIONS: &[&str] = &["txt", "md", "markdown", "html", "htm", "epub", "zip"];
@@ -671,13 +673,18 @@ impl ToolsPage {
             let progress = form
                 .progress
                 .unwrap_or(ToolProgress::new(ToolStage::Loading, 0, 1));
+            // 权重随工具 / 目标格式变化：PDF 写盘占九成耗时，TXT 几乎只有读写。
+            let weights = match self.kind {
+                ToolKind::Convert => StageWeights::for_format(form.target_format),
+                ToolKind::Encoding | ToolKind::Zhconv => StageWeights::plain_file(),
+            };
             let stage: SharedString = t!(progress.stage.label_key()).into();
             let detail: SharedString = if progress.total > 1 {
                 format!("{stage} {}/{}", progress.done, progress.total).into()
             } else {
                 stage
             };
-            let percent: SharedString = format!("{:.0}%", progress.percent()).into();
+            let percent: SharedString = format!("{:.0}%", progress.percent(weights)).into();
             column = column.child(
                 v_flex()
                     .w_full()
@@ -693,7 +700,7 @@ impl ToolsPage {
                     )
                     .child(
                         Progress::new(("tool-progress", self.kind.index() as u64))
-                            .value(progress.percent()),
+                            .value(progress.percent(weights)),
                     ),
             );
         }
