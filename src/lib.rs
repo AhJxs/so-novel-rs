@@ -55,5 +55,6 @@ pub mod library;
 pub mod logger;
 pub mod models;
 pub mod parser;
+pub mod reader;
 pub mod tools;
 pub mod utils;
