@@ -51,6 +51,7 @@ pub mod export;
 pub mod http;
 pub mod i18n;
 pub mod js;
+pub mod library;
 pub mod logger;
 pub mod models;
 pub mod parser;
