@@ -8320,6 +8320,10 @@ git commit -m "feat(reader): 滚动模式、目录抽屉与排版面板"
 
 ### Task 19: 翻页模式（整章连续排版 + 视口窗口）
 
+> **本任务的文件清单多一项：`src/reader/layout.rs`** —— 把 `count_f32` 的可见性从模块私有
+> 放宽到 `pub(crate)`（`content_view::measure_lines` 的估算分支要用它，避免在新文件里再写一条
+> `#[allow(clippy::cast_precision_loss)]`）。只改这一个函数的可见性与文档注释，不动实现。
+
 **Files:**
 - Create: `src/desktop/pages/reader/content_view.rs`
 - Modify: `src/desktop/pages/reader/mod.rs`（`mod content_view;`）
@@ -8439,7 +8443,12 @@ pub(super) fn measure_lines(
             .map(|line| line.wrap_boundaries.len() + 1)
             .sum::<usize>()
             .max(1),
-        _ => ((text.chars().count() as f32 * font_size / wrap_width.max(1.0)).ceil() as usize).max(1),
+        _ => {
+            // 字符数 → f32 只经由 `layout::count_f32` 这一处转换（那里有唯一一条
+            // `cast_precision_loss` 的说明性放行），这里再写一个 `as f32` 会多一条 allow。
+            let chars = crate::reader::layout::count_f32(text.chars().count());
+            ((chars * font_size / wrap_width.max(1.0)).ceil() as usize).max(1)
+        }
     }
 }
 
@@ -8780,6 +8789,30 @@ struct PageCache {
     }
 ```
 
+**Step 4b：把全书百分比抽成一份**
+
+`render_chapter_nav`（Task 18 已落地）里有一段算全书的百分比，`render_page_nav` 不要再写第二份。
+把 `render_chapter_nav` 开头那段（注释连同代码）换成对这个方法的调用，方法插在 `render_chapter_nav` 之前：
+
+```rust
+    /// 全书百分比：(章节下标 + 章内比例) / 章节数。
+    ///
+    /// 全书的章节数、章节下标都远小于 2^32；经 u32 转 f64 精确，且不触发
+    /// `cast_precision_loss`（该 lint 没有全局放行）。
+    fn book_percent(&self, count: usize) -> f64 {
+        if count == 0 {
+            return 0.0;
+        }
+        let chapter = f64::from(u32::try_from(self.chapter).unwrap_or(u32::MAX));
+        let total = f64::from(u32::try_from(count).unwrap_or(u32::MAX));
+        let ratio = f64::from(self.chapter_ratio.clamp(0.0, 1.0));
+        ((chapter + ratio) / total * 100.0).clamp(0.0, 100.0)
+    }
+```
+
+`render_chapter_nav` 里原来的 `let percent = if count == 0 { ... };` 整段删掉，改成
+`let percent = self.book_percent(count);`；它后面 `{percent:.0}` 的格式化保持不变。
+
 - [ ] **Step 5: 渲染翻页正文**
 
 把 Task 18 的 `fn render_body` 整体替换为下面这段（`render_scroll_body` 也一并替换，改成复用 `chapter_column`）：
@@ -8931,12 +8964,9 @@ struct PageCache {
     }
 
     fn render_page_nav(&self, pages: usize, count: usize, cx: &mut Context<Self>) -> impl IntoElement {
-        let percent = if count == 0 {
-            0.0
-        } else {
-            ((self.chapter as f32 + self.chapter_ratio.clamp(0.0, 1.0)) / count as f32 * 100.0)
-                .clamp(0.0, 100.0)
-        };
+        // 与滚动模式的页脚共用一份：`as f32` 会触发 `cast_precision_loss`（无全局放行），
+        // 第三份百分比实现只会让两者漂移。
+        let percent = self.book_percent(count);
         let at_end = self.chapter + 1 >= count && self.page_index + 1 >= pages;
         div()
             .flex()
@@ -9015,11 +9045,9 @@ struct PageCache {
             "down" => self.scroll_by_step(1.0),
             "home" => self.scroll_to_ratio(0.0),
             "end" => self.scroll_to_ratio(1.0),
-            "t" => {
-                self.toc_open = !self.toc_open;
-                self.typography_open = false;
-                cx.notify();
-            }
+            // 不要退回 Task 18 之前的写法：关目录必须走 `toggle_toc`（它把焦点从过滤框
+            // 收回正文），Esc 关闭必须走 `window.defer`（`cx.listener` 正租着本实体）。
+            "t" => self.toggle_toc(window, cx),
             "m" => self.toggle_mode(cx),
             "escape" => {
                 if self.typography_open {
@@ -9030,7 +9058,7 @@ struct PageCache {
                     self.toc_open = false;
                     cx.notify();
                 } else if let Some(handler) = self.close_handler.clone() {
-                    handler(window, cx);
+                    window.defer(cx, move |window, cx| handler(window, cx));
                 }
             }
             _ => return,
@@ -9044,6 +9072,9 @@ struct PageCache {
                 "left" | "right" | "pageup" | "pagedown" | "space" | "up" | "down" | "home" | "end"
             )
         {
+            // `set_offset` 不会自己重绘（Task 18 修的 I3），翻页模式则由 `goto_page` 的
+            // `cx.notify()` 负责，所以只在滚动模式下补这一下。
+            cx.notify();
             self.schedule_progress_commit(cx);
         }
 ```
