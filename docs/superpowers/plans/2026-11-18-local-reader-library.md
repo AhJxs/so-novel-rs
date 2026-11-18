@@ -549,13 +549,19 @@ mod tests {
     }
 
     #[test]
-    fn path_key_upcases_only_on_windows() {
-        let key = normalize_path_key(Path::new("C:/Books/Novel.TXT"));
+    fn path_key_lowercases_only_on_windows() {
+        // 用真实存在的临时文件：既走 canonicalize 成功分支，又不依赖 C:\Books 是否存在。
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("Novel.TXT");
+        std::fs::write(&path, b"x").unwrap();
+        let key = normalize_path_key(&path);
         if cfg!(windows) {
-            assert_eq!(key, "c:\\books\\novel.txt");
+            assert_eq!(key, key.to_lowercase());
+            assert!(key.ends_with("novel.txt"));
         } else {
-            assert!(key.ends_with("Novel.TXT") || key.ends_with("Books/Novel.TXT"));
+            assert!(key.ends_with("Novel.TXT"));
         }
+        assert_eq!(key, normalize_path_key(&path));
     }
 
     #[test]
@@ -655,6 +661,7 @@ pub mod library;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use rust_i18n::t;
 use serde::{Deserialize, Serialize};
 
 use crate::config::ReadingMode;
@@ -720,14 +727,16 @@ impl Book {
     ///
     /// # Errors
     ///
-    /// 文件不存在 / 不是普通文件 / 后缀不支持时返回中文错误文案（可直接进 toast）。
+    /// 文件不存在 / 不是普通文件 / 后缀不支持时返回可直接进 toast 的文案：
+    /// 后两种走 `t!` 本地化，IO 失败透传系统原始文案。
     #[tracing::instrument(name = "library::Book::from_file", skip_all, fields(path = %path.display()))]
     pub fn from_file(path: &Path, origin: BookOrigin) -> Result<Self, String> {
         let metadata = std::fs::metadata(path).map_err(|error| error.to_string())?;
         if !metadata.is_file() {
-            return Err("不是文件".to_string());
+            return Err(t!("Library.error.not_a_file").to_string());
         }
-        let format = BookFormat::from_path(path).ok_or_else(|| "不支持的文件格式".to_string())?;
+        let format = BookFormat::from_path(path)
+            .ok_or_else(|| t!("Library.error.unsupported_format").to_string())?;
         let path_key = normalize_path_key(path);
         Ok(Self {
             id: id_for_key(&path_key),
@@ -2224,6 +2233,7 @@ pub use store::{LIBRARY_VERSION, LibraryStore};
 use std::collections::HashSet;
 use std::path::Path;
 
+use rust_i18n::t;
 use serde::{Deserialize, Serialize};
 
 use super::book::{Book, id_for_key, now_unix};
@@ -2669,7 +2679,7 @@ pub struct ImportOutcome {
             if BookFormat::from_path(path).is_none() {
                 outcome
                     .failed
-                    .push((path.clone(), "不支持的文件格式".to_string()));
+                    .push((path.clone(), t!("Library.error.unsupported_format").to_string()));
                 continue;
             }
             let book = match Book::from_file(path, BookOrigin::Imported) {
@@ -3036,11 +3046,14 @@ use crate::config::ReadingMode;
             .books
             .iter()
             .position(|book| book.id == old_id)
-            .ok_or_else(|| AppError::not_found("书籍不存在"))?;
-        let format = BookFormat::from_path(new_path)
-            .ok_or_else(|| AppError::business("不支持的文件格式"))?;
+            .ok_or_else(|| AppError::not_found(t!("Library.error.book_not_found").to_string()))?;
+        let format = BookFormat::from_path(new_path).ok_or_else(|| {
+            AppError::business(t!("Library.error.unsupported_format").to_string())
+        })?;
         if format != self.books[index].format {
-            return Err(AppError::business("选择的文件格式与书籍不一致"));
+            return Err(AppError::business(
+                t!("Library.error.format_mismatch").to_string(),
+            ));
         }
         let fresh = Book::from_file(new_path, self.books[index].origin)
             .map_err(AppError::business)?;
@@ -3049,7 +3062,9 @@ use crate::config::ReadingMode;
             .iter()
             .any(|book| book.path_key == fresh.path_key && book.id != old_id)
         {
-            return Err(AppError::conflict("该文件已在书架中"));
+            return Err(AppError::conflict(
+                t!("Library.error.already_on_shelf").to_string(),
+            ));
         }
         let book = &mut self.books[index];
         book.id = fresh.id;
@@ -5127,7 +5142,9 @@ use super::pages::{LibraryPage, ReaderPage, SearchPage, SettingsPage, SourcesPag
     /// 打开阅读器；书已不在书架或格式不可读时推错误通知。
     pub fn open_reader(&mut self, book_id: &str, window: &mut Window, cx: &mut Context<Self>) {
         let Some(book) = self.model.read(cx).book_snapshot(book_id) else {
-            self.model.update(cx, |model, _| model.push_error("书籍已不在书架中".to_string()));
+            self.model.update(cx, |model, _| {
+                model.push_error(t!("Library.error.book_not_found").to_string())
+            });
             return;
         };
         if !book.format.is_readable() {
@@ -10840,6 +10857,29 @@ Library:
       en: "%{file}: %{err}"
       zh-CN: "%{file}：%{err}"
       zh-TW: "%{file}：%{err}"
+  # 用户可见错误摘要（数据层直接 `t!` 后进 toast / 导入失败列表）。
+  # IO 失败不透传 key，直接拼系统原文。
+  error:
+    not_a_file:
+      en: "Not a file"
+      zh-CN: 不是文件
+      zh-TW: 不是檔案
+    unsupported_format:
+      en: "Unsupported file format"
+      zh-CN: 不支持的文件格式
+      zh-TW: 不支援的檔案格式
+    book_not_found:
+      en: "That book is no longer on the shelf"
+      zh-CN: 书籍已不在书架中
+      zh-TW: 書籍已不在書架中
+    format_mismatch:
+      en: "The chosen file has a different format"
+      zh-CN: 选择的文件格式与书籍不一致
+      zh-TW: 選擇的檔案格式與書籍不一致
+    already_on_shelf:
+      en: "That file is already on the shelf"
+      zh-CN: 该文件已在书架中
+      zh-TW: 該檔案已在書架中
   info:
     title:
       en: "Book info"
@@ -11357,6 +11397,11 @@ Reader:
         "Library.import.filter_all",
         "Library.import.done",
         "Library.import.failed_item",
+        "Library.error.not_a_file",
+        "Library.error.unsupported_format",
+        "Library.error.book_not_found",
+        "Library.error.format_mismatch",
+        "Library.error.already_on_shelf",
         "Library.info.title",
         "Library.info.unknown",
         "Library.info.format",
