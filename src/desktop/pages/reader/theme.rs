@@ -20,18 +20,24 @@ pub struct ReaderColors {
 /// 按主题给出配色；`ReaderTheme::App` 跟随应用主题。
 #[must_use]
 pub fn reader_colors(theme: ReaderTheme, cx: &gpui_kit::App) -> ReaderColors {
-    match theme {
-        ReaderTheme::Paper => palette(0x00f7_f4ec, 0x002b_2a26, 0x00f3_d98b, 0x00e8_b93f),
-        ReaderTheme::Sepia => palette(0x00f0_e2c8, 0x004a_3b24, 0x00e9_cf95, 0x00d9_a94a),
-        ReaderTheme::Night => palette(0x001c_1d21, 0x00c9_c9c4, 0x004a_4a20, 0x00b8_a54a),
-        ReaderTheme::Green => palette(0x00dc_e8d5, 0x0024_331f, 0x00bc_d98f, 0x008f_bf5a),
-        ReaderTheme::App => ReaderColors {
-            background: cx.theme().background,
-            foreground: cx.theme().foreground,
-            highlight: cx.theme().selection,
-            active_highlight: cx.theme().accent,
-        },
-    }
+    builtin_colors(theme).unwrap_or_else(|| ReaderColors {
+        background: cx.theme().background,
+        foreground: cx.theme().foreground,
+        highlight: cx.theme().selection,
+        active_highlight: cx.theme().accent,
+    })
+}
+
+/// 内置主题的配色；`ReaderTheme::App` 跟随应用主题，没有内置表。
+fn builtin_colors(theme: ReaderTheme) -> Option<ReaderColors> {
+    let (background, foreground, highlight, active_highlight) = match theme {
+        ReaderTheme::Paper => (0xf7_f4ec, 0x2b_2a_26, 0xf3_d98b, 0xe8_b93f),
+        ReaderTheme::Sepia => (0xf0_e2c8, 0x4a_3b24, 0xe9_cf95, 0xd9_a94a),
+        ReaderTheme::Night => (0x1c_1d21, 0xc9_c9c4, 0x4a_4a20, 0xb8_a54a),
+        ReaderTheme::Green => (0xdc_e8d5, 0x24_331f, 0xbc_d98f, 0x8f_bf5a),
+        ReaderTheme::App => return None,
+    };
+    Some(palette(background, foreground, highlight, active_highlight))
 }
 
 fn palette(
@@ -69,17 +75,64 @@ mod tests {
 
     use super::*;
 
-    /// 每个内置主题的背景 / 前景都必须与调色板表一致：改一个十六进制值就会红。
+    /// 每个内置主题都必须可读：前景与背景对比度够，高亮与底色、当前命中与普通命中可区分。
+    ///
+    /// 故意不比对具体十六进制——换配色是设计决定，不该让测试红。这里钉的是真会写错的
+    /// 性质：夜间主题写成浅色、前景与背景调反、高亮色撞上底色。
     #[test]
-    fn palettes_match_the_table() {
-        let paper = palette(0xf7_f4ec, 0x2b_2a_26, 0xf3_d98b, 0xe8_b93f);
-        assert_eq!(paper.background, rgb(0xf7_f4ec));
-        assert_eq!(paper.foreground, rgb(0x2b_2a_26));
-        assert_eq!(paper.highlight, rgb(0xf3_d98b));
-        assert_eq!(paper.active_highlight, rgb(0xe8_b93f));
+    fn builtin_palettes_stay_readable() {
+        let themes = [
+            ReaderTheme::Paper,
+            ReaderTheme::Sepia,
+            ReaderTheme::Night,
+            ReaderTheme::Green,
+        ];
+        for theme in themes {
+            let colors = builtin_colors(theme).expect("内置主题必须有调色板");
+            let contrast = contrast_ratio(colors.background, colors.foreground);
+            assert!(
+                contrast >= 4.5,
+                "{theme:?} 的前景与背景对比度只有 {contrast:.2}，读不下去"
+            );
+            assert_ne!(
+                colors.highlight, colors.background,
+                "{theme:?} 高亮与底色相同"
+            );
+            assert_ne!(
+                colors.active_highlight, colors.highlight,
+                "{theme:?} 当前命中与普通命中相同"
+            );
+        }
+        assert!(
+            builtin_colors(ReaderTheme::App).is_none(),
+            "App 主题跟随应用主题，不能有内置表"
+        );
+    }
 
-        let night = palette(0x1c_1d21, 0xc9_c9c4, 0x4a_4a20, 0xb8_a54a);
-        assert_eq!(night.background, rgb(0x1c_1d21));
-        assert_ne!(night.background, paper.background);
+    fn contrast_ratio(first: Hsla, second: Hsla) -> f32 {
+        let first = luminance(first);
+        let second = luminance(second);
+        let (lighter, darker) = if first >= second {
+            (first, second)
+        } else {
+            (second, first)
+        };
+        (lighter + 0.05) / (darker + 0.05)
+    }
+
+    /// WCAG 相对亮度。
+    fn luminance(color: Hsla) -> f32 {
+        let rgba = Rgba::from(color);
+        let channel = |value: f32| {
+            if value <= 0.039_28 {
+                value / 12.92
+            } else {
+                ((value + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        0.0722f32.mul_add(
+            channel(rgba.b),
+            0.2126f32.mul_add(channel(rgba.r), 0.7152 * channel(rgba.g)),
+        )
     }
 }
