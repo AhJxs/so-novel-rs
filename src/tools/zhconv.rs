@@ -64,9 +64,8 @@ pub fn run_zhconv(
 mod tests {
     #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
 
-    use crate::config::LangType;
-
     use super::run_zhconv;
+    use crate::config::LangType;
 
     #[test]
     fn converts_simplified_txt_to_traditional() {

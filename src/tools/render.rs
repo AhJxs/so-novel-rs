@@ -81,10 +81,9 @@ pub(crate) fn escape_html(input: &str) -> String {
 mod tests {
     #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
 
+    use super::render_chapter;
     use crate::config::ExportFormat;
     use crate::tools::source_book::SourceChapter;
-
-    use super::render_chapter;
 
     fn chapter() -> SourceChapter {
         SourceChapter {

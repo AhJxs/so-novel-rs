@@ -14,13 +14,12 @@ pub mod zhconv;
 
 use std::path::PathBuf;
 
+pub use encoding::detect_file_encoding;
+pub use source_book::{SourceBook, SourceChapter};
 use thiserror::Error;
 
 use crate::config::{ExportFormat, LangType};
 use crate::export::ExportError;
-
-pub use encoding::detect_file_encoding;
-pub use source_book::{SourceBook, SourceChapter};
 
 /// 一次工具请求（UI → 业务层）。
 #[derive(Debug, Clone)]

@@ -76,10 +76,9 @@ pub fn run_convert(
 mod tests {
     #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
 
+    use super::run_convert;
     use crate::config::ExportFormat;
     use crate::tools::ToolError;
-
-    use super::run_convert;
 
     #[test]
     fn converts_txt_to_markdown() {

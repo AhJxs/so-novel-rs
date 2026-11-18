@@ -9,9 +9,8 @@ use std::path::Path;
 
 use encoding_rs::Encoding;
 
-use super::ToolError;
 use super::source_book::SourceBook;
-use super::split;
+use super::{ToolError, split};
 
 /// 加载选项。
 #[derive(Debug, Clone, Copy, Default)]
