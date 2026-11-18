@@ -78,7 +78,51 @@ pub fn split_chapters(
             });
         }
     }
-    chapters
+    split_oversized(chapters)
+}
+
+/// 单章字符上限。没有可识别标题的文件会退回成「整本一章」，不切块的话一帧要排整本书；
+/// 个别超长章节同理。1 万字约 30–40 行页宽下的十几页，单帧排版可接受。
+const MAX_CHAPTER_CHARS: usize = 10_000;
+
+/// 把超长章节按段落切块；第一块沿用原标题，后续块标题追加「（2）」「（3）」。
+fn split_oversized(chapters: Vec<SourceChapter>) -> Vec<SourceChapter> {
+    let mut out = Vec::with_capacity(chapters.len());
+    for chapter in chapters {
+        let total: usize = chapter
+            .paragraphs
+            .iter()
+            .map(|paragraph| paragraph.chars().count() + 1)
+            .sum();
+        if total <= MAX_CHAPTER_CHARS {
+            out.push(chapter);
+            continue;
+        }
+        let mut parts: Vec<Vec<String>> = Vec::new();
+        let mut current: Vec<String> = Vec::new();
+        let mut size = 0_usize;
+        for paragraph in chapter.paragraphs {
+            let len = paragraph.chars().count() + 1;
+            if !current.is_empty() && size + len > MAX_CHAPTER_CHARS {
+                parts.push(std::mem::take(&mut current));
+                size = 0;
+            }
+            size += len;
+            current.push(paragraph);
+        }
+        if !current.is_empty() {
+            parts.push(current);
+        }
+        for (index, paragraphs) in parts.into_iter().enumerate() {
+            let title = if index == 0 {
+                chapter.title.clone()
+            } else {
+                format!("{}（{}）", chapter.title, index + 1)
+            };
+            out.push(SourceChapter { title, paragraphs });
+        }
+    }
+    out
 }
 
 fn default_regex() -> Regex {
@@ -145,6 +189,19 @@ mod tests {
         let chapters = split_chapters(&paragraphs, &compile_pattern(None).unwrap(), "书");
         assert_eq!(chapters.len(), 1);
         assert_eq!(chapters[0].title, "书");
+    }
+
+    #[test]
+    fn oversized_chapter_is_chunked() {
+        let long = "字".repeat(6_000);
+        let paragraphs = paragraphs(&["第一章 起", &long, &long, &long]);
+        let chapters = split_chapters(&paragraphs, &compile_pattern(None).unwrap(), "书");
+        // 前言空、第一章 3 段 × 6000 字 → 每块一段，共 3 块。
+        assert_eq!(chapters.len(), 3);
+        assert_eq!(chapters[0].title, "第一章 起");
+        assert_eq!(chapters[1].title, "第一章 起（2）");
+        assert_eq!(chapters[2].title, "第一章 起（3）");
+        assert!(chapters.iter().all(|c| c.paragraphs.len() == 1));
     }
 
     #[test]

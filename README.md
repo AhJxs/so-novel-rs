@@ -167,7 +167,7 @@ cargo build --release --target aarch64-unknown-linux-gnu    # Linux ARM64
 
 | 快捷键 | 功能 |
 |--------|------|
-| `Cmd/Ctrl + 1..5` | 直跳页面（搜索 / 任务 / 书库 / 书源 / 设置） |
+| `Cmd/Ctrl + 1..6` | 直跳页面（搜索 / 任务 / 书库 / 书源 / 工具 / 设置） |
 | `Cmd/Ctrl + B` | 折叠 / 展开 Sidebar |
 | `F6` / `Shift+F6` | 翻页（避开 Input 的 Tab 绑定） |
 | `Escape` | 关闭 Dialog / Sheet / Notification |

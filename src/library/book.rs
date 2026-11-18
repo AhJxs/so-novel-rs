@@ -151,8 +151,8 @@ pub enum BookFormat {
 impl BookFormat {
     /// `txt` / `epub` / `md|markdown` / `html|htm` / `zip` / `pdf`；未知后缀返回 `None`。
     ///
-    /// 白名单 [`crate::core::library::SUPPORTED_LIBRARY_EXTS`] 只决定「扫描时收哪些文件」，
-    /// 这里额外接受 `htm` / `markdown` 两个别名，供导入与重新定位用。
+    /// 书架扫描 / 导入 / 重新定位共用这一处：这是「哪些后缀算一本书」的唯一事实来源
+    /// （`htm` / `markdown` 是别名，同样收进书架）。
     #[must_use]
     pub fn from_extension(ext: &str) -> Option<Self> {
         match ext.to_ascii_lowercase().as_str() {

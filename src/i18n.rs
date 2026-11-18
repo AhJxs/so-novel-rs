@@ -174,8 +174,8 @@ mod tests {
     /// —— 必须覆盖该命令输出的每一个 `Library.*`；`Library.time.*` 由
     /// `utils::formatting` 的测试引用，同样算在内。
     /// `--exclude=i18n.rs` 不能省：常量本身就是带引号的 `"Library.*"` 字面量，不排除的话
-    /// 命令会把自己的清单也统计进去（`Reader.*` 由 69 变 72），自检从此自指，再也发现不了
-    /// 「常量写了但代码里没有」的 key。统计口径 = `src/` 下除 `i18n.rs` 外的代码引用。
+    /// 命令会把自己的清单也统计进去，自检从此自指，再也发现不了「常量写了但代码里没有」的 key。
+    /// 统计口径 = `src/` 下除 `i18n.rs` 外的代码引用。
     /// 书库改造前的旧词条（`Library.action_delete` 等）无代码引用，不进清单。
     const LIBRARY_KEYS: &[&str] = &[
         "Library.action_clear_filters",
@@ -295,6 +295,7 @@ mod tests {
         "Reader.error.action.open_external",
         "Reader.error.action.relink",
         "Reader.error.decode",
+        "Reader.error.decode_detail",
         "Reader.error.encoding",
         "Reader.error.epub",
         "Reader.error.io",

@@ -133,7 +133,7 @@ impl LibraryPage {
             };
             let paths: Vec<PathBuf> = files.iter().map(|file| file.path().to_path_buf()).collect();
             let _ = page.update(async_cx, |_page, cx| {
-                model.update(cx, |model, _cx| model.import_library_files(paths));
+                model.update(cx, |model, _cx| model.import_library_files(&paths));
                 cx.notify();
             });
         })
@@ -300,7 +300,7 @@ impl LibraryPage {
             .justify_center()
             .gap_3()
             .child(empty)
-            .child(
+            .child(if has_books {
                 h_flex()
                     .gap_2()
                     .child(
@@ -319,8 +319,27 @@ impl LibraryPage {
                             .on_click(cx.listener(|this, _ev, window, cx| {
                                 this.clear_filters(window, cx);
                             })),
-                    ),
-            )
+                    )
+            } else {
+                h_flex()
+                    .gap_2()
+                    .child(
+                        Button::new("shelf-empty-rescan")
+                            .primary()
+                            .icon(Icon::new(IconName::Search))
+                            .label(t!("Library.action_rescan"))
+                            .on_click(cx.listener(|this, _ev, _window, cx| this.rescan(cx))),
+                    )
+                    .child(
+                        Button::new("shelf-empty-import")
+                            .ghost()
+                            .icon(Icon::new(IconName::Plus))
+                            .label(t!("Library.action_import"))
+                            .on_click(cx.listener(|this, _ev, _window, cx| {
+                                this.pick_and_import(cx);
+                            })),
+                    )
+            })
             .into_any_element()
     }
 

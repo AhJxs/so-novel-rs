@@ -145,6 +145,8 @@ pub struct ReaderPage {
     immersive: bool,
     generation: u64,
     progress_dirty: bool,
+    /// 自动保存循环是否已经在跑；换编码 / 重新定位会再成功加载一次，不能各起一条。
+    autosave_running: bool,
     focus: FocusHandle,
     immersive_handler: Option<ImmersiveFn>,
     close_handler: Option<CloseReaderFn>,
@@ -179,10 +181,16 @@ impl ReaderPage {
             InputState::new(window, cx).placeholder(t!("Reader.search.placeholder").to_string())
         });
         let finished = book.progress.finished;
+        // 从未打开过的书（`updated_unix == 0`）用配置里的默认阅读方式；读过的书恢复上次的模式。
+        let mode = if book.progress.updated_unix == 0 {
+            model.read(cx).config.reader.clamped().default_mode
+        } else {
+            book.progress.mode
+        };
         let page = Self {
             model,
             book_id: book.id.clone(),
-            mode: book.progress.mode,
+            mode,
             chapter: book.progress.chapter,
             chapter_ratio: book.progress.chapter_ratio,
             book,
@@ -216,6 +224,7 @@ impl ReaderPage {
             immersive: false,
             generation: 1,
             progress_dirty: false,
+            autosave_running: false,
             focus,
             immersive_handler: None,
             close_handler: None,
@@ -259,7 +268,10 @@ impl ReaderPage {
         self.cancel_search();
         // 滚动防抖可能还没触发：关窗前先按当前滚动位置收一次比例，避免丢掉最后一屏。
         self.capture_scroll_ratio();
-        self.record_progress(cx);
+        // 打不开的书不该被记成「在读」：失败态没有可信的位置可写。
+        if matches!(self.load_state, LoadState::Ready) {
+            self.record_progress(cx);
+        }
         self.progress_dirty = false;
         self.persist_settings(cx);
         self.model.update(cx, |model, _| model.flush_library());
@@ -481,11 +493,21 @@ impl ReaderPage {
                     });
                 }
                 self.record_progress(cx);
-                Self::spawn_autosave(cx);
+                self.start_autosave(cx);
             }
             Err(error) => self.load_state = LoadState::Error(error),
         }
         cx.notify();
+    }
+
+    // `cx` 只读：`spawn_autosave` 收 `&Context`；写成 `&mut` 会撞 `needless_pass_by_ref_mut`。
+    fn start_autosave(&mut self, cx: &Context<Self>) {
+        // 换编码 / 重新定位都会再成功加载一次：只留一个循环，别让它们叠加。
+        if self.autosave_running {
+            return;
+        }
+        self.autosave_running = true;
+        Self::spawn_autosave(cx);
     }
 
     /// 每 5 s 把脏掉的进度落盘一次；实体被丢弃时循环自然结束。
@@ -563,7 +585,7 @@ impl ReaderPage {
         };
         let book_id = self.book_id.clone();
         self.model.update(cx, |model, _| {
-            model.record_reading_progress(&book_id, progress);
+            model.record_reading_progress(&book_id, &progress);
         });
         self.progress_dirty = true;
     }
@@ -598,6 +620,9 @@ impl ReaderPage {
             return;
         }
         self.chapter = index;
+        // 分页缓存属于旧章：不清掉的话同一帧里的第二次翻页会拿旧书页数继续跳（N → N+2）。
+        self.page_cache = None;
+        self.page_index = 0;
         self.invalidate_scroll_commit();
         self.chapter_ratio = 0.0;
         self.restore_pending = true;
@@ -773,6 +798,10 @@ impl ReaderPage {
 
     fn on_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         let key = event.keystroke.key.as_str();
+        // 字母快捷键不抢带修饰键的按键：Cmd/Ctrl+B 是侧边栏，不能让书签抽屉跟着开。
+        let plain = !(event.keystroke.modifiers.control
+            || event.keystroke.modifiers.alt
+            || event.keystroke.modifiers.platform);
         if self.shortcuts_blocked(window, cx) {
             if key == "escape" {
                 self.close_drawers(window, cx);
@@ -813,21 +842,21 @@ impl ReaderPage {
             "end" => self.scroll_to_ratio(1.0),
             // 不要退回 Task 18 之前的写法：关目录必须走 `toggle_toc`（它把焦点从过滤框
             // 收回正文），Esc 关闭必须走 `window.defer`（`cx.listener` 正租着本实体）。
-            "t" => self.toggle_toc(window, cx),
-            "s" => {
+            "t" if plain => self.toggle_toc(window, cx),
+            "s" if plain => {
                 self.toc_open = false;
                 self.typography_open = false;
                 let open = !self.search_open;
                 self.set_search_open(open, window, cx);
                 cx.notify();
             }
-            "b" => {
+            "b" if plain => {
                 self.typography_open = false;
                 let open = !self.bookmarks_open;
                 self.set_bookmarks_open(open, window, cx);
                 cx.notify();
             }
-            "m" => self.toggle_mode(cx),
+            "m" if plain => self.toggle_mode(cx),
             "f11" if !event.is_held => self.toggle_immersive(window, cx),
             "escape" => {
                 if self.toc_open
@@ -1014,7 +1043,11 @@ impl ReaderPage {
         }
 
         // EPUB 不经过编码标签，换编码毫无意义；只有 TXT 才有这组按钮。
-        if matches!(error, ReaderError::Decode(BookFormat::Txt, _)) {
+        // `InvalidEncoding` 来自 `library.json` 里的非法标签，换一个编码同样能修好。
+        if matches!(
+            error,
+            ReaderError::Decode(BookFormat::Txt, _) | ReaderError::InvalidEncoding(_)
+        ) {
             for &label in ENCODING_CHOICES {
                 actions.push(
                     Button::new(format!("reader-encoding-{label}"))
@@ -1089,7 +1122,9 @@ impl ReaderPage {
             .gap_3()
             .p_8()
             .child(div().text_lg().child(t!(error.message_key()).to_string()))
-            .child(div().text_sm().child(error.detail()))
+            .when_some(error.detail(), |el, detail| {
+                el.child(div().text_sm().child(detail))
+            })
             .child(
                 div()
                     .flex()

@@ -79,6 +79,14 @@ impl RootView {
         // 从 config 恢复上次折叠状态, 否则每次启动 sidebar 都会弹开。
         let sidebar_collapsed = model.read(cx).config.global.sidebar_collapsed;
 
+        // 原生关窗（标题栏 X）不经过任何 Action：挂到退出钩子上补一次落盘，
+        // 否则字号改动与最近 5 秒进度都会随窗口一起丢掉（`Quit` action 只覆盖 Cmd+Q）。
+        cx.on_app_quit(|root, cx| {
+            root.flush_before_quit(cx);
+            async {}
+        })
+        .detach();
+
         Self {
             model,
             current_page: NavPage::default(),
@@ -107,9 +115,11 @@ impl RootView {
             });
             return;
         };
-        if !book.format.is_readable() {
-            self.model.update(cx, |model, _| {
-                model.push_warning(t!("Library.status.unsupported").to_string());
+        // 文件丢了 / 格式读不了：按 spec 5.2 打开书籍信息（含重新定位入口），
+        // 而不是开一个注定失败的阅读器、或只弹一条 toast。
+        if book.missing || !book.format.is_readable() {
+            self.library_page.update(cx, |page, cx| {
+                page.open_info_dialog(book_id, window, cx);
             });
             return;
         }
@@ -145,6 +155,19 @@ impl RootView {
         cx.notify();
     }
 
+    /// 退出前的兜底落盘：有阅读器就走它自己的关闭契约（采位置、存字号、落库），
+    /// 没有也至少把书库与配置写一次。
+    fn flush_before_quit(&mut self, cx: &mut Context<Self>) {
+        if let Some(reader) = self.reader.take() {
+            reader.update(cx, ReaderPage::close_and_flush);
+        } else {
+            self.model.update(cx, |model, _| {
+                model.persist_settings();
+                model.flush_library();
+            });
+        }
+    }
+
     fn navigate(&mut self, page: NavPage, cx: &mut Context<Self>) {
         if self.current_page != page {
             self.current_page = page;
@@ -161,6 +184,10 @@ impl RootView {
     /// 新值写回 config 并落盘; Cmd+B 频率低, 每次写盘可接受。
     #[tracing::instrument(name = "RootView::toggle_sidebar", skip_all)]
     fn toggle_sidebar(&mut self, cx: &mut Context<Self>) {
+        // 阅读器是全屏阅读视图：侧边栏不可见，改它的折叠状态只会让用户莫名其妙。
+        if self.reader.is_some() {
+            return;
+        }
         self.sidebar_collapsed = !self.sidebar_collapsed;
         let new_value = self.sidebar_collapsed;
         self.model.update(cx, |m, _| {

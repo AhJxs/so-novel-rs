@@ -140,18 +140,31 @@ impl ReaderPage {
         let cancel = Arc::new(AtomicBool::new(false));
         self.search_cancel = Some(cancel.clone());
         cx.spawn(async move |this, cx| {
+            // 每批最多扫 6 ms，扫完让出一次；结果列表每 32 章才重绘 —— 每章都重绘会把
+            // 上千条命中行整个重建一遍，扫描反而更慢。整本书 3000 章应在几秒内扫完。
+            let mut since_notify = 0_usize;
             loop {
-                let more = this
-                    .update(cx, |page, cx| {
-                        page.search_step(generation, &needle, &cancel, cx)
-                    })
-                    .unwrap_or(false);
+                let started = std::time::Instant::now();
+                let mut more = true;
+                let mut scanned = 0_usize;
+                while more && started.elapsed() < Duration::from_millis(6) {
+                    more = this
+                        .update(cx, |page, cx| {
+                            page.search_step(generation, &needle, &cancel, cx)
+                        })
+                        .unwrap_or(false);
+                    scanned += 1;
+                }
+                since_notify += scanned;
+                if !more || since_notify >= 32 {
+                    since_notify = 0;
+                    let _ = this.update(cx, |_page, cx| cx.notify());
+                }
                 if !more {
                     break;
                 }
-                // 每章让出一次调度：整书扫描不会把输入框和滚动卡死。
                 cx.background_executor()
-                    .timer(Duration::from_millis(8))
+                    .timer(Duration::from_millis(4))
                     .await;
             }
         })
@@ -165,6 +178,12 @@ impl ReaderPage {
             cancel.store(true, Ordering::Relaxed);
         }
         self.search.scanning = false;
+        // 关掉抽屉 / 重载后不能把高亮留在正文上：没有可见的结果列表时，满屏黄块既无法
+        // 解释也无法清除。查询词保留，重新按回车可以再扫一遍。
+        self.search.groups.clear();
+        self.search.hits = 0;
+        self.search.active = None;
+        self.search.scanned = 0;
     }
 
     /// 扫一章；返回是否还有下一章要扫。
@@ -206,7 +225,6 @@ impl ReaderPage {
         if !more {
             self.search_cancel = None;
         }
-        cx.notify();
         more
     }
 

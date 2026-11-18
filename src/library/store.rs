@@ -237,6 +237,8 @@ impl LibraryStore {
                     book.size_bytes = file.size_bytes;
                     book.file_mtime = file.mtime;
                     book.missing = false;
+                    // 文件内容变了：上一次记录的编码对新字节未必成立，让它重新探测。
+                    book.encoding = None;
                     self.dirty = true;
                     if !book.metadata_edited {
                         meta_ids.push(book.id.clone());
@@ -820,6 +822,40 @@ mod tests {
         let book = store.get(&id).unwrap();
         assert!(book.hidden);
         assert_eq!(book.size_bytes, 3);
+    }
+
+    #[test]
+    fn merge_clears_stale_encoding_when_file_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.txt");
+        std::fs::write(&path, b"one").unwrap();
+        let mut store = LibraryStore::default();
+        let id = store.merge_scan(&[scanned(&path)]).remove(0);
+        assert!(store.set_encoding(&id, Some("GBK".to_string())));
+
+        // 重新下载成另一个文件：旧的编码标签对新字节未必成立，必须清掉重新探测。
+        std::fs::write(&path, b"one and more").unwrap();
+        let _ = store.merge_scan(&[scanned(&path)]);
+        let book = store.get(&id).unwrap();
+        assert_eq!(book.size_bytes, 12, "书还在，文件信息照旧刷新");
+        assert!(book.encoding.is_none(), "文件内容变了，旧编码标签必须清空");
+    }
+
+    #[test]
+    fn merge_keeps_encoding_when_file_is_unchanged() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.txt");
+        std::fs::write(&path, b"one").unwrap();
+        let mut store = LibraryStore::default();
+        let id = store.merge_scan(&[scanned(&path)]).remove(0);
+        assert!(store.set_encoding(&id, Some("GBK".to_string())));
+
+        // 文件没变就不该清编码：否则每次启动扫描都会把用户的显式选择丢掉。
+        let _ = store.merge_scan(&[scanned(&path)]);
+        assert_eq!(
+            store.get(&id).and_then(|book| book.encoding.clone()),
+            Some("GBK".to_string())
+        );
     }
 
     #[test]

@@ -144,10 +144,7 @@ impl AppModel {
     }
 
     /// 记录阅读位置（只改内存 + 标脏，由 drain 每 5s 落盘）。
-    // 调用方按值交出刚构造好的进度快照；`ReadingProgress` 全字段 Copy，clippy 建议改借用，
-    // 但后续阅读器调用点已按 brief 以按值传入，保持签名一致。
-    #[allow(clippy::needless_pass_by_value)]
-    pub fn record_reading_progress(&mut self, id: &str, progress: ReadingProgress) {
+    pub fn record_reading_progress(&mut self, id: &str, progress: &ReadingProgress) {
         self.library.store.record_progress(
             id,
             progress.chapter,
@@ -193,14 +190,11 @@ impl AppModel {
     }
 
     /// 导入一批文件（引用式，不复制）。完成后启动元数据提取。
-    // 一批文件由文件对话框按值交出，调用方随后不再使用；保持 `Vec` 与 Task 16 的
-    // `import_library_files(paths)` 调用点一致，避免调用方额外借用。
-    #[allow(clippy::needless_pass_by_value)]
-    pub fn import_library_files(&mut self, paths: Vec<PathBuf>) {
+    pub fn import_library_files(&mut self, paths: &[PathBuf]) {
         if paths.is_empty() {
             return;
         }
-        let outcome = self.library.store.import_files(&paths);
+        let outcome = self.library.store.import_files(paths);
         self.library.enqueue_meta(outcome.meta_ids);
         self.library.bump();
         self.persist_library();

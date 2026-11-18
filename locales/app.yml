@@ -1505,6 +1505,10 @@ Reader:
       en: "Failed to decode the text"
       zh-CN: 文本解码失败
       zh-TW: 文字解碼失敗
+    decode_detail:
+      en: "%{broken} replacement characters in %{total} sampled — the file may use a different encoding"
+      zh-CN: 疑似编码不匹配（样本 %{total} 字中 %{broken} 个替换字符）
+      zh-TW: 疑似編碼不符（樣本 %{total} 字中 %{broken} 個取代字元）
     encoding:
       en: "Unknown or unsupported encoding"
       zh-CN: 未知或不支持的编码

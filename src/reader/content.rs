@@ -2,6 +2,8 @@
 
 use std::path::Path;
 
+use rust_i18n::t;
+
 use crate::library::BookFormat;
 use crate::tools::ToolError;
 use crate::tools::load::{LoadOptions, load_path};
@@ -65,10 +67,19 @@ impl ReaderError {
         }
     }
 
-    /// 技术细节（文件名 / 结构错误），UI 用弱化小字展示。
+    /// 技术细节（系统错误原文 / 无法识别的编码标签），UI 用弱化小字展示。
+    ///
+    /// 没有可展示的细节时返回 `None`：`MissingFile` 之类的中文 `Display` 是给日志看的，
+    /// 标题已经由 `message_key()` 翻译过，再印一遍既重复又绕过 `t!`。
     #[must_use]
-    pub fn detail(&self) -> String {
-        self.to_string()
+    pub fn detail(&self) -> Option<String> {
+        match self {
+            Self::MissingFile | Self::UnsupportedFormat(_) | Self::NoContent | Self::Epub(_) => {
+                None
+            }
+            Self::Io(error) => Some(error.to_string()),
+            Self::Decode(_, message) | Self::InvalidEncoding(message) => Some(message.clone()),
+        }
     }
 }
 
@@ -207,7 +218,7 @@ fn check_decoded_text(format: BookFormat, chapters: &[ReaderChapter]) -> Result<
     {
         return Err(ReaderError::Decode(
             format,
-            format!("疑似编码不匹配（样本 {total} 字中 {broken} 个替换字符）"),
+            t!("Reader.error.decode_detail", total = total, broken = broken).to_string(),
         ));
     }
     Ok(())
@@ -413,6 +424,33 @@ mod tests {
             load_book(&dir.path().join("nope.txt"), BookFormat::Txt, None),
             Err(ReaderError::MissingFile)
         ));
+    }
+
+    #[test]
+    fn detail_only_exposes_technical_text() {
+        // 中文 `Display` 只给日志看：标题已由 `message_key()` 翻译过，再当成 UI 细节就重复了。
+        assert!(ReaderError::MissingFile.detail().is_none());
+        assert!(ReaderError::NoContent.detail().is_none());
+        assert!(
+            ReaderError::UnsupportedFormat(BookFormat::Pdf)
+                .detail()
+                .is_none()
+        );
+        assert!(ReaderError::Epub("坏 zip".to_string()).detail().is_none());
+        assert_eq!(
+            ReaderError::Decode(BookFormat::Txt, "msg".to_string()).detail(),
+            Some("msg".to_string())
+        );
+        assert_eq!(
+            ReaderError::InvalidEncoding("klingon".to_string()).detail(),
+            Some("klingon".to_string())
+        );
+        assert!(
+            ReaderError::Io(std::io::Error::from(std::io::ErrorKind::PermissionDenied))
+                .detail()
+                .is_some(),
+            "系统错误原文仍要作为细节展示"
+        );
     }
 
     #[test]

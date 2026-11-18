@@ -207,7 +207,7 @@ impl LibraryPage {
     }
 
     /// 书籍信息（只读）。
-    pub(super) fn open_info_dialog(
+    pub(crate) fn open_info_dialog(
         &self,
         book_id: &str,
         window: &mut Window,
