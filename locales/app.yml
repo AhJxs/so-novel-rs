@@ -1613,7 +1613,7 @@ Reader:
       zh-TW: 按 Enter 搜尋 · Esc 關閉
     # %{done} / %{total} 已扫描章数。
     scanning:
-      en: "Scanning %{done} / %{total} chapters"
+      en: "Scanning chapters: %{done} / %{total}"
       zh-CN: 正在扫描 %{done} / %{total} 章
       zh-TW: 正在掃描 %{done} / %{total} 章
     results:
