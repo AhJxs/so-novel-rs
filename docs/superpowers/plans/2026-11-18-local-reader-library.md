@@ -9813,6 +9813,31 @@ git commit -m "feat(reader): 书内搜索与命中高亮"
 
 ### Task 21: 书签面板
 
+**Task 19/20 定案、本任务必须照做（本任务的代码块写于翻页模式与搜索面板之前）**
+
+- **`goto_position` 改位置之前要先作废两样东西**，与 `goto_hit` 一致：
+
+  ```rust
+          // 书签可能在当前章：指纹不变时分页缓存会直接早退、`page_index` 不追随新比例。
+          self.invalidate_scroll_commit();
+          self.page_cache = None;
+          self.chapter = chapter.min(count - 1);
+  ```
+
+- **`current_excerpt` 里的 `as f32` 会撞 `clippy::cast_precision_loss`**（该 lint 无全局放行）：
+  `chapter.paragraphs.len() as f32` 改成 `crate::reader::layout::count_f32(chapter.paragraphs.len())`。
+
+- **书签抽屉也是右侧抽屉，宽度同样要进 `ensure_pagination` 的 `dock`**。在
+  `bookmarks_panel.rs` 里加 `pub(super) const BOOKMARKS_WIDTH: f32 = 300.0;`，
+  抽屉本体用 `px(BOOKMARKS_WIDTH)`，`dock` 改成「按当前开着的抽屉逐个累加」
+  （目录 300 / 搜索 320 / 书签 300，三者互斥所以最多一个，但按累加写更稳）。
+
+- **开合抽屉走一个入口**：像 `set_search_open` 那样加
+  `pub(super) fn set_bookmarks_open(&mut self, open: bool, window: &mut Window, cx: &mut Context<Self>)`，
+  关的时候调 `self.focus_body(window, cx)`。抽屉卸掉后焦点若还留在里面，
+  `shortcuts_blocked` 之外的快捷键会全部失灵（Task 18/20 的同类坑）。工具栏按钮、
+  `b` 键、Esc 分支都走它，不要各处直写 `self.bookmarks_open = ...`。
+
 **Files:**
 - Create: `src/desktop/pages/reader/bookmarks_panel.rs`
 - Modify: `src/desktop/pages/reader/mod.rs`（`mod bookmarks_panel;`）
