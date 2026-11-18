@@ -23,5 +23,6 @@ pub use actions::{
     ShowTools, ToggleSidebar,
 };
 pub use nav::{NavPage, register_key_bindings};
+pub use pages::LibraryPage;
 pub use root::RootView;
 pub use run::run;

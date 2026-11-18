@@ -123,7 +123,7 @@ fn local_tz_offset_secs() -> i64 {
     }
 }
 
-/// `u64` 版本，便于 `LibraryEntry::modified_unix_secs` 这种非负时间戳；内部夹到 `i64::MAX`。
+/// `u64` 版本，便于旧书库条目的非负时间戳；内部夹到 `i64::MAX`。
 #[must_use]
 pub fn format_unix_local_u64(unix_secs: u64) -> String {
     let s = i64::try_from(unix_secs).unwrap_or(i64::MAX);

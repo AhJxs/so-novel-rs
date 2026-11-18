@@ -1,129 +1,194 @@
-//! 本地书库：条目、状态、目录扫描。
+//! 书架页状态：`LibraryStore` + 后台扫描 / 元数据通道 + 查询条件。
+//!
+//! 这里只排空 channel、更新 store 内存；落盘由 `AppModel::persist_library` 负责。
 
-use std::path::{Path, PathBuf};
-use std::time::SystemTime;
+use std::collections::VecDeque;
+use std::path::PathBuf;
+
+use smol::channel::Receiver;
 
 use crate::error::AppResult;
+use crate::library::{AppliedMeta, LibraryStore, ScannedFile, ShelfQuery, now_unix};
 
-/// 书库中的单个下载文件。
-#[derive(Debug, Clone)]
-pub struct LibraryEntry {
-    /// 文件完整路径。
-    pub path: PathBuf,
-    /// 文件名字（不含目录）。
-    pub file_name: String,
-    /// 文件大小（字节）。
-    pub size_bytes: u64,
-    /// 文件修改时间 (Unix 时间戳, 秒); 获取失败为 0。
-    pub modified_unix_secs: u64,
-    /// 扩展名（小写、不含点）。
-    pub ext: String,
+/// 后台扫描结果。
+pub type ScanEvent = AppResult<Vec<ScannedFile>>;
+
+/// 单本书的元数据提取结果（封面已由工作线程落盘）。
+#[derive(Debug)]
+pub struct MetaEvent {
+    pub id: String,
+    pub outcome: Result<AppliedMeta, String>,
 }
 
-/// 后台扫描完成事件。Err 装 [`AppError`], drain 时调 `e.message()` 拿 i18n 文案。
-pub type LibraryScanEvent = AppResult<Vec<LibraryEntry>>;
-
-/// 书库页状态：扫描结果与当前过滤条件。
-#[derive(Default)]
+/// 书架页状态。
 pub struct LibraryState {
-    /// 当前扫描结果（已按修改时间倒序）。
-    pub entries: Vec<LibraryEntry>,
-    /// `entries` 改动的单调递增版本号, 供 UI 缓存过滤/分页。
-    pub entries_version: u64,
-    /// 文件名过滤关键词。
-    pub filter_text: String,
-    /// 用户选的格式过滤（None = 全部）。
-    pub filter_ext: Option<String>,
-    /// 上次扫描时的下载目录绝对路径（变化时自动重扫）。
-    pub scanned_dir: Option<PathBuf>,
-    /// 待删除确认中的条目路径；点删除后置位，再次点确认才真正删除。
-    pub pending_delete: Option<PathBuf>,
-    /// 上次扫描 / 操作失败提示。
-    pub last_error: Option<String>,
-    /// 后台扫描进行中（避免重复触发）。
+    pub store: LibraryStore,
+    /// store 内容每次变化 +1；UI 用它判定是否需要重绘。
+    pub books_version: u64,
+    pub query: ShelfQuery,
+    /// 待提取元数据的书籍 id，按入队顺序出队。
+    pub meta_queue: VecDeque<String>,
+    pub scan_rx: Option<Receiver<ScanEvent>>,
+    pub meta_rx: Option<Receiver<MetaEvent>>,
     pub scan_in_flight: bool,
-    /// 后台扫描任务的 smol channel 接收端。
-    pub scan_rx: Option<smol::channel::Receiver<LibraryScanEvent>>,
+    pub meta_in_flight: bool,
+    pub last_error: Option<String>,
+    /// 上次进度落盘时间（unix 秒）。
+    pub last_save_unix: i64,
+    /// 上次扫描的目录，用于「下载目录变了才重扫」。
+    pub scanned_dir: Option<PathBuf>,
 }
 
-/// 扫描下载目录得到 `LibraryEntry` 列表: 只看**直接子文件**, 只保留
-/// [`crate::core::library::SUPPORTED_LIBRARY_EXTS`] 白名单内的扩展名。
-///
-/// # Errors
-///
-/// 目录不可读或其下某个条目的元信息获取失败时返回对应的 `std::io::Error`。
-pub fn scan_library_dir(dir: &Path) -> std::io::Result<Vec<LibraryEntry>> {
-    use crate::core::library::SUPPORTED_LIBRARY_EXTS;
-
-    let mut out = Vec::new();
-    for entry in std::fs::read_dir(dir)? {
-        let entry = entry?;
-        let path = entry.path();
-        if !path.is_file() {
-            continue;
-        }
-        let Some(ext_raw) = path.extension().and_then(|s| s.to_str()) else {
-            continue;
-        };
-        let ext = ext_raw.to_ascii_lowercase();
-        if !SUPPORTED_LIBRARY_EXTS.contains(&ext.as_str()) {
-            continue;
-        }
-        let file_name = path
-            .file_name()
-            .and_then(|s| s.to_str())
-            .unwrap_or_default()
-            .to_string();
-        let meta = entry.metadata()?;
-        let size_bytes = meta.len();
-        let modified_unix_secs = meta
-            .modified()
-            .ok()
-            .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
-            .map_or(0, |d| d.as_secs());
-
-        out.push(LibraryEntry {
-            path,
-            file_name,
-            size_bytes,
-            modified_unix_secs,
-            ext,
-        });
+impl Default for LibraryState {
+    fn default() -> Self {
+        Self::new(LibraryStore::default())
     }
-    Ok(out)
 }
 
 impl LibraryState {
-    /// 排空后台扫描完成事件。每次 `events::drain` 调一次。返回是否有进展。
+    /// 用已加载的 store 构造。
+    #[must_use]
+    pub fn new(store: LibraryStore) -> Self {
+        Self {
+            store,
+            books_version: 0,
+            query: ShelfQuery::default(),
+            meta_queue: VecDeque::new(),
+            scan_rx: None,
+            meta_rx: None,
+            scan_in_flight: false,
+            meta_in_flight: false,
+            last_error: None,
+            last_save_unix: now_unix(),
+            scanned_dir: None,
+        }
+    }
+
+    /// 书籍集合变化：让 UI 缓存与书架页失效。
+    pub const fn bump(&mut self) {
+        self.books_version = self.books_version.wrapping_add(1);
+    }
+
+    /// 排空扫描通道；返回是否有进展。
+    #[must_use]
     pub fn drain_scan(&mut self) -> bool {
-        let mut any = false;
-        let Some(rx) = self.scan_rx.as_mut() else {
+        let Some(rx) = self.scan_rx.take() else {
             return false;
         };
+        let mut any = false;
         loop {
             match rx.try_recv() {
                 Ok(event) => {
                     any = true;
+                    self.scan_in_flight = false;
                     match event {
-                        Ok(mut entries) => {
-                            entries.sort_by_key(|b| std::cmp::Reverse(b.modified_unix_secs));
-                            self.entries = entries;
-                            self.entries_version = self.entries_version.wrapping_add(1);
+                        Ok(files) => {
+                            let meta_ids = self.store.merge_scan(&files);
+                            self.meta_queue.extend(meta_ids);
+                            self.bump();
                             self.last_error = None;
                         }
-                        Err(e) => {
-                            self.last_error = Some(e.message());
-                        }
+                        Err(error) => self.last_error = Some(error.message()),
                     }
                 }
-                Err(smol::channel::TryRecvError::Empty) => break,
+                Err(smol::channel::TryRecvError::Empty) => {
+                    // 一次扫描只回送一个事件；空通道说明还没回送，接收端放回继续等。
+                    if !any {
+                        self.scan_rx = Some(rx);
+                    }
+                    break;
+                }
                 Err(smol::channel::TryRecvError::Closed) => {
-                    self.scan_rx = None;
                     self.scan_in_flight = false;
                     break;
                 }
             }
         }
         any
+    }
+
+    /// 排空元数据通道；返回是否有进展。
+    #[must_use]
+    pub fn drain_meta(&mut self) -> bool {
+        let Some(rx) = self.meta_rx.take() else {
+            return false;
+        };
+        let mut any = false;
+        loop {
+            match rx.try_recv() {
+                Ok(event) => {
+                    any = true;
+                    self.meta_in_flight = false;
+                    match event.outcome {
+                        Ok(meta) => self.store.apply_meta(&event.id, meta),
+                        Err(error) => {
+                            tracing::warn!("提取元数据失败 {}: {error}", event.id);
+                        }
+                    }
+                    self.bump();
+                }
+                Err(smol::channel::TryRecvError::Empty) => {
+                    // 一次元数据任务只回送一个事件；空通道时放回接收端。
+                    if !any {
+                        self.meta_rx = Some(rx);
+                    }
+                    break;
+                }
+                Err(smol::channel::TryRecvError::Closed) => {
+                    self.meta_in_flight = false;
+                    break;
+                }
+            }
+        }
+        any
+    }
+
+    /// 入队待提取元数据的书籍。
+    pub fn enqueue_meta(&mut self, ids: Vec<String>) {
+        self.meta_queue.extend(ids);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
+
+    use super::*;
+
+    #[test]
+    fn drain_scan_merges_files_and_bumps_version() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.txt");
+        std::fs::write(&path, b"x").unwrap();
+        let (tx, rx) = smol::channel::unbounded::<ScanEvent>();
+        let mut state = LibraryState::new(LibraryStore::default());
+        state.scan_rx = Some(rx);
+        state.scan_in_flight = true;
+        smol::block_on(tx.send(Ok(vec![ScannedFile {
+            path,
+            size_bytes: 1,
+            mtime: 1,
+        }])))
+        .unwrap();
+        drop(tx);
+
+        assert!(state.drain_scan());
+        assert_eq!(state.store.books().len(), 1);
+        assert_eq!(state.books_version, 1);
+        assert!(!state.scan_in_flight);
+        assert!(state.scan_rx.is_none());
+        assert_eq!(state.meta_queue.len(), 1);
+    }
+
+    #[test]
+    fn drain_scan_records_error() {
+        let (tx, rx) = smol::channel::unbounded::<ScanEvent>();
+        let mut state = LibraryState::new(LibraryStore::default());
+        state.scan_rx = Some(rx);
+        smol::block_on(tx.send(Err(crate::error::AppError::internal("boom".into())))).unwrap();
+        drop(tx);
+
+        assert!(state.drain_scan());
+        assert!(state.last_error.is_some());
     }
 }

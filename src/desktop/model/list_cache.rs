@@ -22,7 +22,7 @@ pub enum PageKind {
 }
 
 /// 列表缓存 key。`elem_type` 是为了**类型擦除**: `HashMap` 只存一种 `Arc<dyn Any>`,
-/// 不同 page 的元素类型不同, 靠 `TypeId` 保证不会把 `LibraryEntry` Vec 当成
+/// 不同 page 的元素类型不同, 靠 `TypeId` 保证不会把书架 `Book` Vec 当成
 /// `SearchResult` Vec 取出来。
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 pub struct ListCacheKey {

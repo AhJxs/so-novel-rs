@@ -541,6 +541,29 @@ impl LibraryStore {
         self.dirty = true;
         Ok(new_id)
     }
+
+    /// 打开成功后写回章节数 / 编码 / 最近打开时间。
+    pub fn mark_opened(&mut self, id: &str, chapter_count: u32, encoding: Option<String>) {
+        let Some(book) = self.books.iter_mut().find(|book| book.id == id) else {
+            return;
+        };
+        book.chapter_count = Some(chapter_count.max(1));
+        if book.encoding.is_none()
+            && let Some(encoding) = encoding
+        {
+            book.encoding = Some(encoding);
+        }
+        book.last_opened_unix = Some(now_unix());
+        self.dirty = true;
+    }
+
+    /// 直接替换封面文件名（重新定位改名后调用）。
+    pub fn set_cover_file(&mut self, id: &str, cover_file: Option<String>) {
+        if let Some(book) = self.books.iter_mut().find(|book| book.id == id) {
+            book.cover_file = cover_file;
+            self.dirty = true;
+        }
+    }
 }
 
 /// 损坏文件的备份名：`library.json.corrupt-<unix>`，已被占用就追加 `-1`、`-2`…

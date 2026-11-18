@@ -13,6 +13,7 @@ use crate::core::DownloadTask;
 use crate::core::bootstrap::load_context;
 use crate::db::{LoadedTasks, SourcesConfig, load_tasks_from_file};
 use crate::http::{HttpClients, SystemProxy, detect_system_proxy};
+use crate::library::LibraryStore;
 use crate::models::Rule;
 
 /// 应用整体状态。UI 中立 —— 不依赖任何 GUI 框架, 由 `desktop` 层渲染。
@@ -104,9 +105,11 @@ impl AppModel {
         tracing::info!("从文件加载 {} 个历史下载任务", tasks.len());
         let next_task_id = max_id + 1;
 
+        let (library_store, library_warning) = LibraryStore::load(&paths.library_file);
+
         let (wakeup, rx) = events::new_wakeup();
 
-        let model = Self {
+        let mut model = Self {
             paths,
             config,
             rules,
@@ -119,13 +122,16 @@ impl AppModel {
             search: SearchState::default(),
             tasks,
             next_task_id,
-            library: LibraryState::default(),
+            library: LibraryState::new(library_store),
             sources_state: SourcesState::default(),
             update_state: UpdateState::default(),
             pending_ui_events: Vec::new(),
             list_cache: ListCache::new(),
             wakeup,
         };
+        if let Some(warning) = library_warning {
+            model.push_error(warning);
+        }
         Ok((model, rx))
     }
 

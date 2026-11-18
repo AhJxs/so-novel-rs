@@ -73,8 +73,16 @@ pub fn drain(model: &mut AppModel) -> bool {
             .spawn_cover_download(sid, &url, &safe_client, model.runtime);
     }
 
-    // 2b. 本地书库后台扫描结果（refresh_library_async 通过 smol channel 回送）。
+    // 2b. 书架：扫描 / 元数据通道 + 进度节流落盘（5 秒最多一次）。
     any |= model.library.drain_scan();
+    any |= model.library.drain_meta();
+    model.spawn_meta_worker();
+    if model.library.store.is_dirty()
+        && crate::library::now_unix() - model.library.last_save_unix >= 5
+    {
+        model.persist_library();
+        any = true;
+    }
 
     // 3. 下载任务进度。
     //    循环里借了 `&mut model.tasks`, 不能再借 `&mut model` 调 push_*, 所以先收集

@@ -19,6 +19,6 @@ pub use cover::{
 pub use meta::{ExtractedMeta, extract};
 pub use query::{ShelfQuery, ShelfSort, ShelfStatusFilter, visible_books};
 pub use scan::{ScannedFile, scan_download_dir};
-pub use store::{LIBRARY_VERSION, LibraryStore};
+pub use store::{AppliedMeta, LIBRARY_VERSION, LibraryStore};
 
 pub use crate::config::ReadingMode;

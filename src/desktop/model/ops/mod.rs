@@ -5,7 +5,6 @@
 //! 为接收者，避免引入 callback 机制。
 
 mod download;
-mod library;
 mod search;
 mod sources;
 mod update;
@@ -13,7 +12,6 @@ mod update;
 pub mod settings;
 
 pub use download::*;
-pub use library::*;
 pub use search::*;
 pub use sources::*;
 pub use update::*;
