@@ -72,6 +72,7 @@ src/library/
   scan.rs       # 目录扫描 → Vec<ScannedFile>（无 UI、无状态）
   meta.rs       # 元数据提取（EPUB OPF / TXT 编码）、封面字节
   cover.rs      # 封面缓存路径、扩展名嗅探、生成封面配色
+  query.rs      # ShelfQuery + visible_books：筛选 / 排序纯函数
 src/reader/
   mod.rs        # 公开 API
   content.rs    # ReaderBook / ReaderChapter；load_book（TXT/EPUB）+ 格式扩展点
@@ -118,7 +119,8 @@ pub struct Book {
     pub title: String,
     pub author: String,
     pub intro: Option<String>,
-    /// 封面缓存文件名（相对 `covers_dir`）；`None` = 使用生成封面。
+    /// 封面缓存文件名（相对 `covers_dir`，形如 `<id>-<内容哈希>.<ext>`）；
+    /// `None` = 使用生成封面。
     pub cover_file: Option<String>,
     pub size_bytes: u64,
     pub file_mtime: i64,
@@ -137,6 +139,19 @@ pub struct Book {
     pub favorite: bool,
     pub progress: ReadingProgress,
     pub bookmarks: Vec<Bookmark>,
+}
+
+impl Book {
+    /// 由磁盘文件构造新记录：算 `path_key` / `id`，读 `size_bytes` / `file_mtime`，
+    /// 标题取文件名去扩展名，其余字段取默认值（`added_unix` = 当前时间）。
+    /// 未知后缀或读不到元信息时返回错误文案。
+    pub fn from_file(path: &Path, origin: BookOrigin) -> Result<Self, String>;
+
+    /// 派生状态：`Unread` / `Reading` / `Finished`。
+    pub fn status(&self) -> ShelfStatus;
+
+    /// 显示用的书架状态文字 key（`Library.status.unread` 等），不返回已翻译文本。
+    pub const fn status_key(&self) -> &'static str;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -185,12 +200,9 @@ pub struct ReadingProgress {
     pub finished: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-pub enum ReadingMode {
-    #[default]
-    Scroll,
-    Page,
-}
+// `ReadingMode` / `ReaderTheme` 定义在 `config::types`（配置与业务共用），
+// 这里 re-export，避免 `config` 反向依赖 `library`。
+pub use crate::config::ReadingMode;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Bookmark {
@@ -241,8 +253,8 @@ pub enum ShelfStatus { Unread, Reading, Finished }
   Windows 下 `.to_lowercase()`。反斜杠保留，仅用于比较。
 - `id` = `path_key` 字节的 FNV-1a 64 位哈希，16 位小写 hex。若加载时发现 ID 冲突（极低概率），
   给后者追加 `-1`、`-2`，`path_key` 仍是唯一事实来源。
-- 重新定位（换文件）时重新计算 `id` / `path_key`，并把 `covers_dir/<旧 id>.*` 重命名为新 `id`；
-  进度与书签原样保留。
+- 重新定位（换文件）时由 `LibraryStore::relink` 重新计算 `id` / `path_key`（不碰磁盘）；
+  桌面层负责把 `covers_dir/<旧 id>-*` 改名为 `<新 id>-<原哈希>.<ext>`；进度与书签原样保留。
 
 ### 2.4 阅读设置 `[reader]`
 
@@ -272,20 +284,54 @@ pub enum ShelfStatusFilter { All, Unread, Reading, Finished }
 /// 书架排序。
 pub enum ShelfSort { LastOpened, AddedAt, Title, Size }
 
+/// 书架视图查询：搜索 + 状态筛选 + 收藏开关 + 排序，由 UI 状态构造。
+#[derive(Debug, Clone, Default)]
+pub struct ShelfQuery {
+    /// 已 `trim`；空串 = 不过滤。
+    pub text: String,
+    pub status: ShelfStatusFilter,
+    pub favorite_only: bool,
+    pub sort: ShelfSort,
+}
+
+impl ShelfQuery {
+    /// 命中书名 / 作者 / 文件名（ASCII 大小写不敏感）；收藏开关要求 `book.favorite`。
+    pub fn matches(&self, book: &Book) -> bool;
+}
+
+/// 过滤 + 排序，返回借用而非拷贝；`LastOpened` 未打开的书排在有记录的书之后。
+pub fn visible_books<'a>(books: &'a [Book], query: &ShelfQuery) -> Vec<&'a Book>;
+```
+
+`ShelfStatusFilter` 与 `ShelfSort` 实现 `Default`（分别是 `All` / `LastOpened`），
+`ShelfQuery` 才能 `#[derive(Default)]`。排序都是稳定排序，同键时按 `id` 升序兜底，
+保证两次渲染顺序一致。
+
+```rust
 /// 后台扫描结果。
 pub type ScanEvent = Result<Vec<ScannedFile>, AppError>;
 
-/// 单本书的元数据提取结果。
+/// 单本书的元数据提取结果（封面已由工作线程落盘）。
 pub struct MetaEvent {
     pub id: String,
-    pub outcome: Result<ExtractedMeta, String>,
+    pub outcome: Result<AppliedMeta, String>,
 }
 
+/// `library::meta::extract` 的返回值；封面是原始字节。
 pub struct ExtractedMeta {
     pub title: Option<String>,
     pub author: Option<String>,
     pub intro: Option<String>,
     pub cover: Option<Vec<u8>>,
+    pub encoding: Option<String>,
+}
+
+/// 工作线程把封面写入 `covers_dir` 后的结果；`drain` 只做内存回写，不碰磁盘。
+pub struct AppliedMeta {
+    pub title: Option<String>,
+    pub author: Option<String>,
+    pub intro: Option<String>,
+    pub cover_file: Option<String>,
     pub encoding: Option<String>,
 }
 
@@ -300,6 +346,8 @@ pub struct ImportOutcome {
     pub existing: usize,
     /// 失败项及错误文案（打开失败 / 不支持的后缀）。
     pub failed: Vec<(PathBuf, String)>,
+    /// 需要后台提取元数据的书籍 id。
+    pub meta_ids: Vec<String>,
 }
 ```
 
@@ -313,7 +361,7 @@ impl LibraryStore {
     pub fn get(&self, id: &str) -> Option<&Book>;
     pub fn merge_scan(&mut self, files: &[ScannedFile]) -> Vec<String>; // 返回需提取元数据的 id
     pub fn import_files(&mut self, paths: &[PathBuf]) -> ImportOutcome; // 新增 / 已存在 / 失败计数
-    pub fn apply_meta(&mut self, id: &str, meta: ExtractedMeta, cover_file: Option<String>);
+    pub fn apply_meta(&mut self, id: &str, meta: AppliedMeta);
     pub fn mark_missing(&mut self, id: &str, missing: bool);
     pub fn edit_metadata(&mut self, id: &str, title: &str, author: &str, cover_file: Option<String>);
     pub fn set_hidden(&mut self, id: &str, hidden: bool);
@@ -323,7 +371,8 @@ impl LibraryStore {
     pub fn record_progress(&mut self, id: &str, chapter: usize, ratio: f32, mode: ReadingMode, finished: bool);
     pub fn add_bookmark(&mut self, id: &str, bookmark: Bookmark) -> bool; // false = 已存在
     pub fn remove_bookmark(&mut self, id: &str, bookmark_id: &str);
-    pub fn take_dirty(&mut self) -> bool;
+    pub fn is_dirty(&self) -> bool;
+    pub fn clear_dirty(&mut self);
 }
 ```
 
@@ -366,8 +415,10 @@ impl LibraryStore {
 - **其他格式**：标题 = 文件名去扩展名，无封面。
 - 写回规则：`metadata_edited == false` 时才覆盖 `title` / `author` / `intro` / `cover_file`；
   `chapter_count` 只由阅读器首次成功打开后写入，扫描不计算。
-- 封面字节写入 `~/.sonovel/covers/<id>.<ext>`；扩展名按魔数嗅探（PNG / JPEG / GIF / WebP），
-  不认识则丢弃；旧封面文件在替换 / 移除 / 删除时清理。
+- 封面字节写入 `~/.sonovel/covers/<id>-<内容哈希>.<ext>`：文件名带内容哈希（FNV-1a 64 位、
+  16 hex），内容一变文件名就变，GPUI 的图片缓存不会继续显示旧封面，无需手动清缓存；
+  扩展名按魔数嗅探（PNG / JPEG / GIF / WebP），不认识则丢弃；
+  旧封面文件在替换 / 移除 / 删除时清理。
 - 生成封面不落盘：UI 用 `id` 哈希得到色相，`linear_gradient` 两段色 + 书名首字渲染。
 
 ### 3.3 导入
@@ -493,8 +544,9 @@ impl ReaderPage {
 - 首行缩进：渲染前给段落文本前置 `"　　"`；测量使用同一文本；搜索命中区间按前缀的
   UTF-8 字节长度整体偏移（两个全角空格 = 6 字节）。
 - 阅读主题由 `[reader].theme` 决定：`paper` / `sepia` / `night` / `green` / `app`。
-  `src/reader` 只定义枚举 `ReadingThemeKind`（UI 中立）；具体颜色在
-  `desktop/pages/reader/theme.rs` 映射为 gpui `Rgba`，作用于正文、阅读器顶栏与抽屉。
+  枚举 `ReaderTheme` 与 `ReadingMode` 一样定义在 `config::types` 并由 `library` re-export，
+  `src/reader` 不持有任何颜色；具体颜色在 `desktop/pages/reader/theme.rs` 按 `ReaderTheme`
+  映射为 gpui `Rgba`，作用于正文、阅读器顶栏与抽屉。
   `app` 表示背景 / 前景沿用应用主题，高亮色取主题的 selection / accent。
 - 生成封面的配色同样由 UI 层根据 `library::cover::cover_palette(id)` 返回的
   `(hue, [u8; 3], [u8; 3])` 组装；`src/library` 不依赖 gpui。
@@ -515,8 +567,13 @@ impl ReaderPage {
 
 1. **测量**（UI 层，`desktop/pages/reader/content_view.rs`）：对每段用
    `Window::text_system().shape_text(text, font_size, &runs, Some(content_width), None)`；
-   返回的每个 `WrappedLine` 对应一个源段落，显示行数 = `wrap_boundaries().len() + 1`；
+   返回的每个 `WrappedLine` 对应一个源段落，显示行数 = `wrap_boundaries.len() + 1`
+   （该字段经 `Deref` 来自 `WrappedLineLayout`）；
    段落高度 = `lines * line_height + paragraph_spacing`。
+   - 视口高度用正文容器上 `canvas` 回调里的 `bounds.size.height`（不含顶栏 / 页脚），
+     不用 `window.viewport_size()` 全窗高；首帧尚无量测值时按
+     `window.viewport_size().height - 2 * 24px - 顶栏高度` 估算，量到真实值后若差异 > 1px
+     立即重算分页；
    - 搜索高亮只改颜色，不影响行宽，测量时用默认 `TextRun` 即可；
    - 测量结果转成 `ParagraphMetrics`，尺寸统一用 `f32` 像素，UI 层再转 `gpui::Pixels`。
 2. **分页**（`src/reader/layout.rs`，纯函数，不依赖 gpui）：
@@ -600,10 +657,13 @@ pub struct SearchHit {
 ```
 - **书签**：右侧抽屉。顶部「添加当前书签」；列表按章节升序，显示章节名、摘录、时间；
   点击跳转，删除按钮。同一章同一相对位置（误差 < 0.5%）视为重复，提示「已存在」。
-- **排版**：顶栏 `Aa` 弹出面板：主题五选一、字号滑杆、行高滑杆、段距滑杆、页宽滑杆、
-  缩进开关、字体族下拉。即时生效，面板关闭时持久化。
-- **书籍信息**：顶栏「更多」弹出：书名、作者、简介、格式、大小、路径、添加 / 最近阅读时间；
-  按钮「编辑信息」「在文件夹中显示」「用系统程序打开」。
+- **排版**：顶栏 `Aa` 弹出面板：主题五选一、字号 / 行高 / 段距 / 页宽 各一行
+  「− 值 +」步进（gpui-kit 的 `Slider` 是裸行为组件，轨道与滑块要应用自绘，首版不引），
+  缩进开关。即时生效，面板关闭时持久化。字体族首版只读 `[reader].font_family` 配置，
+  不做下拉选择（枚举系统字体要额外走 `TextSystem`，留待后续）。
+- **书籍信息**：顶栏「更多」右侧抽屉：书名、作者、简介、格式、大小、章节 / 书签 / 进度、
+  路径、添加 / 最近阅读时间；按钮「在文件夹中显示」「用系统程序打开」。改元数据走书架卡片的
+  「⋯」菜单（阅读器是覆盖视图，退出即可编辑，不在阅读器里重复一套编辑弹窗）。
 
 ### 4.8 沉浸模式
 
@@ -642,7 +702,7 @@ pub struct SearchHit {
 ```
 PageHeader「书架」                [导入] [重新扫描]
 ────────────────────────────────────────────────
-[搜索框]  [全部|在读|未读|已读|收藏]      [排序 ▾]
+[搜索框]  [全部|在读|未读|已读|收藏]      [排序：最近阅读]
 ────────────────────────────────────────────────
 ┌卡片┐ ┌卡片┐ ┌卡片┐ ┌卡片┐ ┌卡片┐
 └────┘ └────┘ └────┘ └────┘ └────┘
@@ -651,11 +711,15 @@ PageHeader「书架」                [导入] [重新扫描]
 ```
 
 - `PageHeader` 副标题：`N 本书 · <下载目录>`；扫描中「重新扫描」显示 loading 且禁用。
-- 搜索匹配 `title` / `author` / 文件名，实时过滤（大小写不敏感）。
-- 状态筛选：全部 / 在读 / 未读 / 已读 / 收藏；与搜索、排序组合。
-  「收藏」是独立开关（`filter_favorite=true`，同时状态回到「全部」），其余四个互斥
-  写入 `filter_status`。
+- 搜索匹配 `title` / `author` / 文件名，实时过滤（ASCII 大小写不敏感），对应
+  `ShelfQuery.text`。
+- 状态筛选：全部 / 在读 / 未读 / 已读 / 收藏；与搜索、排序组合，全部交给
+  `library::query::visible_books`。
+  「收藏」是独立开关（`ShelfQuery.favorite_only=true`，同时状态回到「全部」），
+  其余四个互斥写入 `ShelfQuery.status`。
 - 排序：最近阅读（`last_opened_unix` 降序，未打开排后）/ 最近添加 / 书名 / 大小。
+  控件是**单个循环按钮**（点一次切到下一项，按 `ShelfSort::ALL` 顺序），按钮文案带当前项，
+  不用下拉框 —— 四选项的弹出菜单比一个循环按钮更重，且与状态筛选的按钮组风格不一致。
 - 卡片网格：卡片宽 140px、封面 2:3（140×210px）、间距 20px、`flex_wrap`，
   容器外层纵向滚动（`ScrollHandle`）。
 - 每批渲染 60 张，底部「加载更多」；筛选 / 排序变化重置批次；书架为空时不显示。
@@ -671,11 +735,14 @@ PageHeader「书架」                [导入] [重新扫描]
 - 文本区：书名最多 2 行、作者 1 行，均省略号；
 - 底部：进度条 + 状态文字（未读 / 32% / 已读完 / 文件不存在）。
 - 悬停：边框高亮、封面轻微放大（若 gpui 支持 hover 变换；否则仅边框 + 阴影），
-  右下浮出「继续阅读」按钮与「…」菜单。
+  右下浮出「继续阅读」按钮与「…」按钮。
 - 单击卡片：可读 → 打开阅读器；不可读 → 打开书籍信息并提示「暂不支持在应用内阅读」；
   `missing` → 书籍信息（重新定位入口）。
-- 右键 / 「…」菜单：阅读、书籍信息、编辑信息、在文件夹中显示、用系统程序打开、
-  移出书架、删除文件（危险色）。
+- 右键卡片或点「…」→ 打开**书籍操作弹窗**（不用 `PopupMenu`：菜单需要 action /
+  focus 管线，为 7 个纯按钮注册全局 action 是负担）。弹窗内纵向排列：
+  继续阅读 / 从头开始（仅已读完）、书籍信息、编辑信息、在文件夹中显示、
+  用系统程序打开、移出书架、删除文件（危险色，底部用 `AlertDialog` 二次确认）。
+  不可读格式的「继续阅读」置灰；`missing` 时换成「重新定位」。
 
 ### 5.3 弹窗
 
@@ -718,16 +785,18 @@ pub struct RootView {
 ```rust
 pub struct LibraryState {
     pub store: LibraryStore,
+    /// 每次 store 内容变化 +1；书架用它判定列表缓存失效。
     pub books_version: u64,
-    pub filter_text: String,
-    pub filter_status: Option<ShelfStatusFilter>,
-    pub filter_favorite: bool,
-    pub sort: ShelfSort,
+    pub query: ShelfQuery,
     pub scan_rx: Option<Receiver<ScanEvent>>,
     pub meta_rx: Option<Receiver<MetaEvent>>,
+    /// 待提取元数据的书籍 id，按入队顺序出队。
+    pub meta_queue: VecDeque<String>,
     pub scan_in_flight: bool,
     pub meta_in_flight: bool,
     pub last_error: Option<String>,
+    /// 上次进度落盘时间（unix 秒）。
+    pub last_save_unix: i64,
 }
 ```
 
