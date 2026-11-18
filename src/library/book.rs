@@ -252,7 +252,7 @@ impl Default for ReadingProgress {
 /// 章节内书签。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Bookmark {
-    /// `<chapter>-<created_unix_millis>`。
+    /// `<chapter>-<毫秒时间戳>`。
     #[serde(default)]
     pub id: String,
     /// 0-based 章节下标。
@@ -273,7 +273,8 @@ pub struct Bookmark {
 static LAST_BOOKMARK_MILLIS: AtomicU64 = AtomicU64::new(0);
 
 impl Bookmark {
-    /// 用当前时间生成唯一 ID（`<chapter>-<毫秒时间戳>`）。
+    /// 生成唯一 ID（`<chapter>-<毫秒时间戳>`）：毫秒值单调递增，同一毫秒内连续创建时
+    /// 等于上一次 +1，其余时候等于当前时间。
     #[must_use]
     pub fn new(chapter: usize, chapter_ratio: f32, excerpt: String) -> Self {
         let now_millis = SystemTime::now()
@@ -478,5 +479,14 @@ mod tests {
         assert_eq!(first.chapter, 2);
         assert_ne!(first.id, second.id);
         assert!(first.created_unix > 0);
+    }
+
+    #[test]
+    fn bookmark_ids_are_unique_within_one_millisecond() {
+        // 不 sleep：32 次连续创建必然落在同一毫秒内，只有单调计数能保证 ID 互不相同。
+        let ids: std::collections::HashSet<_> = (0..32)
+            .map(|_| Bookmark::new(3, 0.5, String::new()).id)
+            .collect();
+        assert_eq!(ids.len(), 32, "同一毫秒内连续创建的书签 ID 必须互不相同");
     }
 }

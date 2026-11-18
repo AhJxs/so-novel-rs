@@ -1,6 +1,6 @@
-//! 书架持久化：`library.json` 的加载 / 保存 / 损坏兜底。
+//! 书架持久化：`library.json` 的加载 / 保存 / 损坏兜底，以及扫描合并、导入、
+//! 元数据回写、进度 / 书签 / 收藏 / 重新定位等业务变更。
 //!
-//! 本文件只负责「记录集合」本身；扫描合并、导入、进度等业务变更在后续任务里追加。
 //! store 不启动线程、不持有 channel —— 扫描与元数据由 `desktop/model` 调度。
 
 use std::collections::HashSet;
@@ -503,6 +503,13 @@ impl LibraryStore {
     /// # Errors
     ///
     /// 书籍不存在、格式与原来不同、新文件已在书架中时返回 [`AppError`]。
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// let new_id = store.relink(&old_id, Path::new("/books/新位置.txt"))?;
+    /// ```
+    #[tracing::instrument(name = "library::LibraryStore::relink", skip_all, fields(old_id, path = %new_path.display()))]
     pub fn relink(&mut self, old_id: &str, new_path: &Path) -> AppResult<String> {
         let index = self
             .books
@@ -535,7 +542,6 @@ impl LibraryStore {
         book.size_bytes = fresh.size_bytes;
         book.file_mtime = fresh.file_mtime;
         book.missing = false;
-        book.hidden = false;
         let new_id = book.id.clone();
         self.dirty = true;
         Ok(new_id)
@@ -895,10 +901,14 @@ mod tests {
         let id = store.merge_scan(&[scanned(&old_path)]).remove(0);
         store.books[0].progress.chapter = 7;
         store.books[0].missing = true;
+        assert!(store.add_bookmark(&id, crate::library::Bookmark::new(1, 0.4, "甲".into())));
 
         let wrong = dir.path().join("new.epub");
         std::fs::write(&wrong, b"x").unwrap();
         assert!(store.relink(&id, &wrong).is_err());
+        let before = store.get(&id).unwrap();
+        assert!(before.missing);
+        assert_eq!(Path::new(&before.path), old_path.as_path());
 
         let new_path = dir.path().join("new.txt");
         std::fs::write(&new_path, b"two").unwrap();
@@ -906,6 +916,7 @@ mod tests {
         assert_ne!(new_id, id);
         let book = store.get(&new_id).unwrap();
         assert_eq!(book.progress.chapter, 7);
+        assert_eq!(book.bookmarks.len(), 1);
         assert!(!book.missing);
         assert_eq!(book.size_bytes, 3);
     }
@@ -922,5 +933,9 @@ mod tests {
         store.set_favorite(&id, true);
         assert!(store.get(&id).unwrap().favorite);
         assert!(store.is_dirty());
+
+        store.clear_dirty();
+        store.set_favorite(&id, true);
+        assert!(!store.is_dirty(), "值没变不该标脏");
     }
 }
