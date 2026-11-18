@@ -1,24 +1,28 @@
-//! 阅读器页面：加载状态机 + 顶栏 + 正文骨架。
+//! 阅读器页面：加载状态机 + 滚动模式正文 + 目录抽屉 / 排版面板。
 //!
-//! 滚动 / 翻页的完整实现分别在 Task 18 / 19 里替换 `render_chapter`；
-//! 本任务先把「从书架打开 → 加载 → 显示正文 → 关闭落盘」的闭环跑通。
+//! 翻页模式由 Task 19 接进 `render_body`；本文件把滚动模式的位置恢复、进度采样
+//! 与自动落盘做完整。
 
 use std::path::PathBuf;
 use std::rc::Rc;
+use std::time::Duration;
 
-use gpui_kit::component::button::Button;
+use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::input::{InputEvent, InputState};
+use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::{ActiveTheme as _, Disableable as _};
 use gpui_kit::{
-    App, Context, Entity, FocusHandle, FontWeight, InteractiveElement as _, IntoElement,
-    ParentElement, Render, SharedString, StatefulInteractiveElement as _, Styled, Window, div,
+    AnyElement, App, AppContext as _, Context, Entity, FocusHandle, Focusable as _, FontWeight,
+    InteractiveElement as _, IntoElement, KeyDownEvent, ParentElement, Render, ScrollEvent,
+    ScrollHandle, SharedString, StatefulInteractiveElement as _, Styled, Window, div, point, px,
 };
 use rust_i18n::t;
 
 use super::reader_colors;
-use crate::config::{ReaderTheme, ReadingMode};
+use crate::config::{ReaderConfig, ReadingMode};
 use crate::desktop::model::AppModel;
 use crate::library::{Book, ReadingProgress};
-use crate::reader::{ReaderBook, ReaderError, load_book};
+use crate::reader::{ReaderBook, ReaderError, ReaderLayout, load_book};
 
 /// 关闭阅读器：由 `RootView` 注入（需要同时改 `RootView` 状态与全屏标记）。
 pub type CloseReaderFn = Rc<dyn Fn(&mut Window, &mut App)>;
@@ -34,17 +38,29 @@ pub enum LoadState {
 pub struct ReaderPage {
     model: Entity<AppModel>,
     book_id: String,
-    book: Book,
-    content: Option<ReaderBook>,
-    load_state: LoadState,
-    mode: ReadingMode,
-    chapter: usize,
-    chapter_ratio: f32,
+    /// 打开时的书籍快照；关闭时用于落盘。
+    pub(super) book: Book,
+    pub(super) content: Option<ReaderBook>,
+    pub(super) load_state: LoadState,
+    pub(super) mode: ReadingMode,
+    pub(super) chapter: usize,
+    pub(super) chapter_ratio: f32,
+    /// 已到达书末并置位；一旦为 true 不再回落。
+    finished: bool,
+    /// 滚动模式的滚动位置。
+    pub(super) scroll: ScrollHandle,
+    /// 待恢复的滚动位置：`max_offset` 要等布局完成，所以恢复放到下一帧。
+    restore_pending: bool,
+    /// 每次滚动自增，只有最新一代的防抖任务会写进度。
+    scroll_generation: u64,
+    /// 章节标题快照；加载完成时建一次，抽屉每帧零拷贝共享。
+    pub(super) toc_titles: Option<Rc<Vec<String>>>,
+    /// 目录顶部的章节过滤框。
+    pub(super) toc_filter: Entity<InputState>,
+    pub(super) toc_open: bool,
+    pub(super) typography_open: bool,
     immersive: bool,
-    /// 加载代数：结果回来时与当时的代数比对，丢弃过期结果。重开一本新书是换实体，
-    /// 所以今天只在 `new()` 里置 1；将来若在同一实体里「重新加载」，必须在这里 +1。
     generation: u64,
-    /// 进度有未落盘的改动；Task 18 的滚动提交与关闭路径读它。
     progress_dirty: bool,
     focus: FocusHandle,
     close_handler: Option<CloseReaderFn>,
@@ -60,6 +76,10 @@ impl ReaderPage {
     ) -> Self {
         let focus = cx.focus_handle();
         window.focus(&focus, cx);
+        let toc_filter = cx.new(|cx| {
+            InputState::new(window, cx).placeholder(t!("Reader.toc.filter_placeholder").to_string())
+        });
+        let finished = book.progress.finished;
         let page = Self {
             model,
             book_id: book.id.clone(),
@@ -69,12 +89,27 @@ impl ReaderPage {
             book,
             content: None,
             load_state: LoadState::Loading,
+            finished,
+            scroll: ScrollHandle::new(),
+            restore_pending: true,
+            scroll_generation: 0,
+            toc_titles: None,
+            toc_filter,
+            toc_open: false,
+            typography_open: false,
             immersive: false,
             generation: 1,
             progress_dirty: false,
             focus,
             close_handler: None,
         };
+        // 过滤框内容变化要让抽屉重画；不清空的话列表会停在旧结果上。
+        cx.subscribe(&page.toc_filter, |_this, _input, event, cx| {
+            if matches!(event, InputEvent::Change) {
+                cx.notify();
+            }
+        })
+        .detach();
         page.spawn_load(cx);
         page
     }
@@ -92,9 +127,40 @@ impl ReaderPage {
 
     /// 落盘进度与阅读设置；随后由 `RootView` 丢弃本实体。
     pub fn close_and_flush(&mut self, cx: &mut Context<Self>) {
+        // 滚动防抖可能还没触发：关窗前先按当前滚动位置收一次比例，避免丢掉最后一屏。
+        self.capture_scroll_ratio();
         self.record_progress(cx);
         self.progress_dirty = false;
+        self.persist_settings(cx);
         self.model.update(cx, |model, _| model.flush_library());
+    }
+
+    /// 当前生效的排版参数（已 clamp）。
+    pub(super) fn reader_config(&self, cx: &App) -> ReaderConfig {
+        self.model.read(cx).config.reader.clamped()
+    }
+
+    /// 改一项排版参数：写回配置、保持当前阅读比例，并立刻重画。
+    ///
+    /// 不在这里落盘 —— 面板关闭 / 关闭阅读器时才写 config.toml，拖动步进不会刷盘。
+    pub(super) fn update_reader_config(
+        &mut self,
+        update: impl FnOnce(&mut ReaderConfig),
+        cx: &mut Context<Self>,
+    ) {
+        // 字号一变内容高度就变，先把「读到哪」按比例记下来，下一帧再按比例恢复。
+        self.capture_scroll_ratio();
+        self.restore_pending = true;
+        self.model.update(cx, |model, _cx| {
+            let mut reader = model.config.reader.clamped();
+            update(&mut reader);
+            model.config.reader = reader.clamped();
+        });
+        cx.notify();
+    }
+
+    fn persist_settings(&self, cx: &mut Context<Self>) {
+        self.model.update(cx, |model, _| model.persist_settings());
     }
 
     fn spawn_load(&self, cx: &Context<Self>) {
@@ -127,35 +193,75 @@ impl ReaderPage {
                 self.chapter = self.chapter.min(chapter_count - 1);
                 self.chapter_ratio = self.chapter_ratio.clamp(0.0, 1.0);
                 let encoding = content.encoding.clone();
+                self.toc_titles = Some(Rc::new(
+                    content
+                        .chapters
+                        .iter()
+                        .map(|chapter| chapter.title.clone())
+                        .collect(),
+                ));
                 self.content = Some(content);
                 self.load_state = LoadState::Ready;
+                self.restore_pending = true;
                 let book_id = self.book_id.clone();
                 self.model.update(cx, |model, _| {
                     model.mark_book_opened(&book_id, chapter_count as u32, encoding);
                 });
                 self.record_progress(cx);
+                Self::spawn_autosave(cx);
             }
             Err(error) => self.load_state = LoadState::Error(error),
         }
         cx.notify();
     }
 
-    /// 当前章节快照（章节下标已夹在合法范围）。
-    fn current_chapter(&self) -> Option<&crate::reader::ReaderChapter> {
-        let content = self.content.as_ref()?;
-        content.chapters.get(self.chapter)
+    /// 每 5 s 把脏掉的进度落盘一次；实体被丢弃时循环自然结束。
+    fn spawn_autosave(cx: &Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor().timer(Duration::from_secs(5)).await;
+                let alive = this.update(cx, Self::autosave).is_ok();
+                if !alive {
+                    break;
+                }
+            }
+        })
+        .detach();
+    }
+
+    fn autosave(&mut self, cx: &mut Context<Self>) {
+        if !self.progress_dirty {
+            return;
+        }
+        self.progress_dirty = false;
+        self.model.update(cx, |model, _| model.flush_library());
+    }
+
+    /// 把当前滚动位置换算成章内比例（滚不动时保持原值）。
+    fn capture_scroll_ratio(&mut self) {
+        let max = f32::from(self.scroll.max_offset().y);
+        if max > 1.0 {
+            self.chapter_ratio = (f32::from(self.scroll.offset().y) / max).clamp(0.0, 1.0);
+        }
     }
 
     fn record_progress(&mut self, cx: &mut Context<Self>) {
-        // `percent` 与 `updated_unix` 是占位：`LibraryStore::record_progress` 会用
-        // 章节数重算百分比并写入当前时间。
+        let chapter_count = self
+            .content
+            .as_ref()
+            .map_or(0, |content| content.chapters.len());
+        // 滚动到最后一章的最后 1%（或翻页到最后一页）即视为读完。
+        let at_end =
+            chapter_count > 0 && self.chapter + 1 >= chapter_count && self.chapter_ratio >= 0.99;
+        self.finished |= at_end;
         let progress = ReadingProgress {
             chapter: self.chapter,
             chapter_ratio: self.chapter_ratio,
+            // 百分比与时间戳由 store 统一计算，这里不做第二份实现。
             percent: 0.0,
             mode: self.mode,
             updated_unix: 0,
-            finished: self.book.progress.finished,
+            finished: self.finished,
         };
         let book_id = self.book_id.clone();
         self.model.update(cx, |model, _| {
@@ -165,30 +271,177 @@ impl ReaderPage {
     }
 
     fn toggle_mode(&mut self, cx: &mut Context<Self>) {
+        self.capture_scroll_ratio();
         self.mode = match self.mode {
             ReadingMode::Scroll => ReadingMode::Page,
             ReadingMode::Page => ReadingMode::Scroll,
         };
-        self.book.progress.mode = self.mode;
+        self.restore_pending = true;
         let book_id = self.book_id.clone();
         let mode = self.mode;
         self.model
             .update(cx, |model, _| model.set_reading_mode(&book_id, mode));
+        self.record_progress(cx);
         cx.notify();
     }
 
-    fn goto_chapter(&mut self, delta: isize, cx: &mut Context<Self>) {
+    /// 跳到第 `index` 章（0-based），章内位置归零。
+    pub(super) fn goto_chapter(&mut self, index: usize, cx: &mut Context<Self>) {
+        let Some(content) = self.content.as_ref() else {
+            return;
+        };
+        if index >= content.chapters.len() {
+            return;
+        }
+        self.chapter = index;
+        self.chapter_ratio = 0.0;
+        self.restore_pending = true;
+        self.record_progress(cx);
+        cx.notify();
+    }
+
+    fn step_chapter(&mut self, delta: isize, cx: &mut Context<Self>) {
         let Some(content) = self.content.as_ref() else {
             return;
         };
         let count = content.chapters.len();
+        if count == 0 {
+            return;
+        }
         let next = self.chapter.saturating_add_signed(delta).min(count - 1);
         if next != self.chapter {
-            self.chapter = next;
-            self.chapter_ratio = 0.0;
-            self.record_progress(cx);
-            cx.notify();
+            self.goto_chapter(next, cx);
         }
+    }
+
+    /// 按屏幕高度滚动（`direction` 为 -1 / 1）。
+    pub(super) fn scroll_by_page(&self, direction: f32) {
+        let viewport = f32::from(self.scroll.bounds().size.height);
+        self.scroll_relative(direction * (viewport * 0.9).max(1.0));
+    }
+
+    /// 小步滚动（方向键）。
+    fn scroll_by_step(&self, direction: f32) {
+        self.scroll_relative(direction * 40.0);
+    }
+
+    /// 滚动到章内某个比例处。
+    fn scroll_to_ratio(&self, ratio: f32) {
+        let max = f32::from(self.scroll.max_offset().y);
+        self.scroll
+            .set_offset(point(px(0.0), px(max * ratio.clamp(0.0, 1.0))));
+    }
+
+    /// 在当前位置上偏移；程序化滚动不会触发 `on_scroll`，调用方负责补排进度提交。
+    pub(super) fn scroll_relative(&self, delta: f32) {
+        let max = f32::from(self.scroll.max_offset().y);
+        let target = (f32::from(self.scroll.offset().y) + delta).clamp(0.0, max.max(0.0));
+        self.scroll.set_offset(point(px(0.0), px(target)));
+    }
+
+    /// 滚动防抖：200 ms 内不再滚动才写进度，避免每一帧都更新 store。
+    pub(super) fn schedule_progress_commit(&mut self, cx: &Context<Self>) {
+        self.scroll_generation = self.scroll_generation.wrapping_add(1);
+        let generation = self.scroll_generation;
+        let handle = self.scroll.clone();
+        cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(Duration::from_millis(200))
+                .await;
+            let _ = this.update(cx, |page, cx| {
+                page.commit_scroll_progress(generation, &handle, cx);
+            });
+        })
+        .detach();
+    }
+
+    fn commit_scroll_progress(
+        &mut self,
+        generation: u64,
+        handle: &ScrollHandle,
+        cx: &mut Context<Self>,
+    ) {
+        if generation != self.scroll_generation {
+            return;
+        }
+        let max = f32::from(handle.max_offset().y);
+        let offset = f32::from(handle.offset().y);
+        self.chapter_ratio = if max <= 1.0 {
+            0.0
+        } else {
+            (offset / max).clamp(0.0, 1.0)
+        };
+        self.record_progress(cx);
+        cx.notify();
+    }
+
+    fn shortcuts_blocked(&self, window: &Window, cx: &App) -> bool {
+        // 目录过滤框聚焦时按键归输入框，只让 Esc 例外（在 on_key_down 里处理）。
+        self.toc_filter.read(cx).focus_handle(cx).is_focused(window)
+    }
+
+    fn on_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        let key = event.keystroke.key.as_str();
+        if self.shortcuts_blocked(window, cx) {
+            if key == "escape" {
+                self.toc_open = false;
+                window.focus(&self.focus, cx);
+                cx.notify();
+            }
+            return;
+        }
+
+        match event.keystroke.key_char.as_deref() {
+            Some("+") => {
+                self.adjust_font_size(1.0, cx);
+                return;
+            }
+            Some("-") => {
+                self.adjust_font_size(-1.0, cx);
+                return;
+            }
+            _ => {}
+        }
+
+        match key {
+            "left" | "pageup" => self.scroll_by_page(-1.0),
+            "right" | "pagedown" | "space" => self.scroll_by_page(1.0),
+            "up" => self.scroll_by_step(-1.0),
+            "down" => self.scroll_by_step(1.0),
+            "home" => self.scroll_to_ratio(0.0),
+            "end" => self.scroll_to_ratio(1.0),
+            "t" => {
+                self.toc_open = !self.toc_open;
+                self.typography_open = false;
+                cx.notify();
+            }
+            "m" => self.toggle_mode(cx),
+            "escape" => {
+                if self.typography_open {
+                    self.typography_open = false;
+                    self.persist_settings(cx);
+                    cx.notify();
+                } else if self.toc_open {
+                    self.toc_open = false;
+                    cx.notify();
+                } else if let Some(handler) = self.close_handler.clone() {
+                    handler(window, cx);
+                }
+            }
+            _ => return,
+        }
+
+        // 方向键 / Home / End 只改了滚动位置，进度要在滚动之后补记。
+        if matches!(
+            key,
+            "left" | "right" | "pageup" | "pagedown" | "space" | "up" | "down" | "home" | "end"
+        ) {
+            self.schedule_progress_commit(cx);
+        }
+    }
+
+    fn adjust_font_size(&mut self, delta: f32, cx: &mut Context<Self>) {
+        self.update_reader_config(move |reader| reader.font_size += delta, cx);
     }
 
     fn render_toolbar(&self, cx: &Context<Self>) -> impl IntoElement {
@@ -197,6 +450,20 @@ impl ReaderPage {
             ReadingMode::Scroll => t!("Reader.mode.page"),
             ReadingMode::Page => t!("Reader.mode.scroll"),
         };
+
+        let mut toc_button = Button::new("reader-toc").label(t!("Reader.action.toc"));
+        toc_button = if self.toc_open {
+            toc_button.primary()
+        } else {
+            toc_button.ghost()
+        };
+        let mut typography_button = Button::new("reader-typography").label("Aa");
+        typography_button = if self.typography_open {
+            typography_button.primary()
+        } else {
+            typography_button.ghost()
+        };
+
         div()
             .flex()
             .flex_row()
@@ -216,11 +483,30 @@ impl ReaderPage {
                     }),
             )
             .child(
+                toc_button.on_click(cx.listener(|this, _event, _window, cx| {
+                    this.toc_open = !this.toc_open;
+                    this.typography_open = false;
+                    cx.notify();
+                })),
+            )
+            .child(
                 div()
                     .flex_1()
+                    .min_w_0()
                     .text_center()
                     .font_weight(FontWeight::MEDIUM)
+                    .truncate()
                     .child(SharedString::from(self.book.title.clone())),
+            )
+            .child(
+                typography_button.on_click(cx.listener(|this, _event, _window, cx| {
+                    this.typography_open = !this.typography_open;
+                    this.toc_open = false;
+                    if !this.typography_open {
+                        this.persist_settings(cx);
+                    }
+                    cx.notify();
+                })),
             )
             .child(
                 Button::new("reader-mode")
@@ -242,17 +528,116 @@ impl ReaderPage {
             .child(div().text_sm().child(error.detail()))
     }
 
-    fn render_chapter(&self, cx: &Context<Self>) -> impl IntoElement {
+    fn render_chapter_nav(&self, count: usize, cx: &Context<Self>) -> impl IntoElement {
+        // 全书的章节数、章节下标都远小于 2^32；经 u32 转 f64 精确，且不触发
+        // `cast_precision_loss`（该 lint 没有全局放行）。
+        let percent = if count == 0 {
+            0.0_f64
+        } else {
+            let chapter = f64::from(u32::try_from(self.chapter).unwrap_or(u32::MAX));
+            let total = f64::from(u32::try_from(count).unwrap_or(u32::MAX));
+            let ratio = f64::from(self.chapter_ratio.clamp(0.0, 1.0));
+            ((chapter + ratio) / total * 100.0).clamp(0.0, 100.0)
+        };
+        div()
+            .flex()
+            .flex_row()
+            .items_center()
+            .justify_between()
+            .px_4()
+            .py_2()
+            .border_t_1()
+            .border_color(cx.theme().border)
+            .child(
+                Button::new("reader-prev-chapter")
+                    .label(t!("Reader.action.prev_chapter"))
+                    .disabled(self.chapter == 0)
+                    .on_click(cx.listener(|this, _event, _window, cx| {
+                        this.step_chapter(-1, cx);
+                    })),
+            )
+            .child(
+                div()
+                    .text_sm()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(format!(
+                        "{} · {percent:.0}%",
+                        t!(
+                            "Reader.chapter_indicator",
+                            current = self.chapter + 1,
+                            total = count
+                        )
+                    )),
+            )
+            .child(
+                Button::new("reader-next-chapter")
+                    .label(t!("Reader.action.next_chapter"))
+                    .disabled(self.chapter + 1 >= count)
+                    .on_click(cx.listener(|this, _event, _window, cx| {
+                        this.step_chapter(1, cx);
+                    })),
+            )
+    }
+
+    /// 正文区域。Task 19 会在这里加 `ReadingMode::Page` 分支。
+    fn render_body(&self, cx: &Context<Self>) -> AnyElement {
+        self.render_scroll_body(cx)
+    }
+
+    fn render_scroll_body(&self, cx: &Context<Self>) -> AnyElement {
         let Some(content) = self.content.as_ref() else {
             return div().flex_1().into_any_element();
         };
-        let colors = reader_colors(self.book_theme(cx), cx);
-        let Some(chapter) = self.current_chapter() else {
+        let Some(chapter) = content.chapters.get(self.chapter) else {
             return div().flex_1().into_any_element();
         };
-        let title = chapter.title.clone();
-        let paragraphs = chapter.paragraphs.clone();
+
+        let reader = self.reader_config(cx);
+        let colors = reader_colors(reader.theme, cx);
+        let layout = ReaderLayout::new(
+            reader.font_size,
+            reader.line_height,
+            reader.paragraph_spacing,
+            reader.page_width,
+            0.0,
+            reader.indent,
+            reader.font_family.clone(),
+        );
+        let line_height = layout.line_height_px();
+        let font_size = reader.font_size;
+        let paragraph_spacing = reader.paragraph_spacing;
+        let page_width = reader.page_width;
+        let font_family = reader.font_family;
         let count = content.chapters.len();
+        let chapter_title = chapter.title.clone();
+        let paragraphs = chapter
+            .paragraphs
+            .iter()
+            .map(|paragraph| layout.display_text(paragraph).into_owned());
+
+        let mut column = div()
+            .w_full()
+            .max_w(px(page_width))
+            .flex()
+            .flex_col()
+            .child(
+                div()
+                    .text_xl()
+                    .font_weight(FontWeight::BOLD)
+                    .mb_4()
+                    .child(chapter_title),
+            )
+            .children(paragraphs.map(move |text| {
+                div()
+                    .pb(px(paragraph_spacing))
+                    .text_size(px(font_size))
+                    .line_height(px(line_height))
+                    .child(text)
+            }));
+        if !font_family.is_empty() {
+            column = column.font_family(font_family);
+        }
+
         div()
             .flex_1()
             .min_h_0()
@@ -262,67 +647,50 @@ impl ReaderPage {
             .text_color(colors.foreground)
             .child(
                 div()
-                    .id("reader-chapter-scroll")
+                    .id("reader-scroll")
+                    .relative()
                     .flex_1()
                     .min_h_0()
                     .overflow_y_scroll()
-                    .p_6()
+                    .track_scroll(&self.scroll)
+                    .vertical_scrollbar(&self.scroll)
+                    .on_scroll(cx.listener(|this, _event: &ScrollEvent, _window, cx| {
+                        this.schedule_progress_commit(cx);
+                    }))
                     .child(
-                        // 居中靠 flex 而不是 `mx_auto`：gpui 没有 auto margin 样式。
-                        div().w_full().flex().flex_row().justify_center().child(
-                            div()
-                                .w_full()
-                                .max_w(gpui_kit::px(720.0))
-                                .flex()
-                                .flex_col()
-                                .gap_3()
-                                .child(div().text_xl().font_weight(FontWeight::BOLD).child(title))
-                                .children(paragraphs.into_iter().map(|line| div().child(line))),
-                        ),
+                        // 居中靠 flex：gpui 没有 auto margin 样式。
+                        div()
+                            .w_full()
+                            .flex()
+                            .flex_row()
+                            .justify_center()
+                            .px_6()
+                            .py_6()
+                            .child(column),
                     ),
             )
-            .child(
-                div()
-                    .flex()
-                    .flex_row()
-                    .justify_between()
-                    .px_4()
-                    .py_2()
-                    .border_t_1()
-                    .border_color(cx.theme().border)
-                    .child(
-                        Button::new("reader-prev-chapter")
-                            .label(t!("Reader.action.prev_chapter"))
-                            .disabled(self.chapter == 0)
-                            .on_click(cx.listener(|this, _event, _window, cx| {
-                                this.goto_chapter(-1, cx);
-                            })),
-                    )
-                    .child(div().text_sm().child(t!(
-                        "Reader.chapter_indicator",
-                        current = self.chapter + 1,
-                        total = count
-                    )))
-                    .child(
-                        Button::new("reader-next-chapter")
-                            .label(t!("Reader.action.next_chapter"))
-                            .disabled(self.chapter + 1 >= count)
-                            .on_click(cx.listener(|this, _event, _window, cx| {
-                                this.goto_chapter(1, cx);
-                            })),
-                    ),
-            )
+            .child(self.render_chapter_nav(count, cx))
             .into_any_element()
-    }
-
-    fn book_theme(&self, cx: &Context<Self>) -> ReaderTheme {
-        self.model.read(cx).config.reader.theme
     }
 }
 
 impl Render for ReaderPage {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let body: gpui_kit::AnyElement = match &self.load_state {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let reader = self.reader_config(cx);
+        let colors = reader_colors(reader.theme, cx);
+
+        // 首帧布局算完才知道 max_offset，所以恢复位置一定发生在下一帧。
+        if self.restore_pending && matches!(self.load_state, LoadState::Ready) {
+            self.restore_pending = false;
+            let handle = self.scroll.clone();
+            let ratio = self.chapter_ratio.clamp(0.0, 1.0);
+            cx.on_next_frame(window, move |_page, _window, _cx| {
+                let max = f32::from(handle.max_offset().y);
+                handle.set_offset(point(px(0.0), px(max * ratio)));
+            });
+        }
+
+        let body: AnyElement = match &self.load_state {
             LoadState::Loading => div()
                 .flex_1()
                 .flex()
@@ -331,17 +699,39 @@ impl Render for ReaderPage {
                 .child(t!("Reader.loading").to_string())
                 .into_any_element(),
             LoadState::Error(error) => Self::render_error(error).into_any_element(),
-            LoadState::Ready => self.render_chapter(cx).into_any_element(),
+            LoadState::Ready => self.render_body(cx),
         };
+        let toc = if self.toc_open {
+            Some(self.render_toc(cx))
+        } else {
+            None
+        };
+        let typography = if self.typography_open {
+            Some(self.render_typography(cx))
+        } else {
+            None
+        };
+
         div()
+            .relative()
             .track_focus(&self.focus)
             .key_context("Reader")
             .size_full()
             .flex()
             .flex_col()
-            .bg(cx.theme().background)
-            .text_color(cx.theme().foreground)
+            .bg(colors.background)
+            .text_color(colors.foreground)
+            .on_key_down(cx.listener(Self::on_key_down))
             .child(self.render_toolbar(cx))
-            .child(body)
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .flex_1()
+                    .min_h_0()
+                    .children(toc)
+                    .child(body),
+            )
+            .children(typography)
     }
 }

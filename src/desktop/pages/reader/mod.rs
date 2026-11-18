@@ -2,6 +2,9 @@
 //!
 //! 注意区分：本模块是阅读器的桌面 UI 外壳，数据层仍是 [`crate::reader`]。
 
+mod toc;
+mod typography;
+
 pub mod reader_page;
 pub mod theme;
 
