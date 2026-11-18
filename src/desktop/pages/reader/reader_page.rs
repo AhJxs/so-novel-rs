@@ -30,7 +30,8 @@ use crate::desktop::model::AppModel;
 use crate::library::{Book, BookFormat, ReadingProgress};
 use crate::reader::layout::{page_for_ratio, ratio_for_page};
 use crate::reader::{
-    LayoutFingerprint, ParagraphMetrics, ReaderBook, ReaderError, ReaderLayout, load_book, paginate,
+    LayoutFingerprint, ParagraphMetrics, ReaderBook, ReaderError, ReaderLayout, load_book,
+    load_book_relaxed, paginate,
 };
 use crate::utils::system;
 
@@ -93,6 +94,8 @@ pub struct ReaderPage {
     ///
     /// 只有解码成功才写回 store：选错不该把错误标签永久留在 `library.json` 里。
     pending_encoding: Option<PendingEncoding>,
+    /// 用户点了「仍要打开」：本次加载跳过乱码检查。
+    force_decode: bool,
     pub(super) load_state: LoadState,
     pub(super) mode: ReadingMode,
     pub(super) chapter: usize,
@@ -185,6 +188,7 @@ impl ReaderPage {
             book,
             content: None,
             pending_encoding: None,
+            force_decode: false,
             load_state: LoadState::Loading,
             finished,
             scroll: ScrollHandle::new(),
@@ -332,10 +336,17 @@ impl ReaderPage {
         let path = PathBuf::from(&self.book.path);
         let format = self.book.format;
         let encoding = self.book.encoding.clone();
+        let force = self.force_decode;
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_executor()
-                .spawn(async move { load_book(&path, format, encoding.as_deref()) })
+                .spawn(async move {
+                    if force {
+                        load_book_relaxed(&path, format, encoding.as_deref())
+                    } else {
+                        load_book(&path, format, encoding.as_deref())
+                    }
+                })
                 .await;
             let _ = this.update(cx, |page, cx| page.finish_load(generation, result, cx));
         })
@@ -365,6 +376,11 @@ impl ReaderPage {
         encoding: Option<&'static str>,
         cx: &mut Context<Self>,
     ) {
+        // 点已经生效的标签不必重读整个文件（失败态 `content` 为空，仍会重试）。
+        if self.content.is_some() && self.book.encoding.as_deref() == encoding {
+            return;
+        }
+        self.force_decode = false;
         self.book.encoding = encoding.map(str::to_string);
         self.pending_encoding = Some(encoding.map_or(PendingEncoding::Auto, |label| {
             PendingEncoding::Explicit(label.to_string())
@@ -412,6 +428,9 @@ impl ReaderPage {
                 self.chapter_ratio = book.progress.chapter_ratio;
                 self.finished = book.progress.finished;
                 self.book = book;
+                // 上一本书没验证成功的编码不能带给新书；新书的解码检查也要重新走一遍。
+                self.pending_encoding = None;
+                self.force_decode = false;
                 self.reload_from_disk(cx);
             }
             Err(error) => {
@@ -449,17 +468,18 @@ impl ReaderPage {
                 self.load_state = LoadState::Ready;
                 self.invalidate_scroll_commit();
                 self.restore_pending = true;
-                // 选定的编码只有解码成功才落盘；失败时留给用户继续换。
+                let book_id = self.book_id.clone();
+                self.model.update(cx, |model, _| {
+                    model.mark_book_opened(&book_id, chapter_count as u32, encoding);
+                });
+                // 放在 `mark_book_opened` 之后：它在 encoding.is_none() 时会写探测结果，
+                // 用户点「自动」（None）必须先让它写、再覆盖回 None 才留得住。
                 if let Some(pending) = self.pending_encoding.take() {
                     let book_id = self.book_id.clone();
                     self.model.update(cx, |model, _| {
                         model.set_book_encoding(&book_id, pending.into_option());
                     });
                 }
-                let book_id = self.book_id.clone();
-                self.model.update(cx, |model, _| {
-                    model.mark_book_opened(&book_id, chapter_count as u32, encoding);
-                });
                 self.record_progress(cx);
                 Self::spawn_autosave(cx);
             }
@@ -1007,6 +1027,21 @@ impl ReaderPage {
                         .into_any_element(),
                 );
             }
+        }
+
+        // 密度判断只是启发式：猜错时给用户一条「仍然打开」的出路。
+        if matches!(error, ReaderError::Decode(BookFormat::Txt, _)) {
+            actions.push(
+                Button::new("reader-error-force-open")
+                    .ghost()
+                    .compact()
+                    .label(t!("Reader.error.action.force_open"))
+                    .on_click(cx.listener(|this, _event, _window, cx| {
+                        this.force_decode = true;
+                        this.reload_from_disk(cx);
+                    }))
+                    .into_any_element(),
+            );
         }
 
         if matches!(

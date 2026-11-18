@@ -1535,6 +1535,10 @@ Reader:
         en: "Back to library"
         zh-CN: 返回书库
         zh-TW: 返回書庫
+      force_open:
+        en: "Open anyway"
+        zh-CN: 仍要打开
+        zh-TW: 仍要開啟
   toc:
     title:
       en: "Contents"

@@ -4,6 +4,6 @@ pub mod content;
 pub mod layout;
 pub mod search;
 
-pub use content::{ReaderBook, ReaderChapter, ReaderError, load_book};
+pub use content::{ReaderBook, ReaderChapter, ReaderError, load_book, load_book_relaxed};
 pub use layout::{LayoutFingerprint, ParagraphMetrics, ReaderLayout, paginate};
 pub use search::{HITS_PER_CHAPTER, HITS_TOTAL, SearchGroup, SearchHit, run as run_search};

@@ -291,6 +291,7 @@ mod tests {
         "Reader.bookmarks.unknown_time",
         "Reader.chapter_indicator",
         "Reader.error.action.back",
+        "Reader.error.action.force_open",
         "Reader.error.action.open_external",
         "Reader.error.action.relink",
         "Reader.error.decode",

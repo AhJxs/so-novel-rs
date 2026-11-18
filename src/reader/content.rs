@@ -72,7 +72,7 @@ impl ReaderError {
     }
 }
 
-/// 打开一本书并章节化。
+/// 读一本书。TXT 会做一次「疑似乱码」检查（有损解码不会失败，只能反推）。
 ///
 /// # Errors
 ///
@@ -82,6 +82,30 @@ pub fn load_book(
     path: &Path,
     format: BookFormat,
     encoding: Option<&str>,
+) -> Result<ReaderBook, ReaderError> {
+    load_book_impl(path, format, encoding, true)
+}
+
+/// 跳过「疑似乱码」检查的加载：错误面板上「仍要打开」用它。
+///
+/// 密度判断是启发式，猜错时不能把一本书永久挡在门外。
+///
+/// # Errors
+///
+/// 同 [`load_book`]，只是不再因替换字符密度报「疑似编码不匹配」。
+pub fn load_book_relaxed(
+    path: &Path,
+    format: BookFormat,
+    encoding: Option<&str>,
+) -> Result<ReaderBook, ReaderError> {
+    load_book_impl(path, format, encoding, false)
+}
+
+fn load_book_impl(
+    path: &Path,
+    format: BookFormat,
+    encoding: Option<&str>,
+    check_text: bool,
 ) -> Result<ReaderBook, ReaderError> {
     if !format.is_readable() {
         return Err(ReaderError::UnsupportedFormat(format));
@@ -122,7 +146,7 @@ pub fn load_book(
         return Err(ReaderError::NoContent);
     }
     // 有损解码不会失败，只会产出替换字符；TXT 才需要按密度反推「编码选错了」。
-    if format == BookFormat::Txt {
+    if check_text && format == BookFormat::Txt {
         check_decoded_text(format, &chapters)?;
     }
     // EPUB 不经过编码标签（`epub::load` 不接受 `source_encoding`），报了就是假话。
@@ -154,6 +178,8 @@ fn map_error(format: BookFormat, error: ToolError) -> ReaderError {
 const REPLACEMENT_SAMPLE_LIMIT: usize = 200_000;
 /// 替换字符占样本的千分之一以上，就认定编码不匹配（正确解码时基本上是 0）。
 const REPLACEMENT_PER_MILLE_LIMIT: usize = 1;
+/// 替换字符少于这个数量一律放过：正常文件偶尔带一个（编辑残留）不该被拦。
+const REPLACEMENT_MIN_COUNT: usize = 8;
 
 /// 有损解码不会失败，只会把解不出的字节换成 U+FFFD。这里按替换字符的密度反推
 /// 「编码选错了」，让 UI 有机会给出「换编码重试」。
@@ -175,7 +201,9 @@ fn check_decoded_text(format: BookFormat, chapters: &[ReaderChapter]) -> Result<
         }
     }
     // 全用整数比较：`usize as f32` 会撞 `cast_precision_loss`（无全局放行）。
-    if total > 0 && broken.saturating_mul(1000) > total.saturating_mul(REPLACEMENT_PER_MILLE_LIMIT)
+    if total > 0
+        && broken >= REPLACEMENT_MIN_COUNT
+        && broken.saturating_mul(1000) > total.saturating_mul(REPLACEMENT_PER_MILLE_LIMIT)
     {
         return Err(ReaderError::Decode(
             format,
@@ -259,7 +287,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("utf8.txt");
         // UTF-8 字节 + 显式 GBK：探测会说是 UTF-8，只有真的按显式标签解码才会得到乱码。
-        std::fs::write(&path, TXT).unwrap();
+        // 正文重复几遍，保证 GBK 解码出的替换字符数量能越过绝对下限、密度检查真正触发。
+        std::fs::write(&path, TXT.repeat(10)).unwrap();
 
         // 对照：自动探测能正常读出，说明文件本身是合法 UTF-8。
         let auto = load_book(&path, BookFormat::Txt, None).unwrap();
@@ -342,6 +371,33 @@ mod tests {
             .filter(|ch| *ch == '\u{FFFD}')
             .count();
         assert_eq!(broken, 0, "正确解码的 UTF-8 不应被判成乱码");
+    }
+
+    #[test]
+    fn one_replacement_char_in_short_text_still_loads() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("short.txt");
+        std::fs::write(&path, "第一章 开始\n\n正文\u{FFFD}正文\n").unwrap();
+
+        assert!(
+            load_book(&path, BookFormat::Txt, None).is_ok(),
+            "少量替换字符（编辑残留）不该被当成编码错"
+        );
+    }
+
+    #[test]
+    fn relaxed_load_ignores_mojibake_check() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("gbk.txt");
+        let (bytes, _, _) = encoding_rs::GBK.encode(TXT);
+        std::fs::write(&path, &bytes).unwrap();
+
+        assert!(matches!(
+            load_book(&path, BookFormat::Txt, Some("UTF-8")),
+            Err(ReaderError::Decode(BookFormat::Txt, _))
+        ));
+        let book = load_book_relaxed(&path, BookFormat::Txt, Some("UTF-8")).unwrap();
+        assert!(!book.chapters.is_empty());
     }
 
     #[test]
