@@ -62,25 +62,32 @@ impl CardData {
     }
 }
 
+/// 卡片点击回调；`Rc` 让同一个 handler 能被多张卡片共享。
+type ClickHandler = Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>;
+
 /// 书架卡片。
 #[derive(IntoElement)]
 pub(super) struct BookCard {
     data: CardData,
-    on_open: Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>,
-    on_favorite: Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>,
+    on_open: ClickHandler,
+    on_favorite: ClickHandler,
+    on_actions: Option<ClickHandler>,
 }
 
 impl BookCard {
-    pub(super) fn new(
-        data: CardData,
-        on_open: Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>,
-        on_favorite: Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>,
-    ) -> Self {
+    pub(super) fn new(data: CardData, on_open: ClickHandler, on_favorite: ClickHandler) -> Self {
         Self {
             data,
             on_open,
             on_favorite,
+            on_actions: None,
         }
+    }
+
+    /// 挂上「…」操作按钮（Task 17 的书籍操作弹窗）。
+    pub(super) fn with_actions(mut self, handler: ClickHandler) -> Self {
+        self.on_actions = Some(handler);
+        self
     }
 }
 
@@ -90,6 +97,7 @@ impl RenderOnce for BookCard {
             data,
             on_open,
             on_favorite,
+            on_actions,
         } = self;
 
         // ---- 1. 封面区：先铺生成封面（渐变 + 书名首字），有真实封面时再盖上去 ----
@@ -186,9 +194,33 @@ impl RenderOnce for BookCard {
             );
         }
 
+        // 右下「…」：默认不可见（`invisible` 同时挡住命中测试），悬停卡片时出现。
+        if let Some(on_actions) = on_actions {
+            cover = cover.child(
+                div()
+                    .id(ElementId::Name(format!("book-actions-{}", data.id).into()))
+                    .absolute()
+                    .bottom_1()
+                    .right_1()
+                    .w(px(22.))
+                    .h(px(22.))
+                    .rounded_full()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .bg(rgba(0x0000_0066))
+                    .cursor_pointer()
+                    .invisible()
+                    .group_hover("shelf-card", Styled::visible)
+                    .child(Icon::new(IconName::Ellipsis).text_color(rgb(0x00ff_ffff)))
+                    .on_click(move |event, window, cx| (on_actions)(event, window, cx)),
+            );
+        }
+
         // ---- 2. 文本区：书名 2 行 + 作者 1 行 + 进度条 + 状态 ----
         let mut card = div()
             .id(ElementId::Name(format!("book-card-{}", data.id).into()))
+            .group("shelf-card")
             .w(px(COVER_W))
             .flex()
             .flex_col()

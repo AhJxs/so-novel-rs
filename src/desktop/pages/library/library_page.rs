@@ -344,7 +344,14 @@ impl LibraryPage {
                     });
                     cx.notify();
                 }));
-            grid = grid.child(BookCard::new(data, on_open, on_favorite));
+            let actions_id = data.id.clone();
+            let on_actions: Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)> =
+                Rc::new(cx.listener(move |this, _ev: &ClickEvent, window, cx| {
+                    // 「…」也在卡片内部：不阻止冒泡会连带打开阅读器。
+                    cx.stop_propagation();
+                    this.open_actions_dialog(&actions_id, window, cx);
+                }));
+            grid = grid.child(BookCard::new(data, on_open, on_favorite).with_actions(on_actions));
         }
 
         div()

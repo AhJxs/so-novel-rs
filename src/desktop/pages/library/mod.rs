@@ -5,6 +5,7 @@
 //! - 卡片点击通过 `RootView` 注入的回调打开阅读器。
 
 mod card;
+mod dialogs;
 mod library_page;
 
 pub use library_page::LibraryPage;

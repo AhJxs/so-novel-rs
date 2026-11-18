@@ -304,4 +304,15 @@ impl AppModel {
         self.persist_library();
         Ok(new_id)
     }
+
+    /// 从头开始：清空阅读进度、保留阅读方式并立即落盘。
+    pub fn restart_book(&mut self, id: &str) {
+        let Some(book) = self.library.store.get(id) else {
+            return;
+        };
+        let mode = book.progress.mode;
+        self.library.store.record_progress(id, 0, 0.0, mode, false);
+        self.library.bump();
+        self.persist_library();
+    }
 }
