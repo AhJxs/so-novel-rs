@@ -2093,7 +2093,8 @@ git commit -m "feat(library): 下载目录扫描"
   - `LibraryStore::load(&Path) -> (Self, Option<String>)`
   - `LibraryStore::save(&self, &Path) -> AppResult<()>`
   - `books() -> &[Book]`、`get(&str) -> Option<&Book>`、`is_dirty()`、`clear_dirty()`
-  - 私有 `touch()` / `normalize_ids()`，供后续任务复用。
+  - 私有 `normalize_ids()`（ID 去重，`load` 时调用）。写方法各自直接置 `dirty`：
+    它们都持有 `&mut Book`，再调 `&mut self` 的辅助方法会借用冲突。
 
 - [ ] **Step 1: 写失败测试**
 
@@ -2212,17 +2213,6 @@ mod tests {
         assert!(warning.is_some());
         assert!(store.save(&file).is_err());
         assert!(file.is_dir(), "读失败后那份文件必须原样留着");
-    }
-
-    #[test]
-    fn dirty_flag_starts_clean() {
-        let dir = tempfile::tempdir().unwrap();
-        let (mut store, _) = LibraryStore::load(&dir.path().join("library.json"));
-        assert!(!store.is_dirty());
-        store.touch();
-        assert!(store.is_dirty());
-        store.clear_dirty();
-        assert!(!store.is_dirty());
     }
 }
 ```
@@ -2410,11 +2400,6 @@ impl LibraryStore {
         self.dirty = false;
     }
 
-    /// 标记有变更。后续任务的写方法统一调它。
-    pub(super) const fn touch(&mut self) {
-        self.dirty = true;
-    }
-
     /// 重新按 `path_key` 计算 ID，并消解重复 ID（极低概率的哈希碰撞 / 手改文件）。
     fn normalize_ids(&mut self) {
         let mut seen: HashSet<String> = HashSet::new();
@@ -2524,6 +2509,21 @@ git commit -m "feat(library): 书架持久化与损坏兜底"
     }
 
     #[test]
+    fn dirty_flag_starts_clean_and_clears() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut store, _) = LibraryStore::load(&dir.path().join("library.json"));
+        assert!(!store.is_dirty());
+
+        let path = dir.path().join("a.txt");
+        std::fs::write(&path, b"one").unwrap();
+        store.merge_scan(&[scanned(&path)]);
+        assert!(store.is_dirty());
+
+        store.clear_dirty();
+        assert!(!store.is_dirty());
+    }
+
+    #[test]
     fn merge_marks_missing_and_restores() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("a.txt");
@@ -2549,8 +2549,29 @@ git commit -m "feat(library): 书架持久化与损坏兜底"
         let id = store.books()[0].id.clone();
         store.set_hidden(&id, true);
 
+        // 文件真的变了也不许动隐藏书：既不重新提取元数据，也不刷新文件信息。
+        std::fs::write(&path, b"one and more").unwrap();
+        let ids = store.merge_scan(&[scanned(&path)]);
+        assert!(ids.is_empty());
+        let book = store.get(&id).unwrap();
+        assert!(book.hidden);
+        assert_eq!(book.size_bytes, 3);
+    }
+
+    #[test]
+    fn merge_requeues_changed_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.txt");
+        std::fs::write(&path, b"one").unwrap();
+        let mut store = LibraryStore::default();
         store.merge_scan(&[scanned(&path)]);
-        assert!(store.get(&id).unwrap().hidden);
+        let id = store.books()[0].id.clone();
+
+        // 大小变了就重新提取元数据并刷新文件信息。
+        std::fs::write(&path, b"one and more").unwrap();
+        let ids = store.merge_scan(&[scanned(&path)]);
+        assert_eq!(ids, vec![id.clone()]);
+        assert_eq!(store.get(&id).unwrap().size_bytes, 12);
     }
 
     #[test]
@@ -2699,8 +2720,9 @@ pub struct ImportOutcome {
                 if book.hidden {
                     continue;
                 }
-                let changed = book.size_bytes != file.size_bytes
-                    || book.file_mtime != file.mtime
+                // 用元组比较而不是逐字段 `!=`：两个同形字段分开写会触发
+                // `suspicious_operation_groupings`（怀疑写反了），元组形式等价且免掉 allow。
+                let changed = (book.size_bytes, book.file_mtime) != (file.size_bytes, file.mtime)
                     || book.missing;
                 if changed {
                     book.size_bytes = file.size_bytes;
@@ -2864,7 +2886,7 @@ pub struct ImportOutcome {
 - [ ] **Step 4: 跑测试确认通过**
 
 Run: `cargo test --lib library::store:: -- --nocapture`
-Expected: PASS（13 个测试）。
+Expected: PASS（全绿）。
 
 - [ ] **Step 5: 提交**
 
