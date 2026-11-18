@@ -4857,6 +4857,7 @@ pub struct ReaderColors {
 }
 
 /// 按主题给出配色；`ReaderTheme::App` 跟随应用主题。
+#[must_use]
 pub fn reader_colors(theme: ReaderTheme, cx: &gpui_kit::App) -> ReaderColors {
     match theme {
         ReaderTheme::Paper => palette(0xf7f4ec, 0x2b2a26, 0xf3d98b, 0xe8b93f),
@@ -4884,9 +4885,11 @@ fn palette(background: u32, foreground: u32, highlight: u32, active_highlight: u
 }
 
 fn rgb(value: u32) -> Hsla {
-    let red = ((value >> 16) & 0xff) as f32 / 255.0;
-    let green = ((value >> 8) & 0xff) as f32 / 255.0;
-    let blue = (value & 0xff) as f32 / 255.0;
+    // 先落 u8 再 `f32::from`：u32 直接转 f32 会触发 `cast_precision_loss`（不在全局 allow 名单），
+    // 而 u8 → f32 是无损的。
+    let red = f32::from(((value >> 16) & 0xff) as u8) / 255.0;
+    let green = f32::from(((value >> 8) & 0xff) as u8) / 255.0;
+    let blue = f32::from((value & 0xff) as u8) / 255.0;
     Rgba { r: red, g: green, b: blue, a: 1.0 }.into()
 }
 ```
