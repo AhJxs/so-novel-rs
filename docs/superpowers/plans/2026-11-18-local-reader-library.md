@@ -2172,16 +2172,19 @@ mod tests {
             "version": 1,
             "books": [
                 {"id": "same", "path_key": "a", "title": "A"},
-                {"id": "same", "path_key": "b", "title": "B"}
+                {"id": "same", "path_key": "b", "title": "B"},
+                {"id": "same", "path_key": "a", "title": "A2"}
             ]
         }"#;
         std::fs::write(&file, json).unwrap();
 
         let (store, _) = LibraryStore::load(&file);
         let ids: Vec<_> = store.books().iter().map(|book| book.id.as_str()).collect();
-        assert_eq!(ids.len(), 2);
+        assert_eq!(ids.len(), 3);
         assert_ne!(ids[0], ids[1]);
         assert_eq!(ids[0], id_for_key("a"));
+        // 同一个 path_key 的重复条目走 `-<suffix>` 兜底，两条都不能丢。
+        assert_eq!(ids[2], format!("{}-1", id_for_key("a")));
     }
 
     #[test]
@@ -2192,7 +2195,23 @@ mod tests {
 
         let (store, warning) = LibraryStore::load(&file);
         assert!(warning.is_some());
+        let before = std::fs::read_to_string(&file).unwrap();
         assert!(store.save(&file).is_err());
+        // 拒写必须是真的没动磁盘：write_atomically 会先删目标再 rename。
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), before);
+    }
+
+    #[test]
+    fn unreadable_file_is_not_overwritten() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("library.json");
+        // 同名目录：读它必然失败（走读错误分支），而且无法被 rename 备份掉。
+        std::fs::create_dir(&file).unwrap();
+
+        let (store, warning) = LibraryStore::load(&file);
+        assert!(warning.is_some());
+        assert!(store.save(&file).is_err());
+        assert!(file.is_dir(), "读失败后那份文件必须原样留着");
     }
 
     #[test]
@@ -2232,7 +2251,7 @@ pub use store::{LIBRARY_VERSION, LibraryStore};
 //! store 不启动线程、不持有 channel —— 扫描与元数据由 `desktop/model` 调度。
 
 use std::collections::HashSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use rust_i18n::t;
 use serde::{Deserialize, Serialize};
@@ -2259,6 +2278,9 @@ pub struct LibraryStore {
     dirty: bool,
     /// 文件版本高于本程序支持的版本：只读，拒绝覆盖，避免把新版数据写回旧格式。
     future_version: bool,
+    /// 读取失败、或损坏文件改名备份失败：磁盘上还躺着一份没备份过的文件，
+    /// 而 `write_atomically` 会先删除目标再 rename，保存就等于抹掉它 —— 故一律拒写。
+    readonly: bool,
 }
 
 impl LibraryStore {
@@ -2276,7 +2298,10 @@ impl LibraryStore {
             }
             Err(error) => {
                 return (
-                    Self::default(),
+                    Self {
+                        readonly: true,
+                        ..Self::default()
+                    },
                     Some(
                         t!("Library.error.load_failed", detail = error.to_string()).to_string(),
                     ),
@@ -2302,7 +2327,7 @@ impl LibraryStore {
                 (store, warning)
             }
             Err(error) => {
-                let backup = path.with_extension(format!("json.corrupt-{}", now_unix()));
+                let backup = unique_backup_path(path);
                 let rename_error = std::fs::rename(path, &backup).err();
                 let mut message = t!(
                     "Library.error.corrupt_backup",
@@ -2310,13 +2335,20 @@ impl LibraryStore {
                     detail = error.to_string()
                 )
                 .to_string();
+                let backup_failed = rename_error.is_some();
                 if let Some(rename_error) = rename_error {
                     message.push_str(&t!(
                         "Library.error.backup_failed",
                         detail = rename_error.to_string()
                     ));
                 }
-                (Self::default(), Some(message))
+                (
+                    Self {
+                        readonly: backup_failed,
+                        ..Self::default()
+                    },
+                    Some(message),
+                )
             }
         }
     }
@@ -2328,6 +2360,11 @@ impl LibraryStore {
     /// 版本过高拒写、序列化失败、目录创建或写盘失败时返回 [`AppError`]。
     #[tracing::instrument(name = "library::LibraryStore::save", skip_all, fields(path = %path.display()))]
     pub fn save(&self, path: &Path) -> AppResult<()> {
+        if self.readonly {
+            return Err(AppError::business(
+                t!("Library.error.save_refused_after_load_failure").to_string(),
+            ));
+        }
         if self.future_version {
             return Err(AppError::business(
                 t!("Library.error.save_refused").to_string(),
@@ -2400,6 +2437,21 @@ impl LibraryStore {
             book.id = candidate;
         }
     }
+}
+
+/// 损坏文件的备份名：`library.json.corrupt-<unix>`，已被占用就追加 `-1`、`-2`…
+///
+/// 同一秒内再次损坏覆盖上一份备份就白备份了（Unix 的 `rename` 会静默替换目标）。
+fn unique_backup_path(path: &Path) -> PathBuf {
+    let base = path.with_extension(format!("json.corrupt-{}", now_unix()));
+    let mut candidate = base.clone();
+    for suffix in 1..1000 {
+        if !candidate.exists() {
+            return candidate;
+        }
+        candidate = PathBuf::from(format!("{}-{suffix}", base.display()));
+    }
+    base
 }
 ```
 
@@ -10918,6 +10970,11 @@ Library:
       en: "library.json comes from a newer version; refusing to overwrite. Upgrade the app to save."
       zh-CN: "library.json 来自更高版本，拒绝覆盖；请升级应用后再保存"
       zh-TW: "library.json 來自更高版本，拒絕覆寫；請先升級應用程式再儲存"
+    # 上次读取失败 / 备份失败：磁盘上的文件没被保住，写回就等于抹掉它。
+    save_refused_after_load_failure:
+      en: "The shelf file could not be read or backed up; refusing to overwrite it. Move or delete it, then restart the app."
+      zh-CN: "书架文件读取或备份失败，拒绝覆盖；请移走或删除该文件后重启应用"
+      zh-TW: "書架檔案讀取或備份失敗，拒絕覆寫；請移走或刪除該檔案後重新啟動應用程式"
     create_dir_failed:
       en: "Could not create the shelf folder"
       zh-CN: 创建书架目录失败
@@ -11453,6 +11510,7 @@ Reader:
         "Library.error.backup_failed",
         "Library.error.future_version",
         "Library.error.save_refused",
+        "Library.error.save_refused_after_load_failure",
         "Library.error.create_dir_failed",
         "Library.error.write_failed",
         "Library.info.title",
