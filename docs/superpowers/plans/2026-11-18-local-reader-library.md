@@ -2277,7 +2277,9 @@ impl LibraryStore {
             Err(error) => {
                 return (
                     Self::default(),
-                    Some(format!("读取 library.json 失败: {error}")),
+                    Some(
+                        t!("Library.error.load_failed", detail = error.to_string()).to_string(),
+                    ),
                 );
             }
         };
@@ -2290,20 +2292,29 @@ impl LibraryStore {
                 };
                 store.normalize_ids();
                 let warning = store.future_version.then(|| {
-                    format!(
-                        "library.json 版本 {} 高于当前支持的 {LIBRARY_VERSION}，本次只读，不会覆盖",
-                        file.version
+                    t!(
+                        "Library.error.future_version",
+                        version = file.version,
+                        supported = LIBRARY_VERSION
                     )
+                    .to_string()
                 });
                 (store, warning)
             }
             Err(error) => {
                 let backup = path.with_extension(format!("json.corrupt-{}", now_unix()));
                 let rename_error = std::fs::rename(path, &backup).err();
-                let mut message =
-                    format!("library.json 解析失败，已备份为 {}: {error}", backup.display());
+                let mut message = t!(
+                    "Library.error.corrupt_backup",
+                    path = backup.display().to_string(),
+                    detail = error.to_string()
+                )
+                .to_string();
                 if let Some(rename_error) = rename_error {
-                    message.push_str(&format!("（备份失败: {rename_error}）"));
+                    message.push_str(&t!(
+                        "Library.error.backup_failed",
+                        detail = rename_error.to_string()
+                    ));
                 }
                 (Self::default(), Some(message))
             }
@@ -2319,7 +2330,7 @@ impl LibraryStore {
     pub fn save(&self, path: &Path) -> AppResult<()> {
         if self.future_version {
             return Err(AppError::business(
-                "library.json 来自更高版本，拒绝覆盖；请升级应用后再保存",
+                t!("Library.error.save_refused").to_string(),
             ));
         }
         let file = LibraryFile {
@@ -2330,10 +2341,12 @@ impl LibraryStore {
             serde_json::to_vec_pretty(&file).map_err(|error| AppError::internal(error.to_string()))?;
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)
-                .map_err(|error| AppError::io_msg(&error, "创建书架目录失败"))?;
+                .map_err(|error| {
+                    AppError::io_msg(&error, t!("Library.error.create_dir_failed"))
+                })?;
         }
         crate::db::write_atomically(path, &json)
-            .map_err(|error| AppError::io_msg(&error, "写入 library.json 失败"))
+            .map_err(|error| AppError::io_msg(&error, t!("Library.error.write_failed")))
     }
 
     /// 全部书籍（含隐藏项，UI 自行过滤）。
@@ -4265,7 +4278,7 @@ impl AppModel {
             .await;
             let event = match result {
                 Ok(Ok(files)) => Ok(files),
-                Ok(Err(error)) => Err(AppError::io_msg(&error, "扫描下载目录失败")),
+                Ok(Err(error)) => Err(AppError::io_msg(&error, t!("Library.scan_failed"))),
                 Err(error) => Err(AppError::internal(error.to_string())),
             };
             let _ = tx.send(event).await;
@@ -10881,6 +10894,38 @@ Library:
       en: "That file is already on the shelf"
       zh-CN: 该文件已在书架中
       zh-TW: 該檔案已在書架中
+    # %{detail} 系统原始错误。
+    load_failed:
+      en: "Could not read library.json: %{detail}"
+      zh-CN: "读取 library.json 失败：%{detail}"
+      zh-TW: "讀取 library.json 失敗：%{detail}"
+    # %{path} 备份文件名，%{detail} 解析错误。
+    corrupt_backup:
+      en: "library.json could not be parsed and was backed up to %{path}: %{detail}"
+      zh-CN: "library.json 解析失败，已备份为 %{path}：%{detail}"
+      zh-TW: "library.json 解析失敗，已備份為 %{path}：%{detail}"
+    # %{detail} 备份失败原因；接在 corrupt_backup 之后。
+    backup_failed:
+      en: " (backup failed: %{detail})"
+      zh-CN: "（备份失败：%{detail}）"
+      zh-TW: "（備份失敗：%{detail}）"
+    # %{version} 文件版本，%{supported} 当前支持的版本。
+    future_version:
+      en: "library.json is version %{version}, newer than the supported %{supported}; this run is read-only and will not overwrite it"
+      zh-CN: "library.json 版本 %{version} 高于当前支持的 %{supported}，本次只读，不会覆盖"
+      zh-TW: "library.json 版本 %{version} 高於目前支援的 %{supported}，本次唯讀，不會覆寫"
+    save_refused:
+      en: "library.json comes from a newer version; refusing to overwrite. Upgrade the app to save."
+      zh-CN: "library.json 来自更高版本，拒绝覆盖；请升级应用后再保存"
+      zh-TW: "library.json 來自更高版本，拒絕覆寫；請先升級應用程式再儲存"
+    create_dir_failed:
+      en: "Could not create the shelf folder"
+      zh-CN: 创建书架目录失败
+      zh-TW: 建立書架目錄失敗
+    write_failed:
+      en: "Could not write library.json"
+      zh-CN: 写入 library.json 失败
+      zh-TW: 寫入 library.json 失敗
   info:
     title:
       en: "Book info"
@@ -11403,6 +11448,13 @@ Reader:
         "Library.error.book_not_found",
         "Library.error.format_mismatch",
         "Library.error.already_on_shelf",
+        "Library.error.load_failed",
+        "Library.error.corrupt_backup",
+        "Library.error.backup_failed",
+        "Library.error.future_version",
+        "Library.error.save_refused",
+        "Library.error.create_dir_failed",
+        "Library.error.write_failed",
         "Library.info.title",
         "Library.info.unknown",
         "Library.info.format",
