@@ -88,9 +88,8 @@ pub fn load_book(
     if !path.is_file() {
         return Err(ReaderError::MissingFile);
     }
-    let explicit = crate::tools::encoding::parse_encoding(encoding).map_err(|_| {
-        ReaderError::InvalidEncoding(encoding.unwrap_or_default().to_string())
-    })?;
+    let explicit = crate::tools::encoding::parse_encoding(encoding)
+        .map_err(|_| ReaderError::InvalidEncoding(encoding.unwrap_or_default().to_string()))?;
     let detected = if format == BookFormat::Txt {
         crate::tools::encoding::detect_file_encoding(path)
             .ok()
