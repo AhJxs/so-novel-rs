@@ -283,7 +283,7 @@ impl LibraryPage {
             .child(Self::sort_button(sort, cx))
     }
 
-    /// 空态：整库为空 → 「导入 EPUB / TXT」；筛选无结果 → 「清除筛选」。
+    /// 空态：整库为空 → 「扫描下载目录 + 导入本地文件」；筛选无结果 → 「导入 + 清除筛选」。
     fn render_empty(has_books: bool, cx: &Context<Self>) -> AnyElement {
         let empty = if has_books {
             EmptyState::new(IconName::Search, t!("Library.empty_filtered_title").into())

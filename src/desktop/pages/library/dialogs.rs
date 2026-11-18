@@ -217,6 +217,9 @@ impl LibraryPage {
             return;
         };
         let unsupported = !book.format.is_readable();
+        let missing = book.missing;
+        let page = cx.entity();
+        let id = book_id.to_string();
         window.open_dialog(cx, move |dialog, _window, cx| {
             let book = book.clone();
             let unknown = t!("Library.info.unknown").to_string();
@@ -280,6 +283,22 @@ impl LibraryPage {
                             )
                         }),
                 )
+                .when(missing, |this| {
+                    let page = page.clone();
+                    let id = id.clone();
+                    this.child(
+                        Button::new("book-info-relink")
+                            .w_full()
+                            .mt_3()
+                            .ghost()
+                            .label(t!("Library.actions.relink").to_string())
+                            .on_click(move |_ev, window, cx| {
+                                window.close_dialog(cx);
+                                // 这里是强引用 `Entity`，`update` 直接返回 `()`，不能再套 `let _ =`。
+                                page.update(cx, |page, cx| page.pick_relink(&id, cx));
+                            }),
+                    )
+                })
         });
     }
 

@@ -1042,12 +1042,12 @@ impl ReaderPage {
             );
         }
 
-        // EPUB 不经过编码标签，换编码毫无意义；只有 TXT 才有这组按钮。
-        // `InvalidEncoding` 来自 `library.json` 里的非法标签，换一个编码同样能修好。
-        if matches!(
-            error,
-            ReaderError::Decode(BookFormat::Txt, _) | ReaderError::InvalidEncoding(_)
-        ) {
+        let txt = matches!(self.book.format, BookFormat::Txt);
+        // `InvalidEncoding` 来自 `library.json` 里的非法标签，换一个编码同样能修好；
+        // 编码只对 TXT 有意义，EPUB 上给这排按钮只会写回一个假标签。
+        if matches!(error, ReaderError::Decode(BookFormat::Txt, _))
+            || (txt && matches!(error, ReaderError::InvalidEncoding(_)))
+        {
             for &label in ENCODING_CHOICES {
                 actions.push(
                     Button::new(format!("reader-encoding-{label}"))
