@@ -4822,6 +4822,9 @@ git commit -m "feat(desktop): 书架状态与后台元数据调度"
   - `OpenReaderFn = Rc<dyn Fn(&str, &mut Window, &mut App)>`（书架页用它打开阅读器）
   - `RootView::{open_reader, close_reader}`
 
+**注意：** 本任务用到的 `Reader.*` i18n key 现在还没写进 `locales/app.yml`，`t!` 会回落到
+key 字符串本身——这是预期的，Task 23 统一补齐。**不要**在本任务里加 locale 条目。
+
 - [ ] **Step 1: 写最小状态机**
 
 `src/desktop/pages/reader/mod.rs`：
@@ -4909,8 +4912,8 @@ use gpui_kit::component::button::Button;
 use gpui_kit::component::{ActiveTheme as _, Disableable as _};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    App, Context, Entity, FocusHandle, FontWeight, IntoElement, ParentElement, Render, SharedString,
-    Styled, Window, div,
+    App, Context, Entity, FocusHandle, FontWeight, InteractiveElement as _, IntoElement,
+    ParentElement, Render, SharedString, Styled, Window, div,
 };
 use rust_i18n::t;
 
