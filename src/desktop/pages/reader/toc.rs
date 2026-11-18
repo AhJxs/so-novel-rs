@@ -13,12 +13,15 @@ use rust_i18n::t;
 
 use super::reader_page::ReaderPage;
 
+/// 目录抽屉宽度（px）。正文列宽要减掉它，否则抽屉打开时分页与实际折行对不上。
+pub(super) const TOC_WIDTH: f32 = 300.0;
+
 impl ReaderPage {
     /// 目录抽屉。没有内容（加载中 / 失败）时给一句占位而不是空面板。
     pub(super) fn render_toc(&self, cx: &Context<Self>) -> AnyElement {
         let Some(titles) = self.toc_titles.clone() else {
             return div()
-                .w(px(300.0))
+                .w(px(TOC_WIDTH))
                 .h_full()
                 .flex_none()
                 .flex()
@@ -77,7 +80,7 @@ impl ReaderPage {
         });
 
         div()
-            .w(px(300.0))
+            .w(px(TOC_WIDTH))
             .h_full()
             .flex_none()
             .flex()

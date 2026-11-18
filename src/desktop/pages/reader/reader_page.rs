@@ -100,6 +100,8 @@ pub struct ReaderPage {
 /// `offset` 是每页的起始纵向偏移（px，首项恒为 0），由 `paginate` 产出。
 struct PageCache {
     fingerprint: LayoutFingerprint,
+    /// 分页与渲染共用的行高（已按设备像素取整）。
+    line_height_px: f32,
     offset: Vec<f32>,
 }
 
@@ -345,6 +347,12 @@ impl ReaderPage {
             ReadingMode::Scroll => ReadingMode::Page,
             ReadingMode::Page => ReadingMode::Scroll,
         };
+        // 切到翻页模式时丢掉旧分页：页号要按当前 `chapter_ratio` 重新归位，
+        // 否则会沿用上次翻页留下的 `page_index`（滚动模式读到的位置被无视，
+        // 页脚百分比与页号自相矛盾）。
+        if matches!(self.mode, ReadingMode::Page) {
+            self.page_cache = None;
+        }
         self.restore_pending = true;
         let book_id = self.book_id.clone();
         let mode = self.mode;
@@ -703,16 +711,27 @@ impl ReaderPage {
 
     /// 翻页模式：按当前指纹测一遍本章并分页；指纹没变就直接用缓存。
     fn ensure_pagination(&mut self, window: &Window, cx: &mut Context<Self>) {
+        let previous_ratio = self.chapter_ratio;
         let reader = self.reader_config(cx);
-        let viewport_width = f32::from(window.viewport_size().width);
+        // 目录抽屉是根 flex row 里的正常子元素，会把正文列压窄；宽度进了指纹，
+        // 开合抽屉会自动触发重排。
+        let dock = if self.toc_open {
+            super::toc::TOC_WIDTH
+        } else {
+            0.0
+        };
         // `mul_add` 而非 `a - 2 * b`：`clippy::suboptimal_flops` 是启用的（无全局放行）。
-        let content_width = 2.0_f32
-            .mul_add(-COLUMN_PADDING, viewport_width)
-            .min(reader.page_width)
-            .max(160.0);
-        let viewport_height = self
-            .viewport_height
-            .unwrap_or_else(|| (f32::from(window.viewport_size().height) - 160.0).max(120.0));
+        // `f32::sub` 需要 `use std::ops::Sub`，改用运算符。
+        let content_width =
+            (2.0_f32.mul_add(-COLUMN_PADDING, f32::from(window.viewport_size().width)) - dock)
+                .min(reader.page_width)
+                .max(160.0);
+        // 探针量的是裁剪盒的 padding box（绝对定位的 inset 相对 padding box 解析），
+        // 里面上下各有 `COLUMN_PADDING` 的留白，能排字的高度要减掉它们。
+        let viewport_height = self.viewport_height.map_or_else(
+            || (f32::from(window.viewport_size().height) - 160.0).max(120.0),
+            |height| 2.0_f32.mul_add(-COLUMN_PADDING, height).max(120.0),
+        );
         let layout = ReaderLayout::new(
             reader.font_size,
             reader.line_height,
@@ -722,16 +741,16 @@ impl ReaderPage {
             reader.indent,
             reader.font_family.clone(),
         );
+        // gpui 渲染文本时会把行高 `pixel_snap` 到设备像素（`elements/text.rs:643`），
+        // 分页必须用同一个值，否则页起点逐页漂移、页首那行被裁。
+        let line_height_px = f32::from(window.pixel_snap(px(layout.line_height_px())));
         let fingerprint = layout.fingerprint(self.chapter);
-        if self
-            .page_cache
-            .as_ref()
-            .is_some_and(|cache| cache.fingerprint == fingerprint)
-        {
+        if self.page_cache.as_ref().is_some_and(|cache| {
+            cache.fingerprint == fingerprint
+                && cache.line_height_px.to_bits() == line_height_px.to_bits()
+        }) {
             return;
         }
-
-        let line_height_px = layout.line_height_px();
         let Some(chapter) = self
             .content
             .as_ref()
@@ -749,6 +768,8 @@ impl ReaderPage {
             )
             .collect();
         let style = content_view::measure_style(window, &reader);
+        let mut title_style = style.clone();
+        title_style.font_weight = FontWeight::BOLD;
         let spacing = reader.paragraph_spacing;
         let metrics: Vec<ParagraphMetrics> = texts
             .iter()
@@ -759,7 +780,7 @@ impl ReaderPage {
                     text,
                     reader.font_size,
                     content_width,
-                    &style,
+                    if index == 0 { &title_style } else { &style },
                 ),
                 spacing_after: if index == 0 {
                     line_height_px * 0.75
@@ -772,6 +793,7 @@ impl ReaderPage {
             .collect();
         let page_offsets = paginate(&metrics, line_height_px, viewport_height);
         let content_height = crate::reader::layout::content_height(&metrics, line_height_px);
+        // 防御：`paginate` 不变量下不会命中，留着是为了测量实现将来变化时不静默出错。
         let broken =
             page_offsets.is_empty() || page_offsets.last().copied().unwrap_or(0.0) > content_height;
         if broken {
@@ -800,8 +822,14 @@ impl ReaderPage {
         self.chapter_ratio = ratio_for_page(self.page_index, pages);
         self.page_cache = Some(PageCache {
             fingerprint,
+            line_height_px,
             offset: page_offsets,
         });
+        // 跨章回退时 `goto_chapter` 记下的是 ratio = 0，真正的位置由这里改写；
+        // 翻页模式下 `capture_scroll_ratio` 已早退，不在这里补记就再没人刷新它。
+        if self.chapter_ratio.to_bits() != previous_ratio.to_bits() {
+            self.record_progress(cx);
+        }
     }
 
     fn goto_page(&mut self, page: usize, cx: &mut Context<Self>) {
@@ -812,6 +840,7 @@ impl ReaderPage {
         if pages == 0 {
             return;
         }
+        self.invalidate_scroll_commit();
         self.page_index = page.min(pages - 1);
         self.chapter_ratio = ratio_for_page(self.page_index, pages);
         self.record_progress(cx);
@@ -826,6 +855,7 @@ impl ReaderPage {
         if pages == 0 {
             return;
         }
+        self.invalidate_scroll_commit();
         let next = self.page_index.cast_signed() + delta;
         if next < 0 {
             if self.chapter == 0 {
@@ -860,12 +890,16 @@ impl ReaderPage {
     }
 
     fn render_page_body(&self, cx: &Context<Self>) -> AnyElement {
-        let Some((start, pages)) = self.page_cache.as_ref().map(|cache| {
-            let start = cache.offset.get(self.page_index).copied().unwrap_or(0.0);
-            (start, cache.offset.len())
+        let Some((start, pages, line_height)) = self.page_cache.as_ref().map(|cache| {
+            (
+                cache.offset.get(self.page_index).copied().unwrap_or(0.0),
+                cache.offset.len(),
+                cache.line_height_px,
+            )
         }) else {
-            // 还没分好页（首帧）：先按滚动模式画，下一帧缓存在了再切过来。
-            return self.render_scroll_body(cx);
+            // 还没排好页：给一帧空占位。退回滚动容器会在翻页模式里挂上
+            // `on_scroll`，可能把陈旧的滚动偏移写成进度。
+            return div().flex_1().into_any_element();
         };
         let Some(content) = self.content.as_ref() else {
             return div().flex_1().into_any_element();
@@ -886,7 +920,6 @@ impl ReaderPage {
             reader.indent,
             reader.font_family.clone(),
         );
-        let line_height = layout.line_height_px();
         let paragraphs: Vec<String> = chapter
             .paragraphs
             .iter()

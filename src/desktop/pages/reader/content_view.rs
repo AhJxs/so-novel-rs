@@ -123,4 +123,9 @@ pub(super) fn viewport_probe(
         },
         |_bounds, (), _window, _cx| {},
     )
+    // `Canvas` 是 `Style::default()` 的 block 叶子，auto 高度恒为 0，prepaint 拿到的
+    // bounds 也就恒为 0 高。绝对定位铺满父容器（父容器已有 `.relative()`），
+    // 这样量到的就是裁剪盒的 padding box 高度。
+    .absolute()
+    .inset_0()
 }
