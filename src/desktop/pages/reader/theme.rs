@@ -10,10 +10,9 @@ use crate::config::ReaderTheme;
 pub struct ReaderColors {
     pub background: Hsla,
     pub foreground: Hsla,
-    // Task 20（书内搜索命中高亮）会读这两个字段；在那之前它们是唯一的读点缺口。
-    #[allow(dead_code)]
+    /// 普通命中底色。
     pub highlight: Hsla,
-    #[allow(dead_code)]
+    /// 当前定位命中的底色。
     pub active_highlight: Hsla,
 }
 

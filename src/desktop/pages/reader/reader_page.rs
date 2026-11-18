@@ -6,6 +6,8 @@
 use std::cell::Cell;
 use std::path::PathBuf;
 use std::rc::Rc;
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
@@ -21,6 +23,7 @@ use rust_i18n::t;
 
 use super::content_view::{self, COLUMN_PADDING};
 use super::reader_colors;
+use super::search_panel::{self, SearchPanel};
 use crate::config::{ReaderConfig, ReadingMode};
 use crate::desktop::model::AppModel;
 use crate::library::{Book, ReadingProgress};
@@ -67,13 +70,13 @@ pub struct ReaderPage {
     /// 滚动模式的滚动位置。
     pub(super) scroll: ScrollHandle,
     /// 待恢复的位置：`max_offset` 要等布局完成，所以恢复放到下一帧。
-    restore_pending: bool,
+    pub(super) restore_pending: bool,
     /// 每次滚动自增，只有最新一代的防抖任务会写进度。
     scroll_generation: u64,
     /// 翻页模式：当前页号。
     page_index: usize,
     /// 翻页模式：当前章的分页缓存。
-    page_cache: Option<PageCache>,
+    pub(super) page_cache: Option<PageCache>,
     /// 越界向前翻页时置位：重算分页后落到新章最后一页。
     page_turn_to_last: bool,
     /// 正文视口实测高度（px）；`None` = 还没量到，先按窗口高度估。
@@ -86,6 +89,12 @@ pub struct ReaderPage {
     pub(super) toc_titles: Option<Rc<Vec<String>>>,
     /// 目录顶部的章节过滤框。
     pub(super) toc_filter: Entity<InputState>,
+    /// 搜索抽屉状态。
+    pub(super) search: SearchPanel,
+    pub(super) search_input: Entity<InputState>,
+    pub(super) search_open: bool,
+    /// 在跑的扫描任务的取消旗标。
+    pub(super) search_cancel: Option<Arc<AtomicBool>>,
     pub(super) toc_open: bool,
     pub(super) typography_open: bool,
     immersive: bool,
@@ -98,7 +107,9 @@ pub struct ReaderPage {
 /// 一章的分页缓存：指纹变了才整章重算。
 ///
 /// `offset` 是每页的起始纵向偏移（px，首项恒为 0），由 `paginate` 产出。
-struct PageCache {
+///
+/// `pub(super)` 是为了让同级的 `search_panel` 能在跳转命中时作废缓存，字段仍只在本模块读写。
+pub(super) struct PageCache {
     fingerprint: LayoutFingerprint,
     /// 分页与渲染共用的行高（已按设备像素取整）。
     line_height_px: f32,
@@ -117,6 +128,9 @@ impl ReaderPage {
         window.focus(&focus, cx);
         let toc_filter = cx.new(|cx| {
             InputState::new(window, cx).placeholder(t!("Reader.toc.filter_placeholder").to_string())
+        });
+        let search_input = cx.new(|cx| {
+            InputState::new(window, cx).placeholder(t!("Reader.search.placeholder").to_string())
         });
         let finished = book.progress.finished;
         let page = Self {
@@ -140,6 +154,10 @@ impl ReaderPage {
             layout_warned: false,
             toc_titles: None,
             toc_filter,
+            search: SearchPanel::new(),
+            search_input,
+            search_open: false,
+            search_cancel: None,
             toc_open: false,
             typography_open: false,
             immersive: false,
@@ -152,6 +170,13 @@ impl ReaderPage {
         cx.subscribe(&page.toc_filter, |_this, _input, event, cx| {
             if matches!(event, InputEvent::Change) {
                 cx.notify();
+            }
+        })
+        .detach();
+        // 回车才开始扫描：边输入边搜会让整书扫描反复重启。
+        cx.subscribe(&page.search_input, |this, _input, event, cx| {
+            if matches!(event, InputEvent::PressEnter { .. }) {
+                this.start_search(cx);
             }
         })
         .detach();
@@ -172,6 +197,7 @@ impl ReaderPage {
 
     /// 落盘进度与阅读设置；随后由 `RootView` 丢弃本实体。
     pub fn close_and_flush(&mut self, cx: &mut Context<Self>) {
+        self.cancel_search();
         // 滚动防抖可能还没触发：关窗前先按当前滚动位置收一次比例，避免丢掉最后一屏。
         self.capture_scroll_ratio();
         self.record_progress(cx);
@@ -312,11 +338,11 @@ impl ReaderPage {
     }
 
     /// 作废在途的滚动防抖提交（位置已被别的路径改写）。
-    const fn invalidate_scroll_commit(&mut self) {
+    pub(super) const fn invalidate_scroll_commit(&mut self) {
         self.scroll_generation = self.scroll_generation.wrapping_add(1);
     }
 
-    fn record_progress(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn record_progress(&mut self, cx: &mut Context<Self>) {
         let chapter_count = self
             .content
             .as_ref()
@@ -463,10 +489,38 @@ impl ReaderPage {
         cx.notify();
     }
 
+    /// 把焦点收回正文。抽屉一卸，输入框仍持着焦点，`shortcuts_blocked` 就会一直拦着快捷键。
+    pub(super) fn focus_body(&self, window: &mut Window, cx: &mut App) {
+        window.focus(&self.focus, cx);
+    }
+
+    /// 开 / 关搜索抽屉：开时焦点进输入框，关时停扫描并把焦点收回正文。
+    ///
+    /// 开合都收在这一个入口：抽屉卸载后若焦点还留在输入框上，除 Esc 外的快捷键全部失灵。
+    pub(super) fn set_search_open(
+        &mut self,
+        open: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.search_open = open;
+        if open {
+            let handle = self.search_input.read(cx).focus_handle(cx);
+            window.focus(&handle, cx);
+        } else {
+            self.cancel_search();
+            self.focus_body(window, cx);
+        }
+    }
+
     fn toggle_toc(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.toc_open {
             self.close_toc(window, cx);
         } else {
+            // 两个右侧抽屉不共存：开目录就关搜索，正文列宽只按一个抽屉算。
+            if self.search_open {
+                self.set_search_open(false, window, cx);
+            }
             self.toc_open = true;
             self.typography_open = false;
             cx.notify();
@@ -474,8 +528,13 @@ impl ReaderPage {
     }
 
     fn shortcuts_blocked(&self, window: &Window, cx: &App) -> bool {
-        // 目录过滤框聚焦时按键归输入框，只让 Esc 例外（在 on_key_down 里处理）。
+        // 抽屉里的输入框聚焦时按键归输入框；只有 Esc 例外（在 on_key_down 里处理）。
         self.toc_filter.read(cx).focus_handle(cx).is_focused(window)
+            || self
+                .search_input
+                .read(cx)
+                .focus_handle(cx)
+                .is_focused(window)
     }
 
     fn on_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
@@ -483,7 +542,7 @@ impl ReaderPage {
         if self.shortcuts_blocked(window, cx) {
             if key == "escape" {
                 self.toc_open = false;
-                window.focus(&self.focus, cx);
+                self.set_search_open(false, window, cx);
                 cx.notify();
             }
             return;
@@ -522,11 +581,21 @@ impl ReaderPage {
             // 不要退回 Task 18 之前的写法：关目录必须走 `toggle_toc`（它把焦点从过滤框
             // 收回正文），Esc 关闭必须走 `window.defer`（`cx.listener` 正租着本实体）。
             "t" => self.toggle_toc(window, cx),
+            "s" => {
+                self.toc_open = false;
+                self.typography_open = false;
+                let open = !self.search_open;
+                self.set_search_open(open, window, cx);
+                cx.notify();
+            }
             "m" => self.toggle_mode(cx),
             "escape" => {
                 if self.typography_open {
                     self.typography_open = false;
                     self.persist_settings(cx);
+                    cx.notify();
+                } else if self.search_open {
+                    self.set_search_open(false, window, cx);
                     cx.notify();
                 } else if self.toc_open {
                     self.toc_open = false;
@@ -598,6 +667,22 @@ impl ReaderPage {
             .child(toc_button.on_click(cx.listener(|this, _event, window, cx| {
                 this.toggle_toc(window, cx);
             })))
+            .child({
+                let mut search_button =
+                    Button::new("reader-search").label(t!("Reader.action.search"));
+                search_button = if self.search_open {
+                    search_button.primary()
+                } else {
+                    search_button.ghost()
+                };
+                search_button.on_click(cx.listener(|this, _event, window, cx| {
+                    this.toc_open = false;
+                    this.typography_open = false;
+                    let open = !this.search_open;
+                    this.set_search_open(open, window, cx);
+                    cx.notify();
+                }))
+            })
             .child(
                 div()
                     .flex_1()
@@ -713,13 +798,17 @@ impl ReaderPage {
     fn ensure_pagination(&mut self, window: &Window, cx: &mut Context<Self>) {
         let previous_ratio = self.chapter_ratio;
         let reader = self.reader_config(cx);
-        // 目录抽屉是根 flex row 里的正常子元素，会把正文列压窄；宽度进了指纹，
-        // 开合抽屉会自动触发重排。
-        let dock = if self.toc_open {
+        // 目录 / 搜索抽屉都是根 flex row 里的正常子元素，会把正文列压窄；宽度进了指纹，
+        // 开合抽屉会自动触发重排。两个抽屉理论上不共存，这里仍按和算，免得将来放开互斥时漏掉。
+        let dock = (if self.toc_open {
             super::toc::TOC_WIDTH
         } else {
             0.0
-        };
+        }) + (if self.search_open {
+            search_panel::SEARCH_WIDTH
+        } else {
+            0.0
+        });
         // `mul_add` 而非 `a - 2 * b`：`clippy::suboptimal_flops` 是启用的（无全局放行）。
         // `f32::sub` 需要 `use std::ops::Sub`，改用运算符。
         let content_width =
@@ -924,6 +1013,7 @@ impl ReaderPage {
             .iter()
             .map(|paragraph| layout.display_text(paragraph).into_owned())
             .collect();
+        let highlights = self.chapter_highlights(&reader, cx);
         let probe =
             content_view::viewport_probe(cx.entity().downgrade(), self.viewport_measured.clone());
 
@@ -965,6 +1055,7 @@ impl ReaderPage {
                                         &paragraphs,
                                         &reader,
                                         line_height,
+                                        highlights.as_deref(),
                                     )),
                             ),
                     ),
@@ -999,7 +1090,14 @@ impl ReaderPage {
             .iter()
             .map(|paragraph| layout.display_text(paragraph).into_owned())
             .collect();
-        let column = content_view::chapter_column(&title, &paragraphs, &reader, line_height);
+        let highlights = self.chapter_highlights(&reader, cx);
+        let column = content_view::chapter_column(
+            &title,
+            &paragraphs,
+            &reader,
+            line_height,
+            highlights.as_deref(),
+        );
 
         div()
             .flex_1()
@@ -1126,6 +1224,11 @@ impl Render for ReaderPage {
         } else {
             None
         };
+        let search = if self.search_open {
+            Some(self.render_search(cx))
+        } else {
+            None
+        };
         let typography = if self.typography_open {
             Some(self.render_typography(cx))
         } else {
@@ -1150,7 +1253,8 @@ impl Render for ReaderPage {
                     .flex_1()
                     .min_h_0()
                     .children(toc)
-                    .child(body),
+                    .child(body)
+                    .children(search),
             )
             .children(typography)
     }

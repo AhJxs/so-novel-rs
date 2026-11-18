@@ -7,8 +7,8 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use gpui_kit::{
-    Div, FontWeight, IntoElement, ParentElement, SharedString, Styled, TextStyle, WeakEntity,
-    Window, canvas, div, px,
+    Div, FontWeight, HighlightStyle, IntoElement, ParentElement, SharedString, Styled, StyledText,
+    TextStyle, WeakEntity, Window, canvas, div, px,
 };
 
 use super::reader_page::ReaderPage;
@@ -18,14 +18,19 @@ use crate::config::ReaderConfig;
 pub(super) const COLUMN_PADDING: f32 = 24.0;
 
 /// 把一章渲染成一整列（含章标题）。翻页模式的外层再套一个裁剪视口。
+/// `highlights` 按段落索引给出高亮区间。
 pub(super) fn chapter_column(
     title: &str,
     paragraphs: &[String],
     reader: &ReaderConfig,
     line_height_px: f32,
+    highlights: Option<&[Vec<(std::ops::Range<usize>, HighlightStyle)>]>,
 ) -> Div {
     let font_size = reader.font_size;
     let spacing = reader.paragraph_spacing;
+    // `Option<&[...]>` 是 `Copy`：`move` 闭包捕获的只是切片引用，子元素在
+    // `children()` 里同步构造完就散掉，不必每帧把整章区间拷成 owned。
+    let highlight_rows = highlights;
     let mut column = div()
         .w_full()
         .max_w(px(reader.page_width))
@@ -39,13 +44,29 @@ pub(super) fn chapter_column(
                 .font_weight(FontWeight::BOLD)
                 .child(SharedString::from(title.to_string())),
         )
-        .children(paragraphs.iter().cloned().map(move |text| {
-            div()
-                .pb(px(spacing))
-                .text_size(px(font_size))
-                .line_height(px(line_height_px))
-                .child(text)
-        }));
+        .children(
+            paragraphs
+                .iter()
+                .cloned()
+                .enumerate()
+                .map(move |(index, text)| {
+                    let mut row = div()
+                        .pb(px(spacing))
+                        .text_size(px(font_size))
+                        .line_height(px(line_height_px));
+                    row = match highlight_rows
+                        .as_ref()
+                        .and_then(|rows| rows.get(index))
+                        .filter(|ranges| !ranges.is_empty())
+                    {
+                        Some(ranges) => {
+                            row.child(StyledText::new(text).with_highlights(ranges.clone()))
+                        }
+                        None => row.child(text),
+                    };
+                    row
+                }),
+        );
     if !reader.font_family.is_empty() {
         column = column.font_family(reader.font_family.clone());
     }
