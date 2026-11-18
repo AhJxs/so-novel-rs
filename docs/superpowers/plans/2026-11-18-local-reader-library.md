@@ -2516,7 +2516,7 @@ git commit -m "feat(library): 书架持久化与损坏兜底"
 
         let path = dir.path().join("a.txt");
         std::fs::write(&path, b"one").unwrap();
-        store.merge_scan(&[scanned(&path)]);
+        let _ = store.merge_scan(&[scanned(&path)]);
         assert!(store.is_dirty());
 
         store.clear_dirty();
@@ -2529,13 +2529,13 @@ git commit -m "feat(library): 书架持久化与损坏兜底"
         let path = dir.path().join("a.txt");
         std::fs::write(&path, b"one").unwrap();
         let mut store = LibraryStore::default();
-        store.merge_scan(&[scanned(&path)]);
+        let _ = store.merge_scan(&[scanned(&path)]);
         let id = store.books()[0].id.clone();
 
-        store.merge_scan(&[]);
+        let _ = store.merge_scan(&[]);
         assert!(store.get(&id).unwrap().missing);
 
-        store.merge_scan(&[scanned(&path)]);
+        let _ = store.merge_scan(&[scanned(&path)]);
         assert!(!store.get(&id).unwrap().missing);
     }
 
@@ -2545,14 +2545,14 @@ git commit -m "feat(library): 书架持久化与损坏兜底"
         let path = dir.path().join("a.txt");
         std::fs::write(&path, b"one").unwrap();
         let mut store = LibraryStore::default();
-        store.merge_scan(&[scanned(&path)]);
+        let _ = store.merge_scan(&[scanned(&path)]);
         let id = store.books()[0].id.clone();
         store.set_hidden(&id, true);
 
         // 文件真的变了也不许动隐藏书：既不重新提取元数据，也不刷新文件信息。
         std::fs::write(&path, b"one and more").unwrap();
         let ids = store.merge_scan(&[scanned(&path)]);
-        assert!(ids.is_empty());
+        assert_eq!(ids, Vec::<String>::new());
         let book = store.get(&id).unwrap();
         assert!(book.hidden);
         assert_eq!(book.size_bytes, 3);
@@ -2564,7 +2564,7 @@ git commit -m "feat(library): 书架持久化与损坏兜底"
         let path = dir.path().join("a.txt");
         std::fs::write(&path, b"one").unwrap();
         let mut store = LibraryStore::default();
-        store.merge_scan(&[scanned(&path)]);
+        let _ = store.merge_scan(&[scanned(&path)]);
         let id = store.books()[0].id.clone();
 
         // 大小变了就重新提取元数据并刷新文件信息。
@@ -2584,11 +2584,11 @@ git commit -m "feat(library): 书架持久化与损坏兜底"
         assert_eq!(outcome.added, 1);
         let id = outcome.meta_ids[0].clone();
 
-        store.merge_scan(&[]);
+        let _ = store.merge_scan(&[]);
         assert!(!store.get(&id).unwrap().missing, "不在下载目录不等于失效");
 
         std::fs::remove_file(&path).unwrap();
-        store.merge_scan(&[]);
+        let _ = store.merge_scan(&[]);
         assert!(store.get(&id).unwrap().missing);
     }
 
