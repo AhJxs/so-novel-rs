@@ -2314,6 +2314,7 @@ impl LibraryStore {
                     books: file.books,
                     dirty: false,
                     future_version: file.version > LIBRARY_VERSION,
+                    readonly: false,
                 };
                 store.normalize_ids();
                 let warning = store.future_version.then(|| {
