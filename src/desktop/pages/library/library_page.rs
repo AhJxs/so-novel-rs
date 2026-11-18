@@ -42,7 +42,7 @@ pub struct LibraryPage {
     /// 当前渲染的卡片上限。
     visible_limit: usize,
     /// 打开阅读器的回调（`dialogs` 的「继续阅读」也要用）。
-    pub(super) open_reader: Option<super::OpenReaderFn>,
+    pub(super) open_reader: Option<OpenReaderFn>,
 }
 
 impl LibraryPage {
@@ -99,7 +99,7 @@ impl LibraryPage {
         cx.notify();
     }
 
-    /// 首次进入 / 下载目录变化时自动扫一次（重复调用由 `scan_in_flight` 拦掉）。
+    /// 首次进入 / 下载目录变化时自动扫一次（同一目录只扫一次，靠 `scanned_dir` 去重）。
     fn maybe_auto_scan(&self, cx: &mut Context<Self>) {
         let wanted = absolute_dir(std::path::Path::new(
             &self.model.read(cx).config.download.download_path,
@@ -362,7 +362,7 @@ impl LibraryPage {
                             .ghost()
                             .label(t!("Library.action_load_more"))
                             .on_click(cx.listener(|this, _ev, _window, cx| {
-                                this.visible_limit += BATCH;
+                                this.visible_limit = this.visible_limit.saturating_add(BATCH);
                                 cx.notify();
                             })),
                     ),
@@ -458,7 +458,7 @@ impl Render for LibraryPage {
                         .rounded_md()
                         .bg(cx.theme().danger)
                         .text_color(cx.theme().danger_foreground)
-                        .child(format!("{}: {error}", t!("Library.scan_failed"))),
+                        .child(error),
                 )
             })
             .child(body)

@@ -7,4 +7,4 @@
 mod card;
 mod library_page;
 
-pub use library_page::{LibraryPage, OpenReaderFn};
+pub use library_page::LibraryPage;

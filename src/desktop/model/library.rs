@@ -17,11 +17,13 @@ impl AppModel {
         // 与写入 `library.json` 的 `path_key` 共用 `absolute_dir`，否则
         // 「相对路径 vs 绝对路径」永远对不上 → 同一目录被反复当成新目录扫描。
         let dir = crate::library::absolute_dir(Path::new(&self.config.download.download_path));
-        self.library.scanned_dir = Some(dir.clone());
-        self.library.last_error = None;
+        // 目录还不存在时不记「已扫描」：下载目录可能稍后才被创建，
+        // 记下了书架页的 `maybe_auto_scan` 就再也不会自动重扫。
         if !dir.exists() {
             return;
         }
+        self.library.scanned_dir = Some(dir.clone());
+        self.library.last_error = None;
         let (tx, rx) = smol::channel::unbounded::<ScanEvent>();
         self.library.scan_rx = Some(rx);
         self.library.scan_in_flight = true;
