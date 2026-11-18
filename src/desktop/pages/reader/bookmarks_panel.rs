@@ -1,7 +1,9 @@
 //! 书签抽屉：添加当前书签、按章节升序展示、点击跳转、删除。
 
 use gpui_kit::component::ActiveTheme as _;
+use gpui_kit::component::Disableable as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::{
     AnyElement, App, Context, FontWeight, InteractiveElement as _, IntoElement, ParentElement,
     StatefulInteractiveElement as _, Styled, div, px,
@@ -18,30 +20,39 @@ pub(super) const BOOKMARKS_WIDTH: f32 = 300.0;
 
 impl ReaderPage {
     /// 书签列表快照：store 是唯一真相，`self.book` 只是打开时的副本。
+    ///
+    /// 走 `bookmarks_of` 而不是 `book_snapshot`：抽屉每帧都要读，别为此整本 clone。
     pub(super) fn bookmarks_snapshot(&self, cx: &App) -> Vec<Bookmark> {
         self.model
             .read(cx)
-            .book_snapshot(&self.book_id)
-            .map_or_else(Vec::new, |book| book.bookmarks)
+            .bookmarks_of(&self.book_id)
+            .unwrap_or_default()
     }
 
     /// 把当前位置加成书签；同章同位置重复时提示「已存在」。
     ///
-    /// 只读 `self`，写操作全部落到 model 实体上，所以接收者是 `&self`
-    /// （`&mut self` 会让 `clippy::needless_pass_by_ref_mut` 误判 `cx` 未被可变使用）。
-    pub(super) fn add_bookmark(&self, cx: &mut Context<Self>) {
+    /// 滚动模式下 `chapter_ratio` 只由 `on_scroll` 与 5 s 一次的 autosave 更新，
+    /// 而**拖动滚动条不触发 `on_scroll`**：不先按当前偏移校准，书签会落在拖之前的位置。
+    pub(super) fn add_bookmark(&mut self, cx: &mut Context<Self>) {
+        self.capture_scroll_ratio();
+        self.record_progress(cx);
         let bookmark = Bookmark::new(
             self.chapter,
             self.chapter_ratio.clamp(0.0, 1.0),
             self.current_excerpt(),
         );
         let book_id = self.book_id.clone();
+        let exists = self.model.read(cx).bookmarks_of(&book_id).is_some();
         let added = self.model.update(cx, |model, _cx| {
             model.add_reading_bookmark(&book_id, bookmark)
         });
         if !added {
             self.model.update(cx, |model, _cx| {
-                model.push_warning(t!("Reader.bookmarks.duplicate").to_string());
+                if exists {
+                    model.push_warning(t!("Reader.bookmarks.duplicate").to_string());
+                } else {
+                    model.push_error(t!("Library.error.book_not_found").to_string());
+                }
             });
         }
         cx.notify();
@@ -93,6 +104,8 @@ impl ReaderPage {
             .flex_1()
             .min_h_0()
             .overflow_y_scroll()
+            .track_scroll(&self.bookmarks_scroll)
+            .vertical_scrollbar(&self.bookmarks_scroll)
             .p_2()
             .flex()
             .flex_col()
@@ -215,6 +228,7 @@ impl ReaderPage {
                         Button::new("reader-bookmark-add")
                             .primary()
                             .compact()
+                            .disabled(self.content.is_none())
                             .label(t!("Reader.bookmarks.add"))
                             .on_click(cx.listener(|this, _event, _window, cx| {
                                 this.add_bookmark(cx);

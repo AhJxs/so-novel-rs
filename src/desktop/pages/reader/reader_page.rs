@@ -95,6 +95,8 @@ pub struct ReaderPage {
     pub(super) search_open: bool,
     /// 书签抽屉。
     pub(super) bookmarks_open: bool,
+    /// 书签列表的滚动位置。
+    pub(super) bookmarks_scroll: ScrollHandle,
     /// 在跑的扫描任务的取消旗标。
     pub(super) search_cancel: Option<Arc<AtomicBool>>,
     pub(super) toc_open: bool,
@@ -160,6 +162,7 @@ impl ReaderPage {
             search_input,
             search_open: false,
             bookmarks_open: false,
+            bookmarks_scroll: ScrollHandle::new(),
             search_cancel: None,
             toc_open: false,
             typography_open: false,
@@ -322,7 +325,7 @@ impl ReaderPage {
     }
 
     /// 把当前滚动位置换算成章内比例（滚不动时保持原值）。
-    fn capture_scroll_ratio(&mut self) {
+    pub(super) fn capture_scroll_ratio(&mut self) {
         self.invalidate_scroll_commit();
         // 跳章 / 切模式 / 改排版之后、恢复帧跑之前，滚动句柄里还是**旧**位置；
         // 此刻采样会把刚设好的目标比例覆盖掉，等恢复帧落地再说。

@@ -117,6 +117,15 @@ impl AppModel {
         self.library.store.get(id).cloned()
     }
 
+    /// 只取书签列表：`book_snapshot` 会整本 clone，书签抽屉每帧都要用，别让它带整本书。
+    #[must_use]
+    pub fn bookmarks_of(&self, id: &str) -> Option<Vec<crate::library::Bookmark>> {
+        self.library
+            .store
+            .get(id)
+            .map(|book| book.bookmarks.clone())
+    }
+
     /// 阅读器打开成功后记录章节数与编码。
     pub fn mark_book_opened(&mut self, id: &str, chapter_count: u32, encoding: Option<String>) {
         self.library.store.mark_opened(id, chapter_count, encoding);
