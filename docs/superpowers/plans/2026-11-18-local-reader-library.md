@@ -12166,6 +12166,42 @@ git commit -m "docs(i18n): 本地书库与阅读器三语文案、README 与验�
 
 ### Task 24: 阅读失败时的恢复操作
 
+> **Task 23 定案、本任务必须照做。**
+>
+> 1. **没有 `desktop::system_open` 这个模块。** 用既有工具 `crate::utils::system::open_path(&Path)`
+>    （返回 `anyhow::Result<()>`）。`use crate::desktop::system_open;` 那行删掉，改成
+>    `use crate::utils::system;`；命中错误时 `model.push_error(message.to_string())`
+>    （`message` 是 `anyhow::Error`，直接传编译不过）。
+> 2. **不要复制 `extension_of`。** `pages::library::dialogs` 里已有一个私有 `const fn extension_of`
+>    （`dialogs.rs:602`），模块私有、跨目录够不到。把它提升成 `BookFormat` 的方法：
+>    在 `src/library/book.rs` 的 `label()` 旁边加
+>
+>    ```rust
+>    /// 文件对话框过滤用的扩展名（无点、小写）。
+>    #[must_use]
+>    pub const fn extension(self) -> &'static str {
+>        match self {
+>            Self::Txt => "txt",
+>            Self::Epub => "epub",
+>            Self::Markdown => "md",
+>            Self::Html => "html",
+>            Self::Zip => "zip",
+>            Self::Pdf => "pdf",
+>        }
+>    }
+>    ```
+>
+>    然后 `dialogs.rs` 删掉私有 `extension_of`、调用点改 `format.extension()`；
+>    `reader_page.rs` 的 `pick_relink` 直接用 `format.extension()`，**不要再写一份 match**。
+>    本任务因此多改两个文件：`src/library/book.rs`、`src/desktop/pages/library/dialogs.rs`。
+> 3. `src/reader/` 不动。`ReaderError` 的七个变体与 `message_key()` 已在 `content.rs` 就位，直接
+>    用；`Reader.error.action.*` 三个 key 已在 Task 23 写进 `app.yml` 与 `READER_KEYS`。
+> 4. `render_error` 现在是关联函数（无 `self`），改成 `&self` + `cx` 后，`render()` 里那处
+>    `LoadState::Error(error) => self.render_error(error, cx)` 借用是成立的（`error` 借自
+>    `self.load_state`，与 `&self` 共享借用相容）。
+> 5. **Step 5 的 GUI 验收不要做**（会话处于锁屏，合成点击不会送达）。在报告里写「由控制器另行
+>    验证」，并逐条说明代码上如何满足。
+
 对应 spec §4.10：打开失败不能只甩一行字 —— 文件丢了要能重新定位，解码失败要能换编码重试，
 其余错误至少能「用系统程序打开」或「返回书架」。
 
