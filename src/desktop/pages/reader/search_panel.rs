@@ -7,15 +7,16 @@ use std::time::Duration;
 use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::Input;
+use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, App, Context, FontWeight, HighlightStyle, InteractiveElement as _, IntoElement,
-    ParentElement, StatefulInteractiveElement as _, Styled, StyledText, div, px,
+    ParentElement, ScrollHandle, StatefulInteractiveElement as _, Styled, StyledText, div, px,
 };
 use rust_i18n::t;
 
 use super::reader_page::ReaderPage;
-use super::theme::reader_colors;
+use super::theme::{ReaderColors, reader_colors};
 use crate::config::ReaderConfig;
 use crate::reader::HITS_TOTAL;
 use crate::reader::layout::count_f32;
@@ -24,6 +25,57 @@ use crate::reader::{ReaderLayout, SearchGroup, SearchHit};
 
 /// 搜索抽屉宽度（px）。正文列宽要减掉它，与 `toc::TOC_WIDTH` 同理。
 pub(super) const SEARCH_WIDTH: f32 = 320.0;
+
+/// 段落内的一段命中：字节区间 + 是否为当前定位的命中。
+type HitRange = (std::ops::Range<usize>, bool);
+
+/// 同一段落里的命中区间整理成「升序、互不重叠、active 单独一段」。
+///
+/// `find_hits` 在每个 char 边界都试匹配，自重叠的 needle（「哈哈」于「哈哈哈」）
+/// 会给出互相重叠的区间；而 `StyledText` 的 run 不做重叠补偿（每个 run 从上一个
+/// run 的末尾起算），重叠区间直接传进去会把后面几个字染错。
+fn merge_hit_ranges(hits: &[HitRange]) -> Vec<HitRange> {
+    let mut plain: Vec<std::ops::Range<usize>> = hits
+        .iter()
+        .filter(|(_, active)| !active)
+        .map(|(range, _)| range.clone())
+        .collect();
+    plain.sort_by_key(|range| range.start);
+    let mut merged: Vec<std::ops::Range<usize>> = Vec::new();
+    for range in plain {
+        match merged.last_mut() {
+            // 相邻（`start == end`）也合并：连续染成一整段与分段染在视觉上一致。
+            Some(last) if range.start <= last.end => last.end = last.end.max(range.end),
+            _ => merged.push(range),
+        }
+    }
+
+    let Some(active) = hits
+        .iter()
+        .find(|(_, active)| *active)
+        .map(|(range, _)| range.clone())
+    else {
+        return merged.into_iter().map(|range| (range, false)).collect();
+    };
+
+    // active 命中要保住自己的底色：把压到它的普通区间切成左右两段。
+    let mut out: Vec<(std::ops::Range<usize>, bool)> = Vec::new();
+    for range in merged {
+        if range.end <= active.start || range.start >= active.end {
+            out.push((range, false));
+            continue;
+        }
+        if range.start < active.start {
+            out.push((range.start..active.start, false));
+        }
+        if range.end > active.end {
+            out.push((active.end..range.end, false));
+        }
+    }
+    out.push((active, true));
+    out.sort_by_key(|(range, _)| range.start);
+    out
+}
 
 /// 搜索抽屉的全部状态。
 pub(super) struct SearchPanel {
@@ -41,11 +93,13 @@ pub(super) struct SearchPanel {
     generation: u64,
     /// 当前定位的命中 `(章, 段, 字节偏移)`。
     active: Option<(usize, usize, usize)>,
+    /// 结果列表的滚动位置。
+    pub(super) scroll: ScrollHandle,
 }
 
 impl SearchPanel {
     /// 空状态：还没有关键词、没有结果。
-    pub(super) const fn new() -> Self {
+    pub(super) fn new() -> Self {
         Self {
             query: String::new(),
             groups: Vec::new(),
@@ -55,6 +109,7 @@ impl SearchPanel {
             hits: 0,
             generation: 0,
             active: None,
+            scroll: ScrollHandle::new(),
         }
     }
 }
@@ -215,21 +270,33 @@ impl ReaderPage {
         } else {
             0
         };
-        let mut rows: Vec<Vec<(std::ops::Range<usize>, HighlightStyle)>> = vec![Vec::new(); count];
+        let mut per_paragraph: Vec<Vec<(std::ops::Range<usize>, bool)>> = vec![Vec::new(); count];
         for hit in &group.hits {
-            let active = self.search.active == Some((self.chapter, hit.paragraph, hit.byte_offset));
-            let style = HighlightStyle {
-                background_color: Some(if active {
-                    colors.active_highlight
-                } else {
-                    colors.highlight
-                }),
-                ..HighlightStyle::default()
-            };
             let start = hit.byte_offset + indent;
-            if let Some(row) = rows.get_mut(hit.paragraph) {
-                row.push((start..start + hit.byte_len, style));
+            let active = self.search.active == Some((self.chapter, hit.paragraph, hit.byte_offset));
+            if let Some(row) = per_paragraph.get_mut(hit.paragraph) {
+                row.push((start..start + hit.byte_len, active));
             }
+        }
+        let mut rows: Vec<Vec<(std::ops::Range<usize>, HighlightStyle)>> =
+            Vec::with_capacity(count);
+        for hits in per_paragraph {
+            rows.push(
+                merge_hit_ranges(&hits)
+                    .into_iter()
+                    .map(|(range, active)| {
+                        let style = HighlightStyle {
+                            background_color: Some(if active {
+                                colors.active_highlight
+                            } else {
+                                colors.highlight
+                            }),
+                            ..HighlightStyle::default()
+                        };
+                        (range, style)
+                    })
+                    .collect(),
+            );
         }
         Some(rows)
     }
@@ -253,11 +320,16 @@ impl ReaderPage {
             .to_string()
         };
 
+        // 配色一帧只取一次：`reader_config` 会 clone `font_family`，逐行取在上千条结果时是纯浪费。
+        let colors = reader_colors(self.reader_config(cx).theme, cx);
+
         let mut results = div()
             .id("reader-search-results")
             .flex_1()
             .min_h_0()
             .overflow_y_scroll()
+            .track_scroll(&self.search.scroll)
+            .vertical_scrollbar(&self.search.scroll)
             .p_2()
             .flex()
             .flex_col()
@@ -272,7 +344,7 @@ impl ReaderPage {
                     .child(format!("{} · {}", group.title, group.hits.len())),
             );
             for hit in &group.hits {
-                results = results.child(self.render_search_hit(group.chapter, hit, cx));
+                results = results.child(self.render_search_hit(group.chapter, hit, colors, cx));
             }
         }
 
@@ -331,12 +403,12 @@ impl ReaderPage {
         &self,
         chapter: usize,
         hit: &SearchHit,
+        colors: ReaderColors,
         cx: &Context<Self>,
     ) -> impl IntoElement {
         let paragraph = hit.paragraph;
         let byte_offset = hit.byte_offset;
         let active = self.search.active == Some((chapter, paragraph, byte_offset));
-        let colors = reader_colors(self.reader_config(cx).theme, cx);
         let highlight = if active {
             colors.active_highlight
         } else {
@@ -364,8 +436,41 @@ impl ReaderPage {
             .when(active, |this| this.bg(active_bg))
             .hover(move |style| style.bg(hover_bg))
             .child(snippet)
-            .on_click(cx.listener(move |this, _event, _window, cx| {
+            .on_click(cx.listener(move |this, _event, window, cx| {
                 this.goto_hit(chapter, paragraph, byte_offset, cx);
+                // 跳转后把焦点从输入框收回正文，方向键才不会继续编辑查询词。
+                this.focus_body(window, cx);
             }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::merge_hit_ranges;
+
+    #[test]
+    fn overlapping_hits_merge_into_one_span() {
+        // 「哈哈」在「哈哈哈」里给出 (0..6) 与 (3..9)。
+        let merged = merge_hit_ranges(&[(0..6, false), (3..9, false)]);
+        assert_eq!(merged, vec![(0..9, false)]);
+    }
+
+    #[test]
+    fn adjacent_hits_merge_and_gaps_stay_separate() {
+        let merged = merge_hit_ranges(&[(0..2, false), (2..4, false), (10..12, false)]);
+        assert_eq!(merged, vec![(0..4, false), (10..12, false)]);
+    }
+
+    #[test]
+    fn active_hit_is_cut_out_of_the_merged_span() {
+        // 普通命中 (0..9) 与 active (3..6)：active 保住自己的底色，左右各留一段。
+        let merged = merge_hit_ranges(&[(0..9, false), (3..6, true)]);
+        assert_eq!(merged, vec![(0..3, false), (3..6, true), (6..9, false)]);
+        // active 覆盖整段时不留空片段。
+        let merged = merge_hit_ranges(&[(0..9, false), (0..9, true)]);
+        assert_eq!(merged, vec![(0..9, true)]);
+        // active 落在普通命中之外时只按起点排好序。
+        let merged = merge_hit_ranges(&[(0..3, false), (8..10, true)]);
+        assert_eq!(merged, vec![(0..3, false), (8..10, true)]);
     }
 }
