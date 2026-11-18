@@ -38,7 +38,9 @@
 |---|---|
 | 🔍 **多源搜索** | 聚合多书源并发搜索、相似度过滤排序、quanben5 加密搜索、详情面板、封面预览、选章下载 |
 | 📥 **下载任务** | 并发抓取、失败重试、进度跟踪、取消、封面嵌入、持久化、章节范围、**简繁自动转换** |
-| 📚 **本地书库** | 扫描已下载书籍，按格式/日期/大小排序，删除二次确认（无空态闪烁） |
+| 📚 **本地书库** | 扫描下载目录 + 手动导入，真实封面 / 元数据自动提取、搜索筛选排序、阅读进度、收藏、重新定位、移出与删文件 |
+| 📖 **内置阅读器** | TXT / EPUB 应用内阅读，滚动 + 翻页双模式、目录抽屉、字号 / 行高 / 段距 / 页宽 / 主题即时调整、书内搜索、书签、沉浸全屏 |
+| 🗂 **书籍管理** | 卡片书架（封面 / 作者 / 进度 / 状态徽标）、手动编辑书名作者封面、缺失文件标记 |
 | 🔌 **书源管理** | 多规则文件切换、JSON 导入、启用/禁用、连通性测速 |
 | 📄 **多格式导出** | EPUB / TXT（多编码）/ HTML（zip 打包）/ **PDF**（DocumentBuilder 直接构建，CJK 字体嵌入） |
 | 🎨 **主题系统** | 38 个可用主题，文件 watcher 热重载，无需重启 |
@@ -76,7 +78,9 @@ so-novel-rs/
 └── src/
     ├── main.rs / lib.rs   # 入口 + crate 根
     ├── core/              # 业务层（与 GUI 解耦）
-    ├── desktop/           # GPUI 桌面 GUI（components / model / pages / themes/）
+    ├── desktop/           # GPUI 桌面 GUI（components / model / pages / themes/；pages/reader 是覆盖式阅读器）
+    ├── library/           # 本地书库数据层（扫描 / 元数据 / 封面 / 进度 / 书签，与 GUI 解耦）
+    ├── reader/            # 阅读数据层（txt / epub → 章节段落、分页算法，与 GUI 解耦）
     ├── parser/            # HTML 解析（book / chapter / toc / dom 子模块）
     ├── crawler/           # 搜索 / 下载 / 重试 / 健康检测
     ├── export/            # EPUB / TXT / HTML / PDF（含 pdf/ 子模块）
@@ -167,6 +171,10 @@ cargo build --release --target aarch64-unknown-linux-gnu    # Linux ARM64
 | `Cmd/Ctrl + B` | 折叠 / 展开 Sidebar |
 | `F6` / `Shift+F6` | 翻页（避开 Input 的 Tab 绑定） |
 | `Escape` | 关闭 Dialog / Sheet / Notification |
+| `T` / `S` / `B` | 阅读器内开关目录 / 搜索 / 书签抽屉 |
+| `M` | 阅读器内切换滚动 / 翻页模式 |
+| `←` `→` `PgUp` `PgDn` / `Space` | 阅读器翻页 |
+| `F11` | 阅读器沉浸全屏（鼠标移到窗口顶部唤出工具栏） |
 
 ## 🤝 贡献
 

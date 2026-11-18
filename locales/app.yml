@@ -994,7 +994,375 @@ Library:
     en: Library
     zh-CN: 本地书库
     zh-TW: 本地書庫
-  # PageHeader 副标题前缀，最终拼接为 "下载目录: <path>"。
+  # PageHeader 副标题：%{count} 本书 + 扫描目录 %{dir}。
+  subtitle:
+    en: "%{count} books · %{dir}"
+    zh-CN: "共 %{count} 本 · %{dir}"
+    zh-TW: "共 %{count} 本 · %{dir}"
+  search_placeholder:
+    en: "Search title or author…"
+    zh-CN: 搜索书名或作者…
+    zh-TW: 搜尋書名或作者…
+  action_import:
+    en: Import
+    zh-CN: 导入
+    zh-TW: 匯入
+  action_rescan:
+    en: Rescan
+    zh-CN: 重新扫描
+    zh-TW: 重新掃描
+  action_load_more:
+    en: "Load more"
+    zh-CN: 加载更多
+    zh-TW: 載入更多
+  action_clear_filters:
+    en: "Clear filters"
+    zh-CN: 清除筛选
+    zh-TW: 清除篩選
+  filter:
+    all:
+      en: All
+      zh-CN: 全部
+      zh-TW: 全部
+    reading:
+      en: Reading
+      zh-CN: 在读
+      zh-TW: 在讀
+    unread:
+      en: Unread
+      zh-CN: 未读
+      zh-TW: 未讀
+    finished:
+      en: Finished
+      zh-CN: 已读
+      zh-TW: 已讀
+    favorites:
+      en: Favorites
+      zh-CN: 收藏
+      zh-TW: 收藏
+  # 排序按钮显示的是「当前排序」，点一下切下一种。
+  sort:
+    title:
+      en: "Sort: title"
+      zh-CN: 排序：书名
+      zh-TW: 排序：書名
+    last_opened:
+      en: "Sort: recent"
+      zh-CN: 排序：最近阅读
+      zh-TW: 排序：最近閱讀
+    added_at:
+      en: "Sort: added"
+      zh-CN: 排序：加入时间
+      zh-TW: 排序：加入時間
+    size:
+      en: "Sort: size"
+      zh-CN: 排序：文件大小
+      zh-TW: 排序：檔案大小
+  status:
+    unread:
+      en: Unread
+      zh-CN: 未读
+      zh-TW: 未讀
+    reading:
+      en: Reading
+      zh-CN: 在读
+      zh-TW: 在讀
+    finished:
+      en: Finished
+      zh-CN: 已读
+      zh-TW: 已讀
+    # 非 txt / epub 的书点了「继续阅读」时的提示。
+    unsupported:
+      en: "This format cannot be read in the app yet"
+      zh-CN: 该格式暂不支持应用内阅读
+      zh-TW: 該格式暫不支援應用程式內閱讀
+  card:
+    missing:
+      en: "File missing"
+      zh-CN: 文件已不存在
+      zh-TW: 檔案已不存在
+  empty_title:
+    en: "Library is empty"
+    zh-CN: 本地书库为空
+    zh-TW: 本地書庫為空
+  empty_subtitle:
+    en: "Scanner finds no txt / epub in the download directory."
+    zh-CN: 下载目录里没有找到 txt / epub 书籍。
+    zh-TW: 下載目錄裡沒有找到 txt / epub 書籍。
+  empty_filtered_title:
+    en: "Nothing matches"
+    zh-CN: 没有符合条件的书
+    zh-TW: 沒有符合條件的書
+  empty_filtered_subtitle:
+    en: "Try another keyword, or clear the filters."
+    zh-CN: 换个关键字，或清除筛选条件。
+    zh-TW: 換個關鍵字，或清除篩選條件。
+  scan_failed:
+    en: "Scan failed"
+    zh-CN: "扫描失败"
+    zh-TW: "掃描失敗"
+  import:
+    dialog_title:
+      en: "Import books"
+      zh-CN: 导入书籍
+      zh-TW: 匯入書籍
+    filter_books:
+      en: "Books (txt / epub)"
+      zh-CN: 书籍（txt / epub）
+      zh-TW: 書籍（txt / epub）
+    filter_all:
+      en: "All files"
+      zh-CN: 所有文件
+      zh-TW: 所有檔案
+    # %{added} 新增本数，%{existing} 已在书架的本数。
+    done:
+      en: "Imported %{added}, already in library %{existing}"
+      zh-CN: 已导入 %{added} 本，已在书架 %{existing} 本
+      zh-TW: 已匯入 %{added} 本，已在書架 %{existing} 本
+    # %{file} 文件名，%{err} 失败原因。
+    failed_item:
+      en: "%{file}: %{err}"
+      zh-CN: "%{file}：%{err}"
+      zh-TW: "%{file}：%{err}"
+  # 用户可见错误摘要（数据层直接 `t!` 后进 toast / 导入失败列表）。
+  # IO 失败不透传 key，直接拼系统原文。
+  error:
+    not_a_file:
+      en: "Not a file"
+      zh-CN: 不是文件
+      zh-TW: 不是檔案
+    unsupported_format:
+      en: "Unsupported file format"
+      zh-CN: 不支持的文件格式
+      zh-TW: 不支援的檔案格式
+    book_not_found:
+      en: "That book is no longer on the shelf"
+      zh-CN: 书籍已不在书架中
+      zh-TW: 書籍已不在書架中
+    format_mismatch:
+      en: "The chosen file has a different format"
+      zh-CN: 选择的文件格式与书籍不一致
+      zh-TW: 選擇的檔案格式與書籍不一致
+    already_on_shelf:
+      en: "That file is already on the shelf"
+      zh-CN: 该文件已在书架中
+      zh-TW: 該檔案已在書架中
+    # %{detail} 系统原始错误。
+    load_failed:
+      en: "Could not read library.json: %{detail}"
+      zh-CN: "读取 library.json 失败：%{detail}"
+      zh-TW: "讀取 library.json 失敗：%{detail}"
+    # %{path} 备份文件名，%{detail} 解析错误。
+    corrupt_backup:
+      en: "library.json could not be parsed and was backed up to %{path}: %{detail}"
+      zh-CN: "library.json 解析失败，已备份为 %{path}：%{detail}"
+      zh-TW: "library.json 解析失敗，已備份為 %{path}：%{detail}"
+    # %{detail} 备份失败原因；接在 corrupt_backup 之后。
+    backup_failed:
+      en: " (backup failed: %{detail})"
+      zh-CN: "（备份失败：%{detail}）"
+      zh-TW: "（備份失敗：%{detail}）"
+    # %{version} 文件版本，%{supported} 当前支持的版本。
+    future_version:
+      en: "library.json is version %{version}, newer than the supported %{supported}; this run is read-only and will not overwrite it"
+      zh-CN: "library.json 版本 %{version} 高于当前支持的 %{supported}，本次只读，不会覆盖"
+      zh-TW: "library.json 版本 %{version} 高於目前支援的 %{supported}，本次唯讀，不會覆寫"
+    save_refused:
+      en: "library.json comes from a newer version; refusing to overwrite. Upgrade the app to save."
+      zh-CN: "library.json 来自更高版本，拒绝覆盖；请升级应用后再保存"
+      zh-TW: "library.json 來自更高版本，拒絕覆寫；請先升級應用程式再儲存"
+    # 上次读取失败 / 备份失败：磁盘上的文件没被保住，写回就等于抹掉它。
+    save_refused_after_load_failure:
+      en: "The shelf file could not be read or backed up; refusing to overwrite it. Move or delete it, then restart the app."
+      zh-CN: "书架文件读取或备份失败，拒绝覆盖；请移走或删除该文件后重启应用"
+      zh-TW: "書架檔案讀取或備份失敗，拒絕覆寫；請移走或刪除該檔案後重新啟動應用程式"
+    create_dir_failed:
+      en: "Could not create the shelf folder"
+      zh-CN: 创建书架目录失败
+      zh-TW: 建立書架目錄失敗
+    write_failed:
+      en: "Could not write library.json"
+      zh-CN: 写入 library.json 失败
+      zh-TW: 寫入 library.json 失敗
+    # 编辑书籍信息时，选的封面图片读不出来 / 写不进 covers 目录。
+    cover_failed:
+      en: "Could not save the chosen cover"
+      zh-CN: 封面保存失败，请换一张图片
+      zh-TW: 封面儲存失敗，請換一張圖片
+  info:
+    title:
+      en: "Book info"
+      zh-CN: 书籍信息
+      zh-TW: 書籍資訊
+    unknown:
+      en: "(unknown)"
+      zh-CN: "(未知)"
+      zh-TW: "(未知)"
+    format:
+      en: Format
+      zh-CN: 格式
+      zh-TW: 格式
+    path:
+      en: Path
+      zh-CN: 路径
+      zh-TW: 路徑
+    size:
+      en: Size
+      zh-CN: 大小
+      zh-TW: 大小
+    chapters:
+      en: Chapters
+      zh-CN: 章节
+      zh-TW: 章節
+    added:
+      en: Added
+      zh-CN: 加入时间
+      zh-TW: 加入時間
+    progress:
+      en: Progress
+      zh-CN: 进度
+      zh-TW: 進度
+    bookmarks:
+      en: Bookmarks
+      zh-CN: 书签
+      zh-TW: 書籤
+  edit:
+    title:
+      en: "Edit info"
+      zh-CN: 编辑信息
+      zh-TW: 編輯資訊
+    title_placeholder:
+      en: Title
+      zh-CN: 书名
+      zh-TW: 書名
+    author_placeholder:
+      en: Author
+      zh-CN: 作者
+      zh-TW: 作者
+    pick_cover:
+      en: "Choose cover"
+      zh-CN: 选择封面
+      zh-TW: 選擇封面
+    remove_cover:
+      en: "Remove cover"
+      zh-CN: 移除封面
+      zh-TW: 移除封面
+    no_cover:
+      en: "No cover"
+      zh-CN: 没有封面
+      zh-TW: 沒有封面
+    cover_filter:
+      en: Images
+      zh-CN: 图片
+      zh-TW: 圖片
+    save:
+      en: Save
+      zh-CN: 保存
+      zh-TW: 儲存
+    cancel:
+      en: Cancel
+      zh-CN: 取消
+      zh-TW: 取消
+  # 卡片右上角「⋯」菜单。
+  actions:
+    title:
+      en: "Actions · %{title}"
+      zh-CN: 操作 · %{title}
+      zh-TW: 操作 · %{title}
+    continue:
+      en: "Continue reading"
+      zh-CN: 继续阅读
+      zh-TW: 繼續閱讀
+    info:
+      en: "Book info"
+      zh-CN: 书籍信息
+      zh-TW: 書籍資訊
+    edit:
+      en: "Edit info"
+      zh-CN: 编辑信息
+      zh-TW: 編輯資訊
+    relink:
+      en: "Relink file"
+      zh-CN: 重新定位文件
+      zh-TW: 重新定位檔案
+    reveal:
+      en: "Show in folder"
+      zh-CN: 在文件夹中显示
+      zh-TW: 在資料夾中顯示
+    open_external:
+      en: "Open with system app"
+      zh-CN: 用系统程序打开
+      zh-TW: 用系統程式開啟
+    hide:
+      en: "Remove from library"
+      zh-CN: 从书架移除
+      zh-TW: 從書架移除
+    delete_file:
+      en: "Delete file"
+      zh-CN: 删除文件
+      zh-TW: 刪除檔案
+    restart:
+      en: "Start over"
+      zh-CN: 从头开始
+      zh-TW: 從頭開始
+  hide_dialog:
+    title:
+      en: "Remove from library"
+      zh-CN: 从书架移除
+      zh-TW: 從書架移除
+    message:
+      en: 'Remove "%{title}" from the library? The file stays on disk.'
+      zh-CN: '把「%{title}」从书架移除？磁盘上的文件不会被删除。'
+      zh-TW: '把「%{title}」從書架移除？磁碟上的檔案不會被刪除。'
+    confirm_button:
+      en: Remove
+      zh-CN: 移除
+      zh-TW: 移除
+  delete_file_dialog:
+    title:
+      en: "Delete file"
+      zh-CN: 删除文件
+      zh-TW: 刪除檔案
+    message:
+      en: 'Delete the file of "%{title}"? This cannot be undone.'
+      zh-CN: '确定删除「%{title}」的文件吗？此操作无法撤销。'
+      zh-TW: '確定刪除「%{title}」的檔案嗎？此操作無法撤銷。'
+    confirm_button:
+      en: Delete
+      zh-CN: 删除
+      zh-TW: 刪除
+  dialog:
+    cancel_button:
+      en: Cancel
+      zh-CN: 取消
+      zh-TW: 取消
+  relink:
+    dialog_title:
+      en: "Pick the book file again"
+      zh-CN: 重新选择书籍文件
+      zh-TW: 重新選擇書籍檔案
+  delete:
+    # %{err} 失败原因。
+    failed:
+      en: "Delete failed: %{err}"
+      zh-CN: "删除失败：%{err}"
+      zh-TW: "刪除失敗：%{err}"
+  # 时间戳的三个 fallback，`utils::formatting::format_local_unix_secs` 与书架卡片共用。
+  time:
+    unknown:
+      en: "(unknown)"
+      zh-CN: "(未知)"
+      zh-TW: "(未知)"
+    invalid:
+      en: "(invalid time)"
+      zh-CN: "(无效时间)"
+      zh-TW: "(無效時間)"
+    format_failed:
+      en: "(format failed)"
+      zh-CN: "(格式化失败)"
+      zh-TW: "(格式化失敗)"
+  # ---- 以下为书库改造前的旧词条，已无代码引用。按 Task 22 定案「只补不删」保留：
+  # 删词条需先证明没有动态拼接引用，风险大于收益；未引用的词条不占界面。
   download_path_label:
     en: "Download directory"
     zh-CN: 下载目录
@@ -1019,24 +1387,10 @@ Library:
     en: Delete
     zh-CN: 删除
     zh-TW: 刪除
-  # PageHeader 右上角的刷新按钮 —— 触发 `refresh_library_async` 重扫下载目录。
-  # 原 watcher 已删除，列表只在进入页面 / 切下载目录时自动扫一次，其余情况靠手动刷新。
   action_refresh:
     en: Refresh
     zh-CN: 刷新
     zh-TW: 重新整理
-  empty_title:
-    en: "Library is empty"
-    zh-CN: 本地书库为空
-    zh-TW: 本地書庫為空
-  empty_subtitle:
-    en: "Download a book and it will appear here automatically."
-    zh-CN: 下载一本书后，它会自动出现在这里。
-    zh-TW: 下載一本書後，它會自動出現在這裡。
-  scan_failed:
-    en: "Scan failed"
-    zh-CN: "扫描失败"
-    zh-TW: "掃描失敗"
   delete_dialog:
     title:
       en: "Confirm delete"
@@ -1059,20 +1413,312 @@ Library:
     en: "(unknown file name)"
     zh-CN: "(未知文件名)"
     zh-TW: "(未知檔案名稱)"
-  # 修改时间列的 fallback（format_unix_secs 的三个错误分支）。
-  time:
+
+# 应用内阅读器（`src/desktop/pages/reader/`）的所有文案。
+# 技术名词（TXT / EPUB / Aa）不翻译；`mode.*` 是工具栏上那个「切到另一种模式」的按钮文案。
+Reader:
+  action:
+    back:
+      en: Back
+      zh-CN: 返回
+      zh-TW: 返回
+    toc:
+      en: Contents
+      zh-CN: 目录
+      zh-TW: 目錄
+    search:
+      en: Search
+      zh-CN: 搜索
+      zh-TW: 搜尋
+    bookmarks:
+      en: Bookmarks
+      zh-CN: 书签
+      zh-TW: 書籤
+    more:
+      en: More
+      zh-CN: 更多
+      zh-TW: 更多
+    immersive:
+      en: "Full screen"
+      zh-CN: 沉浸
+      zh-TW: 沉浸
+    exit_immersive:
+      en: "Exit full screen"
+      zh-CN: 退出沉浸
+      zh-TW: 退出沉浸
+    close:
+      en: Close
+      zh-CN: 关闭
+      zh-TW: 關閉
+    prev_chapter:
+      en: "Prev chapter"
+      zh-CN: 上一章
+      zh-TW: 上一章
+    next_chapter:
+      en: "Next chapter"
+      zh-CN: 下一章
+      zh-TW: 下一章
+    prev_page:
+      en: "Prev page"
+      zh-CN: 上一页
+      zh-TW: 上一頁
+    next_page:
+      en: "Next page"
+      zh-CN: 下一页
+      zh-TW: 下一頁
+  mode:
+    scroll:
+      en: Scroll
+      zh-CN: 滚动
+      zh-TW: 滑動
+    page:
+      en: Pages
+      zh-CN: 翻页
+      zh-TW: 翻頁
+  # %{current} / %{total} 都是 1-based。
+  chapter_indicator:
+    en: "Chapter %{current} / %{total}"
+    zh-CN: 第 %{current} / %{total} 章
+    zh-TW: 第 %{current} / %{total} 章
+  page_indicator:
+    en: "Chapter %{chapter} / %{total} · Page %{page} / %{pages}"
+    zh-CN: 第 %{chapter} / %{total} 章 · 第 %{page} / %{pages} 页
+    zh-TW: 第 %{chapter} / %{total} 章 · 第 %{page} / %{pages} 頁
+  loading:
+    en: "Loading…"
+    zh-CN: 正在载入…
+    zh-TW: 正在載入…
+  error:
+    io:
+      en: "Failed to read the file"
+      zh-CN: 读取文件失败
+      zh-TW: 讀取檔案失敗
+    missing:
+      en: "File not found — relink it from the shelf"
+      zh-CN: 文件不存在，请回书架重新定位
+      zh-TW: 檔案不存在，請回書架重新定位
+    unsupported:
+      en: "This format cannot be read in the app yet"
+      zh-CN: 该格式暂不支持应用内阅读
+      zh-TW: 該格式暫不支援應用程式內閱讀
+    decode:
+      en: "Failed to decode the text"
+      zh-CN: 文本解码失败
+      zh-TW: 文字解碼失敗
+    encoding:
+      en: "Unknown or unsupported encoding"
+      zh-CN: 未知或不支持的编码
+      zh-TW: 未知或不支援的編碼
+    epub:
+      en: "Broken EPUB"
+      zh-CN: EPUB 结构损坏
+      zh-TW: EPUB 結構損壞
+    no_content:
+      en: "No readable content"
+      zh-CN: 没有可显示的正文
+      zh-TW: 沒有可顯示的正文
+    layout_fallback:
+      en: "Window or font too small — switched back to scroll mode"
+      zh-CN: 窗口或字号太小，已回退到滚动模式
+      zh-TW: 視窗或字級太小，已回退到滑動模式
+    # 错误面板上的按钮。
+    action:
+      relink:
+        en: "Relink file"
+        zh-CN: 重新定位
+        zh-TW: 重新定位
+      open_external:
+        en: "Open with system app"
+        zh-CN: 用系统程序打开
+        zh-TW: 用系統程式開啟
+      back:
+        en: "Back to shelf"
+        zh-CN: 返回书架
+        zh-TW: 返回書架
+  toc:
+    title:
+      en: "Contents"
+      zh-CN: 目录
+      zh-TW: 目錄
+    empty:
+      en: "No chapters"
+      zh-CN: 没有章节
+      zh-TW: 沒有章節
+    filter_placeholder:
+      en: "Filter chapters…"
+      zh-CN: 过滤章节…
+      zh-TW: 過濾章節…
+    chapter_count:
+      en: "%{count} chapters"
+      zh-CN: "%{count} 章"
+      zh-TW: "%{count} 章"
+  typography:
+    title:
+      en: "Type"
+      zh-CN: 排版
+      zh-TW: 排版
+    font_size:
+      en: "Font size"
+      zh-CN: 字号
+      zh-TW: 字級
+    line_height:
+      en: "Line height"
+      zh-CN: 行高
+      zh-TW: 行高
+    paragraph_spacing:
+      en: "Paragraph gap"
+      zh-CN: 段距
+      zh-TW: 段距
+    page_width:
+      en: "Page width"
+      zh-CN: 页宽
+      zh-TW: 頁寬
+    indent:
+      en: "Indent"
+      zh-CN: 首行缩进
+      zh-TW: 首行縮排
+    theme:
+      app:
+        en: "App theme"
+        zh-CN: 跟随应用
+        zh-TW: 跟隨應用程式
+      paper:
+        en: Paper
+        zh-CN: 纸白
+        zh-TW: 紙白
+      sepia:
+        en: Sepia
+        zh-CN: 米黄
+        zh-TW: 米黃
+      green:
+        en: "Eye care"
+        zh-CN: 护眼绿
+        zh-TW: 護眼綠
+      night:
+        en: Night
+        zh-CN: 夜间
+        zh-TW: 夜間
+  search:
+    title:
+      en: Search
+      zh-CN: 搜索
+      zh-TW: 搜尋
+    placeholder:
+      en: "Type a keyword, press Enter"
+      zh-CN: 输入关键字，回车搜索
+      zh-TW: 輸入關鍵字，按 Enter 搜尋
+    hint:
+      en: "Enter to search · Esc to close"
+      zh-CN: 回车搜索 · Esc 关闭
+      zh-TW: 按 Enter 搜尋 · Esc 關閉
+    # %{done} / %{total} 已扫描章数。
+    scanning:
+      en: "Scanning %{done} / %{total} chapters"
+      zh-CN: 正在扫描 %{done} / %{total} 章
+      zh-TW: 正在掃描 %{done} / %{total} 章
+    results:
+      en: "%{count} results"
+      zh-CN: "%{count} 个结果"
+      zh-TW: "%{count} 個結果"
+  bookmarks:
+    title:
+      en: Bookmarks
+      zh-CN: 书签
+      zh-TW: 書籤
+    add:
+      en: "Add bookmark"
+      zh-CN: 添加当前书签
+      zh-TW: 新增目前書籤
+    # 章节标题缺失时的兜底，%{index} 是 1-based 章号。
+    chapter:
+      en: "Chapter %{index}"
+      zh-CN: 第 %{index} 章
+      zh-TW: 第 %{index} 章
+    delete:
+      en: Delete
+      zh-CN: 删除
+      zh-TW: 刪除
+    duplicate:
+      en: "A bookmark already exists here"
+      zh-CN: 当前位置已经有书签
+      zh-TW: 目前位置已經有書籤
+    empty:
+      en: "No bookmarks yet"
+      zh-CN: 还没有书签
+      zh-TW: 還沒有書籤
+    unknown_time:
+      en: "(unknown)"
+      zh-CN: "(未知)"
+      zh-TW: "(未知)"
+    invalid_time:
+      en: "(invalid time)"
+      zh-CN: "(无效时间)"
+      zh-TW: "(無效時間)"
+    time_failed:
+      en: "(format failed)"
+      zh-CN: "(格式化失败)"
+      zh-TW: "(格式化失敗)"
+  info:
+    title:
+      en: "Book info"
+      zh-CN: 书籍信息
+      zh-TW: 書籍資訊
+    close:
+      en: Close
+      zh-CN: 关闭
+      zh-TW: 關閉
+    author:
+      en: Author
+      zh-CN: 作者
+      zh-TW: 作者
+    intro:
+      en: Intro
+      zh-CN: 简介
+      zh-TW: 簡介
+    format:
+      en: Format
+      zh-CN: 格式
+      zh-TW: 格式
+    size:
+      en: Size
+      zh-CN: 大小
+      zh-TW: 大小
+    chapters:
+      en: Chapters
+      zh-CN: 章节
+      zh-TW: 章節
+    progress:
+      en: Progress
+      zh-CN: 进度
+      zh-TW: 進度
+    bookmarks:
+      en: Bookmarks
+      zh-CN: 书签
+      zh-TW: 書籤
+    added:
+      en: Added
+      zh-CN: 加入时间
+      zh-TW: 加入時間
+    last_opened:
+      en: "Last read"
+      zh-CN: 最近阅读
+      zh-TW: 最近閱讀
+    path:
+      en: Path
+      zh-CN: 路径
+      zh-TW: 路徑
+    reveal:
+      en: "Show in folder"
+      zh-CN: 在文件夹中显示
+      zh-TW: 在資料夾中顯示
+    open:
+      en: "Open with system app"
+      zh-CN: 用默认程序打开
+      zh-TW: 用預設程式開啟
     unknown:
       en: "(unknown)"
       zh-CN: "(未知)"
       zh-TW: "(未知)"
-    invalid:
-      en: "(invalid time)"
-      zh-CN: "(无效时间)"
-      zh-TW: "(無效時間)"
-    format_failed:
-      en: "(format failed)"
-      zh-CN: "(格式化失败)"
-      zh-TW: "(格式化失敗)"
 
 # 书源管理页面（`src/gpui_app/pages/sources.rs`）所有面向用户的字符串。
 # 设计要点：

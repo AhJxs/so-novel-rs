@@ -168,4 +168,204 @@ mod tests {
             }
         }
     }
+
+    /// 本地书库页面的全部 key。清单来源（多行安全）：
+    /// `grep -rhoE '"(Library|Reader)\.[A-Za-z0-9_.]+"' src | tr -d '"' | sort -u`
+    /// —— 必须覆盖该命令输出的每一个 `Library.*`；`Library.time.*` 由
+    /// `utils::formatting` 的测试引用，同样算在内。
+    /// 书库改造前的旧词条（`Library.action_delete` 等）无代码引用，不进清单。
+    const LIBRARY_KEYS: &[&str] = &[
+        "Library.action_clear_filters",
+        "Library.action_import",
+        "Library.action_load_more",
+        "Library.action_rescan",
+        "Library.actions.continue",
+        "Library.actions.delete_file",
+        "Library.actions.edit",
+        "Library.actions.hide",
+        "Library.actions.info",
+        "Library.actions.open_external",
+        "Library.actions.relink",
+        "Library.actions.restart",
+        "Library.actions.reveal",
+        "Library.actions.title",
+        "Library.card.missing",
+        "Library.delete.failed",
+        "Library.delete_file_dialog.confirm_button",
+        "Library.delete_file_dialog.message",
+        "Library.delete_file_dialog.title",
+        "Library.dialog.cancel_button",
+        "Library.edit.author_placeholder",
+        "Library.edit.cancel",
+        "Library.edit.cover_filter",
+        "Library.edit.no_cover",
+        "Library.edit.pick_cover",
+        "Library.edit.remove_cover",
+        "Library.edit.save",
+        "Library.edit.title",
+        "Library.edit.title_placeholder",
+        "Library.empty_filtered_subtitle",
+        "Library.empty_filtered_title",
+        "Library.empty_subtitle",
+        "Library.empty_title",
+        "Library.error.already_on_shelf",
+        "Library.error.backup_failed",
+        "Library.error.book_not_found",
+        "Library.error.corrupt_backup",
+        "Library.error.cover_failed",
+        "Library.error.create_dir_failed",
+        "Library.error.format_mismatch",
+        "Library.error.future_version",
+        "Library.error.load_failed",
+        "Library.error.not_a_file",
+        "Library.error.save_refused",
+        "Library.error.save_refused_after_load_failure",
+        "Library.error.unsupported_format",
+        "Library.error.write_failed",
+        "Library.filter.all",
+        "Library.filter.favorites",
+        "Library.filter.finished",
+        "Library.filter.reading",
+        "Library.filter.unread",
+        "Library.hide_dialog.confirm_button",
+        "Library.hide_dialog.message",
+        "Library.hide_dialog.title",
+        "Library.import.dialog_title",
+        "Library.import.done",
+        "Library.import.failed_item",
+        "Library.import.filter_all",
+        "Library.import.filter_books",
+        "Library.info.added",
+        "Library.info.bookmarks",
+        "Library.info.chapters",
+        "Library.info.format",
+        "Library.info.path",
+        "Library.info.progress",
+        "Library.info.size",
+        "Library.info.title",
+        "Library.info.unknown",
+        "Library.page_title",
+        "Library.relink.dialog_title",
+        "Library.scan_failed",
+        "Library.search_placeholder",
+        "Library.sort.added_at",
+        "Library.sort.last_opened",
+        "Library.sort.size",
+        "Library.sort.title",
+        "Library.status.finished",
+        "Library.status.reading",
+        "Library.status.unread",
+        "Library.status.unsupported",
+        "Library.subtitle",
+        "Library.time.format_failed",
+        "Library.time.invalid",
+        "Library.time.unknown",
+    ];
+
+    /// 应用内阅读器的全部 key（同样来自上面的 grep 命令）。`Reader.error.action.*`
+    /// 是错误面板的三个恢复按钮，Task 24 才开始调用，先纳入覆盖。
+    const READER_KEYS: &[&str] = &[
+        "Reader.action.back",
+        "Reader.action.bookmarks",
+        "Reader.action.close",
+        "Reader.action.exit_immersive",
+        "Reader.action.immersive",
+        "Reader.action.more",
+        "Reader.action.next_chapter",
+        "Reader.action.next_page",
+        "Reader.action.prev_chapter",
+        "Reader.action.prev_page",
+        "Reader.action.search",
+        "Reader.action.toc",
+        "Reader.bookmarks.add",
+        "Reader.bookmarks.chapter",
+        "Reader.bookmarks.delete",
+        "Reader.bookmarks.duplicate",
+        "Reader.bookmarks.empty",
+        "Reader.bookmarks.invalid_time",
+        "Reader.bookmarks.time_failed",
+        "Reader.bookmarks.title",
+        "Reader.bookmarks.unknown_time",
+        "Reader.chapter_indicator",
+        "Reader.error.action.back",
+        "Reader.error.action.open_external",
+        "Reader.error.action.relink",
+        "Reader.error.decode",
+        "Reader.error.encoding",
+        "Reader.error.epub",
+        "Reader.error.io",
+        "Reader.error.layout_fallback",
+        "Reader.error.missing",
+        "Reader.error.no_content",
+        "Reader.error.unsupported",
+        "Reader.info.added",
+        "Reader.info.author",
+        "Reader.info.bookmarks",
+        "Reader.info.chapters",
+        "Reader.info.close",
+        "Reader.info.format",
+        "Reader.info.intro",
+        "Reader.info.last_opened",
+        "Reader.info.open",
+        "Reader.info.path",
+        "Reader.info.progress",
+        "Reader.info.reveal",
+        "Reader.info.size",
+        "Reader.info.title",
+        "Reader.info.unknown",
+        "Reader.loading",
+        "Reader.mode.page",
+        "Reader.mode.scroll",
+        "Reader.page_indicator",
+        "Reader.search.hint",
+        "Reader.search.placeholder",
+        "Reader.search.results",
+        "Reader.search.scanning",
+        "Reader.search.title",
+        "Reader.toc.chapter_count",
+        "Reader.toc.empty",
+        "Reader.toc.filter_placeholder",
+        "Reader.toc.title",
+        "Reader.typography.font_size",
+        "Reader.typography.indent",
+        "Reader.typography.line_height",
+        "Reader.typography.page_width",
+        "Reader.typography.paragraph_spacing",
+        "Reader.typography.theme.app",
+        "Reader.typography.theme.green",
+        "Reader.typography.theme.night",
+        "Reader.typography.theme.paper",
+        "Reader.typography.theme.sepia",
+        "Reader.typography.title",
+    ];
+
+    #[test]
+    fn library_translated_in_all_three_locales() {
+        for &key in LIBRARY_KEYS {
+            for locale in ["en", "zh-CN", "zh-TW"] {
+                let v = rust_i18n::t!(key, locale = locale);
+                assert!(!v.is_empty(), "{key} 在 locale={locale} 翻译为空字符串");
+                assert_ne!(
+                    v.as_ref(),
+                    key,
+                    "{key} 在 locale={locale} 缺失（返回 key 本身）"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn reader_translated_in_all_three_locales() {
+        for &key in READER_KEYS {
+            for locale in ["en", "zh-CN", "zh-TW"] {
+                let v = rust_i18n::t!(key, locale = locale);
+                assert!(!v.is_empty(), "{key} 在 locale={locale} 翻译为空字符串");
+                assert_ne!(
+                    v.as_ref(),
+                    key,
+                    "{key} 在 locale={locale} 缺失（返回 key 本身）"
+                );
+            }
+        }
+    }
 }
