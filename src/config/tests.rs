@@ -12,8 +12,8 @@ use std::path::PathBuf;
 
 use crate::config::{
     AppConfig, CookieConfig, CrawlConfig, DownloadConfig, ExportFormat, GlobalConfig, LangType,
-    Language, ProxyConfig, ProxyMode, SourceConfig, ThemeDynMode, ThemeKind, ThemePref,
-    load_config, save_config,
+    Language, ProxyConfig, ProxyMode, ReaderConfig, ReaderTheme, ReadingMode, SourceConfig,
+    ThemeDynMode, ThemeKind, ThemePref, load_config, save_config,
 };
 
 #[test]
@@ -331,4 +331,84 @@ fn proxy_mode_parse_is_lenient() {
     // 认不出来的一律直连，不 panic
     assert_eq!(ProxyMode::parse(""), ProxyMode::None);
     assert_eq!(ProxyMode::parse("garbage"), ProxyMode::None);
+}
+
+#[test]
+fn reader_defaults_when_section_missing() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    std::fs::write(&path, "[global]\nfont-size = 16\n").unwrap();
+    let cfg = load_config(&path).unwrap();
+    assert!((cfg.reader.font_size - 19.0).abs() < f32::EPSILON);
+    assert!((cfg.reader.line_height - 1.8).abs() < f32::EPSILON);
+    assert!((cfg.reader.page_width - 720.0).abs() < f32::EPSILON);
+    assert!(cfg.reader.indent);
+    assert_eq!(cfg.reader.theme, ReaderTheme::Paper);
+    assert_eq!(cfg.reader.default_mode, ReadingMode::Scroll);
+    assert_eq!(cfg.reader.font_family, "");
+}
+
+#[test]
+fn reader_values_are_clamped_on_load() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    std::fs::write(
+        &path,
+        "[reader]\nfont-size = 99\nline-height = 0.2\npage-width = 10\nparagraph-spacing = 999\n",
+    )
+    .unwrap();
+    let cfg = load_config(&path).unwrap();
+    assert!((cfg.reader.font_size - 32.0).abs() < f32::EPSILON);
+    assert!((cfg.reader.line_height - 1.3).abs() < f32::EPSILON);
+    assert!((cfg.reader.page_width - 480.0).abs() < f32::EPSILON);
+    assert!((cfg.reader.paragraph_spacing - 32.0).abs() < f32::EPSILON);
+}
+
+#[test]
+fn reader_round_trips_through_save() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    let mut cfg = AppConfig::default();
+    cfg.reader.font_size = 22.0;
+    cfg.reader.theme = ReaderTheme::Night;
+    cfg.reader.default_mode = ReadingMode::Page;
+    cfg.reader.indent = false;
+    save_config(&path, &cfg).unwrap();
+    let loaded = load_config(&path).unwrap();
+    assert!((loaded.reader.font_size - 22.0).abs() < f32::EPSILON);
+    assert_eq!(loaded.reader.theme, ReaderTheme::Night);
+    assert_eq!(loaded.reader.default_mode, ReadingMode::Page);
+    assert!(!loaded.reader.indent);
+}
+
+#[test]
+fn reader_clamped_respects_declared_ranges() {
+    let clamped = ReaderConfig {
+        font_size: 100.0,
+        line_height: 0.1,
+        page_width: 1.0,
+        paragraph_spacing: 100.0,
+        ..ReaderConfig::default()
+    }
+    .clamped();
+    assert!((clamped.font_size - ReaderConfig::FONT_SIZE_RANGE.1).abs() < f32::EPSILON);
+    assert!((clamped.line_height - ReaderConfig::LINE_HEIGHT_RANGE.0).abs() < f32::EPSILON);
+    assert!((clamped.page_width - ReaderConfig::PAGE_WIDTH_RANGE.0).abs() < f32::EPSILON);
+    assert!(
+        (clamped.paragraph_spacing - ReaderConfig::PARAGRAPH_SPACING_RANGE.1).abs() < f32::EPSILON
+    );
+}
+
+#[test]
+fn reader_out_of_range_rejected_by_validate() {
+    let mut cfg = AppConfig::default();
+    cfg.reader.font_size = 40.0;
+    assert!(cfg.validate().is_err());
+
+    let mut cfg = AppConfig::default();
+    cfg.reader.page_width = 100.0;
+    assert!(cfg.validate().is_err());
+
+    let cfg = AppConfig::default();
+    assert!(cfg.validate().is_ok());
 }

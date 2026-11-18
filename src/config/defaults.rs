@@ -77,6 +77,20 @@ max-retries = 5
 retry-min-interval = 2000
 retry-max-interval = 4000
 
+[reader]
+# 字号 px（16–32）；行高倍数（1.3–2.4）；正文列最大宽度 px（480–1200）；段距 px（0–32）
+font-size = 19
+line-height = 1.8
+page-width = 720
+paragraph-spacing = 12
+indent = true
+# paper | sepia | night | green | app
+theme = "paper"
+# scroll | page
+default-mode = "scroll"
+# 留空 = 系统默认字体
+font-family = ""
+
 [cookie]
 qidian-cookie = ""
 

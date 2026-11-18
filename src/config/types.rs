@@ -305,6 +305,10 @@ pub struct AppConfig {
     /// 网络代理（`[proxy]`）。
     #[serde(default)]
     pub proxy: ProxyConfig,
+
+    /// 阅读器排版与阅读方式（`[reader]`）。
+    #[serde(default)]
+    pub reader: ReaderConfig,
 }
 
 /// `[global]` 章节。主题偏好 / 应用语言 / GitHub 代理 / Cloudflare bypass / 侧栏折叠 / 字号。
@@ -428,6 +432,177 @@ pub struct ProxyConfig {
     pub proxy_port: u16,
 }
 
+/// 阅读方式。定义在 `config` 里而不是 `library`：配置读写与业务共用，
+/// 放业务层会让 `config` 反向依赖 `library`。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum ReadingMode {
+    /// 纵向连续滚动。
+    #[default]
+    Scroll,
+    /// 左右翻页。
+    Page,
+}
+
+impl ReadingMode {
+    /// 存进 TOML / `library.json` 的取值。
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Scroll => "scroll",
+            Self::Page => "page",
+        }
+    }
+
+    /// 解析配置值；无法识别时回落到 [`Self::Scroll`]。
+    #[must_use]
+    pub fn parse(s: &str) -> Self {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "page" => Self::Page,
+            _ => Self::Scroll,
+        }
+    }
+}
+
+impl FromStr for ReadingMode {
+    type Err = std::convert::Infallible;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self::parse(s))
+    }
+}
+
+/// 阅读器配色主题。`App` = 跟随应用主题（背景 / 前景取自当前应用主题）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum ReaderTheme {
+    /// 纸质白。
+    #[default]
+    Paper,
+    /// 羊皮纸（暖黄）。
+    Sepia,
+    /// 夜间（深灰）。
+    Night,
+    /// 护眼绿。
+    Green,
+    /// 跟随应用主题。
+    App,
+}
+
+impl ReaderTheme {
+    /// 存进 TOML 的取值。
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Paper => "paper",
+            Self::Sepia => "sepia",
+            Self::Night => "night",
+            Self::Green => "green",
+            Self::App => "app",
+        }
+    }
+
+    /// 解析配置值；无法识别时回落到 [`Self::Paper`]。
+    #[must_use]
+    pub fn parse(s: &str) -> Self {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "sepia" => Self::Sepia,
+            "night" => Self::Night,
+            "green" => Self::Green,
+            "app" => Self::App,
+            _ => Self::Paper,
+        }
+    }
+
+    /// 三语 key 后缀（`Reader.typography.theme.*`）。
+    #[must_use]
+    pub const fn label_key(self) -> &'static str {
+        match self {
+            Self::Paper => "Reader.typography.theme.paper",
+            Self::Sepia => "Reader.typography.theme.sepia",
+            Self::Night => "Reader.typography.theme.night",
+            Self::Green => "Reader.typography.theme.green",
+            Self::App => "Reader.typography.theme.app",
+        }
+    }
+}
+
+impl FromStr for ReaderTheme {
+    type Err = std::convert::Infallible;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self::parse(s))
+    }
+}
+
+/// `[reader]` 章节：排版与阅读方式偏好。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ReaderConfig {
+    /// 正文字号 px，16–32。
+    pub font_size: f32,
+    /// 行高倍数（相对字号），1.3–2.4。
+    pub line_height: f32,
+    /// 正文列最大宽度 px，480–1200。
+    pub page_width: f32,
+    /// 段间距 px，0–32。
+    pub paragraph_spacing: f32,
+    /// 首行缩进两个全角空格。
+    pub indent: bool,
+    /// 阅读主题。
+    pub theme: ReaderTheme,
+    /// 新打开的书默认用哪种阅读方式。
+    pub default_mode: ReadingMode,
+    /// 字体族；空 = 系统默认。
+    pub font_family: String,
+}
+
+impl Default for ReaderConfig {
+    fn default() -> Self {
+        Self {
+            font_size: 19.0,
+            line_height: 1.8,
+            page_width: 720.0,
+            paragraph_spacing: 12.0,
+            indent: true,
+            theme: ReaderTheme::Paper,
+            default_mode: ReadingMode::Scroll,
+            font_family: String::new(),
+        }
+    }
+}
+
+impl ReaderConfig {
+    /// 字号允许区间。
+    pub const FONT_SIZE_RANGE: (f32, f32) = (16.0, 32.0);
+    /// 行高倍数允许区间。
+    pub const LINE_HEIGHT_RANGE: (f32, f32) = (1.3, 2.4);
+    /// 页宽允许区间。
+    pub const PAGE_WIDTH_RANGE: (f32, f32) = (480.0, 1200.0);
+    /// 段距允许区间。
+    pub const PARAGRAPH_SPACING_RANGE: (f32, f32) = (0.0, 32.0);
+
+    /// 把越界值夹到合法区间。读取配置时调用：手改出错也不至于排版崩掉。
+    #[must_use]
+    pub fn clamped(&self) -> Self {
+        Self {
+            font_size: self
+                .font_size
+                .clamp(Self::FONT_SIZE_RANGE.0, Self::FONT_SIZE_RANGE.1),
+            line_height: self
+                .line_height
+                .clamp(Self::LINE_HEIGHT_RANGE.0, Self::LINE_HEIGHT_RANGE.1),
+            page_width: self
+                .page_width
+                .clamp(Self::PAGE_WIDTH_RANGE.0, Self::PAGE_WIDTH_RANGE.1),
+            paragraph_spacing: self.paragraph_spacing.clamp(
+                Self::PARAGRAPH_SPACING_RANGE.0,
+                Self::PARAGRAPH_SPACING_RANGE.1,
+            ),
+            ..self.clone()
+        }
+    }
+}
+
 impl AppConfig {
     /// 构造默认配置, 下载路径由 `defaults::default_download_path` 决定。
     #[must_use]
@@ -471,12 +646,14 @@ impl AppConfig {
                 proxy_host: "127.0.0.1".to_string(),
                 proxy_port: 7890,
             },
+            reader: ReaderConfig::default(),
         }
     }
 
     /// 校验配置合法性（启动时调一次，失败让用户改 config.toml 重启）：
     /// `font_size` ∈ [12.0, 24.0]（与 `desktop::themes::FONT_SIZE_MIN/MAX` 一致）、
-    /// `min_interval <= max_interval`、`retry_min_interval <= retry_max_interval`、`download_path` 非空。
+    /// `min_interval <= max_interval`、`retry_min_interval <= retry_max_interval`、`download_path` 非空、
+    /// `[reader]` 排版数值落在各自区间。
     ///
     /// # Errors
     ///
@@ -513,6 +690,39 @@ impl AppConfig {
             return Err(ConfigError::Empty {
                 field: "download.download_path",
             });
+        }
+
+        let reader = &self.reader;
+        for (field, value, range) in [
+            (
+                "reader.font_size",
+                reader.font_size,
+                ReaderConfig::FONT_SIZE_RANGE,
+            ),
+            (
+                "reader.line_height",
+                reader.line_height,
+                ReaderConfig::LINE_HEIGHT_RANGE,
+            ),
+            (
+                "reader.page_width",
+                reader.page_width,
+                ReaderConfig::PAGE_WIDTH_RANGE,
+            ),
+            (
+                "reader.paragraph_spacing",
+                reader.paragraph_spacing,
+                ReaderConfig::PARAGRAPH_SPACING_RANGE,
+            ),
+        ] {
+            if !(range.0..=range.1).contains(&value) {
+                return Err(ConfigError::OutOfRange {
+                    field,
+                    value: f64::from(value),
+                    min: f64::from(range.0),
+                    max: f64::from(range.1),
+                });
+            }
         }
 
         Ok(())

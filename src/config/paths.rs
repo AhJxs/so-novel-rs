@@ -16,6 +16,10 @@ pub struct ConfigPaths {
     pub sources_config: PathBuf,
     /// 下载任务文件 `~/.sonovel/tasks.json`：替代 `SQLite` 管理下载任务。
     pub tasks_file: PathBuf,
+    /// 书架数据 `~/.sonovel/library.json`。
+    pub library_file: PathBuf,
+    /// 封面缓存目录 `~/.sonovel/covers/`。
+    pub covers_dir: PathBuf,
 }
 
 impl ConfigPaths {
@@ -30,6 +34,8 @@ impl ConfigPaths {
             rules_dir: base.join("rules"),
             sources_config: base.join("sources_config.json"),
             tasks_file: base.join("tasks.json"),
+            library_file: base.join("library.json"),
+            covers_dir: base.join("covers"),
         }
     }
 }

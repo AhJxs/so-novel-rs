@@ -12,7 +12,8 @@ use toml_edit::{DocumentMut, Item, Table, value};
 
 use super::defaults;
 use super::types::{
-    AppConfig, ExportFormat, Language, ProxyMode, ThemeDynMode, ThemeKind, ThemePref,
+    AppConfig, ExportFormat, Language, ProxyMode, ReaderTheme, ReadingMode, ThemeDynMode,
+    ThemeKind, ThemePref,
 };
 
 /// 从 TOML 文档中取 `table.key` 对应的 `Item`。
@@ -184,6 +185,34 @@ pub fn load_config(path: &Path) -> Result<AppConfig> {
     if let Some(v) = toml_int(&doc, "proxy", "port") {
         cfg.proxy.proxy_port = sat_u16(v);
     }
+
+    // [reader]：缺失整节时用默认值；读到的越界值统一 clamp，手改配置不会让排版崩掉。
+    let mut reader = cfg.reader.clone();
+    if let Some(v) = toml_float(&doc, "reader", "font-size") {
+        reader.font_size = v;
+    }
+    if let Some(v) = toml_float(&doc, "reader", "line-height") {
+        reader.line_height = v;
+    }
+    if let Some(v) = toml_float(&doc, "reader", "page-width") {
+        reader.page_width = v;
+    }
+    if let Some(v) = toml_float(&doc, "reader", "paragraph-spacing") {
+        reader.paragraph_spacing = v;
+    }
+    if let Some(v) = toml_bool(&doc, "reader", "indent") {
+        reader.indent = v;
+    }
+    if let Some(v) = toml_str(&doc, "reader", "theme") {
+        reader.theme = ReaderTheme::parse(&v);
+    }
+    if let Some(v) = toml_str(&doc, "reader", "default-mode") {
+        reader.default_mode = ReadingMode::parse(&v);
+    }
+    if let Some(v) = toml_str(&doc, "reader", "font-family") {
+        reader.font_family = v;
+    }
+    cfg.reader = reader.clamped();
 
     let theme_kind_present = toml_table(&doc, "global")
         .and_then(|t| t.get("theme-kind"))
@@ -369,6 +398,40 @@ pub fn save_config(path: &Path, cfg: &AppConfig) -> Result<()> {
     unset(&mut doc, "proxy", "enabled");
     set_str(&mut doc, "proxy", "host", &cfg.proxy.proxy_host);
     set_int(&mut doc, "proxy", "port", cfg.proxy.proxy_port as i64);
+
+    set_float(
+        &mut doc,
+        "reader",
+        "font-size",
+        f64::from(cfg.reader.font_size),
+    );
+    set_float(
+        &mut doc,
+        "reader",
+        "line-height",
+        f64::from(cfg.reader.line_height),
+    );
+    set_float(
+        &mut doc,
+        "reader",
+        "page-width",
+        f64::from(cfg.reader.page_width),
+    );
+    set_float(
+        &mut doc,
+        "reader",
+        "paragraph-spacing",
+        f64::from(cfg.reader.paragraph_spacing),
+    );
+    set_bool(&mut doc, "reader", "indent", cfg.reader.indent);
+    set_str(&mut doc, "reader", "theme", cfg.reader.theme.as_str());
+    set_str(
+        &mut doc,
+        "reader",
+        "default-mode",
+        cfg.reader.default_mode.as_str(),
+    );
+    set_str(&mut doc, "reader", "font-family", &cfg.reader.font_family);
 
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).ok();
