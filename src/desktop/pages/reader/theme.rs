@@ -1,21 +1,19 @@
 //! 阅读主题 → 具体颜色。`src/reader` 保持 UI 中立，颜色只在桌面层出现。
 
 use gpui_kit::component::ActiveTheme as _;
-use gpui_kit::{Hsla, Rgba, hsla};
+use gpui_kit::{Hsla, Rgba};
 
 use crate::config::ReaderTheme;
 
 /// 正文与阅读器外壳的前景 / 背景 / 高亮色。
-///
-/// `muted` / `highlight` / `active_highlight` 供 Task 18/19 的搜索高亮与弱化文字使用，
-/// 本任务只渲染正文与外壳，暂无读点。
-#[allow(dead_code)]
 #[derive(Debug, Clone, Copy)]
 pub struct ReaderColors {
     pub background: Hsla,
     pub foreground: Hsla,
-    pub muted: Hsla,
+    // Task 20（书内搜索命中高亮）会读这两个字段；在那之前它们是唯一的读点缺口。
+    #[allow(dead_code)]
     pub highlight: Hsla,
+    #[allow(dead_code)]
     pub active_highlight: Hsla,
 }
 
@@ -30,7 +28,6 @@ pub fn reader_colors(theme: ReaderTheme, cx: &gpui_kit::App) -> ReaderColors {
         ReaderTheme::App => ReaderColors {
             background: cx.theme().background,
             foreground: cx.theme().foreground,
-            muted: cx.theme().muted_foreground,
             highlight: cx.theme().selection,
             active_highlight: cx.theme().accent,
         },
@@ -46,7 +43,6 @@ fn palette(
     ReaderColors {
         background: rgb(background),
         foreground: rgb(foreground),
-        muted: hsla(0.0, 0.0, 0.55, 1.0),
         highlight: rgb(highlight),
         active_highlight: rgb(active_highlight),
     }
@@ -65,4 +61,25 @@ fn rgb(value: u32) -> Hsla {
         a: 1.0,
     }
     .into()
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
+
+    use super::*;
+
+    /// 每个内置主题的背景 / 前景都必须与调色板表一致：改一个十六进制值就会红。
+    #[test]
+    fn palettes_match_the_table() {
+        let paper = palette(0xf7_f4ec, 0x2b_2a_26, 0xf3_d98b, 0xe8_b93f);
+        assert_eq!(paper.background, rgb(0xf7_f4ec));
+        assert_eq!(paper.foreground, rgb(0x2b_2a_26));
+        assert_eq!(paper.highlight, rgb(0xf3_d98b));
+        assert_eq!(paper.active_highlight, rgb(0xe8_b93f));
+
+        let night = palette(0x1c_1d21, 0xc9_c9c4, 0x4a_4a20, 0xb8_a54a);
+        assert_eq!(night.background, rgb(0x1c_1d21));
+        assert_ne!(night.background, paper.background);
+    }
 }

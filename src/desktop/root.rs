@@ -96,6 +96,11 @@ impl RootView {
 
     /// 打开阅读器；书已不在书架或格式不可读时推错误通知。
     pub fn open_reader(&mut self, book_id: &str, window: &mut Window, cx: &mut Context<Self>) {
+        // 已经开着阅读器时先把旧的按关闭契约收尾，再开新的：
+        // 直接覆盖 `self.reader` 会跳过 `close_and_flush`，还会把沉浸全屏留在窗口上。
+        if self.reader.is_some() {
+            self.close_reader(window, cx);
+        }
         let Some(book) = self.model.read(cx).book_snapshot(book_id) else {
             self.model.update(cx, |model, _| {
                 model.push_error(t!("Library.error.book_not_found").to_string());
@@ -343,24 +348,22 @@ impl Render for RootView {
         }
 
         // 阅读器打开时覆盖整个主区域（Sidebar + TitleBar + 内容区），仅沉浸模式下也隐藏
-        // TitleBar；关闭由 RootView 丢弃 entity 完成。
+        // TitleBar；关闭由 RootView 丢弃 entity 完成。键盘 / 退出旁路同样挂在这一分支：
+        // 两个分支互斥（早返回），每帧只有一套 listener，不会双绑定。
         if let Some(reader) = self.reader.clone() {
             let immersive = reader.read(cx).is_immersive();
-            return div()
-                .size_full()
-                .flex()
-                .flex_col()
-                .child(
-                    div()
-                        .track_focus(&self.focus)
-                        .key_context(KEY_CONTEXT)
-                        .flex()
-                        .flex_col()
-                        .size_full()
-                        .when(!immersive, |this| this.child(self.render_title_bar(cx)))
-                        .child(div().flex_1().min_h_0().child(reader)),
-                )
-                .into_any_element();
+            return Self::bind_nav_actions(
+                div()
+                    .track_focus(&self.focus)
+                    .key_context(KEY_CONTEXT)
+                    .flex()
+                    .flex_col()
+                    .size_full(),
+                cx,
+            )
+            .when(!immersive, |this| this.child(self.render_title_bar(cx)))
+            .child(div().flex_1().min_h_0().child(reader))
+            .into_any_element();
         }
 
         Self::bind_nav_actions(div().key_context(KEY_CONTEXT), cx)

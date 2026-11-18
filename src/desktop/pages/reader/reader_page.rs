@@ -41,7 +41,10 @@ pub struct ReaderPage {
     chapter: usize,
     chapter_ratio: f32,
     immersive: bool,
+    /// 加载代数：结果回来时与当时的代数比对，丢弃过期结果。重开一本新书是换实体，
+    /// 所以今天只在 `new()` 里置 1；将来若在同一实体里「重新加载」，必须在这里 +1。
     generation: u64,
+    /// 进度有未落盘的改动；Task 18 的滚动提交与关闭路径读它。
     progress_dirty: bool,
     focus: FocusHandle,
     close_handler: Option<CloseReaderFn>,
@@ -144,6 +147,8 @@ impl ReaderPage {
     }
 
     fn record_progress(&mut self, cx: &mut Context<Self>) {
+        // `percent` 与 `updated_unix` 是占位：`LibraryStore::record_progress` 会用
+        // 章节数重算百分比并写入当前时间。
         let progress = ReadingProgress {
             chapter: self.chapter,
             chapter_ratio: self.chapter_ratio,
