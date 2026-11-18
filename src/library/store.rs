@@ -220,8 +220,6 @@ impl LibraryStore {
     ///
     /// 规则见设计文档 3.1：新文件入队、变化文件按需重新提取、隐藏项跳过、
     /// 扫描结果里缺席的下载书标失效（记录保留，文件放回后自动恢复）。
-    // `ScannedFile` 字段是 `mtime`，`Book` 字段是 `file_mtime`；clippy 误以为是手误。
-    #[allow(clippy::suspicious_operation_groupings)]
     #[must_use]
     pub fn merge_scan(&mut self, files: &[ScannedFile]) -> Vec<String> {
         let mut meta_ids = Vec::new();
@@ -236,8 +234,9 @@ impl LibraryStore {
                 if book.hidden {
                     continue;
                 }
-                let changed = book.size_bytes != file.size_bytes
-                    || book.file_mtime != file.mtime
+                // 用元组比较而不是逐字段 `!=`：两个同形字段分开写会触发
+                // `suspicious_operation_groupings`（怀疑写反了），元组形式等价且免掉 allow。
+                let changed = (book.size_bytes, book.file_mtime) != (file.size_bytes, file.mtime)
                     || book.missing;
                 if changed {
                     book.size_bytes = file.size_bytes;
@@ -743,8 +742,29 @@ mod tests {
         let id = store.books()[0].id.clone();
         store.set_hidden(&id, true);
 
+        // 文件真的变了也不许动隐藏书：既不重新提取元数据，也不刷新文件信息。
+        std::fs::write(&path, b"one and more").unwrap();
+        let ids = store.merge_scan(&[scanned(&path)]);
+        assert_eq!(ids, Vec::<String>::new());
+        let book = store.get(&id).unwrap();
+        assert!(book.hidden);
+        assert_eq!(book.size_bytes, 3);
+    }
+
+    #[test]
+    fn merge_requeues_changed_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.txt");
+        std::fs::write(&path, b"one").unwrap();
+        let mut store = LibraryStore::default();
         let _ = store.merge_scan(&[scanned(&path)]);
-        assert!(store.get(&id).unwrap().hidden);
+        let id = store.books()[0].id.clone();
+
+        // 大小变了就重新提取元数据并刷新文件信息。
+        std::fs::write(&path, b"one and more").unwrap();
+        let ids = store.merge_scan(&[scanned(&path)]);
+        assert_eq!(ids, vec![id.clone()]);
+        assert_eq!(store.get(&id).unwrap().size_bytes, 12);
     }
 
     #[test]
