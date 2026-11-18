@@ -10242,6 +10242,215 @@ git commit -m "feat(reader): 书签面板"
 
 ### Task 22: 沉浸模式与「更多」信息抽屉
 
+> **Task 21 定案、本任务必须照做。** 本任务正文写于 Task 18 之前，下面 Step 1–7 有多处会
+> 退回已修好的 bug。与本节冲突时一律听本节。
+
+#### 0. 现状接口（都已实现，直接用）
+
+- `render_toolbar(&self, cx: &Context<Self>)` —— **不要整段重写**，只在末尾追加两个按钮。
+- `toggle_toc(window, cx)` / `close_toc(window, cx)` / `set_search_open(open, window, cx)` /
+  `set_bookmarks_open(open, window, cx)` 是四个抽屉开关入口。**任何路径都不许直写
+  `toc_open` / `search_open` / `bookmarks_open`**：它们在关抽屉时把焦点收回正文，否则抽屉
+  一卸 `shortcuts_blocked` 恒为真、除 Esc 外快捷键全灭（Task 18 / 20 的同类坑）。
+- `focus_body(window, cx)`、`persist_settings(cx)`、`cancel_search()` 都在 `ReaderPage` 上。
+- Esc 关闭阅读器的末支是 `window.defer(cx, move |window, cx| handler(window, cx));` ——
+  **不许改回直接调用**（`cx.listener` 在回调期间租着本实体，直接调会 double-lease panic）。
+- `mod.rs` 当前只导出 `CloseReaderFn, ReaderPage`（**不导出 `LoadState`**，Task 19 已删）。
+- 文件操作用既有工具：`crate::utils::system::{open_path, reveal_in_folder}`
+  （`fn(&Path) -> anyhow::Result<()>`），大小格式化用 `crate::utils::fs::format_size`。
+  **不要新建 `src/desktop/system_open.rs`**。
+
+#### 1. `more_panel.rs`
+
+brief Step 1 的代码可用，改三处：
+
+- 导入换成 `use crate::utils::fs::format_size;` + `use crate::utils::system;`，删掉
+  `use crate::desktop::{components::format_size, system_open};`；
+- `run_file_action` 里 `system_open::open_with_default_app` → `system::open_path`、
+  `system_open::reveal_in_file_manager` → `system::reveal_in_folder`，且
+  `if let Err(message) = result` 之后必须 `model.push_error(message.to_string())`
+  （`message` 是 `anyhow::Error`，直接传编译不过；其它页面也是 `.to_string()`）；
+- 关闭按钮：`this.more_open = false; this.focus_body(window, cx); cx.notify();`
+  （listener 的 `_window` 改成 `window`）。抽屉里没有输入框，不需要专门的开合入口。
+
+#### 2. `mod.rs`（整文件）
+
+```rust
+//! 应用内阅读器：覆盖式视图，不作为第 7 个导航页。
+//!
+//! 注意区分：本模块是阅读器的桌面 UI 外壳，数据层仍是 [`crate::reader`]。
+
+mod bookmarks_panel;
+mod content_view;
+mod more_panel;
+mod search_panel;
+mod toc;
+mod typography;
+
+pub mod reader_page;
+pub mod theme;
+
+pub use reader_page::{CloseReaderFn, ImmersiveFn, ReaderPage};
+pub use theme::reader_colors;
+```
+
+#### 3. 状态与回调
+
+brief Step 3 的 1) / 2) / 3) / 4) 照做，第 5) 条换成下面两个方法。`close_drawers` **必须收
+`window`**，否则「搜索框聚焦时点别的抽屉按钮」这条路径上焦点收不回来。**复用四个既有入口，
+不要复制它们的逻辑**：
+
+```rust
+    /// 关掉所有抽屉 —— 抽屉之间互斥，开新的之前先调它。
+    fn close_drawers(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.typography_open {
+            self.typography_open = false;
+            self.persist_settings(cx);
+        }
+        if self.toc_open {
+            self.close_toc(window, cx);
+        }
+        if self.search_open {
+            self.set_search_open(false, window, cx);
+        }
+        if self.bookmarks_open {
+            self.set_bookmarks_open(false, window, cx);
+        }
+        self.more_open = false;
+        self.cancel_search();
+    }
+
+    /// 进出沉浸模式：进 = 隐藏应用内工具栏 + 窗口全屏；出 = 反过来。
+    pub(super) fn toggle_immersive(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.immersive = !self.immersive;
+        self.toolbar_visible = false;
+        if self.immersive {
+            self.close_drawers(window, cx);
+        }
+        window.toggle_fullscreen();
+        if let Some(handler) = self.immersive_handler.clone() {
+            handler(cx);
+        }
+        cx.notify();
+    }
+```
+
+#### 4. 工具栏：追加，不重写
+
+brief Step 5 的整段替换**作废**（它会把 `toggle_toc`、`set_search_open`、Aa 按钮的
+`close_toc` + `persist_settings` 全退回去）。只做两处追加：
+
+1) 书签按钮那一块之后加「更多」按钮：
+
+```rust
+            .child({
+                let mut more_button =
+                    Button::new("reader-more").label(t!("Reader.action.more"));
+                more_button = if self.more_open {
+                    more_button.primary()
+                } else {
+                    more_button.ghost()
+                };
+                more_button.on_click(cx.listener(|this, _event, window, cx| {
+                    let open = !this.more_open;
+                    this.close_drawers(window, cx);
+                    this.more_open = open;
+                    cx.notify();
+                }))
+            })
+```
+
+2) `reader-mode` 按钮之后加沉浸按钮：
+
+```rust
+            .child({
+                let label = if self.immersive {
+                    t!("Reader.action.exit_immersive")
+                } else {
+                    t!("Reader.action.immersive")
+                };
+                let mut immersive_button = Button::new("reader-immersive-toggle").label(label);
+                immersive_button = if self.immersive {
+                    immersive_button.primary()
+                } else {
+                    immersive_button.ghost()
+                };
+                immersive_button.on_click(cx.listener(|this, _event, window, cx| {
+                    this.toggle_immersive(window, cx);
+                }))
+            })
+```
+
+#### 5. 按键（只加三处，其余一律不动）
+
+1) `"m" => self.toggle_mode(cx),` 之后加 `"f11" => self.toggle_immersive(window, cx),`；
+2) Esc 末段换成（**`window.defer` 必须保留**）：
+
+```rust
+            "escape" => {
+                if self.toc_open
+                    || self.search_open
+                    || self.bookmarks_open
+                    || self.typography_open
+                    || self.more_open
+                {
+                    self.close_drawers(window, cx);
+                    cx.notify();
+                } else if self.immersive {
+                    self.toggle_immersive(window, cx);
+                } else if let Some(handler) = self.close_handler.clone() {
+                    // `cx.listener` 在回调期间租着本实体，关闭回调要 read/update 它。
+                    window.defer(cx, move |window, cx| handler(window, cx));
+                }
+            }
+```
+
+3) `shortcuts_blocked` 的 Esc 支换成：
+
+```rust
+            if key == "escape" {
+                self.close_drawers(window, cx);
+                cx.notify();
+            }
+```
+
+（`close_toc` / `set_search_open(false)` 各自负责把焦点收回正文。）
+brief Step 6 的 2) **作废**：`"t"` 必须仍是 `self.toggle_toc(window, cx)`，`"s"` 必须仍走
+`set_search_open`，`"b"` 必须仍走 `set_bookmarks_open`。
+
+#### 6. `render_immersive_overlay`
+
+brief Step 4 的代码可用，一处要改：`reader_colors(self.reader_config(cx).theme, &*cx)` →
+`reader_colors(self.reader_config(cx).theme, cx)`。`render_toolbar` 收的是 `&Context`，
+`self.render_toolbar(cx)` 传 `&mut Context` 会自动重借。
+
+#### 7. `Render`
+
+brief Step 7 照做，但当前是三段 `.children(toc)` / `.children(search)` / `.children(bookmarks)`，
+要换成 `.when_some(...)`；`toolbar` 提到变量后 `.when(!self.immersive, |this| this.child(toolbar))`；
+末尾加 `.when_some(overlay, |this, overlay| this.child(overlay))`。根 `div` 已经是 `.relative()`。
+
+#### 8. `RootView`
+
+`open_reader` 里照 brief Step 8 追加；`ImmersiveFn` 不必 import，`Rc::new(...)` 会在
+`set_immersive_handler` 的实参位置强制转成 `Rc<dyn Fn(&mut App)>`。`close_reader` 已经会
+`toggle_fullscreen()` 恢复窗口、`render` 已经按 `is_immersive()` 隐藏标题栏，本任务只补
+「变化时重画」。
+
+#### 9. 验证与验收
+
+```
+cargo fmt --all
+cargo clippy --all-targets -- -D warnings
+cargo build
+cargo test
+```
+
+全绿，`cargo test` 至少 596 passed，不许退化。**不许新增 `#[allow]`、不许新增 locale 词条**
+（`Reader.info.*` / `Reader.action.more` / `Reader.action.immersive*` 回落成 key，Task 23 补）。
+brief Step 10 的 7 条 GUI 验收本机无法执行：报告里逐条写「代码上如何满足 / 未验证」，统一转
+Task 23 端到端验收。
+
 **Files:**
 - Create: `src/desktop/pages/reader/more_panel.rs`
 - Modify: `src/desktop/pages/reader/mod.rs`
