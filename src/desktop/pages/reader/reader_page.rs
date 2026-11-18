@@ -1,8 +1,9 @@
-//! 阅读器页面：加载状态机 + 滚动模式正文 + 目录抽屉 / 排版面板。
+//! 阅读器页面：加载状态机 + 滚动 / 翻页两种正文 + 目录抽屉 / 排版面板。
 //!
-//! 翻页模式由 Task 19 接进 `render_body`；本文件把滚动模式的位置恢复、进度采样
-//! 与自动落盘做完整。
+//! 两种模式共用同一份位置（`chapter` + `chapter_ratio`）：滚动模式从滚动偏移采样，
+//! 翻页模式由分页表换算，切换模式时按比例恢复。
 
+use std::cell::Cell;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::Duration;
@@ -18,11 +19,15 @@ use gpui_kit::{
 };
 use rust_i18n::t;
 
+use super::content_view::{self, COLUMN_PADDING};
 use super::reader_colors;
 use crate::config::{ReaderConfig, ReadingMode};
 use crate::desktop::model::AppModel;
 use crate::library::{Book, ReadingProgress};
-use crate::reader::{ReaderBook, ReaderError, ReaderLayout, load_book};
+use crate::reader::layout::{page_for_ratio, ratio_for_page};
+use crate::reader::{
+    LayoutFingerprint, ParagraphMetrics, ReaderBook, ReaderError, ReaderLayout, load_book, paginate,
+};
 
 /// 关闭阅读器：由 `RootView` 注入（需要同时改 `RootView` 状态与全屏标记）。
 pub type CloseReaderFn = Rc<dyn Fn(&mut Window, &mut App)>;
@@ -50,7 +55,7 @@ pub enum LoadState {
 pub struct ReaderPage {
     model: Entity<AppModel>,
     book_id: String,
-    /// 打开时的书籍快照；只用于标题与初始 `finished`。
+    /// 打开时的书籍快照；关闭时用于落盘。
     pub(super) book: Book,
     pub(super) content: Option<ReaderBook>,
     pub(super) load_state: LoadState,
@@ -61,10 +66,22 @@ pub struct ReaderPage {
     finished: bool,
     /// 滚动模式的滚动位置。
     pub(super) scroll: ScrollHandle,
-    /// 待恢复的滚动位置：`max_offset` 要等布局完成，所以恢复放到下一帧。
+    /// 待恢复的位置：`max_offset` 要等布局完成，所以恢复放到下一帧。
     restore_pending: bool,
     /// 每次滚动自增，只有最新一代的防抖任务会写进度。
     scroll_generation: u64,
+    /// 翻页模式：当前页号。
+    page_index: usize,
+    /// 翻页模式：当前章的分页缓存。
+    page_cache: Option<PageCache>,
+    /// 越界向前翻页时置位：重算分页后落到新章最后一页。
+    page_turn_to_last: bool,
+    /// 正文视口实测高度（px）；`None` = 还没量到，先按窗口高度估。
+    viewport_height: Option<f32>,
+    /// 与 `viewport_probe` 共享的最近一次实测值，用来判断要不要通知。
+    viewport_measured: Rc<Cell<Option<f32>>>,
+    /// 测量异常提示过就不再刷屏。
+    layout_warned: bool,
     /// 章节标题快照；加载完成时建一次，抽屉每帧零拷贝共享。
     pub(super) toc_titles: Option<Rc<Vec<String>>>,
     /// 目录顶部的章节过滤框。
@@ -76,6 +93,14 @@ pub struct ReaderPage {
     progress_dirty: bool,
     focus: FocusHandle,
     close_handler: Option<CloseReaderFn>,
+}
+
+/// 一章的分页缓存：指纹变了才整章重算。
+///
+/// `offset` 是每页的起始纵向偏移（px，首项恒为 0），由 `paginate` 产出。
+struct PageCache {
+    fingerprint: LayoutFingerprint,
+    offset: Vec<f32>,
 }
 
 impl ReaderPage {
@@ -105,6 +130,12 @@ impl ReaderPage {
             scroll: ScrollHandle::new(),
             restore_pending: true,
             scroll_generation: 0,
+            page_index: 0,
+            page_cache: None,
+            page_turn_to_last: false,
+            viewport_height: None,
+            viewport_measured: Rc::new(Cell::new(None)),
+            layout_warned: false,
             toc_titles: None,
             toc_filter,
             toc_open: false,
@@ -265,6 +296,11 @@ impl ReaderPage {
         // 跳章 / 切模式 / 改排版之后、恢复帧跑之前，滚动句柄里还是**旧**位置；
         // 此刻采样会把刚设好的目标比例覆盖掉，等恢复帧落地再说。
         if self.restore_pending {
+            return;
+        }
+        // 翻页模式没有滚动容器：句柄里留着切模式前那次布局的偏移与上限，
+        // 采样会把 `goto_page` 写下的页内比例改回旧位置（autosave 每 5 s 采一次）。
+        if matches!(self.mode, ReadingMode::Page) {
             return;
         }
         let max = f32::from(self.scroll.max_offset().y);
@@ -457,13 +493,26 @@ impl ReaderPage {
             _ => {}
         }
 
+        let paging = matches!(self.mode, ReadingMode::Page);
         match key {
+            "left" | "pageup" | "up" if paging => self.turn_page(-1, cx),
+            "right" | "pagedown" | "space" | "down" if paging => self.turn_page(1, cx),
+            "home" if paging => self.goto_page(0, cx),
+            "end" if paging => {
+                let pages = self
+                    .page_cache
+                    .as_ref()
+                    .map_or(0, |cache| cache.offset.len());
+                self.goto_page(pages.saturating_sub(1), cx);
+            }
             "left" | "pageup" => self.scroll_by_page(-1.0),
             "right" | "pagedown" | "space" => self.scroll_by_page(1.0),
             "up" => self.scroll_by_step(-1.0),
             "down" => self.scroll_by_step(1.0),
             "home" => self.scroll_to_ratio(0.0),
             "end" => self.scroll_to_ratio(1.0),
+            // 不要退回 Task 18 之前的写法：关目录必须走 `toggle_toc`（它把焦点从过滤框
+            // 收回正文），Esc 关闭必须走 `window.defer`（`cx.listener` 正租着本实体）。
             "t" => self.toggle_toc(window, cx),
             "m" => self.toggle_mode(cx),
             "escape" => {
@@ -475,20 +524,22 @@ impl ReaderPage {
                     self.toc_open = false;
                     cx.notify();
                 } else if let Some(handler) = self.close_handler.clone() {
-                    // `cx.listener` 在回调期间租着 `ReaderPage`，而关闭回调要
-                    // `read`/`update` 同一实体（double-lease panic）。推到回调之后执行。
                     window.defer(cx, move |window, cx| handler(window, cx));
                 }
             }
             _ => return,
         }
 
-        // 方向键 / Home / End 只改了滚动位置：`set_offset` 不会自己重绘，
-        // 这里立刻标脏，进度提交仍旧走防抖。
-        if matches!(
-            key,
-            "left" | "right" | "pageup" | "pagedown" | "space" | "up" | "down" | "home" | "end"
-        ) {
+        // 滚动模式的按键只改了滚动位置，进度要在滚动之后补记；
+        // 翻页模式的 turn_page / goto_page 已经自己记过进度了。
+        if !paging
+            && matches!(
+                key,
+                "left" | "right" | "pageup" | "pagedown" | "space" | "up" | "down" | "home" | "end"
+            )
+        {
+            // `set_offset` 不会自己重绘（Task 18 修的 I3），翻页模式则由 `goto_page` 的
+            // `cx.notify()` 负责，所以只在滚动模式下补这一下。
             cx.notify();
             self.schedule_progress_commit(cx);
         }
@@ -582,17 +633,22 @@ impl ReaderPage {
             .child(div().text_sm().child(error.detail()))
     }
 
+    /// 全书百分比：(章节下标 + 章内比例) / 章节数。
+    ///
+    /// 全书的章节数、章节下标都远小于 2^32；经 u32 转 f64 精确，且不触发
+    /// `cast_precision_loss`（该 lint 没有全局放行）。
+    fn book_percent(&self, count: usize) -> f64 {
+        if count == 0 {
+            return 0.0;
+        }
+        let chapter = f64::from(u32::try_from(self.chapter).unwrap_or(u32::MAX));
+        let total = f64::from(u32::try_from(count).unwrap_or(u32::MAX));
+        let ratio = f64::from(self.chapter_ratio.clamp(0.0, 1.0));
+        ((chapter + ratio) / total * 100.0).clamp(0.0, 100.0)
+    }
+
     fn render_chapter_nav(&self, count: usize, cx: &Context<Self>) -> impl IntoElement {
-        // 全书的章节数、章节下标都远小于 2^32；经 u32 转 f64 精确，且不触发
-        // `cast_precision_loss`（该 lint 没有全局放行）。
-        let percent = if count == 0 {
-            0.0_f64
-        } else {
-            let chapter = f64::from(u32::try_from(self.chapter).unwrap_or(u32::MAX));
-            let total = f64::from(u32::try_from(count).unwrap_or(u32::MAX));
-            let ratio = f64::from(self.chapter_ratio.clamp(0.0, 1.0));
-            ((chapter + ratio) / total * 100.0).clamp(0.0, 100.0)
-        };
+        let percent = self.book_percent(count);
         div()
             .flex()
             .flex_row()
@@ -633,19 +689,192 @@ impl ReaderPage {
             )
     }
 
-    /// 正文区域。Task 19 会在这里加 `ReadingMode::Page` 分支。
-    fn render_body(&self, cx: &Context<Self>) -> AnyElement {
-        self.render_scroll_body(cx)
+    /// `viewport_probe` 量到正文容器高度后回调进来；变化超过半像素才重排。
+    pub(super) fn set_viewport_height(&mut self, height: f32, cx: &mut Context<Self>) {
+        if self
+            .viewport_height
+            .is_some_and(|previous| (previous - height).abs() <= 0.5)
+        {
+            return;
+        }
+        self.viewport_height = Some(height);
+        cx.notify();
     }
 
-    fn render_scroll_body(&self, cx: &Context<Self>) -> AnyElement {
+    /// 翻页模式：按当前指纹测一遍本章并分页；指纹没变就直接用缓存。
+    fn ensure_pagination(&mut self, window: &Window, cx: &mut Context<Self>) {
+        let reader = self.reader_config(cx);
+        let viewport_width = f32::from(window.viewport_size().width);
+        // `mul_add` 而非 `a - 2 * b`：`clippy::suboptimal_flops` 是启用的（无全局放行）。
+        let content_width = 2.0_f32
+            .mul_add(-COLUMN_PADDING, viewport_width)
+            .min(reader.page_width)
+            .max(160.0);
+        let viewport_height = self
+            .viewport_height
+            .unwrap_or_else(|| (f32::from(window.viewport_size().height) - 160.0).max(120.0));
+        let layout = ReaderLayout::new(
+            reader.font_size,
+            reader.line_height,
+            reader.paragraph_spacing,
+            content_width,
+            viewport_height,
+            reader.indent,
+            reader.font_family.clone(),
+        );
+        let fingerprint = layout.fingerprint(self.chapter);
+        if self
+            .page_cache
+            .as_ref()
+            .is_some_and(|cache| cache.fingerprint == fingerprint)
+        {
+            return;
+        }
+
+        let line_height_px = layout.line_height_px();
+        let Some(chapter) = self
+            .content
+            .as_ref()
+            .and_then(|content| content.chapters.get(self.chapter))
+        else {
+            return;
+        };
+        // 章标题也算一段（同字号、加粗），否则分页偏移和实际内容高度对不上。
+        let texts: Vec<String> = std::iter::once(chapter.title.clone())
+            .chain(
+                chapter
+                    .paragraphs
+                    .iter()
+                    .map(|paragraph| layout.display_text(paragraph).into_owned()),
+            )
+            .collect();
+        let style = content_view::measure_style(window, &reader);
+        let spacing = reader.paragraph_spacing;
+        let metrics: Vec<ParagraphMetrics> = texts
+            .iter()
+            .enumerate()
+            .map(|(index, text)| ParagraphMetrics {
+                lines: content_view::measure_lines(
+                    window,
+                    text,
+                    reader.font_size,
+                    content_width,
+                    &style,
+                ),
+                spacing_after: if index == 0 {
+                    line_height_px * 0.75
+                } else if index + 1 == texts.len() {
+                    0.0
+                } else {
+                    spacing
+                },
+            })
+            .collect();
+        let page_offsets = paginate(&metrics, line_height_px, viewport_height);
+        let content_height = crate::reader::layout::content_height(&metrics, line_height_px);
+        let broken =
+            page_offsets.is_empty() || page_offsets.last().copied().unwrap_or(0.0) > content_height;
+        if broken {
+            // 测量和分页对不上：退回滚动模式，只提示一次（在渲染后再动 model）。
+            self.mode = ReadingMode::Scroll;
+            self.page_cache = None;
+            if !self.layout_warned {
+                self.layout_warned = true;
+                let model = self.model.clone();
+                cx.defer(move |cx| {
+                    model.update(cx, |model, _cx| {
+                        model.push_warning(t!("Reader.error.layout_fallback").to_string());
+                    });
+                });
+            }
+            return;
+        }
+
+        let pages = page_offsets.len();
+        self.page_index = if self.page_turn_to_last {
+            self.page_turn_to_last = false;
+            pages.saturating_sub(1)
+        } else {
+            page_for_ratio(self.chapter_ratio, pages)
+        };
+        self.chapter_ratio = ratio_for_page(self.page_index, pages);
+        self.page_cache = Some(PageCache {
+            fingerprint,
+            offset: page_offsets,
+        });
+    }
+
+    fn goto_page(&mut self, page: usize, cx: &mut Context<Self>) {
+        let pages = self
+            .page_cache
+            .as_ref()
+            .map_or(0, |cache| cache.offset.len());
+        if pages == 0 {
+            return;
+        }
+        self.page_index = page.min(pages - 1);
+        self.chapter_ratio = ratio_for_page(self.page_index, pages);
+        self.record_progress(cx);
+        cx.notify();
+    }
+
+    fn turn_page(&mut self, delta: isize, cx: &mut Context<Self>) {
+        let pages = self
+            .page_cache
+            .as_ref()
+            .map_or(0, |cache| cache.offset.len());
+        if pages == 0 {
+            return;
+        }
+        let next = self.page_index.cast_signed() + delta;
+        if next < 0 {
+            if self.chapter == 0 {
+                return;
+            }
+            self.page_turn_to_last = true;
+            let target = self.chapter - 1;
+            self.goto_chapter(target, cx);
+            return;
+        }
+        if next as usize >= pages {
+            let count = self
+                .content
+                .as_ref()
+                .map_or(0, |content| content.chapters.len());
+            if self.chapter + 1 >= count {
+                return;
+            }
+            let target = self.chapter + 1;
+            self.goto_chapter(target, cx);
+            return;
+        }
+        self.goto_page(next as usize, cx);
+    }
+
+    /// 正文区域：翻页模式用裁剪视口 + 纵向位移，滚动模式用滚动容器。
+    fn render_body(&self, cx: &Context<Self>) -> AnyElement {
+        match self.mode {
+            ReadingMode::Page => self.render_page_body(cx),
+            ReadingMode::Scroll => self.render_scroll_body(cx),
+        }
+    }
+
+    fn render_page_body(&self, cx: &Context<Self>) -> AnyElement {
+        let Some((start, pages)) = self.page_cache.as_ref().map(|cache| {
+            let start = cache.offset.get(self.page_index).copied().unwrap_or(0.0);
+            (start, cache.offset.len())
+        }) else {
+            // 还没分好页（首帧）：先按滚动模式画，下一帧缓存在了再切过来。
+            return self.render_scroll_body(cx);
+        };
         let Some(content) = self.content.as_ref() else {
             return div().flex_1().into_any_element();
         };
         let Some(chapter) = content.chapters.get(self.chapter) else {
             return div().flex_1().into_any_element();
         };
-
+        let count = content.chapters.len();
+        let title = chapter.title.clone();
         let reader = self.reader_config(cx);
         let colors = reader_colors(reader.theme, cx);
         let layout = ReaderLayout::new(
@@ -658,39 +887,77 @@ impl ReaderPage {
             reader.font_family.clone(),
         );
         let line_height = layout.line_height_px();
-        let font_size = reader.font_size;
-        let paragraph_spacing = reader.paragraph_spacing;
-        let page_width = reader.page_width;
-        let font_family = reader.font_family;
-        let count = content.chapters.len();
-        let chapter_title = chapter.title.clone();
-        let paragraphs = chapter
+        let paragraphs: Vec<String> = chapter
             .paragraphs
             .iter()
-            .map(|paragraph| layout.display_text(paragraph).into_owned());
+            .map(|paragraph| layout.display_text(paragraph).into_owned())
+            .collect();
+        let probe =
+            content_view::viewport_probe(cx.entity().downgrade(), self.viewport_measured.clone());
 
-        let mut column = div()
-            .w_full()
-            .max_w(px(page_width))
+        div()
+            .flex_1()
+            .min_h_0()
             .flex()
             .flex_col()
+            .bg(colors.background)
+            .text_color(colors.foreground)
             .child(
                 div()
-                    .text_xl()
-                    .font_weight(FontWeight::BOLD)
-                    .mb_4()
-                    .child(chapter_title),
+                    .relative()
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_hidden()
+                    .px(px(COLUMN_PADDING))
+                    .py(px(COLUMN_PADDING))
+                    .child(probe)
+                    .child(
+                        div()
+                            .relative()
+                            .top(px(-start))
+                            .w_full()
+                            .flex()
+                            .flex_row()
+                            .justify_center()
+                            .child(content_view::chapter_column(
+                                &title,
+                                &paragraphs,
+                                &reader,
+                                line_height,
+                            )),
+                    ),
             )
-            .children(paragraphs.map(move |text| {
-                div()
-                    .pb(px(paragraph_spacing))
-                    .text_size(px(font_size))
-                    .line_height(px(line_height))
-                    .child(text)
-            }));
-        if !font_family.is_empty() {
-            column = column.font_family(font_family);
-        }
+            .child(self.render_page_nav(pages, count, cx))
+            .into_any_element()
+    }
+
+    fn render_scroll_body(&self, cx: &Context<Self>) -> AnyElement {
+        let Some(content) = self.content.as_ref() else {
+            return div().flex_1().into_any_element();
+        };
+        let Some(chapter) = content.chapters.get(self.chapter) else {
+            return div().flex_1().into_any_element();
+        };
+        let count = content.chapters.len();
+        let title = chapter.title.clone();
+        let reader = self.reader_config(cx);
+        let colors = reader_colors(reader.theme, cx);
+        let layout = ReaderLayout::new(
+            reader.font_size,
+            reader.line_height,
+            reader.paragraph_spacing,
+            reader.page_width,
+            0.0,
+            reader.indent,
+            reader.font_family.clone(),
+        );
+        let line_height = layout.line_height_px();
+        let paragraphs: Vec<String> = chapter
+            .paragraphs
+            .iter()
+            .map(|paragraph| layout.display_text(paragraph).into_owned())
+            .collect();
+        let column = content_view::chapter_column(&title, &paragraphs, &reader, line_height);
 
         div()
             .flex_1()
@@ -718,13 +985,60 @@ impl ReaderPage {
                             .flex()
                             .flex_row()
                             .justify_center()
-                            .px_6()
-                            .py_6()
+                            .px(px(COLUMN_PADDING))
+                            .py(px(COLUMN_PADDING))
                             .child(column),
                     ),
             )
             .child(self.render_chapter_nav(count, cx))
             .into_any_element()
+    }
+
+    fn render_page_nav(&self, pages: usize, count: usize, cx: &Context<Self>) -> impl IntoElement {
+        // 与滚动模式的页脚共用一份：`as f32` 会触发 `cast_precision_loss`（无全局放行），
+        // 第三份百分比实现只会让两者漂移。
+        let percent = self.book_percent(count);
+        let at_end = self.chapter + 1 >= count && self.page_index + 1 >= pages;
+        div()
+            .flex()
+            .flex_row()
+            .items_center()
+            .justify_between()
+            .px_4()
+            .py_2()
+            .border_t_1()
+            .border_color(cx.theme().border)
+            .child(
+                Button::new("reader-prev-page")
+                    .label(t!("Reader.action.prev_page"))
+                    .disabled(self.chapter == 0 && self.page_index == 0)
+                    .on_click(cx.listener(|this, _event, _window, cx| {
+                        this.turn_page(-1, cx);
+                    })),
+            )
+            .child(
+                div()
+                    .text_sm()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(format!(
+                        "{} · {percent:.0}%",
+                        t!(
+                            "Reader.page_indicator",
+                            page = self.page_index + 1,
+                            pages = pages,
+                            chapter = self.chapter + 1,
+                            total = count
+                        )
+                    )),
+            )
+            .child(
+                Button::new("reader-next-page")
+                    .label(t!("Reader.action.next_page"))
+                    .disabled(at_end)
+                    .on_click(cx.listener(|this, _event, _window, cx| {
+                        this.turn_page(1, cx);
+                    })),
+            )
     }
 }
 
@@ -747,6 +1061,11 @@ impl Render for ReaderPage {
                 cx.notify();
                 window.refresh();
             });
+        }
+
+        // 翻页模式：指纹变了才重算分页；分页结果供下面的正文与进度使用。
+        if matches!(self.mode, ReadingMode::Page) && matches!(self.load_state, LoadState::Ready) {
+            self.ensure_pagination(window, cx);
         }
 
         let body: AnyElement = match &self.load_state {
