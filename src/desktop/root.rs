@@ -7,6 +7,8 @@
 //! - 覆盖层 (dialog / sheet / notification / menu) 由外层 `Root` 上挂的 `RootPlugin`
 //!   叠加, 不由本 view 渲染。
 
+use std::rc::Rc;
+
 use gpui_kit::component::sidebar::{Sidebar, SidebarMenu, SidebarMenuItem, SidebarToggleButton};
 use gpui_kit::component::{ActiveTheme as _, Icon, TitleBar, WindowExt as _};
 use gpui_kit::prelude::FluentBuilder;
@@ -21,8 +23,9 @@ use super::logo::render_logo;
 use super::nav::{KEY_CONTEXT, NavPage};
 use super::notifications::ui_event_to_notification;
 use crate::desktop::model::AppModel;
+use crate::desktop::pages::reader::CloseReaderFn;
 use crate::desktop::pages::{
-    LibraryPage, SearchPage, SettingsPage, SourcesPage, TasksPage, ToolsPage,
+    LibraryPage, ReaderPage, SearchPage, SettingsPage, SourcesPage, TasksPage, ToolsPage,
 };
 use crate::desktop::{
     NextPage, PrevPage, ShowLibrary, ShowSearch, ShowSettings, ShowSources, ShowTasks, ShowTools,
@@ -46,6 +49,9 @@ pub struct RootView {
     sources_page: Entity<SourcesPage>,
     tools_page: Entity<ToolsPage>,
     settings_page: Entity<SettingsPage>,
+
+    /// 打开的阅读器；`Some` 时覆盖主区域并隐藏侧栏。
+    reader: Option<Entity<ReaderPage>>,
 }
 
 impl RootView {
@@ -62,6 +68,14 @@ impl RootView {
         let tools_page = cx.new(|cx| ToolsPage::new(model.clone(), window, cx));
         let settings_page = cx.new(|cx| SettingsPage::new(model.clone(), window, cx));
 
+        // 书架卡片点击 → RootView::open_reader。用弱引用避免 RootView ↔ LibraryPage 循环持有。
+        let root_handle = cx.entity().downgrade();
+        library_page.update(cx, |page, _cx| {
+            page.set_open_reader_handler(Rc::new(move |book_id, window, cx| {
+                let _ = root_handle.update(cx, |root, cx| root.open_reader(book_id, window, cx));
+            }));
+        });
+
         // 从 config 恢复上次折叠状态, 否则每次启动 sidebar 都会弹开。
         let sidebar_collapsed = model.read(cx).config.global.sidebar_collapsed;
 
@@ -76,7 +90,46 @@ impl RootView {
             sources_page,
             tools_page,
             settings_page,
+            reader: None,
         }
+    }
+
+    /// 打开阅读器；书已不在书架或格式不可读时推错误通知。
+    pub fn open_reader(&mut self, book_id: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(book) = self.model.read(cx).book_snapshot(book_id) else {
+            self.model.update(cx, |model, _| {
+                model.push_error(t!("Library.error.book_not_found").to_string());
+            });
+            return;
+        };
+        if !book.format.is_readable() {
+            self.model.update(cx, |model, _| {
+                model.push_warning(t!("Library.status.unsupported").to_string());
+            });
+            return;
+        }
+        let model = self.model.clone();
+        let reader = cx.new(|cx| ReaderPage::new(model, book, window, cx));
+        let root_handle = cx.entity().downgrade();
+        let close_handler: CloseReaderFn = Rc::new(move |window, cx| {
+            let _ = root_handle.update(cx, |root, cx| root.close_reader(window, cx));
+        });
+        reader.update(cx, |page, _cx| page.set_close_handler(close_handler));
+        self.reader = Some(reader);
+        cx.notify();
+    }
+
+    /// 关闭阅读器：落盘进度、恢复窗口装饰。
+    pub fn close_reader(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(reader) = self.reader.take() else {
+            return;
+        };
+        let immersive = reader.read(cx).is_immersive();
+        reader.update(cx, ReaderPage::close_and_flush);
+        if immersive {
+            window.toggle_fullscreen();
+        }
+        cx.notify();
     }
 
     fn navigate(&mut self, page: NavPage, cx: &mut Context<Self>) {
@@ -232,25 +285,46 @@ impl RootView {
 
     /// 9 个导航 action 的 listener 挂到传入的 div 上。
     fn bind_nav_actions(root: Div, cx: &Context<Self>) -> Div {
-        root.on_action(
-            cx.listener(|this, _: &ShowSearch, _, cx| this.navigate(NavPage::Search, cx)),
-        )
-        .on_action(cx.listener(|this, _: &ShowTasks, _, cx| this.navigate(NavPage::Tasks, cx)))
-        .on_action(cx.listener(|this, _: &ShowLibrary, _, cx| this.navigate(NavPage::Library, cx)))
-        .on_action(cx.listener(|this, _: &ShowSources, _, cx| this.navigate(NavPage::Sources, cx)))
-        .on_action(cx.listener(|this, _: &ShowTools, _, cx| this.navigate(NavPage::Tools, cx)))
-        .on_action(
-            cx.listener(|this, _: &ShowSettings, _, cx| this.navigate(NavPage::Settings, cx)),
-        )
-        .on_action(cx.listener(|this, _: &NextPage, _, cx| {
+        root.on_action(cx.listener(|this, _: &ShowSearch, window, cx| {
+            this.close_reader(window, cx);
+            this.navigate(NavPage::Search, cx);
+        }))
+        .on_action(cx.listener(|this, _: &ShowTasks, window, cx| {
+            this.close_reader(window, cx);
+            this.navigate(NavPage::Tasks, cx);
+        }))
+        .on_action(cx.listener(|this, _: &ShowLibrary, window, cx| {
+            this.close_reader(window, cx);
+            this.navigate(NavPage::Library, cx);
+        }))
+        .on_action(cx.listener(|this, _: &ShowSources, window, cx| {
+            this.close_reader(window, cx);
+            this.navigate(NavPage::Sources, cx);
+        }))
+        .on_action(cx.listener(|this, _: &ShowTools, window, cx| {
+            this.close_reader(window, cx);
+            this.navigate(NavPage::Tools, cx);
+        }))
+        .on_action(cx.listener(|this, _: &ShowSettings, window, cx| {
+            this.close_reader(window, cx);
+            this.navigate(NavPage::Settings, cx);
+        }))
+        .on_action(cx.listener(|this, _: &NextPage, window, cx| {
+            this.close_reader(window, cx);
             let next = this.current_page.next();
             this.navigate(next, cx);
         }))
-        .on_action(cx.listener(|this, _: &PrevPage, _, cx| {
+        .on_action(cx.listener(|this, _: &PrevPage, window, cx| {
+            this.close_reader(window, cx);
             let prev = this.current_page.prev();
             this.navigate(prev, cx);
         }))
         .on_action(cx.listener(|this, _: &ToggleSidebar, _, cx| this.toggle_sidebar(cx)))
+        .on_action(cx.listener(|this, _: &super::Quit, window, cx| {
+            this.close_reader(window, cx);
+            this.model.update(cx, |model, _| model.flush_library());
+            cx.quit();
+        }))
     }
 }
 
@@ -268,6 +342,27 @@ impl Render for RootView {
             window.push_notification(ui_event_to_notification(ev), cx);
         }
 
+        // 阅读器打开时覆盖整个主区域（Sidebar + TitleBar + 内容区），仅沉浸模式下也隐藏
+        // TitleBar；关闭由 RootView 丢弃 entity 完成。
+        if let Some(reader) = self.reader.clone() {
+            let immersive = reader.read(cx).is_immersive();
+            return div()
+                .size_full()
+                .flex()
+                .flex_col()
+                .child(
+                    div()
+                        .track_focus(&self.focus)
+                        .key_context(KEY_CONTEXT)
+                        .flex()
+                        .flex_col()
+                        .size_full()
+                        .when(!immersive, |this| this.child(self.render_title_bar(cx)))
+                        .child(div().flex_1().min_h_0().child(reader)),
+                )
+                .into_any_element();
+        }
+
         Self::bind_nav_actions(div().key_context(KEY_CONTEXT), cx)
             .size_full()
             .flex()
@@ -283,5 +378,6 @@ impl Render for RootView {
                     .child(self.render_title_bar(cx))
                     .child(self.render_content(cx)),
             )
+            .into_any_element()
     }
 }
