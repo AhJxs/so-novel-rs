@@ -136,6 +136,8 @@ impl LibraryStore {
     /// # Errors
     ///
     /// 版本过高拒写、序列化失败、目录创建或写盘失败时返回 [`AppError`]。
+    ///
+    /// 成功后**不清** `dirty`：由调用方在写盘确认后调 [`Self::clear_dirty`]。
     #[tracing::instrument(name = "library::LibraryStore::save", skip_all, fields(path = %path.display()))]
     pub fn save(&self, path: &Path) -> AppResult<()> {
         if self.readonly {
@@ -183,13 +185,6 @@ impl LibraryStore {
     /// 保存成功后清除脏标记。
     pub const fn clear_dirty(&mut self) {
         self.dirty = false;
-    }
-
-    /// 标记有变更。后续任务的写方法统一调它。
-    // 当前生产代码尚未接入写方法，只有测试调用；保留以免后续任务重复造轮子。
-    #[allow(dead_code)]
-    pub(super) const fn touch(&mut self) {
-        self.dirty = true;
     }
 
     /// 重新按 `path_key` 计算 ID，并消解重复 ID（极低概率的哈希碰撞 / 手改文件）。
@@ -551,16 +546,27 @@ impl LibraryStore {
 /// 损坏文件的备份名：`library.json.corrupt-<unix>`，已被占用就追加 `-1`、`-2`…
 ///
 /// 同一秒内再次损坏覆盖上一份备份就白备份了（Unix 的 `rename` 会静默替换目标）。
+/// 后缀取满时退回当前时间戳，仍然不会覆盖任何已有文件。
 fn unique_backup_path(path: &Path) -> PathBuf {
-    let base = path.with_extension(format!("json.corrupt-{}", now_unix()));
-    let mut candidate = base.clone();
-    for suffix in 1..1000 {
+    let stamp = path.with_extension(format!("json.corrupt-{}", now_unix()));
+    for suffix in 0..1000 {
+        let candidate = if suffix == 0 {
+            stamp.clone()
+        } else {
+            append_suffix(&stamp, suffix)
+        };
         if !candidate.exists() {
             return candidate;
         }
-        candidate = PathBuf::from(format!("{}-{suffix}", base.display()));
     }
-    base
+    append_suffix(&stamp, now_unix())
+}
+
+/// 在完整文件名后追加 `-<suffix>`；全程走 `OsString`，非 UTF-8 文件名不被有损转换。
+fn append_suffix(path: &Path, suffix: i64) -> PathBuf {
+    let mut name = path.as_os_str().to_os_string();
+    name.push(format!("-{suffix}"));
+    PathBuf::from(name)
 }
 
 #[cfg(test)]
@@ -670,21 +676,29 @@ mod tests {
     fn unreadable_file_is_not_overwritten() {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("library.json");
-        // 同名目录：读它必然失败（走读错误分支），而且无法被 rename 备份掉。
+        // 同名目录：读它必然失败（走读错误分支）。
         std::fs::create_dir(&file).unwrap();
 
         let (store, warning) = LibraryStore::load(&file);
         assert!(warning.is_some());
-        assert!(store.save(&file).is_err());
+        let error = store.save(&file).unwrap_err();
+        assert_eq!(
+            error.message(),
+            t!("Library.error.save_refused_after_load_failure").to_string(),
+            "读失败后必须走拒写分支，而不是写到一半才发现目标不可替换"
+        );
         assert!(file.is_dir(), "读失败后那份文件必须原样留着");
     }
 
     #[test]
-    fn dirty_flag_starts_clean() {
+    fn dirty_flag_starts_clean_and_clears() {
         let dir = tempfile::tempdir().unwrap();
         let (mut store, _) = LibraryStore::load(&dir.path().join("library.json"));
         assert!(!store.is_dirty());
-        store.touch();
+
+        let path = dir.path().join("a.txt");
+        std::fs::write(&path, b"one").unwrap();
+        let _ = store.merge_scan(&[scanned(&path)]);
         assert!(store.is_dirty());
         store.clear_dirty();
         assert!(!store.is_dirty());

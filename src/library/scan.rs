@@ -16,24 +16,37 @@ pub struct ScannedFile {
 ///
 /// # Errors
 ///
-/// 目录不可读、或某个条目的元信息读取失败时返回 [`std::io::Error`]。
+/// 目录不可读、或枚举目录项本身失败时返回 [`std::io::Error`]；单个条目
+/// 读不出元信息时只跳过它（读不到大小/时间的书仍应出现在书架上）。
 #[tracing::instrument(name = "library::scan_download_dir", skip_all, fields(dir = %dir.display()))]
 pub fn scan_download_dir(dir: &Path) -> std::io::Result<Vec<ScannedFile>> {
     let mut out = Vec::new();
     for entry in std::fs::read_dir(dir)? {
         let entry = entry?;
         let path = entry.path();
-        if !path.is_file() || BookFormat::from_path(&path).is_none() {
+        // 扩展名是纯字符串判断，放在任何 io 之前。
+        if BookFormat::from_path(&path).is_none() {
             continue;
         }
-        let metadata = entry.metadata()?;
+        // `DirEntry::metadata()` 不跟随链接，而 `Path::is_file()` 会跟随；
+        // 混用会让链接书拿到链接自身的大小/时间。直接用 `file_type()` 一律跳过链接。
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if !file_type.is_file() {
+            continue;
+        }
+        let Ok(metadata) = entry.metadata() else {
+            continue;
+        };
         out.push(ScannedFile {
             path,
             size_bytes: metadata.len(),
             mtime: mtime_secs(&metadata),
         });
     }
-    out.sort_by_key(|file| std::cmp::Reverse(file.mtime));
+    // 修改时间倒序；同一秒内按路径升序，保证同一目录两次扫描顺序一致。
+    out.sort_by(|a, b| b.mtime.cmp(&a.mtime).then_with(|| a.path.cmp(&b.path)));
     Ok(out)
 }
 
@@ -51,6 +64,8 @@ mod tests {
         std::fs::write(dir.path().join("c.docx"), b"x").unwrap();
         std::fs::create_dir(dir.path().join("sub")).unwrap();
         std::fs::write(dir.path().join("sub").join("d.txt"), b"x").unwrap();
+        // 名字像书、其实是目录：必须被 `is_file` 挡掉。
+        std::fs::create_dir(dir.path().join("fake.txt")).unwrap();
 
         let files = scan_download_dir(dir.path()).unwrap();
         let mut names: Vec<_> = files
@@ -74,6 +89,10 @@ mod tests {
             3
         );
         assert!(files.iter().all(|file| file.mtime > 0));
+        assert!(
+            files.windows(2).all(|pair| pair[0].mtime >= pair[1].mtime),
+            "必须按修改时间倒序"
+        );
     }
 
     #[test]

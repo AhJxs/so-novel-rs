@@ -40,7 +40,7 @@ pub fn extract(path: &Path, format: BookFormat) -> ExtractedMeta {
 fn extract_epub(path: &Path) -> ExtractedMeta {
     match crate::tools::load::epub::read_metadata(path) {
         Ok(meta) => ExtractedMeta {
-            title: meta.title,
+            title: meta.title.or_else(|| file_stem(path)),
             author: meta.author,
             intro: meta.intro,
             cover: meta.cover,
@@ -58,8 +58,8 @@ fn extract_epub(path: &Path) -> ExtractedMeta {
 
 fn file_stem(path: &Path) -> Option<String> {
     path.file_stem()
-        .and_then(|value| value.to_str())
-        .map(str::to_string)
+        .map(|value| value.to_string_lossy().into_owned())
+        .filter(|stem| !stem.is_empty())
 }
 
 #[cfg(test)]
@@ -79,6 +79,7 @@ mod tests {
         let mut builder = EpubBuilder::new(zip).unwrap();
         builder.metadata("title", "元数据书名").unwrap();
         builder.metadata("author", "作者乙").unwrap();
+        builder.metadata("description", "简介").unwrap();
         builder
             .add_cover_image("cover.png", PNG, "image/png")
             .unwrap();
@@ -104,6 +105,7 @@ mod tests {
         let meta = extract(&path, BookFormat::Epub);
         assert_eq!(meta.title.as_deref(), Some("元数据书名"));
         assert_eq!(meta.author.as_deref(), Some("作者乙"));
+        assert_eq!(meta.intro.as_deref(), Some("简介"));
         assert!(meta.cover.is_some_and(|bytes| !bytes.is_empty()));
         assert!(meta.encoding.is_none());
     }
@@ -140,6 +142,35 @@ mod tests {
         let meta = extract(&path, BookFormat::Pdf);
         assert_eq!(meta.title.as_deref(), Some("文档"));
         assert!(meta.cover.is_none());
+        assert!(meta.encoding.is_none());
+    }
+
+    #[test]
+    fn epub_without_dc_title_falls_back_to_file_stem() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("无题.epub");
+        let zip = ZipLibrary::new().unwrap();
+        let mut builder = EpubBuilder::new(zip).unwrap();
+        builder
+            .add_content(
+                EpubContent::new(
+                    "c1.xhtml",
+                    "<html><body><p>正文</p></body></html>".as_bytes(),
+                )
+                .title("第一章"),
+            )
+            .unwrap();
+        let mut file = std::fs::File::create(&path).unwrap();
+        builder.generate(&mut file).unwrap();
+
+        let meta = extract(&path, BookFormat::Epub);
+        assert_eq!(meta.title.as_deref(), Some("无题"));
+    }
+
+    #[test]
+    fn txt_probe_failure_still_yields_a_title() {
+        let meta = extract(Path::new("Z:/definitely/missing/幽灵.txt"), BookFormat::Txt);
+        assert_eq!(meta.title.as_deref(), Some("幽灵"));
         assert!(meta.encoding.is_none());
     }
 }

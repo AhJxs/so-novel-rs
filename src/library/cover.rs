@@ -1,6 +1,6 @@
 //! 封面缓存：魔数嗅探、带内容哈希的文件名、落盘 / 清理，以及生成封面的确定配色。
 
-use std::path::Path;
+use std::path::{Component, Path, PathBuf};
 
 use super::book::hash64;
 
@@ -41,14 +41,26 @@ pub fn write_cover(dir: &Path, id: &str, bytes: &[u8]) -> Option<String> {
     Some(file)
 }
 
-/// 删除一个封面缓存文件；文件名来自 `library.json`，先拒绝路径分隔符防目录穿越。
+/// 删除一个封面缓存文件；文件名来自 `library.json`，先做单段校验防目录穿越。
 pub fn remove_cover_file(dir: &Path, file: Option<&str>) {
     let Some(file) = file else { return };
-    if file.contains('/') || file.contains('\\') || file.contains("..") {
+    let Some(path) = safe_cover_path(dir, file) else {
         tracing::warn!("忽略可疑的封面文件名: {file}");
         return;
+    };
+    let _ = std::fs::remove_file(path);
+}
+
+/// 封面缓存文件名必须恰好是一个普通路径段。
+///
+/// `library.json` 可能被手改，绝不能拿里面的字符串直接拼路径：
+/// `a/b`、`..`、`C:\x`、UNC 前缀全在这里挡掉。
+fn safe_cover_path(dir: &Path, file: &str) -> Option<PathBuf> {
+    let mut components = Path::new(file).components();
+    match (components.next(), components.next()) {
+        (Some(Component::Normal(name)), None) => Some(dir.join(name)),
+        _ => None,
     }
-    let _ = std::fs::remove_file(dir.join(file));
 }
 
 /// 重新定位后把封面文件名里的 id 换掉（内容哈希与扩展名保持不变）。
@@ -62,9 +74,11 @@ pub fn rename_cover_for_relink(
     file: Option<&str>,
 ) -> Option<String> {
     let file = file?;
+    let old_path = safe_cover_path(dir, file)?;
     let suffix = file.strip_prefix(&format!("{old_id}-"))?;
     let new_file = format!("{new_id}-{suffix}");
-    std::fs::rename(dir.join(file), dir.join(&new_file)).ok()?;
+    let new_path = safe_cover_path(dir, &new_file)?;
+    std::fs::rename(old_path, new_path).ok()?;
     Some(new_file)
 }
 
@@ -74,9 +88,8 @@ pub fn rename_cover_for_relink(
 /// 保证白色首字在两段上都可读。
 #[must_use]
 pub fn cover_palette(id: &str) -> (f32, [u8; 3], [u8; 3]) {
-    // 色相只需要整数度数，64 位哈希转 f32 的精度损失无影响。
-    #[allow(clippy::cast_precision_loss)]
-    let hue = (hash64(id.as_bytes()) % 360) as f32;
+    // 先落到 u16 再转 f32：`% 360` 之后不可能截断，`cast_possible_truncation` 已全局 allow。
+    let hue = f32::from((hash64(id.as_bytes()) % 360) as u16);
     let top = hsl_to_rgb(hue, 0.46, 0.58);
     let bottom = hsl_to_rgb((hue + 18.0) % 360.0, 0.52, 0.36);
     (hue, top, bottom)
@@ -120,16 +133,15 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::case_sensitive_file_extension_comparisons)]
     fn cover_name_contains_id_and_content_hash() {
-        let a = cover_file_name("abc", PNG).expect("png");
-        let b = cover_file_name("abc", PNG).expect("png");
-        let c = cover_file_name("abc", JPEG).expect("jpg");
-        assert_eq!(a, b);
-        assert!(a.starts_with("abc-"));
-        assert!(a.ends_with(".png"));
-        assert!(c.ends_with(".jpg"));
-        assert_ne!(a.replace(".png", ""), c.replace(".jpg", ""));
+        assert_eq!(
+            cover_file_name("abc", PNG),
+            Some(format!("abc-{:016x}.png", hash64(PNG)))
+        );
+        assert_eq!(
+            cover_file_name("abc", JPEG),
+            Some(format!("abc-{:016x}.jpg", hash64(JPEG)))
+        );
         assert_eq!(cover_file_name("abc", b"nope"), None);
     }
 
@@ -138,10 +150,19 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let file = write_cover(dir.path(), "id1", PNG).expect("written");
         assert!(dir.path().join(&file).exists());
+        // 目录穿越的调用必须被忽略：`..`、子路径、绝对路径各来一个。
+        remove_cover_file(dir.path(), Some("../evil.png"));
+        remove_cover_file(dir.path(), Some("sub/evil.png"));
+        remove_cover_file(
+            dir.path(),
+            Some(&format!("{}/evil.png", dir.path().display())),
+        );
+        assert!(
+            dir.path().join(&file).exists(),
+            "合法文件不该被上面几次删除波及"
+        );
         remove_cover_file(dir.path(), Some(&file));
         assert!(!dir.path().join(&file).exists());
-        // 目录穿越文件名的调用必须被忽略
-        remove_cover_file(dir.path(), Some("../evil.png"));
     }
 
     #[test]
@@ -163,5 +184,6 @@ mod tests {
         assert!(renamed.starts_with("new-"));
         assert!(dir.path().join(&renamed).exists());
         assert!(!dir.path().join(&file).exists());
+        assert!(rename_cover_for_relink(dir.path(), "old", "new", Some("../evil.png")).is_none());
     }
 }

@@ -75,13 +75,7 @@ pub fn read_metadata(path: &Path) -> Result<EpubMetadata, ToolError> {
     let mut archive =
         ZipArchive::new(file).map_err(|error| ToolError::EpubStructure(error.to_string()))?;
     let package = open_package(&mut archive)?;
-    let cover = cover_manifest_id(&package.opf, &package.items)
-        .and_then(|id| package.items.iter().find(|item| item.id == id))
-        .and_then(|item| {
-            let name = resolve_path(&package.base, &item.href);
-            let bytes = read_entry(&mut archive, &name).ok()?;
-            (!bytes.is_empty()).then_some(bytes)
-        });
+    let cover = read_cover(&mut archive, &package);
     Ok(EpubMetadata {
         title: dc_text(&package.opf, "title"),
         author: dc_text(&package.opf, "creator"),
@@ -97,7 +91,6 @@ pub(super) fn load(path: &Path) -> Result<SourceBook, ToolError> {
         ZipArchive::new(file).map_err(|error| ToolError::EpubStructure(error.to_string()))?;
     let package = open_package(&mut archive)?;
     let spine = spine_ids(&package.opf);
-    let cover_id = cover_manifest_id(&package.opf, &package.items);
 
     let mut chapters = Vec::new();
     for idref in spine {
@@ -131,13 +124,7 @@ pub(super) fn load(path: &Path) -> Result<SourceBook, ToolError> {
         ));
     }
 
-    let cover = cover_id
-        .and_then(|id| package.items.iter().find(|item| item.id == id))
-        .and_then(|item| {
-            let name = resolve_path(&package.base, &item.href);
-            let bytes = read_entry(&mut archive, &name).ok()?;
-            (!bytes.is_empty()).then_some(bytes)
-        });
+    let cover = read_cover(&mut archive, &package);
 
     Ok(SourceBook {
         title: dc_text(&package.opf, "title").unwrap_or_else(|| stem(path)),
@@ -184,6 +171,15 @@ fn cover_manifest_id(opf: &str, items: &[ManifestItem]) -> Option<String> {
             .then(|| attr(tag, "content"))
             .flatten()
     })
+}
+
+/// 按 OPF 里的封面声明读出封面字节；没有声明、条目缺失或字节为空时为 `None`。
+fn read_cover(archive: &mut ZipArchive<std::fs::File>, package: &Package) -> Option<Vec<u8>> {
+    let id = cover_manifest_id(&package.opf, &package.items)?;
+    let item = package.items.iter().find(|item| item.id == id)?;
+    let name = resolve_path(&package.base, &item.href);
+    let bytes = read_entry(archive, &name).ok()?;
+    (!bytes.is_empty()).then_some(bytes)
 }
 
 fn dc_text(opf: &str, tag: &str) -> Option<String> {
@@ -258,6 +254,7 @@ fn compile_regex(pattern: &str) -> Regex {
 mod tests {
     #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
 
+    use std::io::Write;
     use std::path::Path;
 
     use epub_builder::{EpubBuilder, EpubContent, ZipLibrary};
@@ -337,8 +334,54 @@ mod tests {
         ));
     }
 
+    fn write_epub_with_missing_chapter(path: &Path) {
+        let file = std::fs::File::create(path).unwrap();
+        let mut zip = zip::ZipWriter::new(file);
+        let options = zip::write::SimpleFileOptions::default();
+        zip.start_file("mimetype", options).unwrap();
+        zip.write_all(b"application/epub+zip").unwrap();
+        zip.start_file("META-INF/container.xml", options).unwrap();
+        zip.write_all(
+            br#"<?xml version="1.0"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles>
+</container>"#,
+        )
+        .unwrap();
+        zip.start_file("OEBPS/content.opf", options).unwrap();
+        zip.write_all(
+            r#"<?xml version="1.0"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="2.0">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>只剩元数据</dc:title><dc:creator>作者丙</dc:creator>
+  </metadata>
+  <manifest><item id="c1" href="c1.xhtml" media-type="application/xhtml+xml"/></manifest>
+  <spine><itemref idref="c1"/></spine>
+</package>"#
+                .as_bytes(),
+        )
+        .unwrap();
+        zip.finish().unwrap();
+    }
+
     #[test]
     fn read_metadata_reads_opf_without_touching_spine() {
+        let tmp = tempfile::tempdir().unwrap();
+        // 正文文件缺失：元数据仍然可读，整本读取必须失败 —— 这就是「不碰 spine」的防线。
+        let path = tmp.path().join("残.epub");
+        write_epub_with_missing_chapter(&path);
+
+        let meta = read_metadata(&path).unwrap();
+        assert_eq!(meta.title.as_deref(), Some("只剩元数据"));
+        assert_eq!(meta.author.as_deref(), Some("作者丙"));
+        assert!(matches!(
+            load_path(&path, &LoadOptions::default()),
+            Err(crate::tools::ToolError::EpubStructure(_) | crate::tools::ToolError::Io(_))
+        ));
+    }
+
+    #[test]
+    fn read_metadata_reads_all_fields() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("书.epub");
         write_epub(&path);
