@@ -10381,6 +10381,36 @@ brief Step 5 的整段替换**作废**（它会把 `toggle_toc`、`set_search_op
             })
 ```
 
+#### 4b. 「更多」也必须进互斥与列宽
+
+「更多」是第四个右侧抽屉，`close_drawers` 只在**打开别的抽屉时**才被调用；反方向没人管，
+于是「先开更多、再按 `t`」会让两个抽屉并排，而 `ensure_pagination` 的 `dock` 只算了目录 /
+搜索 / 书签 —— 翻页模式下折行与实际列宽对不上。两处补上：
+
+1) `more_panel.rs` 顶部加常量，`render_more` 的 `.w(px(340.0))` 改用它（与
+`TOC_WIDTH` / `SEARCH_WIDTH` / `BOOKMARKS_WIDTH` 同一约定）：
+
+```rust
+/// 「更多」抽屉宽度（px）。正文列宽要减掉它。
+pub(super) const MORE_WIDTH: f32 = 340.0;
+```
+
+2) 三个既有入口的**开**分支各加一行 `self.more_open = false;`：
+
+- `toggle_toc` 的 `else` 分支（开目录前关搜索与书签的地方）；
+- `set_search_open` 的 `if open` 分支；
+- `set_bookmarks_open` 的 `if open` 分支。
+
+3) `ensure_pagination` 的 `dock` 末尾再累加一项：
+
+```rust
+        }) + (if self.more_open {
+            super::more_panel::MORE_WIDTH
+        } else {
+            0.0
+        });
+```
+
 #### 5. 按键（只加三处，其余一律不动）
 
 1) `"m" => self.toggle_mode(cx),` 之后加 `"f11" => self.toggle_immersive(window, cx),`；
