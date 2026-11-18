@@ -254,9 +254,10 @@ impl AppModel {
 
     /// 记录用户在阅读器里手动指定的编码，下次打开不再重新探测。
     pub fn set_book_encoding(&mut self, id: &str, encoding: Option<String>) {
-        self.library.store.set_encoding(id, encoding);
-        self.library.bump();
-        self.persist_library();
+        if self.library.store.set_encoding(id, encoding) {
+            self.library.bump();
+            self.persist_library();
+        }
     }
 
     /// 移出书架：扫描来源只隐藏（重扫不会再加回），导入来源直接删记录。

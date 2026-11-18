@@ -1577,6 +1577,14 @@ Reader:
       en: "Indent"
       zh-CN: 首行缩进
       zh-TW: 首行縮排
+    encoding:
+      en: Encoding
+      zh-CN: 编码
+      zh-TW: 編碼
+    encoding_auto:
+      en: Auto
+      zh-CN: 自动
+      zh-TW: 自動
     theme:
       app:
         en: "Match app"

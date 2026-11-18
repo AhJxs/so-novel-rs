@@ -27,7 +27,7 @@ use super::reader_colors;
 use super::search_panel::{self, SearchPanel};
 use crate::config::{ReaderConfig, ReadingMode};
 use crate::desktop::model::AppModel;
-use crate::library::{Book, ReadingProgress};
+use crate::library::{Book, BookFormat, ReadingProgress};
 use crate::reader::layout::{page_for_ratio, ratio_for_page};
 use crate::reader::{
     LayoutFingerprint, ParagraphMetrics, ReaderBook, ReaderError, ReaderLayout, load_book, paginate,
@@ -35,7 +35,8 @@ use crate::reader::{
 use crate::utils::system;
 
 /// 解码失败时的候选编码（`encoding_rs` 认识这些标签）。
-const ENCODING_CHOICES: &[&str] = &["UTF-8", "GB18030", "GBK", "Big5", "UTF-16LE", "UTF-16BE"];
+pub(super) const ENCODING_CHOICES: &[&str] =
+    &["UTF-8", "GB18030", "GBK", "Big5", "UTF-16LE", "UTF-16BE"];
 
 /// 关闭阅读器：由 `RootView` 注入（需要同时改 `RootView` 状态与全屏标记）。
 pub type CloseReaderFn = Rc<dyn Fn(&mut Window, &mut App)>;
@@ -62,6 +63,25 @@ pub enum LoadState {
     Error(ReaderError),
 }
 
+/// 用户刚选、还没验证成功的编码。
+///
+/// 不用 `Option<Option<String>>`：两层 `None` 语义太隐晦，且 `clippy::option_option` 是启用的。
+enum PendingEncoding {
+    /// 显式编码标签。
+    Explicit(String),
+    /// 改回自动探测。
+    Auto,
+}
+
+impl PendingEncoding {
+    fn into_option(self) -> Option<String> {
+        match self {
+            Self::Explicit(encoding) => Some(encoding),
+            Self::Auto => None,
+        }
+    }
+}
+
 /// 阅读器页面。
 pub struct ReaderPage {
     pub(super) model: Entity<AppModel>,
@@ -69,6 +89,10 @@ pub struct ReaderPage {
     /// 打开时的书籍快照；关闭时用于落盘。
     pub(super) book: Book,
     pub(super) content: Option<ReaderBook>,
+    /// 用户刚选、还没验证成功的编码。
+    ///
+    /// 只有解码成功才写回 store：选错不该把错误标签永久留在 `library.json` 里。
+    pending_encoding: Option<PendingEncoding>,
     pub(super) load_state: LoadState,
     pub(super) mode: ReadingMode,
     pub(super) chapter: usize,
@@ -160,6 +184,7 @@ impl ReaderPage {
             chapter_ratio: book.progress.chapter_ratio,
             book,
             content: None,
+            pending_encoding: None,
             load_state: LoadState::Loading,
             finished,
             scroll: ScrollHandle::new(),
@@ -318,16 +343,15 @@ impl ReaderPage {
     }
 
     /// 清掉旧的正文 / 分页 / 搜索状态，从磁盘重新加载。
+    ///
+    /// **位置由调用方负责**：换编码重试沿用当前位置，重新定位用新书自己的进度。
+    /// 这里只置 `restore_pending`，保证新布局跑完后再按 `chapter` / `chapter_ratio` 恢复。
     fn reload_from_disk(&mut self, cx: &mut Context<Self>) {
         self.cancel_search();
         self.search = SearchPanel::new();
         self.content = None;
         self.page_cache = None;
         self.toc_titles = None;
-        self.chapter = 0;
-        self.chapter_ratio = 0.0;
-        self.page_index = 0;
-        self.page_turn_to_last = false;
         self.restore_pending = true;
         self.load_state = LoadState::Loading;
         self.generation = self.generation.wrapping_add(1);
@@ -335,14 +359,16 @@ impl ReaderPage {
         cx.notify();
     }
 
-    /// 换一种编码重新解码：写回 store 后再走一遍加载。
-    fn retry_with_encoding(&mut self, encoding: &'static str, cx: &mut Context<Self>) {
-        let book_id = self.book_id.clone();
-        let value = encoding.to_string();
-        self.model.update(cx, |model, _cx| {
-            model.set_book_encoding(&book_id, Some(value));
-        });
-        self.book.encoding = Some(encoding.to_string());
+    /// 换一种编码重新解码。选定值先只在内存里，**解码成功后才写回 store**。
+    pub(super) fn retry_with_encoding(
+        &mut self,
+        encoding: Option<&'static str>,
+        cx: &mut Context<Self>,
+    ) {
+        self.book.encoding = encoding.map(str::to_string);
+        self.pending_encoding = Some(encoding.map_or(PendingEncoding::Auto, |label| {
+            PendingEncoding::Explicit(label.to_string())
+        }));
         self.reload_from_disk(cx);
     }
 
@@ -375,11 +401,17 @@ impl ReaderPage {
             .update(cx, |model, _cx| model.relink_book(book_id, path));
         match result {
             Ok(new_id) => {
-                let snapshot = self.model.read(cx).book_snapshot(&new_id);
-                if let Some(book) = snapshot {
-                    self.book_id = new_id;
-                    self.book = book;
-                }
+                let Some(book) = self.model.read(cx).book_snapshot(&new_id) else {
+                    self.model.update(cx, |model, _cx| {
+                        model.push_error(t!("Library.error.book_not_found").to_string());
+                    });
+                    return;
+                };
+                self.book_id = new_id;
+                self.chapter = book.progress.chapter;
+                self.chapter_ratio = book.progress.chapter_ratio;
+                self.finished = book.progress.finished;
+                self.book = book;
                 self.reload_from_disk(cx);
             }
             Err(error) => {
@@ -417,6 +449,13 @@ impl ReaderPage {
                 self.load_state = LoadState::Ready;
                 self.invalidate_scroll_commit();
                 self.restore_pending = true;
+                // 选定的编码只有解码成功才落盘；失败时留给用户继续换。
+                if let Some(pending) = self.pending_encoding.take() {
+                    let book_id = self.book_id.clone();
+                    self.model.update(cx, |model, _| {
+                        model.set_book_encoding(&book_id, pending.into_option());
+                    });
+                }
                 let book_id = self.book_id.clone();
                 self.model.update(cx, |model, _| {
                     model.mark_book_opened(&book_id, chapter_count as u32, encoding);
@@ -941,7 +980,7 @@ impl ReaderPage {
         let close_handler = self.close_handler.clone();
         let mut actions: Vec<AnyElement> = Vec::new();
 
-        if matches!(error, ReaderError::MissingFile) {
+        if matches!(error, ReaderError::MissingFile | ReaderError::Epub(_)) {
             actions.push(
                 Button::new("reader-error-relink")
                     .primary()
@@ -954,18 +993,16 @@ impl ReaderPage {
             );
         }
 
-        if matches!(
-            error,
-            ReaderError::Decode(..) | ReaderError::InvalidEncoding(_)
-        ) {
-            for label in ENCODING_CHOICES {
+        // EPUB 不经过编码标签，换编码毫无意义；只有 TXT 才有这组按钮。
+        if matches!(error, ReaderError::Decode(BookFormat::Txt, _)) {
+            for &label in ENCODING_CHOICES {
                 actions.push(
                     Button::new(format!("reader-encoding-{label}"))
                         .ghost()
                         .compact()
-                        .label(*label)
+                        .label(label)
                         .on_click(cx.listener(move |this, _event, _window, cx| {
-                            this.retry_with_encoding(label, cx);
+                            this.retry_with_encoding(Some(label), cx);
                         }))
                         .into_any_element(),
                 );
@@ -986,7 +1023,7 @@ impl ReaderPage {
                     .compact()
                     .label(t!("Reader.error.action.open_external"))
                     .on_click(cx.listener(move |this, _event, _window, cx| {
-                        if let Err(message) = system::open_path(&PathBuf::from(&path)) {
+                        if let Err(message) = system::open_path(Path::new(&path)) {
                             this.model
                                 .update(cx, |model, _cx| model.push_error(message.to_string()));
                         }

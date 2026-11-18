@@ -537,6 +537,8 @@ impl LibraryStore {
         book.size_bytes = fresh.size_bytes;
         book.file_mtime = fresh.file_mtime;
         book.missing = false;
+        // 重新定位到的是另一个文件：旧显式编码会把探测结果压掉，先清空让它重新判断。
+        book.encoding = None;
         let new_id = book.id.clone();
         self.dirty = true;
         Ok(new_id)
@@ -565,12 +567,14 @@ impl LibraryStore {
         }
     }
 
-    /// 覆盖 TXT 编码（阅读器里「换编码重试」写回的结果）。
-    pub fn set_encoding(&mut self, id: &str, encoding: Option<String>) {
-        if let Some(book) = self.books.iter_mut().find(|book| book.id == id) {
-            book.encoding = encoding;
-            self.dirty = true;
-        }
+    /// 覆盖 TXT 编码（阅读器里「换编码重试」写回的结果）。找到书返回 `true`。
+    pub fn set_encoding(&mut self, id: &str, encoding: Option<String>) -> bool {
+        let Some(book) = self.books.iter_mut().find(|book| book.id == id) else {
+            return false;
+        };
+        book.encoding = encoding;
+        self.dirty = true;
+        true
     }
 }
 
@@ -687,6 +691,22 @@ mod tests {
         assert_eq!(ids[0], id_for_key("a"));
         // 同一个 path_key 的重复条目走 `-<suffix>` 兜底，两条都不能丢。
         assert_eq!(ids[2], format!("{}-1", id_for_key("a")));
+    }
+
+    #[test]
+    fn set_encoding_reports_whether_the_book_exists() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = LibraryStore::default();
+        let book = sample_book(dir.path(), "书.txt");
+        let id = book.id.clone();
+        store.books.push(book);
+
+        assert!(store.set_encoding(&id, Some("GBK".to_string())));
+        assert_eq!(
+            store.get(&id).and_then(|book| book.encoding.clone()),
+            Some("GBK".to_string())
+        );
+        assert!(!store.set_encoding("missing-id", Some("GBK".to_string())));
     }
 
     #[test]

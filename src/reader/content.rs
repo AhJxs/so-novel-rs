@@ -121,6 +121,10 @@ pub fn load_book(
     {
         return Err(ReaderError::NoContent);
     }
+    // 有损解码不会失败，只会产出替换字符；TXT 才需要按密度反推「编码选错了」。
+    if format == BookFormat::Txt {
+        check_decoded_text(format, &chapters)?;
+    }
     // EPUB 不经过编码标签（`epub::load` 不接受 `source_encoding`），报了就是假话。
     let encoding = if format == BookFormat::Txt {
         explicit.map(|value| value.name().to_string()).or(detected)
@@ -144,6 +148,41 @@ fn map_error(format: BookFormat, error: ToolError) -> ReaderError {
         ToolError::UnsupportedFormat(_) => ReaderError::UnsupportedFormat(format),
         other => ReaderError::Decode(format, other.to_string()),
     }
+}
+
+/// 判断「解出来的字像是乱码」时最多数多少个字符：10 MB 的小说没必要全量扫描。
+const REPLACEMENT_SAMPLE_LIMIT: usize = 200_000;
+/// 替换字符占样本的千分之一以上，就认定编码不匹配（正确解码时基本上是 0）。
+const REPLACEMENT_PER_MILLE_LIMIT: usize = 1;
+
+/// 有损解码不会失败，只会把解不出的字节换成 U+FFFD。这里按替换字符的密度反推
+/// 「编码选错了」，让 UI 有机会给出「换编码重试」。
+fn check_decoded_text(format: BookFormat, chapters: &[ReaderChapter]) -> Result<(), ReaderError> {
+    let mut total = 0_usize;
+    let mut broken = 0_usize;
+    for line in chapters.iter().flat_map(|chapter| &chapter.paragraphs) {
+        for ch in line.chars() {
+            total += 1;
+            if ch == '\u{FFFD}' {
+                broken += 1;
+            }
+            if total >= REPLACEMENT_SAMPLE_LIMIT {
+                break;
+            }
+        }
+        if total >= REPLACEMENT_SAMPLE_LIMIT {
+            break;
+        }
+    }
+    // 全用整数比较：`usize as f32` 会撞 `cast_precision_loss`（无全局放行）。
+    if total > 0 && broken.saturating_mul(1000) > total.saturating_mul(REPLACEMENT_PER_MILLE_LIMIT)
+    {
+        return Err(ReaderError::Decode(
+            format,
+            format!("疑似编码不匹配（样本 {total} 字中 {broken} 个替换字符）"),
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -222,12 +261,16 @@ mod tests {
         // UTF-8 字节 + 显式 GBK：探测会说是 UTF-8，只有真的按显式标签解码才会得到乱码。
         std::fs::write(&path, TXT).unwrap();
 
-        let book = load_book(&path, BookFormat::Txt, Some("gbk")).unwrap();
-        assert_eq!(book.encoding.as_deref(), Some("GBK"));
-        assert_ne!(
-            book.chapters[0].paragraphs[0], "正文一",
-            "显式标签必须真正传给了解码器"
-        );
+        // 对照：自动探测能正常读出，说明文件本身是合法 UTF-8。
+        let auto = load_book(&path, BookFormat::Txt, None).unwrap();
+        assert_eq!(auto.encoding.as_deref(), Some("UTF-8"));
+
+        // 显式标签必须真正传给了解码器：按 GBK 解码 UTF-8 字节会产出大量替换字符，
+        // 现在会报 Decode（而不是静默返回满屏乱码）。
+        assert!(matches!(
+            load_book(&path, BookFormat::Txt, Some("gbk")),
+            Err(ReaderError::Decode(BookFormat::Txt, _))
+        ));
     }
 
     #[test]
@@ -257,6 +300,48 @@ mod tests {
             load_book(&path, BookFormat::Txt, Some("klingon")),
             Err(ReaderError::InvalidEncoding(_))
         ));
+    }
+
+    #[test]
+    fn gbk_bytes_decoded_as_utf8_reports_decode_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("gbk.txt");
+        let (bytes, _, _) = encoding_rs::GBK.encode(TXT);
+        std::fs::write(&path, &bytes).unwrap();
+
+        // 有损解码不会失败：替换字符密度检查必须把这种「满屏乱码」变成 Decode 错误。
+        assert!(matches!(
+            load_book(&path, BookFormat::Txt, Some("UTF-8")),
+            Err(ReaderError::Decode(BookFormat::Txt, _))
+        ));
+    }
+
+    #[test]
+    fn correct_encoding_still_loads() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("gbk.txt");
+        let (bytes, _, _) = encoding_rs::GBK.encode(TXT);
+        std::fs::write(&path, &bytes).unwrap();
+
+        let book = load_book(&path, BookFormat::Txt, Some("GBK")).unwrap();
+        assert_eq!(book.chapters[0].paragraphs, vec!["正文一"]);
+    }
+
+    #[test]
+    fn utf8_text_has_no_replacement_chars() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("utf8.txt");
+        std::fs::write(&path, TXT).unwrap();
+
+        let book = load_book(&path, BookFormat::Txt, None).unwrap();
+        let broken = book
+            .chapters
+            .iter()
+            .flat_map(|chapter| &chapter.paragraphs)
+            .flat_map(|line| line.chars())
+            .filter(|ch| *ch == '\u{FFFD}')
+            .count();
+        assert_eq!(broken, 0, "正确解码的 UTF-8 不应被判成乱码");
     }
 
     #[test]

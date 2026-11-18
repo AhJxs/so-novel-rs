@@ -408,6 +408,16 @@ mod tests {
     }
 
     #[test]
+    fn extension_matches_format() {
+        assert_eq!(BookFormat::Txt.extension(), "txt");
+        assert_eq!(BookFormat::Epub.extension(), "epub");
+        assert_eq!(BookFormat::Markdown.extension(), "md");
+        assert_eq!(BookFormat::Html.extension(), "html");
+        assert_eq!(BookFormat::Zip.extension(), "zip");
+        assert_eq!(BookFormat::Pdf.extension(), "pdf");
+    }
+
+    #[test]
     fn id_is_stable_and_depends_on_key() {
         assert_eq!(id_for_key("c:/books/a.txt"), id_for_key("c:/books/a.txt"));
         assert_ne!(id_for_key("c:/books/a.txt"), id_for_key("c:/books/b.txt"));

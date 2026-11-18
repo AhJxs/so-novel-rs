@@ -5,8 +5,9 @@ use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::{ClickEvent, Context, Div, FontWeight, ParentElement, Styled, div, px};
 use rust_i18n::t;
 
-use super::reader_page::ReaderPage;
+use super::reader_page::{ENCODING_CHOICES, ReaderPage};
 use crate::config::{ReaderConfig, ReaderTheme};
+use crate::library::BookFormat;
 
 /// 面板里五个主题按钮的顺序。
 const THEMES: [ReaderTheme; 5] = [
@@ -118,7 +119,84 @@ impl ReaderPage {
             panel = panel.child(Self::render_field_row(field, &reader, cx));
         }
 
-        panel.child(Self::render_indent_row(reader.indent, cx))
+        let panel = panel.child(Self::render_indent_row(reader.indent, cx));
+        // 编码只对 TXT 有意义；放在这里，用户随时能改回自动或换一个标签。
+        if matches!(self.book.format, BookFormat::Txt) {
+            panel.child(self.render_encoding_row(cx))
+        } else {
+            panel
+        }
+    }
+
+    /// TXT 编码行：显示当前生效编码 + 「自动 / 各候选编码」按钮。
+    ///
+    /// 高亮看 `book.encoding`（用户的显式选择）；文字显示 `content.encoding`
+    /// （真正解码用的标签，自动探测时两者可能不同）。
+    fn render_encoding_row(&self, cx: &Context<Self>) -> Div {
+        // 加载失败时 `content` 为空：退回显示用户选的标签，别谎报「自动」。
+        let effective = self
+            .content
+            .as_ref()
+            .and_then(|content| content.encoding.clone())
+            .or_else(|| self.book.encoding.clone());
+        let chosen = self.book.encoding.as_deref();
+        let mut buttons = div().flex().flex_row().flex_wrap().gap_2();
+        let mut auto = Button::new("reader-encoding-auto")
+            .compact()
+            .label(t!("Reader.typography.encoding_auto"));
+        auto = if chosen.is_none() {
+            auto.primary()
+        } else {
+            auto.ghost()
+        };
+        buttons = buttons.child(auto.on_click(cx.listener(
+            |this, _event: &ClickEvent, _window, cx| {
+                this.retry_with_encoding(None, cx);
+            },
+        )));
+        for &label in ENCODING_CHOICES {
+            let mut button = Button::new(format!("reader-encoding-panel-{label}"))
+                .compact()
+                .label(label);
+            button = if chosen == Some(label) {
+                button.primary()
+            } else {
+                button.ghost()
+            };
+            buttons = buttons.child(button.on_click(cx.listener(
+                move |this, _event: &ClickEvent, _window, cx| {
+                    this.retry_with_encoding(Some(label), cx);
+                },
+            )));
+        }
+
+        div()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap_2()
+                    .child(
+                        div()
+                            .flex_1()
+                            .text_sm()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(t!("Reader.typography.encoding").to_string()),
+                    )
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(effective.unwrap_or_else(|| {
+                                t!("Reader.typography.encoding_auto").to_string()
+                            })),
+                    ),
+            )
+            .child(buttons)
     }
 
     fn render_theme_row(current: ReaderTheme, cx: &Context<Self>) -> Div {

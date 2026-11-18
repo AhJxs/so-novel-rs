@@ -329,6 +329,8 @@ mod tests {
         "Reader.toc.empty",
         "Reader.toc.filter_placeholder",
         "Reader.toc.title",
+        "Reader.typography.encoding",
+        "Reader.typography.encoding_auto",
         "Reader.typography.font_size",
         "Reader.typography.indent",
         "Reader.typography.line_height",
