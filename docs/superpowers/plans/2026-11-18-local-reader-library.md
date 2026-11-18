@@ -909,7 +909,7 @@ impl Default for ReadingProgress {
 /// 章节内书签。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Bookmark {
-    /// `<chapter>-<created_unix_millis>`。
+    /// `<chapter>-<毫秒时间戳>`。
     #[serde(default)]
     pub id: String,
     /// 0-based 章节下标。
@@ -2923,6 +2923,15 @@ git commit -m "feat(library): 扫描合并、导入与元数据回写"
         assert_ne!(first.id, second.id);
         assert!(first.created_unix > 0);
     }
+
+    #[test]
+    fn bookmark_ids_are_unique_within_one_millisecond() {
+        // 不 sleep：32 次连续创建必然落在同一毫秒内，只有单调计数能保证 ID 互不相同。
+        let ids: std::collections::HashSet<_> = (0..32)
+            .map(|_| Bookmark::new(3, 0.5, String::new()).id)
+            .collect();
+        assert_eq!(ids.len(), 32, "同一毫秒内连续创建的书签 ID 必须互不相同");
+    }
 ```
 
 `store.rs` 测试追加：
@@ -2976,10 +2985,14 @@ git commit -m "feat(library): 扫描合并、导入与元数据回写"
         let id = store.merge_scan(&[scanned(&old_path)]).remove(0);
         store.books[0].progress.chapter = 7;
         store.books[0].missing = true;
+        assert!(store.add_bookmark(&id, crate::library::Bookmark::new(1, 0.4, "甲".into())));
 
         let wrong = dir.path().join("new.epub");
         std::fs::write(&wrong, b"x").unwrap();
         assert!(store.relink(&id, &wrong).is_err());
+        let before = store.get(&id).unwrap();
+        assert!(before.missing);
+        assert_eq!(Path::new(&before.path), old_path.as_path());
 
         let new_path = dir.path().join("new.txt");
         std::fs::write(&new_path, b"two").unwrap();
@@ -2987,6 +3000,7 @@ git commit -m "feat(library): 扫描合并、导入与元数据回写"
         assert_ne!(new_id, id);
         let book = store.get(&new_id).unwrap();
         assert_eq!(book.progress.chapter, 7);
+        assert_eq!(book.bookmarks.len(), 1);
         assert!(!book.missing);
         assert_eq!(book.size_bytes, 3);
     }
@@ -3003,6 +3017,10 @@ git commit -m "feat(library): 扫描合并、导入与元数据回写"
         store.set_favorite(&id, true);
         assert!(store.get(&id).unwrap().favorite);
         assert!(store.is_dirty());
+
+        store.clear_dirty();
+        store.set_favorite(&id, true);
+        assert!(!store.is_dirty(), "值没变不该标脏");
     }
 ```
 
@@ -3016,13 +3034,27 @@ Expected: 编译失败。
 `book.rs` 的 `Bookmark` 下追加：
 
 ```rust
+/// 上一个书签 ID 用到的毫秒数。同一毫秒内连续创建要单调 +1，否则同章两个书签会撞 ID，
+/// 按 ID 删除时会把两个一起删掉。
+static LAST_BOOKMARK_MILLIS: AtomicU64 = AtomicU64::new(0);
+
 impl Bookmark {
-    /// 用当前时间生成唯一 ID（`<chapter>-<毫秒时间戳>`）。
+    /// 生成唯一 ID（`<chapter>-<毫秒时间戳>`）：毫秒值单调递增，同一毫秒内连续创建时
+    /// 取上一次 +1，其余时候取当前时间。
     #[must_use]
     pub fn new(chapter: usize, chapter_ratio: f32, excerpt: String) -> Self {
-        let millis = SystemTime::now()
+        let now_millis = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .map_or(0, |duration| duration.as_millis());
+            .map_or(0, |duration| {
+                u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
+            });
+        let millis = LAST_BOOKMARK_MILLIS
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |last| {
+                Some(last.saturating_add(1).max(now_millis))
+            })
+            .map_or(now_millis, |previous| {
+                previous.saturating_add(1).max(now_millis)
+            });
         Self {
             id: format!("{chapter}-{millis}"),
             chapter,
@@ -3033,6 +3065,8 @@ impl Bookmark {
     }
 }
 ```
+
+`book.rs` 顶部 use 补：`use std::sync::atomic::{AtomicU64, Ordering};`
 
 `store.rs` 顶部 use 补：
 
@@ -3127,9 +3161,18 @@ use crate::config::ReadingMode;
     ///
     /// 封面文件改名由桌面层负责（store 不持有 `covers_dir`）。
     ///
+    /// 不动 `hidden`：隐藏是用户「移出书架」的明确决定，只有导入才算上架动作。
+    ///
     /// # Errors
     ///
     /// 书籍不存在、格式与原来不同、新文件已在书架中时返回 [`AppError`]。
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// let new_id = store.relink(&old_id, Path::new("/books/新位置.txt"))?;
+    /// ```
+    #[tracing::instrument(name = "library::LibraryStore::relink", skip_all, fields(old_id, path = %new_path.display()))]
     pub fn relink(&mut self, old_id: &str, new_path: &Path) -> AppResult<String> {
         let index = self
             .books
@@ -3162,7 +3205,6 @@ use crate::config::ReadingMode;
         book.size_bytes = fresh.size_bytes;
         book.file_mtime = fresh.file_mtime;
         book.missing = false;
-        book.hidden = false;
         let new_id = book.id.clone();
         self.dirty = true;
         Ok(new_id)
