@@ -27,6 +27,18 @@ use crate::reader::{ReaderBook, ReaderError, ReaderLayout, load_book};
 /// 关闭阅读器：由 `RootView` 注入（需要同时改 `RootView` 状态与全屏标记）。
 pub type CloseReaderFn = Rc<dyn Fn(&mut Window, &mut App)>;
 
+/// gpui 的滚动偏移向下为负（`set_offset`：越往下滚偏移越负），而进度要的是
+/// 0..=1 的正向比例。全部换算都走这两个函数，别在调用点各写一份。
+/// 偏移 → 章内比例；内容不足一屏（滚不动）时返回 `None`。
+fn scroll_ratio(offset_y: f32, max_y: f32) -> Option<f32> {
+    (max_y > 1.0).then(|| (-offset_y / max_y).clamp(0.0, 1.0))
+}
+
+/// 章内比例 → 滚动偏移（负值）。
+fn ratio_offset(ratio: f32, max_y: f32) -> f32 {
+    -(max_y.max(0.0) * ratio.clamp(0.0, 1.0))
+}
+
 /// 打开状态。
 pub enum LoadState {
     Loading,
@@ -38,7 +50,7 @@ pub enum LoadState {
 pub struct ReaderPage {
     model: Entity<AppModel>,
     book_id: String,
-    /// 打开时的书籍快照；关闭时用于落盘。
+    /// 打开时的书籍快照；只用于标题与初始 `finished`。
     pub(super) book: Book,
     pub(super) content: Option<ReaderBook>,
     pub(super) load_state: LoadState,
@@ -202,6 +214,7 @@ impl ReaderPage {
                 ));
                 self.content = Some(content);
                 self.load_state = LoadState::Ready;
+                self.invalidate_scroll_commit();
                 self.restore_pending = true;
                 let book_id = self.book_id.clone();
                 self.model.update(cx, |model, _| {
@@ -230,19 +243,39 @@ impl ReaderPage {
     }
 
     fn autosave(&mut self, cx: &mut Context<Self>) {
+        // 滚动条拖动不上报 `on_scroll`：按固定节奏补采一次位置，位置变了才算一次进度。
+        let previous = self.chapter_ratio;
+        self.capture_scroll_ratio();
+        // 按位比较而不是 `!=`：这里只关心「位置有没有变」，且 `float_cmp` 是启用的。
+        if self.chapter_ratio.to_bits() != previous.to_bits() {
+            self.record_progress(cx);
+            cx.notify();
+        }
         if !self.progress_dirty {
             return;
         }
         self.progress_dirty = false;
-        self.model.update(cx, |model, _| model.flush_library());
+        // 只落书架：`flush_library` 会连 config.toml 一起写，每 5 s 刷一次配置没有意义。
+        self.model.update(cx, |model, _| model.persist_library());
     }
 
     /// 把当前滚动位置换算成章内比例（滚不动时保持原值）。
     fn capture_scroll_ratio(&mut self) {
-        let max = f32::from(self.scroll.max_offset().y);
-        if max > 1.0 {
-            self.chapter_ratio = (f32::from(self.scroll.offset().y) / max).clamp(0.0, 1.0);
+        self.invalidate_scroll_commit();
+        // 跳章 / 切模式 / 改排版之后、恢复帧跑之前，滚动句柄里还是**旧**位置；
+        // 此刻采样会把刚设好的目标比例覆盖掉，等恢复帧落地再说。
+        if self.restore_pending {
+            return;
         }
+        let max = f32::from(self.scroll.max_offset().y);
+        if let Some(ratio) = scroll_ratio(f32::from(self.scroll.offset().y), max) {
+            self.chapter_ratio = ratio;
+        }
+    }
+
+    /// 作废在途的滚动防抖提交（位置已被别的路径改写）。
+    const fn invalidate_scroll_commit(&mut self) {
+        self.scroll_generation = self.scroll_generation.wrapping_add(1);
     }
 
     fn record_progress(&mut self, cx: &mut Context<Self>) {
@@ -294,6 +327,7 @@ impl ReaderPage {
             return;
         }
         self.chapter = index;
+        self.invalidate_scroll_commit();
         self.chapter_ratio = 0.0;
         self.restore_pending = true;
         self.record_progress(cx);
@@ -329,13 +363,16 @@ impl ReaderPage {
     fn scroll_to_ratio(&self, ratio: f32) {
         let max = f32::from(self.scroll.max_offset().y);
         self.scroll
-            .set_offset(point(px(0.0), px(max * ratio.clamp(0.0, 1.0))));
+            .set_offset(point(px(0.0), px(ratio_offset(ratio, max))));
     }
 
-    /// 在当前位置上偏移；程序化滚动不会触发 `on_scroll`，调用方负责补排进度提交。
+    /// 在当前位置上偏移（正数为向下）；程序化滚动不会触发 `on_scroll`，
+    /// 调用方负责补重绘与进度提交。
     pub(super) fn scroll_relative(&self, delta: f32) {
-        let max = f32::from(self.scroll.max_offset().y);
-        let target = (f32::from(self.scroll.offset().y) + delta).clamp(0.0, max.max(0.0));
+        let max = f32::from(self.scroll.max_offset().y).max(0.0);
+        let current = f32::from(self.scroll.offset().y);
+        // 偏移越往下越负，所以「向下 delta」= 偏移减去 delta。
+        let target = (current - delta).clamp(-max, 0.0);
         self.scroll.set_offset(point(px(0.0), px(target)));
     }
 
@@ -365,14 +402,31 @@ impl ReaderPage {
             return;
         }
         let max = f32::from(handle.max_offset().y);
-        let offset = f32::from(handle.offset().y);
-        self.chapter_ratio = if max <= 1.0 {
-            0.0
-        } else {
-            (offset / max).clamp(0.0, 1.0)
-        };
+        if let Some(ratio) = scroll_ratio(f32::from(handle.offset().y), max) {
+            self.chapter_ratio = ratio;
+        }
         self.record_progress(cx);
         cx.notify();
+    }
+
+    /// 关目录抽屉；过滤框还聚焦时把焦点收回正文，
+    /// 否则抽屉一卸，`shortcuts_blocked` 恒为真。
+    fn close_toc(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.toc_open = false;
+        if self.toc_filter.read(cx).focus_handle(cx).is_focused(window) {
+            window.focus(&self.focus, cx);
+        }
+        cx.notify();
+    }
+
+    fn toggle_toc(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.toc_open {
+            self.close_toc(window, cx);
+        } else {
+            self.toc_open = true;
+            self.typography_open = false;
+            cx.notify();
+        }
     }
 
     fn shortcuts_blocked(&self, window: &Window, cx: &App) -> bool {
@@ -410,11 +464,7 @@ impl ReaderPage {
             "down" => self.scroll_by_step(1.0),
             "home" => self.scroll_to_ratio(0.0),
             "end" => self.scroll_to_ratio(1.0),
-            "t" => {
-                self.toc_open = !self.toc_open;
-                self.typography_open = false;
-                cx.notify();
-            }
+            "t" => self.toggle_toc(window, cx),
             "m" => self.toggle_mode(cx),
             "escape" => {
                 if self.typography_open {
@@ -425,17 +475,21 @@ impl ReaderPage {
                     self.toc_open = false;
                     cx.notify();
                 } else if let Some(handler) = self.close_handler.clone() {
-                    handler(window, cx);
+                    // `cx.listener` 在回调期间租着 `ReaderPage`，而关闭回调要
+                    // `read`/`update` 同一实体（double-lease panic）。推到回调之后执行。
+                    window.defer(cx, move |window, cx| handler(window, cx));
                 }
             }
             _ => return,
         }
 
-        // 方向键 / Home / End 只改了滚动位置，进度要在滚动之后补记。
+        // 方向键 / Home / End 只改了滚动位置：`set_offset` 不会自己重绘，
+        // 这里立刻标脏，进度提交仍旧走防抖。
         if matches!(
             key,
             "left" | "right" | "pageup" | "pagedown" | "space" | "up" | "down" | "home" | "end"
         ) {
+            cx.notify();
             self.schedule_progress_commit(cx);
         }
     }
@@ -482,13 +536,9 @@ impl ReaderPage {
                         }
                     }),
             )
-            .child(
-                toc_button.on_click(cx.listener(|this, _event, _window, cx| {
-                    this.toc_open = !this.toc_open;
-                    this.typography_open = false;
-                    cx.notify();
-                })),
-            )
+            .child(toc_button.on_click(cx.listener(|this, _event, window, cx| {
+                this.toggle_toc(window, cx);
+            })))
             .child(
                 div()
                     .flex_1()
@@ -499,9 +549,13 @@ impl ReaderPage {
                     .child(SharedString::from(self.book.title.clone())),
             )
             .child(
-                typography_button.on_click(cx.listener(|this, _event, _window, cx| {
+                typography_button.on_click(cx.listener(|this, _event, window, cx| {
                     this.typography_open = !this.typography_open;
-                    this.toc_open = false;
+                    if this.toc_open {
+                        // 走 `close_toc`：过滤框聚焦时要先把焦点收回正文，
+                        // 否则抽屉一卸，除 Esc 外的快捷键全部失灵。
+                        this.close_toc(window, cx);
+                    }
                     if !this.typography_open {
                         this.persist_settings(cx);
                     }
@@ -681,12 +735,17 @@ impl Render for ReaderPage {
 
         // 首帧布局算完才知道 max_offset，所以恢复位置一定发生在下一帧。
         if self.restore_pending && matches!(self.load_state, LoadState::Ready) {
-            self.restore_pending = false;
             let handle = self.scroll.clone();
             let ratio = self.chapter_ratio.clamp(0.0, 1.0);
-            cx.on_next_frame(window, move |_page, _window, _cx| {
+            cx.on_next_frame(window, move |page, window, cx| {
                 let max = f32::from(handle.max_offset().y);
-                handle.set_offset(point(px(0.0), px(max * ratio)));
+                handle.set_offset(point(px(0.0), px(ratio_offset(ratio, max))));
+                // 标志要留到偏移真正写进去之后再清：在 render 里清掉的话，
+                // 「render 已清、本回调未跑」这段里 autosave 仍会采到旧偏移。
+                page.restore_pending = false;
+                // 只写偏移不重绘：下一帧会被跳过，恢复值要等下一次真实 prepaint 才生效。
+                cx.notify();
+                window.refresh();
             });
         }
 
@@ -733,5 +792,38 @@ impl Render for ReaderPage {
                     .child(body),
             )
             .children(typography)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ratio_offset, scroll_ratio};
+
+    #[test]
+    fn scroll_ratio_maps_negative_offsets_to_forward_progress() {
+        // gpui 的偏移向下为负：0 是章首，-max 是章尾。
+        assert_eq!(scroll_ratio(0.0, 1000.0), Some(0.0));
+        assert_eq!(scroll_ratio(-500.0, 1000.0), Some(0.5));
+        assert_eq!(scroll_ratio(-1000.0, 1000.0), Some(1.0));
+        // resize / 亚像素造成的越界要夹住，不能写出负数或 NaN。
+        assert_eq!(scroll_ratio(-1200.0, 1000.0), Some(1.0));
+        assert_eq!(scroll_ratio(20.0, 1000.0), Some(0.0));
+    }
+
+    #[test]
+    fn scroll_ratio_is_none_when_nothing_scrolls() {
+        assert_eq!(scroll_ratio(0.0, 0.0), None);
+        assert_eq!(scroll_ratio(-0.5, 1.0), None);
+        assert_eq!(scroll_ratio(0.0, -3.0), None);
+    }
+
+    #[test]
+    fn ratio_offset_round_trips_and_stays_inside_content() {
+        let max = 800.0;
+        for ratio in [0.0, 0.25, 0.5, 1.0] {
+            assert_eq!(scroll_ratio(ratio_offset(ratio, max), max), Some(ratio));
+        }
+        assert_eq!(ratio_offset(1.5, max), -800.0);
+        assert_eq!(ratio_offset(-1.0, 0.0), 0.0);
     }
 }
