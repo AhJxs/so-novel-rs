@@ -14,6 +14,7 @@ use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::{ActiveTheme as _, Disableable as _};
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, App, AppContext as _, Context, Entity, FocusHandle, Focusable as _, FontWeight,
     InteractiveElement as _, IntoElement, KeyDownEvent, ParentElement, Render, ScrollEvent,
@@ -34,6 +35,9 @@ use crate::reader::{
 
 /// 关闭阅读器：由 `RootView` 注入（需要同时改 `RootView` 状态与全屏标记）。
 pub type CloseReaderFn = Rc<dyn Fn(&mut Window, &mut App)>;
+
+/// 沉浸模式变化通知：`RootView` 用它重画自己的标题栏。
+pub type ImmersiveFn = Rc<dyn Fn(&mut App)>;
 
 /// gpui 的滚动偏移向下为负（`set_offset`：越往下滚偏移越负），而进度要的是
 /// 0..=1 的正向比例。全部换算都走这两个函数，别在调用点各写一份。
@@ -95,6 +99,12 @@ pub struct ReaderPage {
     pub(super) search_open: bool,
     /// 书签抽屉。
     pub(super) bookmarks_open: bool,
+    /// 沉浸模式的悬浮工具栏是否可见。
+    toolbar_visible: bool,
+    /// 收起工具栏的延时任务代次：鼠标重新进入就作废旧的延时。
+    toolbar_hide_gen: u64,
+    /// 「更多」抽屉。
+    pub(super) more_open: bool,
     /// 书签列表的滚动位置。
     pub(super) bookmarks_scroll: ScrollHandle,
     /// 在跑的扫描任务的取消旗标。
@@ -105,6 +115,7 @@ pub struct ReaderPage {
     generation: u64,
     progress_dirty: bool,
     focus: FocusHandle,
+    immersive_handler: Option<ImmersiveFn>,
     close_handler: Option<CloseReaderFn>,
 }
 
@@ -162,6 +173,9 @@ impl ReaderPage {
             search_input,
             search_open: false,
             bookmarks_open: false,
+            toolbar_visible: false,
+            toolbar_hide_gen: 0,
+            more_open: false,
             bookmarks_scroll: ScrollHandle::new(),
             search_cancel: None,
             toc_open: false,
@@ -170,6 +184,7 @@ impl ReaderPage {
             generation: 1,
             progress_dirty: false,
             focus,
+            immersive_handler: None,
             close_handler: None,
         };
         // 过滤框内容变化要让抽屉重画；不清空的话列表会停在旧结果上。
@@ -195,6 +210,11 @@ impl ReaderPage {
         self.close_handler = Some(handler);
     }
 
+    /// 注入「沉浸模式变了」的回调（`RootView` 调用）。
+    pub fn set_immersive_handler(&mut self, handler: ImmersiveFn) {
+        self.immersive_handler = Some(handler);
+    }
+
     /// 是否处于沉浸模式（`RootView` 据此隐藏 `TitleBar`）。
     #[must_use]
     pub const fn is_immersive(&self) -> bool {
@@ -210,6 +230,42 @@ impl ReaderPage {
         self.progress_dirty = false;
         self.persist_settings(cx);
         self.model.update(cx, |model, _| model.flush_library());
+    }
+
+    /// 关掉所有抽屉 —— 抽屉之间互斥，开新的之前先调它。
+    ///
+    /// 收 `window` 是因为 `close_toc` / `set_search_open` / `set_bookmarks_open`
+    /// 关抽屉时要把焦点收回正文。
+    fn close_drawers(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.typography_open {
+            self.typography_open = false;
+            self.persist_settings(cx);
+        }
+        if self.toc_open {
+            self.close_toc(window, cx);
+        }
+        if self.search_open {
+            self.set_search_open(false, window, cx);
+        }
+        if self.bookmarks_open {
+            self.set_bookmarks_open(false, window, cx);
+        }
+        self.more_open = false;
+        self.cancel_search();
+    }
+
+    /// 进出沉浸模式：进 = 隐藏应用内工具栏 + 窗口全屏；出 = 反过来。
+    pub(super) fn toggle_immersive(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.immersive = !self.immersive;
+        self.toolbar_visible = false;
+        if self.immersive {
+            self.close_drawers(window, cx);
+        }
+        window.toggle_fullscreen();
+        if let Some(handler) = self.immersive_handler.clone() {
+            handler(cx);
+        }
+        cx.notify();
     }
 
     /// 当前生效的排版参数（已 clamp）。
@@ -515,6 +571,7 @@ impl ReaderPage {
             if self.bookmarks_open {
                 self.set_bookmarks_open(false, window, cx);
             }
+            self.more_open = false;
             let handle = self.search_input.read(cx).focus_handle(cx);
             window.focus(&handle, cx);
         } else {
@@ -541,6 +598,7 @@ impl ReaderPage {
             if self.search_open {
                 self.set_search_open(false, window, cx);
             }
+            self.more_open = false;
         } else {
             self.focus_body(window, cx);
         }
@@ -557,6 +615,7 @@ impl ReaderPage {
             if self.bookmarks_open {
                 self.set_bookmarks_open(false, window, cx);
             }
+            self.more_open = false;
             self.toc_open = true;
             self.typography_open = false;
             cx.notify();
@@ -577,8 +636,7 @@ impl ReaderPage {
         let key = event.keystroke.key.as_str();
         if self.shortcuts_blocked(window, cx) {
             if key == "escape" {
-                self.toc_open = false;
-                self.set_search_open(false, window, cx);
+                self.close_drawers(window, cx);
                 cx.notify();
             }
             return;
@@ -631,21 +689,20 @@ impl ReaderPage {
                 cx.notify();
             }
             "m" => self.toggle_mode(cx),
+            "f11" => self.toggle_immersive(window, cx),
             "escape" => {
-                if self.typography_open {
-                    self.typography_open = false;
-                    self.persist_settings(cx);
+                if self.toc_open
+                    || self.search_open
+                    || self.bookmarks_open
+                    || self.typography_open
+                    || self.more_open
+                {
+                    self.close_drawers(window, cx);
                     cx.notify();
-                } else if self.search_open {
-                    self.set_search_open(false, window, cx);
-                    cx.notify();
-                } else if self.bookmarks_open {
-                    self.set_bookmarks_open(false, window, cx);
-                    cx.notify();
-                } else if self.toc_open {
-                    self.toc_open = false;
-                    cx.notify();
+                } else if self.immersive {
+                    self.toggle_immersive(window, cx);
                 } else if let Some(handler) = self.close_handler.clone() {
+                    // `cx.listener` 在回调期间租着本实体，关闭回调要 read/update 它。
                     window.defer(cx, move |window, cx| handler(window, cx));
                 }
             }
@@ -743,6 +800,20 @@ impl ReaderPage {
                     cx.notify();
                 }))
             })
+            .child({
+                let mut more_button = Button::new("reader-more").label(t!("Reader.action.more"));
+                more_button = if self.more_open {
+                    more_button.primary()
+                } else {
+                    more_button.ghost()
+                };
+                more_button.on_click(cx.listener(|this, _event, window, cx| {
+                    let open = !this.more_open;
+                    this.close_drawers(window, cx);
+                    this.more_open = open;
+                    cx.notify();
+                }))
+            })
             .child(
                 div()
                     .flex_1()
@@ -771,6 +842,22 @@ impl ReaderPage {
                     .label(mode_label)
                     .on_click(cx.listener(|this, _event, _window, cx| this.toggle_mode(cx))),
             )
+            .child({
+                let label = if self.immersive {
+                    t!("Reader.action.exit_immersive")
+                } else {
+                    t!("Reader.action.immersive")
+                };
+                let mut immersive_button = Button::new("reader-immersive-toggle").label(label);
+                immersive_button = if self.immersive {
+                    immersive_button.primary()
+                } else {
+                    immersive_button.ghost()
+                };
+                immersive_button.on_click(cx.listener(|this, _event, window, cx| {
+                    this.toggle_immersive(window, cx);
+                }))
+            })
     }
 
     fn render_error(error: &ReaderError) -> impl IntoElement {
@@ -784,6 +871,58 @@ impl ReaderPage {
             .p_8()
             .child(div().text_lg().child(t!(error.message_key()).to_string()))
             .child(div().text_sm().child(error.detail()))
+    }
+
+    /// 沉浸模式：顶部 8px 热区唤出悬浮工具栏，鼠标移出 1.5 s 后收起。
+    fn render_immersive_overlay(&self, cx: &Context<Self>) -> AnyElement {
+        if !self.toolbar_visible {
+            return div()
+                .id("reader-immersive-hotzone")
+                .absolute()
+                .top_0()
+                .left_0()
+                .right_0()
+                .h(px(8.0))
+                .on_hover(cx.listener(|this, hovered: &bool, _window, cx| {
+                    if *hovered {
+                        this.toolbar_visible = true;
+                        cx.notify();
+                    }
+                }))
+                .into_any_element();
+        }
+
+        let background = reader_colors(self.reader_config(cx).theme, cx).background;
+        div()
+            .id("reader-immersive-toolbar")
+            .absolute()
+            .top_0()
+            .left_0()
+            .right_0()
+            .on_hover(cx.listener(|this, hovered: &bool, _window, cx| {
+                this.toolbar_hide_gen = this.toolbar_hide_gen.wrapping_add(1);
+                let generation = this.toolbar_hide_gen;
+                if *hovered {
+                    this.toolbar_visible = true;
+                    cx.notify();
+                } else if this.immersive {
+                    // 移出后 1.5 s 再收起：从工具栏往正文划时不会闪一下。
+                    cx.spawn(async move |this, cx| {
+                        cx.background_executor()
+                            .timer(Duration::from_millis(1500))
+                            .await;
+                        let _ = this.update(cx, |this, cx| {
+                            if this.toolbar_hide_gen == generation && this.immersive {
+                                this.toolbar_visible = false;
+                                cx.notify();
+                            }
+                        });
+                    })
+                    .detach();
+                }
+            }))
+            .child(div().bg(background).child(self.render_toolbar(cx)))
+            .into_any_element()
     }
 
     /// 全书百分比：(章节下标 + 章内比例) / 章节数。
@@ -858,8 +997,8 @@ impl ReaderPage {
     fn ensure_pagination(&mut self, window: &Window, cx: &mut Context<Self>) {
         let previous_ratio = self.chapter_ratio;
         let reader = self.reader_config(cx);
-        // 目录 / 搜索 / 书签抽屉都是根 flex row 里的正常子元素，会把正文列压窄；宽度进了指纹，
-        // 开合抽屉会自动触发重排。三者互斥，这里仍按逐个累加写，免得将来放开互斥时漏掉。
+        // 目录 / 搜索 / 书签 / 更多抽屉都是根 flex row 里的正常子元素，会把正文列压窄；宽度进了指纹，
+        // 开合抽屉会自动触发重排。四者互斥，这里仍按逐个累加写，免得将来放开互斥时漏掉。
         let dock = (if self.toc_open {
             super::toc::TOC_WIDTH
         } else {
@@ -870,6 +1009,10 @@ impl ReaderPage {
             0.0
         }) + (if self.bookmarks_open {
             super::bookmarks_panel::BOOKMARKS_WIDTH
+        } else {
+            0.0
+        }) + (if self.more_open {
+            super::more_panel::MORE_WIDTH
         } else {
             0.0
         });
@@ -1298,11 +1441,24 @@ impl Render for ReaderPage {
         } else {
             None
         };
+        let more = if self.more_open {
+            Some(self.render_more(cx))
+        } else {
+            None
+        };
+        let overlay = if self.immersive {
+            Some(self.render_immersive_overlay(cx))
+        } else {
+            None
+        };
         let typography = if self.typography_open {
             Some(self.render_typography(cx))
         } else {
             None
         };
+        // 放到最后取：Rust 2024 下 `impl IntoElement` 会捕获 `&Context` 的生命周期，
+        // 先拿 `toolbar` 再调需要 `&mut Context` 的渲染方法会撞借用冲突。
+        let toolbar = self.render_toolbar(cx);
 
         div()
             .relative()
@@ -1314,19 +1470,21 @@ impl Render for ReaderPage {
             .bg(colors.background)
             .text_color(colors.foreground)
             .on_key_down(cx.listener(Self::on_key_down))
-            .child(self.render_toolbar(cx))
+            .when(!self.immersive, |this| this.child(toolbar))
             .child(
                 div()
                     .flex()
                     .flex_row()
                     .flex_1()
                     .min_h_0()
-                    .children(toc)
+                    .when_some(toc, ParentElement::child)
                     .child(body)
-                    .children(search)
-                    .children(bookmarks),
+                    .when_some(search, ParentElement::child)
+                    .when_some(bookmarks, ParentElement::child)
+                    .when_some(more, ParentElement::child),
             )
-            .children(typography)
+            .when_some(typography, ParentElement::child)
+            .when_some(overlay, ParentElement::child)
     }
 }
 

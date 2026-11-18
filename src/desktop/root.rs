@@ -23,7 +23,7 @@ use super::logo::render_logo;
 use super::nav::{KEY_CONTEXT, NavPage};
 use super::notifications::ui_event_to_notification;
 use crate::desktop::model::AppModel;
-use crate::desktop::pages::reader::CloseReaderFn;
+use crate::desktop::pages::reader::{CloseReaderFn, ImmersiveFn};
 use crate::desktop::pages::{
     LibraryPage, ReaderPage, SearchPage, SettingsPage, SourcesPage, TasksPage, ToolsPage,
 };
@@ -120,6 +120,14 @@ impl RootView {
             let _ = root_handle.update(cx, |root, cx| root.close_reader(window, cx));
         });
         reader.update(cx, |page, _cx| page.set_close_handler(close_handler));
+        let immersive_handle = cx.entity().downgrade();
+        // `ImmersiveFn` 只在这里用于把 `Rc<closure>` 协转成 `Rc<dyn Fn(&mut App)>`。
+        let immersive_handler: ImmersiveFn = Rc::new(move |cx| {
+            let _ = immersive_handle.update(cx, |_root, cx| cx.notify());
+        });
+        reader.update(cx, |page, _cx| {
+            page.set_immersive_handler(immersive_handler);
+        });
         self.reader = Some(reader);
         cx.notify();
     }

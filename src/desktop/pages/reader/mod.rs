@@ -4,6 +4,7 @@
 
 mod bookmarks_panel;
 mod content_view;
+mod more_panel;
 mod search_panel;
 mod toc;
 mod typography;
@@ -11,5 +12,5 @@ mod typography;
 pub mod reader_page;
 pub mod theme;
 
-pub use reader_page::{CloseReaderFn, ReaderPage};
+pub use reader_page::{CloseReaderFn, ImmersiveFn, ReaderPage};
 pub use theme::reader_colors;
