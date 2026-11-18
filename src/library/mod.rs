@@ -4,6 +4,7 @@
 
 pub mod book;
 pub mod cover;
+pub mod meta;
 pub mod query;
 
 pub use book::{
@@ -13,6 +14,7 @@ pub use book::{
 pub use cover::{
     cover_file_name, cover_palette, remove_cover_file, rename_cover_for_relink, write_cover,
 };
+pub use meta::{ExtractedMeta, extract};
 pub use query::{ShelfQuery, ShelfSort, ShelfStatusFilter, visible_books};
 
 pub use crate::config::ReadingMode;
