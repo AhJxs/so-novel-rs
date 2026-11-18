@@ -9,8 +9,12 @@ use std::path::{Path, PathBuf};
 use rust_i18n::t;
 use serde::{Deserialize, Serialize};
 
-use super::book::{Book, BookFormat, BookOrigin, id_for_key, normalize_path_key, now_unix};
+use super::book::{
+    Book, BookFormat, BookOrigin, Bookmark, ReadingProgress, id_for_key, normalize_path_key,
+    now_unix,
+};
 use super::scan::ScannedFile;
+use crate::config::ReadingMode;
 use crate::error::{AppError, AppResult};
 
 /// 当前书架文件版本。
@@ -408,6 +412,135 @@ impl LibraryStore {
         self.dirty = true;
         Some(self.books.remove(index))
     }
+
+    /// 收藏 / 取消收藏。
+    pub fn set_favorite(&mut self, id: &str, favorite: bool) {
+        if let Some(book) = self.books.iter_mut().find(|book| book.id == id)
+            && book.favorite != favorite
+        {
+            book.favorite = favorite;
+            self.dirty = true;
+        }
+    }
+
+    /// 记录阅读位置。比例统一夹到 0..=1，`finished` 时百分比直接 100。
+    ///
+    /// `percent = (chapter + ratio) / chapter_count * 100`；章节数未知时记 0，
+    /// 等阅读器首次打开成功写回 `chapter_count` 后自然恢复。
+    pub fn record_progress(
+        &mut self,
+        id: &str,
+        chapter: usize,
+        chapter_ratio: f32,
+        mode: ReadingMode,
+        finished: bool,
+    ) {
+        let Some(book) = self.books.iter_mut().find(|book| book.id == id) else {
+            return;
+        };
+        let ratio = chapter_ratio.clamp(0.0, 1.0);
+        // 章节数只有几千，远在 f32 能精确表示整数的 2^24 以内，转 f32 算百分比不丢精度。
+        #[allow(clippy::cast_precision_loss)]
+        let percent = if finished {
+            100.0
+        } else {
+            book.chapter_count
+                .filter(|count| *count > 0)
+                .map_or(0.0, |count| {
+                    ((chapter as f32 + ratio) / count as f32 * 100.0).clamp(0.0, 100.0)
+                })
+        };
+        book.progress = ReadingProgress {
+            chapter,
+            chapter_ratio: ratio,
+            percent,
+            mode,
+            updated_unix: now_unix(),
+            finished,
+        };
+        book.last_opened_unix = Some(now_unix());
+        self.dirty = true;
+    }
+
+    /// 添加书签；同一章同一相对位置（误差 < 0.5%）视为重复，返回 `false`。
+    #[must_use]
+    pub fn add_bookmark(&mut self, id: &str, bookmark: Bookmark) -> bool {
+        let Some(book) = self.books.iter_mut().find(|book| book.id == id) else {
+            return false;
+        };
+        let duplicate = book.bookmarks.iter().any(|existing| {
+            existing.chapter == bookmark.chapter
+                && (existing.chapter_ratio - bookmark.chapter_ratio).abs() < 0.005
+        });
+        if duplicate {
+            return false;
+        }
+        book.bookmarks.push(bookmark);
+        book.bookmarks.sort_by(|a, b| {
+            a.chapter
+                .cmp(&b.chapter)
+                .then_with(|| a.chapter_ratio.total_cmp(&b.chapter_ratio))
+        });
+        self.dirty = true;
+        true
+    }
+
+    /// 删除书签。
+    pub fn remove_bookmark(&mut self, id: &str, bookmark_id: &str) {
+        let Some(book) = self.books.iter_mut().find(|book| book.id == id) else {
+            return;
+        };
+        let before = book.bookmarks.len();
+        book.bookmarks.retain(|bookmark| bookmark.id != bookmark_id);
+        if book.bookmarks.len() != before {
+            self.dirty = true;
+        }
+    }
+
+    /// 重新定位到新文件：重算 ID / 路径键，保留进度与书签。返回新 ID。
+    ///
+    /// 封面文件改名由桌面层负责（store 不持有 `covers_dir`）。
+    ///
+    /// # Errors
+    ///
+    /// 书籍不存在、格式与原来不同、新文件已在书架中时返回 [`AppError`]。
+    pub fn relink(&mut self, old_id: &str, new_path: &Path) -> AppResult<String> {
+        let index = self
+            .books
+            .iter()
+            .position(|book| book.id == old_id)
+            .ok_or_else(|| AppError::not_found(t!("Library.error.book_not_found").to_string()))?;
+        let format = BookFormat::from_path(new_path).ok_or_else(|| {
+            AppError::business(t!("Library.error.unsupported_format").to_string())
+        })?;
+        if format != self.books[index].format {
+            return Err(AppError::business(
+                t!("Library.error.format_mismatch").to_string(),
+            ));
+        }
+        let fresh =
+            Book::from_file(new_path, self.books[index].origin).map_err(AppError::business)?;
+        if self
+            .books
+            .iter()
+            .any(|book| book.path_key == fresh.path_key && book.id != old_id)
+        {
+            return Err(AppError::conflict(
+                t!("Library.error.already_on_shelf").to_string(),
+            ));
+        }
+        let book = &mut self.books[index];
+        book.id = fresh.id;
+        book.path_key = fresh.path_key;
+        book.path = fresh.path;
+        book.size_bytes = fresh.size_bytes;
+        book.file_mtime = fresh.file_mtime;
+        book.missing = false;
+        book.hidden = false;
+        let new_id = book.id.clone();
+        self.dirty = true;
+        Ok(new_id)
+    }
 }
 
 /// 损坏文件的备份名：`library.json.corrupt-<unix>`，已被占用就追加 `-1`、`-2`…
@@ -692,5 +825,82 @@ mod tests {
         assert!(store.remove(&id).is_some());
         assert!(store.books().is_empty());
         assert!(store.remove(&id).is_none());
+    }
+
+    #[test]
+    fn progress_computes_percent() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.txt");
+        std::fs::write(&path, b"one").unwrap();
+        let mut store = LibraryStore::default();
+        let id = store.merge_scan(&[scanned(&path)]).remove(0);
+        store.books[0].chapter_count = Some(10);
+
+        store.record_progress(&id, 4, 0.5, crate::config::ReadingMode::Page, false);
+        let book = store.get(&id).unwrap();
+        assert_eq!(book.progress.chapter, 4);
+        assert!((book.progress.percent - 45.0).abs() < 0.01);
+        assert_eq!(book.progress.mode, crate::config::ReadingMode::Page);
+        assert!(book.last_opened_unix.is_some());
+        assert!(!book.progress.finished);
+
+        store.record_progress(&id, 9, 1.0, crate::config::ReadingMode::Scroll, true);
+        assert!((store.get(&id).unwrap().progress.percent - 100.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn bookmark_dedupes_same_spot() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.txt");
+        std::fs::write(&path, b"one").unwrap();
+        let mut store = LibraryStore::default();
+        let id = store.merge_scan(&[scanned(&path)]).remove(0);
+
+        assert!(store.add_bookmark(&id, crate::library::Bookmark::new(1, 0.4, "甲".into())));
+        assert!(!store.add_bookmark(&id, crate::library::Bookmark::new(1, 0.402, "乙".into())));
+        assert!(store.add_bookmark(&id, crate::library::Bookmark::new(1, 0.6, "丙".into())));
+        assert_eq!(store.get(&id).unwrap().bookmarks.len(), 2);
+
+        let bookmark_id = store.get(&id).unwrap().bookmarks[0].id.clone();
+        store.remove_bookmark(&id, &bookmark_id);
+        assert_eq!(store.get(&id).unwrap().bookmarks.len(), 1);
+    }
+
+    #[test]
+    fn relink_keeps_progress_and_rejects_format_mismatch() {
+        let dir = tempfile::tempdir().unwrap();
+        let old_path = dir.path().join("old.txt");
+        std::fs::write(&old_path, b"one").unwrap();
+        let mut store = LibraryStore::default();
+        let id = store.merge_scan(&[scanned(&old_path)]).remove(0);
+        store.books[0].progress.chapter = 7;
+        store.books[0].missing = true;
+
+        let wrong = dir.path().join("new.epub");
+        std::fs::write(&wrong, b"x").unwrap();
+        assert!(store.relink(&id, &wrong).is_err());
+
+        let new_path = dir.path().join("new.txt");
+        std::fs::write(&new_path, b"two").unwrap();
+        let new_id = store.relink(&id, &new_path).unwrap();
+        assert_ne!(new_id, id);
+        let book = store.get(&new_id).unwrap();
+        assert_eq!(book.progress.chapter, 7);
+        assert!(!book.missing);
+        assert_eq!(book.size_bytes, 3);
+    }
+
+    #[test]
+    fn favorite_toggles_and_marks_dirty() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.txt");
+        std::fs::write(&path, b"one").unwrap();
+        let mut store = LibraryStore::default();
+        let id = store.merge_scan(&[scanned(&path)]).remove(0);
+        store.clear_dirty();
+
+        store.set_favorite(&id, true);
+        assert!(store.get(&id).unwrap().favorite);
+        assert!(store.is_dirty());
     }
 }

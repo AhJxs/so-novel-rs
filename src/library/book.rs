@@ -1,6 +1,7 @@
 //! 书籍模型：格式 / 来源 / 阅读进度 / 书签，以及路径规范化与稳定 ID。
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use rust_i18n::t;
@@ -267,6 +268,36 @@ pub struct Bookmark {
     pub created_unix: i64,
 }
 
+/// 上一个书签 ID 用到的毫秒数。同一毫秒内连续创建要单调 +1，否则同章两个书签会撞 ID，
+/// 按 ID 删除时会把两个一起删掉。
+static LAST_BOOKMARK_MILLIS: AtomicU64 = AtomicU64::new(0);
+
+impl Bookmark {
+    /// 用当前时间生成唯一 ID（`<chapter>-<毫秒时间戳>`）。
+    #[must_use]
+    pub fn new(chapter: usize, chapter_ratio: f32, excerpt: String) -> Self {
+        let now_millis = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |duration| {
+                u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
+            });
+        let millis = LAST_BOOKMARK_MILLIS
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |last| {
+                Some(last.saturating_add(1).max(now_millis))
+            })
+            .map_or(now_millis, |previous| {
+                previous.saturating_add(1).max(now_millis)
+            });
+        Self {
+            id: format!("{chapter}-{millis}"),
+            chapter,
+            chapter_ratio,
+            excerpt,
+            created_unix: now_unix(),
+        }
+    }
+}
+
 /// FNV-1a 64 位哈希：稳定、跨平台、无外部依赖。
 #[must_use]
 pub fn hash64(bytes: &[u8]) -> u64 {
@@ -437,5 +468,15 @@ mod tests {
         book.progress.finished = true;
         assert_eq!(book.status(), ShelfStatus::Finished);
         assert_eq!(book.status_key(), "Library.status.finished");
+    }
+
+    #[test]
+    fn bookmark_ids_are_unique_per_creation() {
+        let first = Bookmark::new(2, 0.5, "摘录".to_string());
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        let second = Bookmark::new(2, 0.5, "摘录".to_string());
+        assert_eq!(first.chapter, 2);
+        assert_ne!(first.id, second.id);
+        assert!(first.created_unix > 0);
     }
 }
