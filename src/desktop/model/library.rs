@@ -221,31 +221,6 @@ impl AppModel {
         self.spawn_meta_worker();
     }
 
-    /// 手动编辑元数据；替换封面时删除旧缓存文件。
-    pub fn update_book_metadata(
-        &mut self,
-        id: &str,
-        title: &str,
-        author: &str,
-        cover_file: Option<String>,
-    ) {
-        let old_cover = self
-            .library
-            .store
-            .get(id)
-            .and_then(|book| book.cover_file.clone());
-        if old_cover != cover_file
-            && let Some(old_cover) = old_cover
-        {
-            crate::library::remove_cover_file(&self.paths.covers_dir, Some(&old_cover));
-        }
-        self.library
-            .store
-            .edit_metadata(id, title, author, cover_file);
-        self.library.bump();
-        self.persist_library();
-    }
-
     /// 记录用户在阅读器里手动指定的编码，下次打开不再重新探测。
     pub fn set_book_encoding(&mut self, id: &str, encoding: Option<String>) {
         if self.library.store.set_encoding(id, encoding) {

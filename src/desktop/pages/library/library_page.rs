@@ -11,20 +11,22 @@ use std::rc::Rc;
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
+use gpui_kit::component::menu::PopupMenuItem;
 use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::{ActiveTheme as _, Disableable as _, Icon, IconName, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, App, AppContext as _, ClickEvent, Context, Entity, InteractiveElement as _,
     IntoElement, ParentElement, Point, Render, ScrollHandle, StatefulInteractiveElement as _,
-    Styled, Window, div,
+    Styled, Window, div, px,
 };
 use rust_i18n::t;
 
-use super::card::{BookCard, CardData};
+use super::card::{BookCard, CardData, MenuBuilder};
 use crate::desktop::components::{EmptyState, PageHeader};
 use crate::desktop::model::AppModel;
 use crate::library::{ShelfQuery, ShelfSort, ShelfStatusFilter, absolute_dir, visible_books};
+use crate::utils::system;
 
 /// 书架卡片点击 → 打开阅读器。由 `RootView` 注入。
 pub type OpenReaderFn = Rc<dyn Fn(&str, &mut Window, &mut App)>;
@@ -343,6 +345,131 @@ impl LibraryPage {
             .into_any_element()
     }
 
+    /// 单本书的右键菜单：继续阅读 / 从头开始 / 书籍信息 / 在文件夹中显示 /
+    /// 用默认程序打开 / 从书架移除 / 删除文件。
+    ///
+    /// 没有标题行（书名就在卡片上），也不再有「编辑信息」入口。
+    fn book_menu(data: &CardData, cx: &Context<Self>) -> MenuBuilder {
+        let page = cx.entity().downgrade();
+        let id = data.id.clone();
+        let missing = data.missing;
+        let readable = data.readable;
+        let finished = data.finished;
+        let path = PathBuf::from(&data.path);
+        Rc::new(move |mut menu, _window, _cx| {
+            menu = menu.min_w(px(180.0));
+
+            // 「继续阅读」/「重新定位」共用同一个入口：文件缺失时改走重新定位。
+            let continue_label = if missing {
+                t!("Library.actions.relink")
+            } else {
+                t!("Library.actions.continue")
+            }
+            .to_string();
+            let continue_page = page.clone();
+            let continue_id = id.clone();
+            menu = menu.item(
+                PopupMenuItem::new(continue_label)
+                    .icon(Icon::new(IconName::BookOpen))
+                    .disabled(!missing && !readable)
+                    .on_click(move |_event, window, cx| {
+                        let id = continue_id.clone();
+                        let _ = continue_page.update(cx, |page, cx| {
+                            if missing {
+                                page.pick_relink(&id, cx);
+                            } else {
+                                page.open_book(&id, window, cx);
+                            }
+                        });
+                    }),
+            );
+
+            if finished && !missing {
+                let restart_page = page.clone();
+                let restart_id = id.clone();
+                menu = menu.item(
+                    PopupMenuItem::new(t!("Library.actions.restart").to_string())
+                        .icon(Icon::new(IconName::Redo))
+                        .on_click(move |_event, window, cx| {
+                            let id = restart_id.clone();
+                            let _ = restart_page.update(cx, |page, cx| {
+                                page.model.update(cx, |model, _cx| model.restart_book(&id));
+                                page.open_book(&id, window, cx);
+                            });
+                        }),
+                );
+            }
+
+            let info_page = page.clone();
+            let info_id = id.clone();
+            menu = menu.item(
+                PopupMenuItem::new(t!("Library.actions.info").to_string())
+                    .icon(Icon::new(IconName::FileText))
+                    .on_click(move |_event, window, cx| {
+                        let id = info_id.clone();
+                        let _ =
+                            info_page.update(cx, |page, cx| page.open_info_dialog(&id, window, cx));
+                    }),
+            );
+
+            let reveal_page = page.clone();
+            let reveal_path = path.clone();
+            menu = menu.item(
+                PopupMenuItem::new(t!("Library.actions.reveal").to_string())
+                    .icon(Icon::new(IconName::FolderOpen))
+                    .on_click(move |_event, _window, cx| {
+                        let path = reveal_path.clone();
+                        let _ = reveal_page.update(cx, |page, cx| {
+                            if let Err(error) = system::reveal_in_folder(&path) {
+                                page.model
+                                    .update(cx, |model, _cx| model.push_error(error.to_string()));
+                            }
+                        });
+                    }),
+            );
+
+            let open_page = page.clone();
+            let open_path = path.clone();
+            menu = menu.item(
+                PopupMenuItem::new(t!("Library.actions.open_external").to_string())
+                    .icon(Icon::new(IconName::ExternalLink))
+                    .on_click(move |_event, _window, cx| {
+                        let path = open_path.clone();
+                        let _ = open_page.update(cx, |page, cx| {
+                            if let Err(error) = system::open_path(&path) {
+                                page.model
+                                    .update(cx, |model, _cx| model.push_error(error.to_string()));
+                            }
+                        });
+                    }),
+            );
+
+            let hide_page = page.clone();
+            let hide_id = id.clone();
+            menu = menu.separator().item(
+                PopupMenuItem::new(t!("Library.actions.hide").to_string())
+                    .icon(Icon::new(IconName::Minus))
+                    .on_click(move |_event, window, cx| {
+                        let id = hide_id.clone();
+                        let _ = hide_page.update(cx, |page, cx| page.prompt_hide(&id, window, cx));
+                    }),
+            );
+
+            let delete_page = page.clone();
+            let delete_id = id.clone();
+            menu.item(
+                PopupMenuItem::new(t!("Library.actions.delete_file").to_string())
+                    .icon(Icon::new(IconName::Delete))
+                    .on_click(move |_event, window, cx| {
+                        let id = delete_id.clone();
+                        let _ = delete_page.update(cx, |page, cx| {
+                            page.prompt_delete_file(&id, window, cx);
+                        });
+                    }),
+            )
+        })
+    }
+
     /// 卡片网格 + 「加载更多」；整块纵向滚动。
     fn render_grid(&self, cards: Vec<CardData>, total: usize, cx: &Context<Self>) -> AnyElement {
         let more = total > cards.len();
@@ -363,14 +490,8 @@ impl LibraryPage {
                     });
                     cx.notify();
                 }));
-            let actions_id = data.id.clone();
-            let on_actions: Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)> =
-                Rc::new(cx.listener(move |this, _ev: &ClickEvent, window, cx| {
-                    // 「…」也在卡片内部：不阻止冒泡会连带打开阅读器。
-                    cx.stop_propagation();
-                    this.open_actions_dialog(&actions_id, window, cx);
-                }));
-            grid = grid.child(BookCard::new(data, on_open, on_favorite).with_actions(on_actions));
+            let menu = Self::book_menu(&data, cx);
+            grid = grid.child(BookCard::new(data, on_open, on_favorite).with_context_menu(menu));
         }
 
         div()

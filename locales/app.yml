@@ -1184,11 +1184,6 @@ Library:
       en: "Could not write library.json"
       zh-CN: 写入 library.json 失败
       zh-TW: 寫入 library.json 失敗
-    # 编辑书籍信息时，选的封面图片读不出来 / 写不进 covers 目录。
-    cover_failed:
-      en: "Could not save the chosen cover; try a different image."
-      zh-CN: 封面保存失败，请换一张图片或检查封面目录权限
-      zh-TW: 封面儲存失敗，請換一張圖片或檢查封面目錄權限
   info:
     title:
       en: "Book info"
@@ -1226,49 +1221,8 @@ Library:
       en: Bookmarks
       zh-CN: 书签
       zh-TW: 書籤
-  edit:
-    title:
-      en: "Edit info"
-      zh-CN: 编辑信息
-      zh-TW: 編輯資訊
-    title_placeholder:
-      en: Title
-      zh-CN: 书名
-      zh-TW: 書名
-    author_placeholder:
-      en: Author
-      zh-CN: 作者
-      zh-TW: 作者
-    pick_cover:
-      en: "Choose cover"
-      zh-CN: 选择封面
-      zh-TW: 選擇封面
-    remove_cover:
-      en: "Remove cover"
-      zh-CN: 移除封面
-      zh-TW: 移除封面
-    no_cover:
-      en: "No cover"
-      zh-CN: 没有封面
-      zh-TW: 沒有封面
-    cover_filter:
-      en: Images
-      zh-CN: 图片
-      zh-TW: 圖片
-    save:
-      en: Save
-      zh-CN: 保存
-      zh-TW: 儲存
-    cancel:
-      en: Cancel
-      zh-CN: 取消
-      zh-TW: 取消
-  # 卡片右上角「⋯」菜单。
+  # 卡片右键菜单。
   actions:
-    title:
-      en: "Actions · %{title}"
-      zh-CN: 操作 · %{title}
-      zh-TW: 操作 · %{title}
     continue:
       en: "Continue reading"
       zh-CN: 继续阅读
@@ -1277,10 +1231,6 @@ Library:
       en: "Book info"
       zh-CN: 书籍信息
       zh-TW: 書籍資訊
-    edit:
-      en: "Edit info"
-      zh-CN: 编辑信息
-      zh-TW: 編輯資訊
     relink:
       en: "Relink file"
       zh-CN: 重新定位文件

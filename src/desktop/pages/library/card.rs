@@ -3,11 +3,13 @@
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
+use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenu};
 use gpui_kit::component::{ActiveTheme as _, Icon, IconName};
 use gpui_kit::{
-    App, ClickEvent, ElementId, FontWeight, Hsla, InteractiveElement as _, IntoElement, ObjectFit,
-    ParentElement, RenderOnce, StatefulInteractiveElement as _, Styled, StyledImage as _, Window,
-    div, img, linear_color_stop, linear_gradient, px, relative, rgb, rgba,
+    App, ClickEvent, Context, ElementId, FontWeight, Hsla, InteractiveElement as _, IntoElement,
+    ObjectFit, ParentElement, RenderOnce, StatefulInteractiveElement as _, Styled,
+    StyledImage as _, Window, div, img, linear_color_stop, linear_gradient, px, relative, rgb,
+    rgba,
 };
 use rust_i18n::t;
 
@@ -28,6 +30,12 @@ pub(super) struct CardData {
     pub percent: f32,
     pub favorite: bool,
     pub missing: bool,
+    /// 磁盘路径：右键菜单的「在文件夹中显示 / 用默认程序打开」要用。
+    pub path: String,
+    /// 格式能否在阅读器里打开（右键菜单据此禁用「继续阅读」）。
+    pub readable: bool,
+    /// 已读完（右键菜单据此显示「从头开始」）。
+    pub finished: bool,
     pub cover_path: Option<PathBuf>,
     /// 生成封面的渐变色（顶部 / 底部）。
     pub cover_top: Hsla,
@@ -55,6 +63,9 @@ impl CardData {
             percent: book.progress.percent,
             favorite: book.favorite,
             missing: book.missing,
+            path: book.path.clone(),
+            readable: book.format.is_readable(),
+            finished: book.progress.finished,
             cover_path,
             cover_top: hsla_from(top),
             cover_bottom: hsla_from(bottom),
@@ -65,13 +76,17 @@ impl CardData {
 /// 卡片点击回调；`Rc` 让同一个 handler 能被多张卡片共享。
 type ClickHandler = Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>;
 
+/// 右键菜单构建器。菜单项要书名 / 路径等快照，所以由书架页按书生成后传进来。
+pub(super) type MenuBuilder =
+    Rc<dyn Fn(PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu>;
+
 /// 书架卡片。
 #[derive(IntoElement)]
 pub(super) struct BookCard {
     data: CardData,
     on_open: ClickHandler,
     on_favorite: ClickHandler,
-    on_actions: Option<ClickHandler>,
+    menu: Option<MenuBuilder>,
 }
 
 impl BookCard {
@@ -80,13 +95,13 @@ impl BookCard {
             data,
             on_open,
             on_favorite,
-            on_actions: None,
+            menu: None,
         }
     }
 
-    /// 挂上「…」操作按钮（Task 17 的书籍操作弹窗）。
-    pub(super) fn with_actions(mut self, handler: ClickHandler) -> Self {
-        self.on_actions = Some(handler);
+    /// 挂上右键菜单（继续阅读 / 书籍信息 / 在文件夹中显示 …）。
+    pub(super) fn with_context_menu(mut self, menu: MenuBuilder) -> Self {
+        self.menu = Some(menu);
         self
     }
 }
@@ -97,7 +112,7 @@ impl RenderOnce for BookCard {
             data,
             on_open,
             on_favorite,
-            on_actions,
+            menu,
         } = self;
 
         // ---- 1. 封面区：先铺生成封面（渐变 + 书名首字），有真实封面时再盖上去 ----
@@ -194,33 +209,9 @@ impl RenderOnce for BookCard {
             );
         }
 
-        // 右下「…」：默认不可见（`invisible` 同时挡住命中测试），悬停卡片时出现。
-        if let Some(on_actions) = on_actions {
-            cover = cover.child(
-                div()
-                    .id(ElementId::Name(format!("book-actions-{}", data.id).into()))
-                    .absolute()
-                    .bottom_1()
-                    .right_1()
-                    .w(px(22.))
-                    .h(px(22.))
-                    .rounded_full()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .bg(rgba(0x0000_0066))
-                    .cursor_pointer()
-                    .invisible()
-                    .group_hover("shelf-card", Styled::visible)
-                    .child(Icon::new(IconName::Ellipsis).text_color(rgb(0x00ff_ffff)))
-                    .on_click(move |event, window, cx| (on_actions)(event, window, cx)),
-            );
-        }
-
         // ---- 2. 文本区：书名 2 行 + 作者 1 行 + 进度条 + 状态 ----
         let mut card = div()
             .id(ElementId::Name(format!("book-card-{}", data.id).into()))
-            .group("shelf-card")
             .w(px(COVER_W))
             .flex()
             .flex_col()
@@ -247,7 +238,7 @@ impl RenderOnce for BookCard {
         }
 
         let percent = data.percent.clamp(0.0, 100.0);
-        card.child(
+        let card = card.child(
             div()
                 .flex()
                 .flex_col()
@@ -272,7 +263,15 @@ impl RenderOnce for BookCard {
                         .text_color(cx.theme().muted_foreground)
                         .child(format!("{} · {percent:.0}%", t!(data.status_key))),
                 ),
-        )
+        );
+
+        // 卡片操作走右键菜单：左键仍是打开阅读器，悬停不再出现「…」按钮。
+        match menu {
+            Some(build) => card
+                .context_menu(move |popup, window, cx| build(popup, window, cx))
+                .into_any_element(),
+            None => card.into_any_element(),
+        }
     }
 }
 
