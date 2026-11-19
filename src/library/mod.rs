@@ -5,6 +5,7 @@
 pub mod book;
 pub mod cover;
 pub mod meta;
+pub mod paths;
 pub mod query;
 pub mod scan;
 pub mod store;
@@ -17,6 +18,9 @@ pub use cover::{
     cover_file_name, cover_palette, remove_cover_file, rename_cover_for_relink, write_cover,
 };
 pub use meta::{ExtractedMeta, extract};
+pub use paths::{
+    BOOKS_DIR_NAME, CACHE_DIR_NAME, COVERS_DIR_NAME, cache_root, covers_dir_for, hide_dir,
+};
 pub use query::{ShelfQuery, ShelfSort, ShelfStatusFilter, visible_books};
 pub use scan::{ScannedFile, scan_download_dir};
 pub use store::{AppliedMeta, LIBRARY_VERSION, LibraryStore};

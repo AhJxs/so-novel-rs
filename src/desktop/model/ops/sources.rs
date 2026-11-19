@@ -10,7 +10,7 @@ use crate::error::{AppError, AppResult};
 use crate::http::HttpClients;
 use crate::models::Rule;
 
-/// 切换书源的禁用状态；立即持久化到 `sources_config.json`。
+/// 切换书源的禁用状态；立即写进运行数据存储。
 pub fn toggle_source_disabled(
     sources_config: &mut SourcesConfig,
     rules: &mut [Arc<Rule>],

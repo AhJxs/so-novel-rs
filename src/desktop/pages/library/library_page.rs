@@ -536,13 +536,13 @@ impl Render for LibraryPage {
             status,
             favorite_only,
         ) = self.model.read_with(cx, |model, _cx| {
-            let covers_dir = model.paths.covers_dir.clone();
+            let covers_dir = model.covers_dir();
             let visible = visible_books(model.library.store.books(), &model.library.query);
             let total = visible.len();
             let cards: Vec<CardData> = visible
                 .iter()
                 .take(limit)
-                .map(|book| CardData::from_book(book, &covers_dir))
+                .map(|book| CardData::from_book(book, covers_dir.as_deref()))
                 .collect();
             let has_books = !model.library.store.books().is_empty();
             (

@@ -231,9 +231,9 @@ fn check_decoded_text(format: BookFormat, chapters: &[ReaderChapter]) -> Result<
 mod tests {
     #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
 
-    use super::*;
-
     use epub_builder::{EpubBuilder, EpubContent, ZipLibrary};
+
+    use super::*;
 
     // 每行之间都要有空行：标题行必须独占一个段落才会被识别成章节，
     // 否则「第一章 开始\n正文一」会被当成一段普通正文。

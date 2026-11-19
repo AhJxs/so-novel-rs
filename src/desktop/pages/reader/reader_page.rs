@@ -94,7 +94,7 @@ pub struct ReaderPage {
     pub(super) content: Option<ReaderBook>,
     /// 用户刚选、还没验证成功的编码。
     ///
-    /// 只有解码成功才写回 store：选错不该把错误标签永久留在 `library.json` 里。
+    /// 只有解码成功才写回 store：选错不该把错误标签永久留在书架数据里。
     pending_encoding: Option<PendingEncoding>,
     /// 用户点了「仍要打开」：本次加载跳过乱码检查。
     force_decode: bool,
@@ -1095,15 +1095,11 @@ impl ReaderPage {
                     .on_click(cx.listener(|this, _event, _window, cx| this.toggle_mode(cx))),
             )
             .child(
-                Self::chrome_button(
-                    "reader-immersive-toggle",
-                    immersive_icon,
-                    immersive_tooltip,
-                )
-                .selected(self.immersive)
-                .on_click(cx.listener(|this, _event, window, cx| {
-                    this.toggle_immersive(window, cx);
-                })),
+                Self::chrome_button("reader-immersive-toggle", immersive_icon, immersive_tooltip)
+                    .selected(self.immersive)
+                    .on_click(cx.listener(|this, _event, window, cx| {
+                        this.toggle_immersive(window, cx);
+                    })),
             )
     }
 
@@ -1181,7 +1177,7 @@ impl ReaderPage {
         }
 
         let txt = matches!(self.book.format, BookFormat::Txt);
-        // `InvalidEncoding` 来自 `library.json` 里的非法标签，换一个编码同样能修好；
+        // `InvalidEncoding` 来自书架数据里的非法标签，换一个编码同样能修好；
         // 编码只对 TXT 有意义，EPUB 上给这排按钮只会写回一个假标签。
         if matches!(error, ReaderError::Decode(BookFormat::Txt, _))
             || (txt && matches!(error, ReaderError::InvalidEncoding(_)))

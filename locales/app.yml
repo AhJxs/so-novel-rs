@@ -1149,14 +1149,14 @@ Library:
       zh-TW: 該檔案已在書架中
     # %{detail} 系统原始错误。
     load_failed:
-      en: "Could not read library.json: %{detail}"
-      zh-CN: "读取 library.json 失败：%{detail}"
-      zh-TW: "讀取 library.json 失敗：%{detail}"
+      en: "Could not read the library data: %{detail}"
+      zh-CN: "读取书架数据失败：%{detail}"
+      zh-TW: "讀取書架資料失敗：%{detail}"
     # %{path} 备份文件名，%{detail} 解析错误。
     corrupt_backup:
-      en: "library.json could not be parsed and was backed up to %{path}: %{detail}"
-      zh-CN: "library.json 解析失败，已备份到 %{path}：%{detail}"
-      zh-TW: "library.json 解析失敗，已備份到 %{path}：%{detail}"
+      en: "The library data could not be parsed and was backed up to %{path}: %{detail}"
+      zh-CN: "书架数据解析失败，已备份到 %{path}：%{detail}"
+      zh-TW: "書架資料解析失敗，已備份到 %{path}：%{detail}"
     # %{detail} 备份失败原因；接在 corrupt_backup 之后。
     backup_failed:
       en: " (backup failed: %{detail})"
@@ -1164,26 +1164,36 @@ Library:
       zh-TW: "（備份失敗：%{detail}）"
     # %{version} 文件版本，%{supported} 当前支持的版本。
     future_version:
-      en: "library.json is version %{version}, newer than the supported %{supported}; this run is read-only and will not overwrite it"
-      zh-CN: "library.json 版本 %{version} 高于当前支持的 %{supported}，本次运行按只读处理，不会覆盖"
-      zh-TW: "library.json 版本 %{version} 高於目前支援的 %{supported}，本次執行以唯讀處理，不會覆寫"
+      en: "The library data is version %{version}, newer than the supported %{supported}; this run is read-only and will not overwrite it"
+      zh-CN: "书架数据版本 %{version} 高于当前支持的 %{supported}，本次运行按只读处理，不会覆盖"
+      zh-TW: "書架資料版本 %{version} 高於目前支援的 %{supported}，本次執行以唯讀處理，不會覆寫"
     save_refused:
-      en: "library.json comes from a newer version; refusing to overwrite. Upgrade the app to save."
-      zh-CN: "library.json 来自更高版本，拒绝覆盖；请升级应用后再保存"
-      zh-TW: "library.json 來自更高版本，拒絕覆寫；請先升級應用程式再儲存"
-    # 上次读取失败 / 备份失败：磁盘上的文件没被保住，写回就等于抹掉它。
+      en: "The library data comes from a newer version; refusing to overwrite. Upgrade the app to save."
+      zh-CN: "书架数据来自更高版本，拒绝覆盖；请升级应用后再保存"
+      zh-TW: "書架資料來自更高版本，拒絕覆寫；請先升級應用程式再儲存"
+    # 上次读取失败 / 备份失败：旧数据没被保住，写回就等于抹掉它。
     save_refused_after_load_failure:
-      en: "The library file could not be read or backed up; refusing to overwrite it. Move or delete it, then restart the app."
-      zh-CN: "书库文件读取或备份失败，拒绝覆盖；请移走或删除该文件后重启应用"
-      zh-TW: "書庫檔案讀取或備份失敗，拒絕覆寫；請移走或刪除該檔案後重新啟動應用程式"
+      en: "The library data could not be read or backed up; refusing to overwrite it. Remove ~/.sonovel/state, then restart the app."
+      zh-CN: "书架数据读取或备份失败，拒绝覆盖；请删除 ~/.sonovel/state 后重启应用"
+      zh-TW: "書架資料讀取或備份失敗，拒絕覆寫；請刪除 ~/.sonovel/state 後重新啟動應用程式"
     create_dir_failed:
       en: "Could not create the library folder"
       zh-CN: 创建书库目录失败
       zh-TW: 建立書庫目錄失敗
     write_failed:
-      en: "Could not write library.json"
-      zh-CN: 写入 library.json 失败
-      zh-TW: 寫入 library.json 失敗
+      en: "Could not write the library data"
+      zh-CN: 写入书架数据失败
+      zh-TW: 寫入書架資料失敗
+    # 单实例：运行数据目录已被另一个窗口占用，显示在启动失败对话框里。
+    already_running:
+      en: "So Novel is already running. Close the other window and try again."
+      zh-CN: 应用已在运行，请先关闭另一个窗口
+      zh-TW: 應用程式已在執行，請先關閉另一個視窗
+    # 存储里的 schema 比本程序新：只读运行，绝不覆盖。
+    state_read_only:
+      en: "The saved app data comes from a newer version; this run is read-only and will not overwrite it"
+      zh-CN: 运行数据来自更高版本的程序，本次运行按只读处理，不会覆盖
+      zh-TW: 執行資料來自更高版本程式，本次執行以唯讀處理，不會覆寫
   info:
     title:
       en: "Book info"

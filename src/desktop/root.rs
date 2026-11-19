@@ -166,6 +166,8 @@ impl RootView {
                 model.flush_library();
             });
         }
+        // 阅读器分支只落书架，任务列表在这里补一次（同步提交，返回即已 fsync）。
+        self.model.update(cx, |model, _| model.persist_tasks());
     }
 
     fn navigate(&mut self, page: NavPage, cx: &mut Context<Self>) {

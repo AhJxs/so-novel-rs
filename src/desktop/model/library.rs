@@ -14,7 +14,7 @@ impl AppModel {
         if self.library.scan_in_flight {
             return;
         }
-        // 与写入 `library.json` 的 `path_key` 共用 `absolute_dir`，否则
+        // 与书架数据里的 `path_key` 共用 `absolute_dir`，否则
         // 「相对路径 vs 绝对路径」永远对不上 → 同一目录被反复当成新目录扫描。
         let dir = crate::library::absolute_dir(Path::new(&self.config.download.download_path));
         // 目录还不存在时不记「已扫描」：下载目录可能稍后才被创建，
@@ -55,7 +55,7 @@ impl AppModel {
             let (tx, rx) = smol::channel::unbounded::<MetaEvent>();
             self.library.meta_rx = Some(rx);
             self.library.meta_in_flight = true;
-            let covers_dir = self.paths.covers_dir.clone();
+            let covers_dir = self.covers_dir();
             let path = PathBuf::from(&book.path);
             let format = book.format;
             let cover_id = id.clone();
@@ -64,7 +64,9 @@ impl AppModel {
                 let outcome = tokio::task::spawn_blocking(move || {
                     let meta = crate::library::meta::extract(&path, format);
                     let cover_file = meta.cover.as_deref().and_then(|bytes| {
-                        crate::library::write_cover(&covers_dir, &cover_id, bytes)
+                        covers_dir
+                            .as_deref()
+                            .and_then(|dir| crate::library::write_cover(dir, &cover_id, bytes))
                     });
                     AppliedMeta {
                         title: meta.title,
@@ -88,7 +90,12 @@ impl AppModel {
     /// 下一次扫描成功会把它清掉，混用会让两种失败互相掩盖。
     pub fn persist_library(&mut self) {
         self.library.last_save_attempt_unix = crate::library::now_unix();
-        match self.library.store.save(&self.paths.library_file) {
+        let outcome = self.library.store.to_json().and_then(|bytes| {
+            self.state
+                .put(crate::db::KEY_LIBRARY, &bytes)
+                .map_err(|error| AppError::internal(error.to_string()))
+        });
+        match outcome {
             Ok(()) => {
                 self.library.store.clear_dirty();
                 self.library.last_save_unix = crate::library::now_unix();
@@ -114,7 +121,17 @@ impl AppModel {
     /// 阅读缓存的根目录（`<下载目录>/.sonovel`）；下载目录为空时 `None`。
     #[must_use]
     pub fn reader_cache_dir(&self) -> Option<PathBuf> {
-        crate::reader::cache::dir_for_download(&self.config.download.download_path)
+        crate::library::cache_root(&self.config.download.download_path)
+    }
+
+    /// 封面缓存目录（`<下载目录>/.sonovel/covers`）；下载目录为空时 `None`。
+    ///
+    /// 现算而不是存字段：设置页改下载目录后，下一次读写自然落到新目录。
+    #[must_use]
+    pub fn covers_dir(&self) -> Option<PathBuf> {
+        let root = crate::library::cache_root(&self.config.download.download_path)?;
+        crate::library::hide_dir(&root);
+        Some(root.join(crate::library::COVERS_DIR_NAME))
     }
 
     /// 删掉一本书的阅读缓存。书没了缓存留着也没人会用，只会白占小说目录空间。
@@ -250,10 +267,9 @@ impl AppModel {
         match book.origin {
             crate::library::BookOrigin::Downloaded => self.library.store.set_hidden(id, true),
             crate::library::BookOrigin::Imported => {
-                crate::library::remove_cover_file(
-                    &self.paths.covers_dir,
-                    book.cover_file.as_deref(),
-                );
+                if let Some(dir) = self.covers_dir() {
+                    crate::library::remove_cover_file(&dir, book.cover_file.as_deref());
+                }
                 let _ = self.library.store.remove(id);
             }
         }
@@ -272,7 +288,9 @@ impl AppModel {
             self.push_error(t!("Library.delete.failed", err = error.to_string()).to_string());
             return;
         }
-        crate::library::remove_cover_file(&self.paths.covers_dir, book.cover_file.as_deref());
+        if let Some(dir) = self.covers_dir() {
+            crate::library::remove_cover_file(&dir, book.cover_file.as_deref());
+        }
         let _ = self.library.store.remove(id);
         self.forget_reader_cache(&book.id);
         self.library.bump();
@@ -295,12 +313,9 @@ impl AppModel {
         if new_id != id {
             self.forget_reader_cache(id);
         }
-        let renamed = crate::library::cover::rename_cover_for_relink(
-            &self.paths.covers_dir,
-            id,
-            &new_id,
-            old_cover.as_deref(),
-        );
+        let renamed = self.covers_dir().as_deref().and_then(|dir| {
+            crate::library::cover::rename_cover_for_relink(dir, id, &new_id, old_cover.as_deref())
+        });
         if old_cover.is_some() {
             self.library
                 .store

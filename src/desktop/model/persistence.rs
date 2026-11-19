@@ -1,15 +1,22 @@
 //! `AppModel` 持久化方法 (`save_sources_config` / `persist_settings` / `persist_tasks`)。
 //!
-//! 任务落盘 (`tasks.json`) 统一走 [`AppModel::persist_tasks`]：UI 线程只序列化，
-//! 写盘丢给 blocking pool，调用方拿到 fire-and-forget 语义。
+//! 书源选择与下载任务写进运行数据存储（`~/.sonovel/state`），`config.toml` 仍是文件。
+//! 存储常驻打开、单次提交约亚毫秒级，所以两者都在 UI 线程同步写，返回即已 fsync。
 
 use super::AppModel;
 
 impl AppModel {
-    /// 把书源选择状态写回 `sources_config.json`；失败仅记日志。
+    /// 把书源选择状态写回运行数据；失败仅记日志。
     pub fn save_sources_config(&self) {
-        if let Err(e) = self.sources_config.save(&self.paths.sources_config) {
-            tracing::warn!("保存书源配置失败: {e:#}");
+        let bytes = match self.sources_config.to_json() {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                tracing::warn!("序列化书源配置失败: {error:#}");
+                return;
+            }
+        };
+        if let Err(error) = self.state.put(crate::db::KEY_SOURCES, &bytes) {
+            tracing::warn!("保存书源配置失败: {error:#}");
         }
     }
 
@@ -40,12 +47,11 @@ impl AppModel {
         }
     }
 
-    /// 把当前任务列表 fire-and-forget 落盘。
+    /// 把当前任务列表写进运行数据。
     ///
-    /// 序列化（含超额完成任务的裁剪）留在调用线程，避免把整张 `DownloadTask` 表
-    /// clone 进 blocking pool；写盘本身仍是异步的，失败只记日志。
+    /// 序列化（含超额完成任务的裁剪）与写入都在调用线程完成：提交前已 fsync，
+    /// 调用返回后数据一定在磁盘上，退出时不需要额外的 flush。
     pub fn persist_tasks(&self) {
-        let path = self.paths.tasks_file.clone();
         let json = match crate::db::tasks_json_with_trim(&self.tasks) {
             Ok(json) => json,
             Err(e) => {
@@ -53,10 +59,8 @@ impl AppModel {
                 return;
             }
         };
-        self.runtime.spawn_blocking(move || {
-            if let Err(e) = crate::db::write_json(&path, &json) {
-                tracing::warn!("保存任务到文件失败: {e:#}");
-            }
-        });
+        if let Err(error) = self.state.put(crate::db::KEY_TASKS, json.as_bytes()) {
+            tracing::warn!("保存下载任务失败: {error:#}");
+        }
     }
 }

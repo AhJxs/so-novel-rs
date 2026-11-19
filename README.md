@@ -130,9 +130,11 @@ cargo run
 |------|------|
 | `config.toml` | 用户配置（保留注释） |
 | `rules/` | 书源规则文件（JSON，首次启动从内置资源复制） |
-| `sources_config.json` | 书源配置（当前选中的规则文件 + 禁用列表） |
-| `tasks.json` | 下载任务记录（自动清理超额的已完成任务） |
 | `themes/` | 用户主题目录（JSON，热重载） |
+| `state/` | 运行数据（嵌入式 `SurrealKV`）：书架、下载任务、书源选择。单实例独占，不要手动编辑 |
+
+小说目录（`config.toml` 里的下载目录）下另有一个隐藏目录 `.sonovel/`：`covers/` 存封面缓存，
+`books/` 存阅读解析缓存。删除它只会让封面与解析结果重新生成，不影响书籍文件。
 
 ### 📚 书源
 
@@ -145,8 +147,8 @@ cargo run
 - `cloudflare.json` — 有 Cloudflare 保护的源（5 个）
 - `rule-template.json5` — 自定义书源模板
 
-切换书源集：在 GUI 的「书源」页右上角下拉选择活跃文件（或直接改
-`~/.sonovel/sources_config.json` 的 `active_file`）。Cloudflare 保护的书源需要
+切换书源集：在 GUI 的「书源」页右上角下拉选择活跃文件（选择结果存在
+`~/.sonovel/state`，不再有可手改的 JSON）。Cloudflare 保护的书源需要
 部署 [CloudflareBypassForScraping](https://github.com/sarperavci/CloudflareBypassForScraping)
 反代并设置 `cf-bypass`。
 

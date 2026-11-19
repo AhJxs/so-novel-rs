@@ -1,11 +1,12 @@
-//! 书源配置管理: 活跃书源文件选择 + 禁用书源列表。配置文件 `~/.sonovel/sources_config.json`。
+//! 书源配置管理: 活跃书源文件选择 + 禁用书源列表。
+//!
+//! blob 由 [`crate::db::StateStore`] 存在 `~/.sonovel/state`，这里只管字节。
 
 use std::collections::HashSet;
-use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-/// 书源选择状态，持久化为 `~/.sonovel/sources_config.json`。
+/// 书源选择状态，序列化后由 `StateStore` 存在 `~/.sonovel/state`。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SourcesConfig {
     /// 当前选中的书源 JSON 文件名（相对于 `~/.sonovel/rules/`）。
@@ -25,35 +26,22 @@ impl Default for SourcesConfig {
 }
 
 impl SourcesConfig {
-    /// 从 JSON 文件加载。文件不存在时返回默认值。
-    pub fn load(path: &Path) -> Self {
-        if !path.exists() {
-            return Self::default();
-        }
-        match std::fs::read_to_string(path) {
-            Ok(content) => serde_json::from_str(&content).unwrap_or_else(|e| {
-                tracing::warn!("sources_config.json 解析失败，使用默认值: {e}");
-                Self::default()
-            }),
-            Err(e) => {
-                tracing::warn!("sources_config.json 读取失败，使用默认值: {e}");
-                Self::default()
-            }
-        }
+    /// 从 JSON 字节解析；损坏时记日志并回落默认值（书源选择不值得为它挡住启动）。
+    #[must_use]
+    pub fn from_json(bytes: &[u8]) -> Self {
+        serde_json::from_slice(bytes).unwrap_or_else(|e| {
+            tracing::warn!("书源选择数据解析失败，使用默认值: {e}");
+            Self::default()
+        })
     }
 
-    /// 保存到 JSON 文件（原子写入）。
+    /// 序列化成待写入的 JSON 字节。
     ///
     /// # Errors
     ///
-    /// JSON 序列化或写盘失败时返回错误。
-    pub fn save(&self, path: &Path) -> anyhow::Result<()> {
-        let content = serde_json::to_string_pretty(self)?;
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).ok();
-        }
-        super::write_atomically(path, content.as_bytes())?;
-        Ok(())
+    /// JSON 序列化失败时返回错误。
+    pub fn to_json(&self) -> anyhow::Result<Vec<u8>> {
+        Ok(serde_json::to_vec_pretty(self)?)
     }
 
     /// 切换书源禁用状态。返回切换后的"是否禁用"。
@@ -105,10 +93,7 @@ mod tests {
     }
 
     #[test]
-    fn save_and_load_round_trip() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("sources_config.json");
-
+    fn json_round_trip() {
         let mut cfg = SourcesConfig {
             active_file: "cloudflare.json".to_string(),
             ..Default::default()
@@ -116,9 +101,8 @@ mod tests {
         cfg.disabled_urls.insert("https://a.com".to_string());
         cfg.disabled_urls.insert("https://b.com".to_string());
 
-        cfg.save(&path).unwrap();
-        let loaded = SourcesConfig::load(&path);
-
+        let bytes = cfg.to_json().unwrap();
+        let loaded = SourcesConfig::from_json(&bytes);
         assert_eq!(loaded.active_file, "cloudflare.json");
         assert_eq!(loaded.disabled_urls.len(), 2);
         assert!(loaded.disabled_urls.contains("https://a.com"));
@@ -126,8 +110,8 @@ mod tests {
     }
 
     #[test]
-    fn load_missing_file_returns_default() {
-        let cfg = SourcesConfig::load(Path::new("/definitely/does/not/exist.json"));
+    fn malformed_json_falls_back_to_default() {
+        let cfg = SourcesConfig::from_json(b"{ not json");
         assert_eq!(cfg.active_file, "main.json");
         assert!(cfg.disabled_urls.is_empty());
     }

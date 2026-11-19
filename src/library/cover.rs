@@ -37,11 +37,15 @@ pub fn cover_file_name(id: &str, bytes: &[u8]) -> Option<String> {
 pub fn write_cover(dir: &Path, id: &str, bytes: &[u8]) -> Option<String> {
     let file = cover_file_name(id, bytes)?;
     std::fs::create_dir_all(dir).ok()?;
+    // 封面目录是 `<下载目录>/.sonovel/covers`：隐藏的是共用的缓存根。
+    if let Some(root) = dir.parent() {
+        super::paths::hide_dir(root);
+    }
     std::fs::write(dir.join(&file), bytes).ok()?;
     Some(file)
 }
 
-/// 删除一个封面缓存文件；文件名来自 `library.json`，先做单段校验防目录穿越。
+/// 删除一个封面缓存文件；文件名来自持久化的书架数据，先做单段校验防目录穿越。
 pub fn remove_cover_file(dir: &Path, file: Option<&str>) {
     let Some(file) = file else { return };
     let Some(path) = safe_cover_path(dir, file) else {
@@ -53,7 +57,7 @@ pub fn remove_cover_file(dir: &Path, file: Option<&str>) {
 
 /// 封面缓存文件名必须恰好是一个普通路径段。
 ///
-/// `library.json` 可能被手改，绝不能拿里面的字符串直接拼路径：
+/// 书架数据可能被手改，绝不能拿里面的字符串直接拼路径：
 /// `a/b`、`..`、`C:\x`、UNC 前缀全在这里挡掉。
 fn safe_cover_path(dir: &Path, file: &str) -> Option<PathBuf> {
     let mut components = Path::new(file).components();

@@ -1,4 +1,4 @@
-//! 应用关心的几条文件路径（`config.toml` / themes / rules / `sources_config` / tasks）。
+//! 应用关心的几条文件路径（`config.toml` / themes / rules / 运行数据目录）。
 
 use std::path::PathBuf;
 
@@ -12,14 +12,9 @@ pub struct ConfigPaths {
     pub themes_dir: PathBuf,
     /// 书源规则目录 `~/.sonovel/rules/`：存放书源 JSON 文件。
     pub rules_dir: PathBuf,
-    /// 书源配置文件 `~/.sonovel/sources_config.json`：管理活跃书源文件和禁用列表。
-    pub sources_config: PathBuf,
-    /// 下载任务文件 `~/.sonovel/tasks.json`：替代 `SQLite` 管理下载任务。
-    pub tasks_file: PathBuf,
-    /// 书架数据 `~/.sonovel/library.json`。
-    pub library_file: PathBuf,
-    /// 封面缓存目录 `~/.sonovel/covers/`。
-    pub covers_dir: PathBuf,
+    /// 运行数据目录 `~/.sonovel/state/`：书架 / 下载任务 / 书源选择三份数据由
+    /// [`crate::db::StateStore`] 统一存这里（SurrealKV），不再拆成独立 JSON。
+    pub state_dir: PathBuf,
 }
 
 impl ConfigPaths {
@@ -32,10 +27,7 @@ impl ConfigPaths {
             config_file: base.join("config.toml"),
             themes_dir: base.join("themes"),
             rules_dir: base.join("rules"),
-            sources_config: base.join("sources_config.json"),
-            tasks_file: base.join("tasks.json"),
-            library_file: base.join("library.json"),
-            covers_dir: base.join("covers"),
+            state_dir: base.join("state"),
         }
     }
 }

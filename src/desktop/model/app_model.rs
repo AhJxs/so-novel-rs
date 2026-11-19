@@ -11,7 +11,10 @@ use super::{
 use crate::config::{AppConfig, ConfigPaths};
 use crate::core::DownloadTask;
 use crate::core::bootstrap::load_context;
-use crate::db::{LoadedTasks, SourcesConfig, load_tasks_from_file};
+use crate::db::{
+    KEY_SOURCES, KEY_TASKS, LoadedTasks, SourcesConfig, StateOpenError, StateStore,
+    load_tasks_from_bytes,
+};
 use crate::http::{HttpClients, SystemProxy, detect_system_proxy};
 use crate::library::LibraryStore;
 use crate::models::Rule;
@@ -31,6 +34,8 @@ pub struct AppModel {
 
     /// 书源配置：活跃文件选择 + 禁用列表。
     pub sources_config: SourcesConfig,
+    /// 运行数据存储（书架 / 下载任务 / 书源选择）。
+    pub state: StateStore,
     /// 后台抓取共用的 Tokio 运行时。
     pub runtime: &'static Runtime,
 
@@ -81,14 +86,61 @@ impl AppModel {
 
     /// 构造 `AppModel` + 配套的 `WakeupReceiver`。
     ///
+    /// 运行数据存在 `~/.sonovel/state`（SurrealKV）。库在启动时独占打开并保持到退出：
+    /// 第二个实例打不开目录锁，这里返回「应用已在运行」的致命错误。
+    ///
     /// # Errors
     ///
-    /// tokio runtime 构造失败（资源耗尽）或历史任务文件加载失败时返回错误。
+    /// tokio runtime 构造失败（资源耗尽）、或另一个实例已占用运行数据目录时返回错误。
     pub fn new_with_wakeup() -> Result<(Self, WakeupReceiver)> {
-        // 启动期公共资源 (paths / config / sources_config / rules / http) 统一走
-        // `core::bootstrap::load_context`; 它加载失败时只 `tracing::warn!` + 兜底默认,
-        // 所以 `config_load_error` / `rule_load_error` 保持 `None`。
-        let ctx = load_context();
+        let paths = ConfigPaths::discover();
+        let runtime = build_shared_runtime()?;
+
+        // 1. 打开运行数据。锁冲突 = 已经有窗口在跑，启动直接失败（单实例）。
+        let (state, snapshot) =
+            StateStore::open(paths.state_dir.clone(), runtime).map_err(|error| match error {
+                StateOpenError::Locked => {
+                    anyhow::anyhow!(rust_i18n::t!("Library.error.already_running").to_string())
+                }
+                StateOpenError::Other(error) => error,
+            })?;
+
+        // 2. 书源选择要先于规则加载：规则目录按活跃书源文件解析。
+        let sources_config = snapshot
+            .sources
+            .as_deref()
+            .map_or_else(SourcesConfig::default, SourcesConfig::from_json);
+        if snapshot.sources.is_none() {
+            // 首次运行：把默认选择写进存储（顺带写入 schema 版本）。
+            match sources_config.to_json() {
+                Ok(bytes) => {
+                    if let Err(error) = state.put(KEY_SOURCES, &bytes) {
+                        tracing::warn!("写入默认书源选择失败: {error:#}");
+                    }
+                }
+                Err(error) => tracing::warn!("序列化默认书源选择失败: {error:#}"),
+            }
+        }
+
+        // 3. 下载任务：未完成的标成「应用重启中断」，需要时立刻回写。
+        let (LoadedTasks { tasks, max_id }, tasks_rewrite) =
+            load_tasks_from_bytes(snapshot.tasks.as_deref());
+        tracing::info!("从运行数据加载 {} 个历史下载任务", tasks.len());
+        if let Some(rewrite) = tasks_rewrite
+            && let Err(error) = state.put(KEY_TASKS, &rewrite)
+        {
+            tracing::warn!("回写中断任务失败: {error:#}");
+        }
+        let next_task_id = max_id + 1;
+
+        // 4. 书架。损坏的 blob 备份到 state 目录，再以空库启动。
+        let (library_store, library_warning) = match snapshot.library.as_deref() {
+            Some(bytes) => LibraryStore::from_json(bytes, &paths.state_dir),
+            None => (LibraryStore::default(), None),
+        };
+
+        // 5. 公共资源 (config / rules / http)。失败只 warn + 默认，不挡住启动。
+        let ctx = load_context(paths, sources_config);
         let paths = ctx.paths;
         let config = ctx.config;
         let sources_config = ctx.sources_config;
@@ -99,14 +151,6 @@ impl AppModel {
         // `resolve_proxy_url` 把系统代理算进去了，这里只是给 UI 留一份可读结果。
         let system_proxy = detect_system_proxy();
 
-        let runtime = build_shared_runtime()?;
-
-        let LoadedTasks { tasks, max_id } = load_tasks_from_file(&paths.tasks_file)?;
-        tracing::info!("从文件加载 {} 个历史下载任务", tasks.len());
-        let next_task_id = max_id + 1;
-
-        let (library_store, library_warning) = LibraryStore::load(&paths.library_file);
-
         let (wakeup, rx) = events::new_wakeup();
 
         let mut model = Self {
@@ -116,6 +160,7 @@ impl AppModel {
             rule_load_error: None,
             config_load_error: None,
             sources_config,
+            state,
             runtime,
             http,
             system_proxy,
@@ -129,6 +174,12 @@ impl AppModel {
             list_cache: ListCache::new(),
             wakeup,
         };
+        if let Some(error) = snapshot.error.clone() {
+            // 库打不开 / 读不出：这次运行不保存，提示用户去删 state 目录。
+            model.push_error(error);
+        } else if snapshot.read_only {
+            model.push_error(rust_i18n::t!("Library.error.state_read_only").to_string());
+        }
         if let Some(warning) = library_warning {
             model.push_error(warning);
         }

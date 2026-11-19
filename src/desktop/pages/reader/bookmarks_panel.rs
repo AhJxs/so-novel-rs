@@ -250,12 +250,10 @@ impl ReaderPage {
                                     .compact()
                                     .icon(IconName::Close)
                                     .tooltip(t!("Reader.action.close").to_string())
-                                    .on_click(cx.listener(
-                                        |this, _event, window, cx| {
-                                            this.set_bookmarks_open(false, window, cx);
-                                            cx.notify();
-                                        },
-                                    )),
+                                    .on_click(cx.listener(|this, _event, window, cx| {
+                                        this.set_bookmarks_open(false, window, cx);
+                                        cx.notify();
+                                    })),
                             ),
                     ),
             )

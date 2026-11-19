@@ -43,6 +43,10 @@ toml_edit = { version = "0.25", features = ["serde"] }
 # Filesystem helpers
 directories = "6"
 
+# 嵌入式 KV（运行数据：书架 / 下载任务 / 书源选择）。关掉默认 `encryption`：
+# 本地明文存储不需要 aes-gcm/hkdf/sha2 那套依赖。
+surrealkv = { version = "1.4.0", default-features = false }
+
 # HTTP client（rustls 免 OpenSSL；cookies 供规则注入 Cookie 头；gzip/brotli 透明解压）。
 reqwest = { version = "0.13.5", default-features = false, features = [
     "rustls",

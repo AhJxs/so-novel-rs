@@ -18,10 +18,9 @@ use rust_i18n::t;
 use super::reader_page::ReaderPage;
 use super::theme::{ReaderColors, reader_colors};
 use crate::config::ReaderConfig;
-use crate::reader::HITS_TOTAL;
 use crate::reader::layout::count_f32;
 use crate::reader::search::search_chapter;
-use crate::reader::{ReaderLayout, SearchGroup, SearchHit};
+use crate::reader::{HITS_TOTAL, ReaderLayout, SearchGroup, SearchHit};
 
 /// 搜索抽屉宽度（px）。正文列宽要减掉它，与 `toc::TOC_WIDTH` 同理。
 pub(super) const SEARCH_WIDTH: f32 = 320.0;

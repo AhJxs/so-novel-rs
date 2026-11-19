@@ -31,7 +31,7 @@ pub struct Book {
     pub author: String,
     #[serde(default)]
     pub intro: Option<String>,
-    /// 封面缓存文件名（相对 `covers_dir`，形如 `<id>-<内容哈希>.<ext>`）；None = 生成封面。
+    /// 封面缓存文件名（相对 `<下载目录>/.sonovel/covers`，形如 `<id>-<内容哈希>.<ext>`）；None = 生成封面。
     #[serde(default)]
     pub cover_file: Option<String>,
     #[serde(default)]

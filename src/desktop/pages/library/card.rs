@@ -43,16 +43,18 @@ pub(super) struct CardData {
 }
 
 impl CardData {
-    /// 由 `Book` 与封面缓存目录构造；缓存文件已不在磁盘上时退回生成封面。
-    pub(super) fn from_book(book: &Book, covers_dir: &Path) -> Self {
-        let cover_path = book.cover_file.as_deref().and_then(|file| {
-            // `library.json` 可能被手工改过：带路径分隔符的名字一律不读（防目录穿越）。
-            if file.contains('/') || file.contains('\\') {
-                return None;
-            }
-            let path = covers_dir.join(file);
-            path.is_file().then_some(path)
-        });
+    /// 由 `Book` 与封面缓存目录构造；没有下载目录或缓存文件已不在磁盘上时退回生成封面。
+    pub(super) fn from_book(book: &Book, covers_dir: Option<&Path>) -> Self {
+        let cover_path = covers_dir
+            .zip(book.cover_file.as_deref())
+            .and_then(|(dir, file)| {
+                // 持久化数据可能被手工改过：带路径分隔符的名字一律不读（防目录穿越）。
+                if file.contains('/') || file.contains('\\') {
+                    return None;
+                }
+                let path = dir.join(file);
+                path.is_file().then_some(path)
+            });
         let (_, top, bottom) = cover_palette(&book.id);
         Self {
             id: book.id.clone(),

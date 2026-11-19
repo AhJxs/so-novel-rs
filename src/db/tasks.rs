@@ -1,8 +1,6 @@
-//! 下载任务的 JSON 文件存储。
+//! 下载任务的 JSON 序列化 / 反序列化。
 //!
-//! 数据存放在 `~/.sonovel/tasks.json`。
-
-use std::path::Path;
+//! blob 本身由 [`crate::db::StateStore`] 存在 `~/.sonovel/state`，这里只管字节。
 
 use crate::core::DownloadTask;
 use crate::models::DownloadTaskRecord;
@@ -10,43 +8,18 @@ use crate::models::DownloadTaskRecord;
 /// 已完成任务的最大保留数量, 超出后按完成时间从旧到新删除; 运行中的任务不受限制。
 const MAX_COMPLETED_TASKS: usize = 1000;
 
-/// 从 JSON 文件读取历史任务；文件缺失或损坏时返回空列表。
-pub fn load(path: &Path) -> Vec<DownloadTaskRecord> {
-    if !path.exists() {
-        return Vec::new();
-    }
-    match std::fs::read_to_string(path) {
-        Ok(content) => serde_json::from_str(&content).unwrap_or_else(|e| {
-            tracing::warn!("tasks.json 解析失败: {e}");
-            Vec::new()
-        }),
-        Err(e) => {
-            tracing::warn!("tasks.json 读取失败: {e}");
-            Vec::new()
-        }
-    }
+/// 从 JSON 字节解析历史任务；损坏时返回空列表。
+#[must_use]
+pub fn parse(bytes: &[u8]) -> Vec<DownloadTaskRecord> {
+    serde_json::from_slice(bytes).unwrap_or_else(|e| {
+        tracing::warn!("下载任务数据解析失败: {e}");
+        Vec::new()
+    })
 }
 
-/// 保存所有任务到 JSON 文件（原子写入）。接收运行期 [`DownloadTask`] 切片 → 内部转
-/// [`DownloadTaskRecord`] → 写盘; 调用方不再手动 `.map(to_record)`。
+/// 把任务切片序列化成待写入的 JSON 文本，并顺带清理超额的已完成任务。
 ///
-/// # Errors
-///
-/// JSON 序列化或写盘失败时返回错误。
-pub fn save(path: &Path, tasks: &[DownloadTask]) -> anyhow::Result<()> {
-    let records: Vec<DownloadTaskRecord> = tasks.iter().map(DownloadTask::to_record).collect();
-    save_records(path, &records)
-}
-
-fn save_records(path: &Path, records: &[DownloadTaskRecord]) -> anyhow::Result<()> {
-    let content = serde_json::to_string_pretty(records)?;
-    write_json(path, &content)
-}
-
-/// 把任务切片序列化成待写盘的 JSON 文本，并顺带清理超额的已完成任务。
-///
-/// 拆出这一步是为了让 UI 线程只做序列化（`DownloadTask` 含通道，克隆整表代价大），
-/// 真正的写盘交给 `spawn_blocking`。
+/// 拆出这一步是为了让 UI 线程只做序列化（`DownloadTask` 含通道，克隆整表代价大）。
 ///
 /// # Errors
 ///
@@ -58,19 +31,6 @@ pub fn tasks_json_with_trim(tasks: &[DownloadTask]) -> serde_json::Result<String
         tracing::info!("自动清理了 {trimmed} 条旧的已完成任务");
     }
     serde_json::to_string_pretty(&records)
-}
-
-/// 把已序列化的 JSON 文本原子写入 `path`（父目录缺失时补建）。
-///
-/// # Errors
-///
-/// 写文件失败；父目录创建失败只记日志、不中断写入。
-pub fn write_json(path: &Path, json: &str) -> anyhow::Result<()> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).ok();
-    }
-    super::write_atomically(path, json.as_bytes())?;
-    Ok(())
 }
 
 /// 清理超额的已完成任务，保留最近的 `MAX_COMPLETED_TASKS` 条，返回被删除的条数。运行中的任务
@@ -100,24 +60,6 @@ pub fn trim_completed(tasks: &mut Vec<DownloadTaskRecord>) -> usize {
     let before = tasks.len();
     tasks.retain(|t| !remove_ids.contains(&t.id));
     before - tasks.len()
-}
-
-/// 保存任务并自动清理超额的已完成任务（保存前调 `trim_completed`，确保文件大小有界）。
-///
-/// # Examples
-///
-/// ```ignore
-/// let tasks = state.tasks.lock().expect("tasks lock not poisoned");
-/// save_with_trim(&PathBuf::from(".tasks.json"), &tasks)?;
-/// ```
-///
-/// # Errors
-///
-/// - `std::io::Error` — 序列化或写文件失败
-#[tracing::instrument(name = "db::tasks::save_with_trim", skip_all, fields(path = %path.display(), count = tasks.len()))]
-pub fn save_with_trim(path: &Path, tasks: &[DownloadTask]) -> anyhow::Result<()> {
-    let json = tasks_json_with_trim(tasks)?;
-    write_json(path, &json)
 }
 
 #[cfg(test)]
@@ -193,10 +135,7 @@ mod tests {
     }
 
     #[test]
-    fn save_and_load_round_trip() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("tasks.json");
-
+    fn json_round_trip() {
         let tasks: Vec<DownloadTask> = vec![
             sample_rec(1, Some(Ok(std::path::PathBuf::from("/tmp/a.epub")))),
             sample_rec(2, None),
@@ -204,18 +143,17 @@ mod tests {
         .into_iter()
         .map(DownloadTask::from_record)
         .collect();
-        save(&path, &tasks).unwrap();
+        let json = tasks_json_with_trim(&tasks).unwrap();
 
-        let loaded = load(&path);
+        let loaded = parse(json.as_bytes());
         assert_eq!(loaded.len(), 2);
         assert_eq!(loaded[0].id, 1);
         assert_eq!(loaded[1].id, 2);
     }
 
     #[test]
-    fn load_missing_file_returns_empty() {
-        let tasks = load(Path::new("/definitely/does/not/exist.json"));
-        assert!(tasks.is_empty(), "缺失文件应返回空列表");
+    fn malformed_json_returns_empty() {
+        assert!(parse(b"{ not json").is_empty());
     }
 
     #[test]
@@ -278,31 +216,9 @@ mod tests {
         assert_eq!(tasks.len(), 50);
     }
 
+    /// 混合状态 (running + finished) 下序列化无损：finished payload + completed 字段都要在。
     #[test]
-    fn save_with_trim_creates_file() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("tasks.json");
-
-        let tasks: Vec<DownloadTask> = vec![
-            sample_rec(1, Some(Ok(std::path::PathBuf::from("/tmp/a.epub")))),
-            sample_rec(2, None),
-        ]
-        .into_iter()
-        .map(DownloadTask::from_record)
-        .collect();
-        save_with_trim(&path, &tasks).unwrap();
-
-        let loaded = load(&path);
-        assert_eq!(loaded.len(), 2);
-    }
-
-    /// 验证 [`save_with_trim`] 统一入口在混合状态 (running + finished) 下无损: 既有
-    /// roundtrip 测试只校验 `id` / `len`, 这里补 finished payload + completed 字段的端到端检查。
-    #[test]
-    fn save_with_trim_roundtrips_running_and_finished() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("tasks.json");
-
+    fn json_roundtrips_running_and_finished() {
         let running = sample_rec(1, None);
         let finished = sample_rec(2, Some(Ok(std::path::PathBuf::from("/tmp/done.epub"))));
         let tasks: Vec<DownloadTask> = [running, finished]
@@ -310,9 +226,8 @@ mod tests {
             .map(DownloadTask::from_record)
             .collect();
 
-        save_with_trim(&path, &tasks).unwrap();
-
-        let loaded = load(&path);
+        let json = tasks_json_with_trim(&tasks).unwrap();
+        let loaded = parse(json.as_bytes());
         assert_eq!(loaded.len(), 2);
         // save 不重排 —— id 顺序与输入一致
         assert_eq!(loaded[0].id, 1);

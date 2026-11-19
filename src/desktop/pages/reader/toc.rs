@@ -55,58 +55,54 @@ impl ReaderPage {
         let hover_bg = cx.theme().list_hover;
         let muted = cx.theme().muted_foreground;
 
-        let list = uniform_list(
-            "reader-toc-list",
-            filtered,
-            move |range, _window, _cx| {
-                range
-                    .map(|slot| {
-                        let index = indices[slot];
-                        let title = titles[index].clone();
-                        let handle = handle.clone();
-                        let is_current = index == current;
-                        let row = div()
-                            .id(("reader-toc-item", index))
-                            .w_full()
-                            .h(px(TOC_ROW_HEIGHT))
-                            .flex()
-                            .flex_row()
-                            .items_center()
-                            .gap_2()
-                            .px_3()
-                            .border_l_1()
-                            .cursor_pointer()
-                            .text_sm()
-                            .when(is_current, |this| {
-                                this.border_color(marker)
-                                    .bg(active_bg)
-                                    .font_weight(FontWeight::SEMIBOLD)
-                            })
-                            .when(!is_current, |this| this.border_color(active_bg))
-                            .hover(move |style| style.bg(hover_bg))
-                            // 章号右对齐排在标题左边，目录才有「第几章」的参照。
-                            .child(
-                                div()
-                                    .w(px(40.0))
-                                    .flex_none()
-                                    .text_xs()
-                                    .text_color(muted)
-                                    .child(SharedString::from((index + 1).to_string())),
-                            )
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .min_w_0()
-                                    .truncate()
-                                    .child(SharedString::from(title)),
-                            );
-                        row.on_click(move |_event, _window, cx| {
-                            let _ = handle.update(cx, |page, cx| page.goto_chapter(index, cx));
+        let list = uniform_list("reader-toc-list", filtered, move |range, _window, _cx| {
+            range
+                .map(|slot| {
+                    let index = indices[slot];
+                    let title = titles[index].clone();
+                    let handle = handle.clone();
+                    let is_current = index == current;
+                    let row = div()
+                        .id(("reader-toc-item", index))
+                        .w_full()
+                        .h(px(TOC_ROW_HEIGHT))
+                        .flex()
+                        .flex_row()
+                        .items_center()
+                        .gap_2()
+                        .px_3()
+                        .border_l_1()
+                        .cursor_pointer()
+                        .text_sm()
+                        .when(is_current, |this| {
+                            this.border_color(marker)
+                                .bg(active_bg)
+                                .font_weight(FontWeight::SEMIBOLD)
                         })
+                        .when(!is_current, |this| this.border_color(active_bg))
+                        .hover(move |style| style.bg(hover_bg))
+                        // 章号右对齐排在标题左边，目录才有「第几章」的参照。
+                        .child(
+                            div()
+                                .w(px(40.0))
+                                .flex_none()
+                                .text_xs()
+                                .text_color(muted)
+                                .child(SharedString::from((index + 1).to_string())),
+                        )
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .truncate()
+                                .child(SharedString::from(title)),
+                        );
+                    row.on_click(move |_event, _window, cx| {
+                        let _ = handle.update(cx, |page, cx| page.goto_chapter(index, cx));
                     })
-                    .collect::<Vec<_>>()
-            },
-        )
+                })
+                .collect::<Vec<_>>()
+        })
         // `ListSizingBehavior::Auto` 在 flex 容器里量不到高度，列表会整块空白；
         // 必须给它一个确定的高度，铺满标题栏以下的空间。
         .h_full()
@@ -174,16 +170,13 @@ impl ReaderPage {
                                     .items_center()
                                     .gap_1()
                                     .child(
-                                        div()
-                                            .text_xs()
-                                            .text_color(muted)
-                                            .child(
-                                                t!(
-                                                    "Reader.toc.chapter_count",
-                                                    count = &total.to_string()
-                                                )
-                                                .to_string(),
-                                            ),
+                                        div().text_xs().text_color(muted).child(
+                                            t!(
+                                                "Reader.toc.chapter_count",
+                                                count = &total.to_string()
+                                            )
+                                            .to_string(),
+                                        ),
                                     )
                                     .child(
                                         Button::new("reader-toc-close")
@@ -191,11 +184,9 @@ impl ReaderPage {
                                             .compact()
                                             .icon(IconName::Close)
                                             .tooltip(t!("Reader.action.close").to_string())
-                                            .on_click(cx.listener(
-                                                |this, _event, window, cx| {
-                                                    this.close_toc(window, cx);
-                                                },
-                                            )),
+                                            .on_click(cx.listener(|this, _event, window, cx| {
+                                                this.close_toc(window, cx);
+                                            })),
                                     ),
                             ),
                     )

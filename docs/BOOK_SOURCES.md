@@ -133,26 +133,11 @@ GUI 顶栏 → **书源** 标签 → 右上角下拉菜单切换活跃文件。�
 > 实现：[`src/desktop/model/ops/sources.rs::switch_active_file`](../src/desktop/model/ops/sources.rs)
 > 改 `SourcesConfig.active_file` 后调 `core::sources::load_active` 重新加载。
 
-### 方式 2：手动改 `~/.sonovel/sources_config.json`
+### 方式 2：重置书源选择
 
-```json
-{
-  "active_file": "main.json",
-  "disabled_urls": []
-}
-```
-
-把 `active_file` 改成目标文件名（必须是 `~/.sonovel/rules/` 下已存在的 JSON），
-保存后**重启 `so-novel-rs`** 生效。
-
-```sh
-# 例：临时切到 proxy-required.json（要确保 config.toml 已配 cf-bypass）
-sed -i 's/"active_file": "main.json"/"active_file": "proxy-required.json"/' \
-  ~/.sonovel/sources_config.json
-```
-
-> 这个文件由 GUI 原子写入
-> （用 [`src/db/sources_config.rs`](../src/db/sources_config.rs)）。
+书源选择（活跃文件 + 禁用列表）现在存在 `~/.sonovel/state`（嵌入式
+`SurrealKV`），**不再有可手改的 JSON**。需要回到默认状态时：退出应用，删除
+`~/.sonovel/state`，重新启动即可（书架/任务会随新状态重建）。
 
 ### 方式 3：复制新书源文件到 `~/.sonovel/rules/`
 

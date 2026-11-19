@@ -4,27 +4,24 @@
 //! 反序列化。文件按书籍 id（路径哈希，稳定）命名，命中条件见 [`load`]：大小 / 修改时间 /
 //! 格式 / 编码请求 / 缓存版本全部对得上才用。目录随小说目录一起删，删书时调 [`remove`]。
 
-use std::fs;
-use std::io;
 use std::path::{Path, PathBuf};
+use std::{fs, io};
 
 use serde::{Deserialize, Serialize};
 
 use super::ReaderBook;
-use crate::library::{BookFormat, absolute_dir, mtime_secs};
-
-/// 缓存目录名：放在下载目录下，Windows 上额外设隐藏属性。
-pub const CACHE_DIR_NAME: &str = ".sonovel";
-/// 缓存子目录：每本书一个 JSON。
-const BOOKS_DIR: &str = "books";
+/// 缓存根目录名（`<下载目录>/.sonovel`），与封面缓存共用。
+pub use crate::library::CACHE_DIR_NAME;
+use crate::library::{BOOKS_DIR_NAME, BookFormat, mtime_secs};
 /// 缓存格式版本；解析行为或字段变了就 +1，旧缓存自动失效。
 pub const CACHE_VERSION: u32 = 1;
 
 /// `<下载目录>/.sonovel`；下载目录为空时返回 `None`（不缓存）。
+///
+/// 路径规则与封面缓存共用 [`crate::library::cache_root`]，两处不能各算一套。
 #[must_use]
 pub fn dir_for_download(download_path: &str) -> Option<PathBuf> {
-    let trimmed = download_path.trim();
-    (!trimmed.is_empty()).then(|| absolute_dir(Path::new(trimmed)).join(CACHE_DIR_NAME))
+    crate::library::cache_root(download_path)
 }
 
 /// 缓存文件：解析结果 + 原文件的校验信息。
@@ -35,7 +32,7 @@ struct CacheFile {
     size_bytes: u64,
     mtime: i64,
     /// 生成缓存时**请求**的编码（`None` = 自动探测）。它与 `book.encoding`（实际结果）
-    /// 分开存：首次自动探测成功后 `library.json` 会记下结果，下次带着标签来打开，
+    /// 分开存：首次自动探测成功后书架数据会记下结果，下次带着标签来打开，
     /// 只看结果字段会永远判 miss。
     requested_encoding: Option<String>,
     book: ReaderBook,
@@ -125,11 +122,11 @@ fn encoding_matches(requested: Option<&str>, cached: &CacheFile) -> bool {
 }
 
 fn book_path(dir: &Path, book_id: &str) -> PathBuf {
-    dir.join(BOOKS_DIR)
+    dir.join(BOOKS_DIR_NAME)
         .join(format!("{}.json", safe_file_stem(book_id)))
 }
 
-/// 缓存文件名只允许 ASCII 字母、数字、`-`、`_`；`library.json` 可能被手工改过，
+/// 缓存文件名只允许 ASCII 字母、数字、`-`、`_`；书架数据可能被手工改过，
 /// 带路径分隔符的 id 不能拼进路径（防目录穿越）。
 fn safe_file_stem(book_id: &str) -> String {
     book_id
@@ -149,34 +146,13 @@ fn write_json(dir: &Path, book_id: &str, payload: &CacheRef<'_>) -> io::Result<(
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    hide_dir(dir);
+    crate::library::hide_dir(dir);
     let json = serde_json::to_vec(payload).map_err(io::Error::other)?;
     // 先写临时文件再改名：写到一半崩掉也不会留下半截 JSON 被下次当成有效缓存。
     let tmp = path.with_extension("json.tmp");
     fs::write(&tmp, json)?;
     fs::rename(&tmp, &path)
 }
-
-/// 给缓存目录设隐藏属性（Windows）。仓库禁 `unsafe`，所以调系统自带的 `attrib`，
-/// 每次进程运行最多设一次；点开头的名字在其它平台已经足够。
-#[cfg(target_os = "windows")]
-fn hide_dir(dir: &Path) {
-    use std::process::Command;
-    use std::sync::atomic::{AtomicBool, Ordering};
-
-    static HIDDEN: AtomicBool = AtomicBool::new(false);
-    if HIDDEN.load(Ordering::Relaxed) {
-        return;
-    }
-    // `attrib` 只接受已存在的路径；`write_json` 调用前已经 `create_dir_all` 过。
-    let status = Command::new("attrib").arg("+h").arg(dir).status();
-    if matches!(status, Ok(status) if status.success()) {
-        HIDDEN.store(true, Ordering::Relaxed);
-    }
-}
-
-#[cfg(not(target_os = "windows"))]
-fn hide_dir(_dir: &Path) {}
 
 #[cfg(test)]
 mod tests {

@@ -445,7 +445,7 @@ pub enum ReadingMode {
 }
 
 impl ReadingMode {
-    /// 存进 TOML / `library.json` 的取值。
+    /// 存进 TOML / 书架数据的取值。
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {

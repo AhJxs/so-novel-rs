@@ -27,16 +27,15 @@ pub struct AppContext {
 
 /// 启动期"凑齐所有公共资源"的统一入口。**不**返回 `Result`。
 ///
-/// 所有失败一律 `tracing::warn!` + 兜底默认：`load_config` → 默认配置；首次写 config /
-/// `init_rules_dir` / 首次写 `sources_config` → 仅 warn 不阻塞；`load_active_rules` → 空
-/// Vec；`HttpClients::new` → 默认 client。
+/// 路径与书源选择由调用方提供（它们要先从运行数据存储里读出来，规则才知道该加载哪个
+/// 书源文件）。所有失败一律 `tracing::warn!` + 兜底默认：`load_config` → 默认配置；
+/// 首次写 config / `init_rules_dir` → 仅 warn 不阻塞；`load_active_rules` → 空 Vec；
+/// `HttpClients::new` → 默认 client。
 ///
 /// # Panics
 ///
 /// 不会 panic：所有失败路径都 swallow 走兜底。
-pub fn load_context() -> AppContext {
-    let paths = ConfigPaths::discover();
-
+pub fn load_context(paths: ConfigPaths, sources_config: SourcesConfig) -> AppContext {
     // config.toml
     let (config, config_err) = match crate::config::load_config(&paths.config_file) {
         Ok(c) => (c, None),
@@ -59,13 +58,6 @@ pub fn load_context() -> AppContext {
     // 规则目录（首次启动时复制默认规则文件）
     if let Err(e) = init_rules_dir(&paths.rules_dir) {
         tracing::warn!("规则目录初始化失败: {e:#}");
-    }
-
-    let sources_config = SourcesConfig::load(&paths.sources_config);
-    if !paths.sources_config.exists()
-        && let Err(e) = sources_config.save(&paths.sources_config)
-    {
-        tracing::warn!("写入默认 sources_config.json 失败: {e:#}");
     }
 
     let rules = match load_active_rules(&paths.rules_dir, &sources_config) {

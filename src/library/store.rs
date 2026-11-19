@@ -1,4 +1,4 @@
-//! 书架持久化：`library.json` 的加载 / 保存 / 损坏兜底，以及扫描合并、导入、
+//! 书架数据层：JSON 序列化 / 损坏兜底，以及扫描合并、导入、
 //! 元数据回写、进度 / 书签 / 收藏 / 重新定位等业务变更。
 //!
 //! store 不启动线程、不持有 channel —— 扫描与元数据由 `desktop/model` 调度。
@@ -20,7 +20,7 @@ use crate::error::{AppError, AppResult};
 /// 当前书架文件版本。
 pub const LIBRARY_VERSION: u32 = 1;
 
-/// `library.json` 的根结构。
+/// 书架 blob 的根结构。
 #[derive(Debug, Serialize, Deserialize)]
 struct LibraryFile {
     #[serde(default)]
@@ -29,7 +29,7 @@ struct LibraryFile {
     books: Vec<Book>,
 }
 
-/// 后台工作线程把封面写入 `covers_dir` 之后的结果；drain 只做内存回写，不碰磁盘。
+/// 后台工作线程把封面写入封面缓存目录之后的结果；drain 只做内存回写，不碰磁盘。
 #[derive(Debug, Clone, Default)]
 pub struct AppliedMeta {
     pub title: Option<String>,
@@ -63,61 +63,32 @@ pub struct LibraryStore {
 }
 
 impl LibraryStore {
-    /// 读取书架文件。
+    /// 从 JSON 字节解析。返回值第二项是给用户看的提示（损坏备份 / 版本过高），
+    /// `None` 表示一切正常。
     ///
-    /// 返回值第二项是给用户看的提示（损坏备份 / 版本过高），`None` 表示一切正常。
-    /// 损坏时把原文件改名为 `library.json.corrupt-<unix>` 再以空库启动，
-    /// 保证用户数据不会被下一次保存直接抹掉。
-    #[tracing::instrument(name = "library::LibraryStore::load", skip_all, fields(path = %path.display()))]
-    pub fn load(path: &Path) -> (Self, Option<String>) {
-        let bytes = match std::fs::read(path) {
-            Ok(bytes) => bytes,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                return (Self::default(), None);
-            }
+    /// 损坏时把原始字节备份成 `library.json.corrupt-<unix>` 放在 `backup_dir` 下，
+    /// 再以空库启动；备份失败则空库 + 只读，避免下一次保存抹掉现场。
+    #[must_use]
+    pub fn from_json(bytes: &[u8], backup_dir: &Path) -> (Self, Option<String>) {
+        match serde_json::from_slice::<LibraryFile>(bytes) {
+            Ok(file) => Self::from_file(file),
             Err(error) => {
-                return (
-                    Self {
-                        readonly: true,
-                        ..Self::default()
-                    },
-                    Some(t!("Library.error.load_failed", detail = error.to_string()).to_string()),
-                );
-            }
-        };
-        match serde_json::from_slice::<LibraryFile>(&bytes) {
-            Ok(file) => {
-                let mut store = Self {
-                    books: file.books,
-                    dirty: false,
-                    future_version: file.version > LIBRARY_VERSION,
-                    readonly: false,
-                };
-                store.normalize_ids();
-                let warning = store.future_version.then(|| {
-                    t!(
-                        "Library.error.future_version",
-                        version = file.version,
-                        supported = LIBRARY_VERSION
-                    )
-                    .to_string()
-                });
-                (store, warning)
-            }
-            Err(error) => {
-                let backup = unique_backup_path(path);
-                let rename_error = std::fs::rename(path, &backup).err();
+                let backup = unique_backup_path(&backup_dir.join("library.json"));
+                let mut backup_error = std::fs::create_dir_all(backup_dir).err();
+                if backup_error.is_none() {
+                    backup_error = std::fs::write(&backup, bytes).err();
+                }
                 let mut message = t!(
                     "Library.error.corrupt_backup",
                     path = backup.display().to_string(),
                     detail = error.to_string()
                 )
                 .to_string();
-                let backup_failed = rename_error.is_some();
-                if let Some(rename_error) = rename_error {
+                let backup_failed = backup_error.is_some();
+                if let Some(backup_error) = backup_error {
                     message.push_str(&t!(
                         "Library.error.backup_failed",
-                        detail = rename_error.to_string()
+                        detail = backup_error.to_string()
                     ));
                 }
                 (
@@ -131,15 +102,32 @@ impl LibraryStore {
         }
     }
 
-    /// 把书架写回磁盘（原子写）。
+    /// 解析成功后的统一入口：版本闸门 + id 归一。
+    fn from_file(file: LibraryFile) -> (Self, Option<String>) {
+        let mut store = Self {
+            books: file.books,
+            dirty: false,
+            future_version: file.version > LIBRARY_VERSION,
+            readonly: false,
+        };
+        store.normalize_ids();
+        let warning = store.future_version.then(|| {
+            t!(
+                "Library.error.future_version",
+                version = file.version,
+                supported = LIBRARY_VERSION
+            )
+            .to_string()
+        });
+        (store, warning)
+    }
+
+    /// 序列化成待写入的 JSON 字节。
     ///
     /// # Errors
     ///
-    /// 版本过高拒写、序列化失败、目录创建或写盘失败时返回 [`AppError`]。
-    ///
-    /// 成功后**不清** `dirty`：由调用方在写盘确认后调 [`Self::clear_dirty`]。
-    #[tracing::instrument(name = "library::LibraryStore::save", skip_all, fields(path = %path.display()))]
-    pub fn save(&self, path: &Path) -> AppResult<()> {
+    /// 读取阶段失败（`readonly`）或版本过高时拒写；序列化失败返回内部错误。
+    pub fn to_json(&self) -> AppResult<Vec<u8>> {
         if self.readonly {
             return Err(AppError::business(
                 t!("Library.error.save_refused_after_load_failure").to_string(),
@@ -154,14 +142,7 @@ impl LibraryStore {
             version: LIBRARY_VERSION,
             books: self.books.clone(),
         };
-        let json = serde_json::to_vec_pretty(&file)
-            .map_err(|error| AppError::internal(error.to_string()))?;
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|error| AppError::io_msg(&error, t!("Library.error.create_dir_failed")))?;
-        }
-        crate::db::write_atomically(path, &json)
-            .map_err(|error| AppError::io_msg(&error, t!("Library.error.write_failed")))
+        serde_json::to_vec_pretty(&file).map_err(|error| AppError::internal(error.to_string()))
     }
 
     /// 全部书籍（含隐藏项，UI 自行过滤）。
@@ -495,7 +476,7 @@ impl LibraryStore {
 
     /// 重新定位到新文件：重算 ID / 路径键，保留进度与书签。返回新 ID。
     ///
-    /// 封面文件改名由桌面层负责（store 不持有 `covers_dir`）。
+    /// 封面文件改名由桌面层负责（store 不持有封面缓存目录）。
     ///
     /// # Errors
     ///
@@ -620,17 +601,8 @@ mod tests {
     }
 
     #[test]
-    fn missing_file_loads_empty_without_warning() {
-        let dir = tempfile::tempdir().unwrap();
-        let (store, warning) = LibraryStore::load(&dir.path().join("library.json"));
-        assert!(store.books().is_empty());
-        assert!(warning.is_none());
-    }
-
-    #[test]
     fn save_and_load_round_trip() {
         let dir = tempfile::tempdir().unwrap();
-        let file = dir.path().join("library.json");
         let mut store = LibraryStore::default();
         let mut book = sample_book(dir.path(), "书.txt");
         book.favorite = true;
@@ -638,8 +610,8 @@ mod tests {
         book.title = "改过的书名".to_string();
         store.books.push(book.clone());
 
-        store.save(&file).unwrap();
-        let (loaded, warning) = LibraryStore::load(&file);
+        let bytes = store.to_json().unwrap();
+        let (loaded, warning) = LibraryStore::from_json(&bytes, dir.path());
         assert!(warning.is_none());
         assert_eq!(loaded.books().len(), 1);
         let restored = loaded.get(&book.id).unwrap();
@@ -650,32 +622,8 @@ mod tests {
     }
 
     #[test]
-    fn corrupt_file_is_backed_up_and_reported() {
-        let dir = tempfile::tempdir().unwrap();
-        let file = dir.path().join("library.json");
-        std::fs::write(&file, b"{ not json").unwrap();
-
-        let (store, warning) = LibraryStore::load(&file);
-        assert!(store.books().is_empty());
-        assert!(warning.is_some());
-        assert!(!file.exists(), "损坏文件应被改名备份");
-        let backups: Vec<_> = std::fs::read_dir(dir.path())
-            .unwrap()
-            .filter_map(Result::ok)
-            .filter(|entry| {
-                entry
-                    .file_name()
-                    .to_string_lossy()
-                    .starts_with("library.json.corrupt-")
-            })
-            .collect();
-        assert_eq!(backups.len(), 1);
-    }
-
-    #[test]
     fn duplicate_ids_are_reassigned() {
         let dir = tempfile::tempdir().unwrap();
-        let file = dir.path().join("library.json");
         let json = r#"{
             "version": 1,
             "books": [
@@ -684,9 +632,8 @@ mod tests {
                 {"id": "same", "path_key": "a", "title": "A2"}
             ]
         }"#;
-        std::fs::write(&file, json).unwrap();
 
-        let (store, _) = LibraryStore::load(&file);
+        let (store, _) = LibraryStore::from_json(json.as_bytes(), dir.path());
         let ids: Vec<_> = store.books().iter().map(|book| book.id.as_str()).collect();
         assert_eq!(ids.len(), 3);
         assert_ne!(ids[0], ids[1]);
@@ -712,41 +659,9 @@ mod tests {
     }
 
     #[test]
-    fn future_version_refuses_to_save() {
-        let dir = tempfile::tempdir().unwrap();
-        let file = dir.path().join("library.json");
-        std::fs::write(&file, r#"{"version": 99, "books": []}"#).unwrap();
-
-        let (store, warning) = LibraryStore::load(&file);
-        assert!(warning.is_some());
-        let before = std::fs::read_to_string(&file).unwrap();
-        assert!(store.save(&file).is_err());
-        // 拒写必须是真的没动磁盘：write_atomically 会先删目标再 rename。
-        assert_eq!(std::fs::read_to_string(&file).unwrap(), before);
-    }
-
-    #[test]
-    fn unreadable_file_is_not_overwritten() {
-        let dir = tempfile::tempdir().unwrap();
-        let file = dir.path().join("library.json");
-        // 同名目录：读它必然失败（走读错误分支）。
-        std::fs::create_dir(&file).unwrap();
-
-        let (store, warning) = LibraryStore::load(&file);
-        assert!(warning.is_some());
-        let error = store.save(&file).unwrap_err();
-        assert_eq!(
-            error.message(),
-            t!("Library.error.save_refused_after_load_failure").to_string(),
-            "读失败后必须走拒写分支，而不是写到一半才发现目标不可替换"
-        );
-        assert!(file.is_dir(), "读失败后那份文件必须原样留着");
-    }
-
-    #[test]
     fn dirty_flag_starts_clean_and_clears() {
         let dir = tempfile::tempdir().unwrap();
-        let (mut store, _) = LibraryStore::load(&dir.path().join("library.json"));
+        let mut store = LibraryStore::default();
         assert!(!store.is_dirty());
 
         let path = dir.path().join("a.txt");
@@ -1038,5 +953,54 @@ mod tests {
         store.clear_dirty();
         store.set_favorite(&id, true);
         assert!(!store.is_dirty(), "值没变不该标脏");
+    }
+
+    #[test]
+    fn json_round_trip_without_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = LibraryStore::default();
+        let book = sample_book(dir.path(), "书.txt");
+        store.books.push(book.clone());
+
+        let bytes = store.to_json().unwrap();
+        let (loaded, warning) = LibraryStore::from_json(&bytes, dir.path());
+        assert!(warning.is_none());
+        assert_eq!(loaded.get(&book.id).unwrap().title, book.title);
+    }
+
+    #[test]
+    fn future_version_json_refuses_to_serialize() {
+        let dir = tempfile::tempdir().unwrap();
+        let (store, warning) =
+            LibraryStore::from_json(br#"{"version": 99, "books": []}"#, dir.path());
+        assert!(warning.is_some());
+        assert!(store.to_json().is_err());
+    }
+
+    #[test]
+    fn corrupt_json_is_backed_up_into_state_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = dir.path().join("state");
+
+        let (store, warning) = LibraryStore::from_json(b"{ not json", &state);
+        assert!(store.books().is_empty());
+        assert!(warning.is_some());
+        assert!(!store.readonly, "备份成功就不该只读");
+        let backups: Vec<_> = std::fs::read_dir(&state)
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with("library.json.corrupt-")
+            })
+            .collect();
+        assert_eq!(backups.len(), 1);
+        assert_eq!(
+            std::fs::read(backups[0].path()).unwrap(),
+            b"{ not json",
+            "备份必须是原文"
+        );
     }
 }
