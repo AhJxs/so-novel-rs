@@ -477,7 +477,6 @@ impl FromStr for ReadingMode {
 #[serde(rename_all = "lowercase")]
 pub enum ReaderTheme {
     /// 纸质白。
-    #[default]
     Paper,
     /// 羊皮纸（暖黄）。
     Sepia,
@@ -485,7 +484,8 @@ pub enum ReaderTheme {
     Night,
     /// 护眼绿。
     Green,
-    /// 跟随应用主题。
+    /// 跟随应用主题（默认）。
+    #[default]
     App,
 }
 
@@ -502,15 +502,15 @@ impl ReaderTheme {
         }
     }
 
-    /// 解析配置值；无法识别时回落到 [`Self::Paper`]。
+    /// 解析配置值；无法识别时回落到默认的「跟随应用」。
     #[must_use]
     pub fn parse(s: &str) -> Self {
         match s.trim().to_ascii_lowercase().as_str() {
+            "paper" => Self::Paper,
             "sepia" => Self::Sepia,
             "night" => Self::Night,
             "green" => Self::Green,
-            "app" => Self::App,
-            _ => Self::Paper,
+            _ => Self::App,
         }
     }
 
@@ -564,7 +564,7 @@ impl Default for ReaderConfig {
             page_width: 720.0,
             paragraph_spacing: 12.0,
             indent: true,
-            theme: ReaderTheme::Paper,
+            theme: ReaderTheme::App,
             default_mode: ReadingMode::Scroll,
             font_family: String::new(),
         }

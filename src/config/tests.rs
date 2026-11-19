@@ -343,7 +343,7 @@ fn reader_defaults_when_section_missing() {
     assert!((cfg.reader.line_height - 1.8).abs() < f32::EPSILON);
     assert!((cfg.reader.page_width - 720.0).abs() < f32::EPSILON);
     assert!(cfg.reader.indent);
-    assert_eq!(cfg.reader.theme, ReaderTheme::Paper);
+    assert_eq!(cfg.reader.theme, ReaderTheme::App);
     assert_eq!(cfg.reader.default_mode, ReadingMode::Scroll);
     assert_eq!(cfg.reader.font_family, "");
 }

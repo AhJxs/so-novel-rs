@@ -84,8 +84,8 @@ line-height = 1.8
 page-width = 720
 paragraph-spacing = 12
 indent = true
-# paper | sepia | night | green | app
-theme = "paper"
+# paper | sepia | night | green | app（默认跟随应用主题）
+theme = "app"
 # scroll | page
 default-mode = "scroll"
 # 留空 = 系统默认字体
