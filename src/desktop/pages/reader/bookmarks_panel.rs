@@ -1,9 +1,8 @@
 //! 书签抽屉：添加当前书签、按章节升序展示、点击跳转、删除。
 
-use gpui_kit::component::ActiveTheme as _;
-use gpui_kit::component::Disableable as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::scroll::ScrollableElement as _;
+use gpui_kit::component::{ActiveTheme as _, Disableable as _, IconName};
 use gpui_kit::{
     AnyElement, App, Context, FontWeight, InteractiveElement as _, IntoElement, ParentElement,
     StatefulInteractiveElement as _, Styled, div, px,
@@ -171,7 +170,8 @@ impl ReaderPage {
                                 Button::new(format!("reader-bookmark-delete-{delete_id}"))
                                     .ghost()
                                     .compact()
-                                    .label(t!("Reader.bookmarks.delete"))
+                                    .icon(IconName::Delete)
+                                    .tooltip(t!("Reader.bookmarks.delete").to_string())
                                     .on_click(cx.listener(move |this, _event, _window, cx| {
                                         // 删完不要顺带触发整行的「跳转」。
                                         cx.stop_propagation();
@@ -206,6 +206,9 @@ impl ReaderPage {
             .flex_none()
             .flex()
             .flex_col()
+            // 抽屉属于应用外壳：底色 / 前景跟应用主题。
+            .bg(cx.theme().background)
+            .text_color(cx.theme().foreground)
             .border_l_1()
             .border_color(cx.theme().border)
             .child(
@@ -225,14 +228,35 @@ impl ReaderPage {
                             .child(t!("Reader.bookmarks.title").to_string()),
                     )
                     .child(
-                        Button::new("reader-bookmark-add")
-                            .primary()
-                            .compact()
-                            .disabled(self.content.is_none())
-                            .label(t!("Reader.bookmarks.add"))
-                            .on_click(cx.listener(|this, _event, _window, cx| {
-                                this.add_bookmark(cx);
-                            })),
+                        div()
+                            .flex()
+                            .flex_row()
+                            .items_center()
+                            .gap_1()
+                            .child(
+                                Button::new("reader-bookmark-add")
+                                    .primary()
+                                    .compact()
+                                    .icon(IconName::Plus)
+                                    .tooltip(t!("Reader.bookmarks.add").to_string())
+                                    .disabled(self.content.is_none())
+                                    .on_click(cx.listener(|this, _event, _window, cx| {
+                                        this.add_bookmark(cx);
+                                    })),
+                            )
+                            .child(
+                                Button::new("reader-bookmarks-close")
+                                    .ghost()
+                                    .compact()
+                                    .icon(IconName::Close)
+                                    .tooltip(t!("Reader.action.close").to_string())
+                                    .on_click(cx.listener(
+                                        |this, _event, window, cx| {
+                                            this.set_bookmarks_open(false, window, cx);
+                                            cx.notify();
+                                        },
+                                    )),
+                            ),
                     ),
             )
             .child(list)

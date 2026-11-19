@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::{ActiveTheme as _, h_flex};
+use gpui_kit::component::{ActiveTheme as _, IconName, h_flex};
 use gpui_kit::{
     AnyElement, App, Context, Div, FontWeight, InteractiveElement as _, IntoElement, ParentElement,
     StatefulInteractiveElement as _, Styled, div, px,
@@ -116,6 +116,9 @@ impl ReaderPage {
             .flex_none()
             .flex()
             .flex_col()
+            // 抽屉属于应用外壳：底色 / 前景跟应用主题。
+            .bg(cx.theme().background)
+            .text_color(cx.theme().foreground)
             .border_l_1()
             .border_color(cx.theme().border)
             .child(
@@ -137,7 +140,8 @@ impl ReaderPage {
                         Button::new("reader-more-close")
                             .ghost()
                             .compact()
-                            .label(t!("Reader.info.close"))
+                            .icon(IconName::Close)
+                            .tooltip(t!("Reader.info.close").to_string())
                             .on_click(cx.listener(|this, _event, window, cx| {
                                 this.more_open = false;
                                 this.focus_body(window, cx);
@@ -169,7 +173,8 @@ impl ReaderPage {
                                 Button::new("reader-file-reveal")
                                     .ghost()
                                     .compact()
-                                    .label(t!("Reader.info.reveal"))
+                                    .icon(IconName::FolderOpen)
+                                    .tooltip(t!("Reader.info.reveal").to_string())
                                     .on_click(cx.listener(move |this, _event, _window, cx| {
                                         this.run_file_action(&reveal_path, false, cx);
                                     })),
@@ -178,7 +183,8 @@ impl ReaderPage {
                                 Button::new("reader-file-open")
                                     .ghost()
                                     .compact()
-                                    .label(t!("Reader.info.open"))
+                                    .icon(IconName::ExternalLink)
+                                    .tooltip(t!("Reader.info.open").to_string())
                                     .on_click(cx.listener(move |this, _event, _window, cx| {
                                         this.run_file_action(&open_path, true, cx);
                                     })),

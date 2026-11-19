@@ -1438,6 +1438,18 @@ Reader:
       en: More
       zh-CN: 更多
       zh-TW: 更多
+    settings:
+      en: "Reading settings"
+      zh-CN: 阅读设置
+      zh-TW: 閱讀設定
+    mode_to_page:
+      en: "Switch to page mode"
+      zh-CN: 切换为翻页模式
+      zh-TW: 切換為翻頁模式
+    mode_to_scroll:
+      en: "Switch to scroll mode"
+      zh-CN: 切换为滚动模式
+      zh-TW: 切換為捲動模式
     immersive:
       en: "Immersive mode"
       zh-CN: 沉浸模式
@@ -1543,6 +1555,11 @@ Reader:
         en: "Open anyway"
         zh-CN: 仍要打开
         zh-TW: 仍要開啟
+  settings:
+    title:
+      en: "Reading settings"
+      zh-CN: 阅读设置
+      zh-TW: 閱讀設定
   toc:
     title:
       en: "Contents"
@@ -1556,6 +1573,10 @@ Reader:
       en: "Filter chapters…"
       zh-CN: 过滤章节…
       zh-TW: 過濾章節…
+    no_match:
+      en: "No matching chapters"
+      zh-CN: 没有匹配的章节
+      zh-TW: 沒有符合的章節
     chapter_count:
       en: "Chapters: %{count}"
       zh-CN: "%{count} 章"
@@ -1565,6 +1586,10 @@ Reader:
       en: "Typography"
       zh-CN: 排版
       zh-TW: 排版
+    preview:
+      en: "The night was quiet, and the words settled slowly on the page."
+      zh-CN: 夜色很静，字句在纸上慢慢铺开。
+      zh-TW: 夜色很靜，字句在紙上慢慢鋪開。
     font_size:
       en: "Font size"
       zh-CN: 字号

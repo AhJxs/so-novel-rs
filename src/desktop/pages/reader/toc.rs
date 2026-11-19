@@ -2,8 +2,9 @@
 
 use std::rc::Rc;
 
+use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::Input;
-use gpui_kit::component::{ActiveTheme as _, Sizable as _};
+use gpui_kit::component::{ActiveTheme as _, IconName, Sizable as _};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, Context, FontWeight, InteractiveElement as _, IntoElement, ParentElement,
@@ -14,7 +15,10 @@ use rust_i18n::t;
 use super::reader_page::ReaderPage;
 
 /// 目录抽屉宽度（px）。正文列宽要减掉它，否则抽屉打开时分页与实际折行对不上。
-pub(super) const TOC_WIDTH: f32 = 300.0;
+pub(super) const TOC_WIDTH: f32 = 320.0;
+
+/// 章节行高（px）。虚拟列表按它铺行。
+const TOC_ROW_HEIGHT: f32 = 34.0;
 
 impl ReaderPage {
     /// 目录抽屉。没有内容（加载中 / 失败）时给一句占位而不是空面板。
@@ -46,38 +50,90 @@ impl ReaderPage {
         let total = titles.len();
         let current = self.chapter;
         let handle = cx.entity().downgrade();
-        let list_titles = titles;
-        let list_indices = indices;
+        let active_bg = cx.theme().selection;
+        let marker = cx.theme().primary;
+        let hover_bg = cx.theme().list_hover;
+        let muted = cx.theme().muted_foreground;
 
-        let list = uniform_list("reader-toc-list", filtered, move |range, _window, cx| {
-            let active_bg = cx.theme().selection;
-            let hover_bg = cx.theme().list_hover;
-            range
-                .map(|slot| {
-                    let index = list_indices[slot];
-                    let title = list_titles[index].clone();
-                    let handle = handle.clone();
-                    let is_current = index == current;
-                    div()
-                        .id(("reader-toc-item", index))
-                        .w_full()
-                        .h(px(32.0))
-                        .px_3()
-                        .flex()
-                        .items_center()
-                        .cursor_pointer()
-                        .text_sm()
-                        .when(is_current, |this| {
-                            this.font_weight(FontWeight::SEMIBOLD).bg(active_bg)
-                        })
-                        .hover(move |style| style.bg(hover_bg))
-                        .child(div().truncate().child(SharedString::from(title)))
-                        .on_click(move |_event, _window, cx| {
+        let list = uniform_list(
+            "reader-toc-list",
+            filtered,
+            move |range, _window, _cx| {
+                range
+                    .map(|slot| {
+                        let index = indices[slot];
+                        let title = titles[index].clone();
+                        let handle = handle.clone();
+                        let is_current = index == current;
+                        let row = div()
+                            .id(("reader-toc-item", index))
+                            .w_full()
+                            .h(px(TOC_ROW_HEIGHT))
+                            .flex()
+                            .flex_row()
+                            .items_center()
+                            .gap_2()
+                            .px_3()
+                            .border_l_1()
+                            .cursor_pointer()
+                            .text_sm()
+                            .when(is_current, |this| {
+                                this.border_color(marker)
+                                    .bg(active_bg)
+                                    .font_weight(FontWeight::SEMIBOLD)
+                            })
+                            .when(!is_current, |this| this.border_color(active_bg))
+                            .hover(move |style| style.bg(hover_bg))
+                            // 章号右对齐排在标题左边，目录才有「第几章」的参照。
+                            .child(
+                                div()
+                                    .w(px(40.0))
+                                    .flex_none()
+                                    .text_xs()
+                                    .text_color(muted)
+                                    .child(SharedString::from((index + 1).to_string())),
+                            )
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .truncate()
+                                    .child(SharedString::from(title)),
+                            );
+                        row.on_click(move |_event, _window, cx| {
                             let _ = handle.update(cx, |page, cx| page.goto_chapter(index, cx));
                         })
-                })
-                .collect::<Vec<_>>()
-        });
+                    })
+                    .collect::<Vec<_>>()
+            },
+        )
+        // `ListSizingBehavior::Auto` 在 flex 容器里量不到高度，列表会整块空白；
+        // 必须给它一个确定的高度，铺满标题栏以下的空间。
+        .h_full()
+        .w_full()
+        .track_scroll(&self.toc_scroll);
+
+        let body: AnyElement = if filtered == 0 {
+            div()
+                .flex_1()
+                .min_h_0()
+                .flex()
+                .items_center()
+                .justify_center()
+                .p_4()
+                .text_sm()
+                .text_color(muted)
+                .child(t!("Reader.toc.no_match").to_string())
+                .into_any_element()
+        } else {
+            div()
+                .flex_1()
+                .min_h_0()
+                .flex()
+                .flex_col()
+                .child(list)
+                .into_any_element()
+        };
 
         div()
             .w(px(TOC_WIDTH))
@@ -85,6 +141,9 @@ impl ReaderPage {
             .flex_none()
             .flex()
             .flex_col()
+            // 抽屉是应用外壳的一部分，用应用主题；只有正文纸面跟随阅读主题。
+            .bg(cx.theme().background)
+            .text_color(cx.theme().foreground)
             .border_r_1()
             .border_color(cx.theme().border)
             .child(
@@ -101,6 +160,7 @@ impl ReaderPage {
                             .flex_row()
                             .items_center()
                             .justify_between()
+                            .gap_2()
                             .child(
                                 div()
                                     .text_sm()
@@ -109,17 +169,39 @@ impl ReaderPage {
                             )
                             .child(
                                 div()
-                                    .text_xs()
-                                    .text_color(cx.theme().muted_foreground)
+                                    .flex()
+                                    .flex_row()
+                                    .items_center()
+                                    .gap_1()
                                     .child(
-                                        t!("Reader.toc.chapter_count", count = &total.to_string())
-                                            .to_string(),
+                                        div()
+                                            .text_xs()
+                                            .text_color(muted)
+                                            .child(
+                                                t!(
+                                                    "Reader.toc.chapter_count",
+                                                    count = &total.to_string()
+                                                )
+                                                .to_string(),
+                                            ),
+                                    )
+                                    .child(
+                                        Button::new("reader-toc-close")
+                                            .ghost()
+                                            .compact()
+                                            .icon(IconName::Close)
+                                            .tooltip(t!("Reader.action.close").to_string())
+                                            .on_click(cx.listener(
+                                                |this, _event, window, cx| {
+                                                    this.close_toc(window, cx);
+                                                },
+                                            )),
                                     ),
                             ),
                     )
                     .child(Input::new(&self.toc_filter).cleanable(true).small()),
             )
-            .child(div().flex_1().min_h_0().child(list))
+            .child(body)
             .into_any_element()
     }
 }

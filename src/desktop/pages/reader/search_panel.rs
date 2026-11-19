@@ -4,10 +4,10 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::Input;
 use gpui_kit::component::scroll::ScrollableElement as _;
+use gpui_kit::component::{ActiveTheme as _, IconName};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, App, Context, FontWeight, HighlightStyle, InteractiveElement as _, IntoElement,
@@ -372,6 +372,9 @@ impl ReaderPage {
             .flex_none()
             .flex()
             .flex_col()
+            // 抽屉属于应用外壳：底色 / 前景跟应用主题，别让浅色纸面把按钮字吞掉。
+            .bg(cx.theme().background)
+            .text_color(cx.theme().foreground)
             .border_l_1()
             .border_color(cx.theme().border)
             .child(
@@ -398,7 +401,8 @@ impl ReaderPage {
                                 Button::new("reader-search-close")
                                     .ghost()
                                     .compact()
-                                    .label(t!("Reader.action.close"))
+                                    .icon(IconName::Close)
+                                    .tooltip(t!("Reader.action.close").to_string())
                                     .on_click(cx.listener(|this, _event, window, cx| {
                                         this.set_search_open(false, window, cx);
                                         cx.notify();

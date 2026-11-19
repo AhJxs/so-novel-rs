@@ -13,12 +13,13 @@ use std::time::Duration;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::component::scroll::ScrollableElement as _;
-use gpui_kit::component::{ActiveTheme as _, Disableable as _};
+use gpui_kit::component::{ActiveTheme as _, Disableable as _, IconName, Selectable as _};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyElement, App, AppContext as _, Context, Entity, FocusHandle, Focusable as _, FontWeight,
-    InteractiveElement as _, IntoElement, KeyDownEvent, ParentElement, Render, ScrollEvent,
-    ScrollHandle, SharedString, StatefulInteractiveElement as _, Styled, Window, div, point, px,
+    AnyElement, App, AppContext as _, Context, Div, Entity, FocusHandle, Focusable as _,
+    FontWeight, InteractiveElement as _, IntoElement, KeyDownEvent, ParentElement, Render,
+    ScrollEvent, ScrollHandle, ScrollStrategy, SharedString, StatefulInteractiveElement as _,
+    Styled, UniformListScrollHandle, Window, div, point, px, relative,
 };
 use rust_i18n::t;
 
@@ -124,6 +125,8 @@ pub struct ReaderPage {
     pub(super) toc_titles: Option<Rc<Vec<String>>>,
     /// 目录顶部的章节过滤框。
     pub(super) toc_filter: Entity<InputState>,
+    /// 目录列表的滚动句柄：打开时滚到当前章。
+    pub(super) toc_scroll: UniformListScrollHandle,
     /// 搜索抽屉状态。
     pub(super) search: SearchPanel,
     pub(super) search_input: Entity<InputState>,
@@ -210,6 +213,7 @@ impl ReaderPage {
             layout_warned: false,
             toc_titles: None,
             toc_filter,
+            toc_scroll: UniformListScrollHandle::new(),
             search: SearchPanel::new(),
             search_input,
             search_open: false,
@@ -297,6 +301,16 @@ impl ReaderPage {
         }
         self.more_open = false;
         self.cancel_search();
+    }
+
+    /// 关阅读设置弹窗：面板里的改动在关闭时才落盘。
+    pub(super) fn close_settings(&mut self, cx: &mut Context<Self>) {
+        if !self.typography_open {
+            return;
+        }
+        self.typography_open = false;
+        self.persist_settings(cx);
+        cx.notify();
     }
 
     /// 进出沉浸模式：进 = 隐藏应用内工具栏 + 窗口全屏；出 = 反过来。
@@ -707,8 +721,13 @@ impl ReaderPage {
 
     /// 关目录抽屉；过滤框还聚焦时把焦点收回正文，
     /// 否则抽屉一卸，`shortcuts_blocked` 恒为真。
-    fn close_toc(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn close_toc(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.toc_open = false;
+        // 过滤词不跨次保留：下次打开看到的是完整的书，而不是上次的残留结果。
+        if !self.toc_filter.read(cx).value().is_empty() {
+            self.toc_filter
+                .update(cx, |input, cx| input.set_value("", window, cx));
+        }
         if self.toc_filter.read(cx).focus_handle(cx).is_focused(window) {
             window.focus(&self.focus, cx);
         }
@@ -782,6 +801,13 @@ impl ReaderPage {
             self.more_open = false;
             self.toc_open = true;
             self.typography_open = false;
+            // 打开就停在当前章：382 章的列表从第 1 章开始翻太费手。
+            if let Some(titles) = self.toc_titles.as_ref()
+                && !titles.is_empty()
+            {
+                self.toc_scroll
+                    .scroll_to_item(self.chapter.min(titles.len() - 1), ScrollStrategy::Center);
+            }
             cx.notify();
         }
     }
@@ -896,105 +922,142 @@ impl ReaderPage {
         self.update_reader_config(move |reader| reader.font_size += delta, cx);
     }
 
+    /// 工具栏 / 页脚统一的图标按钮：ghost + compact + 提示，激活态由调用方 `.selected()`。
+    fn chrome_button(
+        id: impl Into<gpui_kit::ElementId>,
+        icon: IconName,
+        tooltip: String,
+    ) -> Button {
+        Button::new(id)
+            .ghost()
+            .compact()
+            .icon(icon)
+            .tooltip(tooltip)
+    }
+
     fn render_toolbar(&self, cx: &Context<Self>) -> impl IntoElement {
         let close_handler = self.close_handler.clone();
-        let mode_label = match self.mode {
-            ReadingMode::Scroll => t!("Reader.mode.page"),
-            ReadingMode::Page => t!("Reader.mode.scroll"),
+        // 图标画的是点下去会切到的模式，提示语把动作讲全。
+        let (mode_icon, mode_tooltip) = match self.mode {
+            ReadingMode::Scroll => (
+                IconName::FileText,
+                t!("Reader.action.mode_to_page").to_string(),
+            ),
+            ReadingMode::Page => (
+                IconName::ChevronsUpDown,
+                t!("Reader.action.mode_to_scroll").to_string(),
+            ),
         };
-
-        let mut toc_button = Button::new("reader-toc").label(t!("Reader.action.toc"));
-        toc_button = if self.toc_open {
-            toc_button.primary()
+        let immersive_tooltip = if self.immersive {
+            t!("Reader.action.exit_immersive").to_string()
         } else {
-            toc_button.ghost()
+            t!("Reader.action.immersive").to_string()
         };
-        let mut typography_button = Button::new("reader-typography").label("Aa");
-        typography_button = if self.typography_open {
-            typography_button.primary()
+        let immersive_icon = if self.immersive {
+            IconName::Minimize
         } else {
-            typography_button.ghost()
+            IconName::Maximize
         };
 
         div()
             .flex()
             .flex_row()
             .items_center()
-            .gap_2()
-            .px_4()
-            .py_2()
+            .gap_1()
+            .px_2()
+            .h(px(48.0))
             .border_b_1()
             .border_color(cx.theme().border)
+            // 工具栏用应用主题铺底：阅读主题只负责正文纸面，否则浅色纸面上
+            // ghost 按钮的浅色文字会整片看不见。
+            .bg(cx.theme().background)
+            .text_color(cx.theme().foreground)
             .child(
-                Button::new("reader-back")
-                    .label(t!("Reader.action.back"))
-                    .on_click(move |_event, window, cx| {
-                        if let Some(handler) = &close_handler {
-                            handler(window, cx);
-                        }
-                    }),
+                Self::chrome_button(
+                    "reader-back",
+                    IconName::ArrowLeft,
+                    t!("Reader.action.back").to_string(),
+                )
+                .on_click(move |_event, window, cx| {
+                    if let Some(handler) = &close_handler {
+                        handler(window, cx);
+                    }
+                }),
             )
-            .child(toc_button.on_click(cx.listener(|this, _event, window, cx| {
-                this.toggle_toc(window, cx);
-            })))
-            .child({
-                let mut search_button =
-                    Button::new("reader-search").label(t!("Reader.action.search"));
-                search_button = if self.search_open {
-                    search_button.primary()
-                } else {
-                    search_button.ghost()
-                };
-                search_button.on_click(cx.listener(|this, _event, window, cx| {
+            .child(
+                Self::chrome_button(
+                    "reader-toc",
+                    IconName::Menu,
+                    t!("Reader.action.toc").to_string(),
+                )
+                .selected(self.toc_open)
+                .on_click(cx.listener(|this, _event, window, cx| {
+                    this.toggle_toc(window, cx);
+                })),
+            )
+            .child(
+                Self::chrome_button(
+                    "reader-search",
+                    IconName::Search,
+                    t!("Reader.action.search").to_string(),
+                )
+                .selected(self.search_open)
+                .on_click(cx.listener(|this, _event, window, cx| {
                     this.toc_open = false;
                     this.typography_open = false;
                     let open = !this.search_open;
                     this.set_search_open(open, window, cx);
                     cx.notify();
-                }))
-            })
-            .child({
-                let mut bookmark_button =
-                    Button::new("reader-bookmarks-toggle").label(t!("Reader.action.bookmarks"));
-                bookmark_button = if self.bookmarks_open {
-                    bookmark_button.primary()
-                } else {
-                    bookmark_button.ghost()
-                };
-                bookmark_button.on_click(cx.listener(|this, _event, window, cx| {
+                })),
+            )
+            .child(
+                Self::chrome_button(
+                    "reader-bookmarks-toggle",
+                    IconName::Star,
+                    t!("Reader.action.bookmarks").to_string(),
+                )
+                .selected(self.bookmarks_open)
+                .on_click(cx.listener(|this, _event, window, cx| {
                     this.typography_open = false;
                     let open = !this.bookmarks_open;
                     this.set_bookmarks_open(open, window, cx);
                     cx.notify();
-                }))
-            })
-            .child({
-                let mut more_button = Button::new("reader-more").label(t!("Reader.action.more"));
-                more_button = if self.more_open {
-                    more_button.primary()
-                } else {
-                    more_button.ghost()
-                };
-                more_button.on_click(cx.listener(|this, _event, window, cx| {
+                })),
+            )
+            .child(
+                Self::chrome_button(
+                    "reader-more",
+                    IconName::Ellipsis,
+                    t!("Reader.action.more").to_string(),
+                )
+                .selected(self.more_open)
+                .on_click(cx.listener(|this, _event, window, cx| {
                     let open = !this.more_open;
                     this.close_drawers(window, cx);
                     this.more_open = open;
                     cx.notify();
-                }))
-            })
+                })),
+            )
             .child(
                 div()
                     .flex_1()
                     .min_w_0()
+                    .px_2()
                     .text_center()
                     .font_weight(FontWeight::MEDIUM)
                     .truncate()
                     .child(SharedString::from(self.book.title.clone())),
             )
             .child(
-                typography_button.on_click(cx.listener(|this, _event, window, cx| {
+                Self::chrome_button(
+                    "reader-settings",
+                    IconName::Settings,
+                    t!("Reader.action.settings").to_string(),
+                )
+                .selected(self.typography_open)
+                .on_click(cx.listener(|this, _event, window, cx| {
                     let open = !this.typography_open;
-                    // Aa 浮层与四个右侧抽屉不共存；关掉正在开的那个时 `close_drawers`
+                    // 设置弹窗与四个抽屉不共存；关掉正在开的那个时 `close_drawers`
                     // 已经替它 `persist_settings` 了，这里不必再写一次。
                     this.close_drawers(window, cx);
                     this.typography_open = open;
@@ -1002,26 +1065,75 @@ impl ReaderPage {
                 })),
             )
             .child(
-                Button::new("reader-mode")
-                    .label(mode_label)
+                Self::chrome_button("reader-mode", mode_icon, mode_tooltip)
                     .on_click(cx.listener(|this, _event, _window, cx| this.toggle_mode(cx))),
             )
-            .child({
-                let label = if self.immersive {
-                    t!("Reader.action.exit_immersive")
-                } else {
-                    t!("Reader.action.immersive")
-                };
-                let mut immersive_button = Button::new("reader-immersive-toggle").label(label);
-                immersive_button = if self.immersive {
-                    immersive_button.primary()
-                } else {
-                    immersive_button.ghost()
-                };
-                immersive_button.on_click(cx.listener(|this, _event, window, cx| {
+            .child(
+                Self::chrome_button(
+                    "reader-immersive-toggle",
+                    immersive_icon,
+                    immersive_tooltip,
+                )
+                .selected(self.immersive)
+                .on_click(cx.listener(|this, _event, window, cx| {
                     this.toggle_immersive(window, cx);
-                }))
-            })
+                })),
+            )
+    }
+
+    /// 页脚外壳：左「上一」+ 居中进度 + 右「下一」，配色与应用主题一致。
+    fn footer_shell(
+        prev: impl IntoElement,
+        center: impl IntoElement,
+        next: impl IntoElement,
+        cx: &App,
+    ) -> Div {
+        div()
+            .flex()
+            .flex_row()
+            .items_center()
+            .justify_between()
+            .gap_3()
+            .px_3()
+            .py_2()
+            .border_t_1()
+            .border_color(cx.theme().border)
+            .bg(cx.theme().background)
+            .text_color(cx.theme().foreground)
+            .child(prev)
+            .child(div().flex_1().min_w_0().child(center))
+            .child(next)
+    }
+
+    /// 居中进度：一行文字 + 细进度条。
+    fn progress_indicator(text: String, percent: f64, cx: &App) -> Div {
+        let ratio = (percent / 100.0).clamp(0.0, 1.0) as f32;
+        div()
+            .flex()
+            .flex_col()
+            .items_center()
+            .gap_1()
+            .child(
+                div()
+                    .text_sm()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(text),
+            )
+            .child(
+                div()
+                    .w(px(220.0))
+                    .h(px(3.0))
+                    .rounded_full()
+                    .overflow_hidden()
+                    .bg(cx.theme().muted)
+                    .child(
+                        div()
+                            .h_full()
+                            .rounded_full()
+                            .bg(cx.theme().primary)
+                            .w(relative(ratio)),
+                    ),
+            )
     }
 
     /// 出错时的正文区：原因 + 该错误支持的操作按钮。
@@ -1158,7 +1270,6 @@ impl ReaderPage {
                 .into_any_element();
         }
 
-        let background = reader_colors(self.reader_config(cx).theme, cx).background;
         div()
             .id("reader-immersive-toolbar")
             .absolute()
@@ -1187,7 +1298,7 @@ impl ReaderPage {
                     .detach();
                 }
             }))
-            .child(div().bg(background).child(self.render_toolbar(cx)))
+            .child(self.render_toolbar(cx))
             .into_any_element()
     }
 
@@ -1207,44 +1318,33 @@ impl ReaderPage {
 
     fn render_chapter_nav(&self, count: usize, cx: &Context<Self>) -> impl IntoElement {
         let percent = self.book_percent(count);
-        div()
-            .flex()
-            .flex_row()
-            .items_center()
-            .justify_between()
-            .px_4()
-            .py_2()
-            .border_t_1()
-            .border_color(cx.theme().border)
-            .child(
-                Button::new("reader-prev-chapter")
-                    .label(t!("Reader.action.prev_chapter"))
-                    .disabled(self.chapter == 0)
-                    .on_click(cx.listener(|this, _event, _window, cx| {
-                        this.step_chapter(-1, cx);
-                    })),
+        let prev = Self::chrome_button(
+            "reader-prev-chapter",
+            IconName::ChevronLeft,
+            t!("Reader.action.prev_chapter").to_string(),
+        )
+        .disabled(self.chapter == 0)
+        .on_click(cx.listener(|this, _event, _window, cx| {
+            this.step_chapter(-1, cx);
+        }));
+        let next = Self::chrome_button(
+            "reader-next-chapter",
+            IconName::ChevronRight,
+            t!("Reader.action.next_chapter").to_string(),
+        )
+        .disabled(self.chapter + 1 >= count)
+        .on_click(cx.listener(|this, _event, _window, cx| {
+            this.step_chapter(1, cx);
+        }));
+        let text = format!(
+            "{} · {percent:.0}%",
+            t!(
+                "Reader.chapter_indicator",
+                current = self.chapter + 1,
+                total = count
             )
-            .child(
-                div()
-                    .text_sm()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(format!(
-                        "{} · {percent:.0}%",
-                        t!(
-                            "Reader.chapter_indicator",
-                            current = self.chapter + 1,
-                            total = count
-                        )
-                    )),
-            )
-            .child(
-                Button::new("reader-next-chapter")
-                    .label(t!("Reader.action.next_chapter"))
-                    .disabled(self.chapter + 1 >= count)
-                    .on_click(cx.listener(|this, _event, _window, cx| {
-                        this.step_chapter(1, cx);
-                    })),
-            )
+        );
+        Self::footer_shell(prev, Self::progress_indicator(text, percent, cx), next, cx)
     }
 
     /// `viewport_probe` 量到正文容器高度后回调进来；变化超过半像素才重排。
@@ -1612,46 +1712,35 @@ impl ReaderPage {
         // 第三份百分比实现只会让两者漂移。
         let percent = self.book_percent(count);
         let at_end = self.chapter + 1 >= count && self.page_index + 1 >= pages;
-        div()
-            .flex()
-            .flex_row()
-            .items_center()
-            .justify_between()
-            .px_4()
-            .py_2()
-            .border_t_1()
-            .border_color(cx.theme().border)
-            .child(
-                Button::new("reader-prev-page")
-                    .label(t!("Reader.action.prev_page"))
-                    .disabled(self.chapter == 0 && self.page_index == 0)
-                    .on_click(cx.listener(|this, _event, _window, cx| {
-                        this.turn_page(-1, cx);
-                    })),
+        let prev = Self::chrome_button(
+            "reader-prev-page",
+            IconName::ChevronLeft,
+            t!("Reader.action.prev_page").to_string(),
+        )
+        .disabled(self.chapter == 0 && self.page_index == 0)
+        .on_click(cx.listener(|this, _event, _window, cx| {
+            this.turn_page(-1, cx);
+        }));
+        let next = Self::chrome_button(
+            "reader-next-page",
+            IconName::ChevronRight,
+            t!("Reader.action.next_page").to_string(),
+        )
+        .disabled(at_end)
+        .on_click(cx.listener(|this, _event, _window, cx| {
+            this.turn_page(1, cx);
+        }));
+        let text = format!(
+            "{} · {percent:.0}%",
+            t!(
+                "Reader.page_indicator",
+                page = self.page_index + 1,
+                pages = pages,
+                chapter = self.chapter + 1,
+                total = count
             )
-            .child(
-                div()
-                    .text_sm()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(format!(
-                        "{} · {percent:.0}%",
-                        t!(
-                            "Reader.page_indicator",
-                            page = self.page_index + 1,
-                            pages = pages,
-                            chapter = self.chapter + 1,
-                            total = count
-                        )
-                    )),
-            )
-            .child(
-                Button::new("reader-next-page")
-                    .label(t!("Reader.action.next_page"))
-                    .disabled(at_end)
-                    .on_click(cx.listener(|this, _event, _window, cx| {
-                        this.turn_page(1, cx);
-                    })),
-            )
+        );
+        Self::footer_shell(prev, Self::progress_indicator(text, percent, cx), next, cx)
     }
 }
 
