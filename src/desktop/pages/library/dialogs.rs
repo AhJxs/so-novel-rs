@@ -40,6 +40,7 @@ impl LibraryPage {
                 .w(px(560.))
                 .child(
                     v_flex()
+                        .w_full()
                         .gap_1()
                         .text_sm()
                         .child(info_row(
@@ -198,8 +199,12 @@ impl LibraryPage {
 }
 
 /// 一行「标签：值」。
+///
+/// `min_w_0` 不能省：flex 子项的默认最小宽度是 `auto`（这里等于值的最长不可断片段，
+/// 比如整条磁盘路径），不置零它就不肯缩到该宽度以下，长路径会溢出弹窗被裁掉。
 fn info_row(label: String, value: String, cx: &App) -> Div {
     h_flex()
+        .w_full()
         .items_start()
         .gap_2()
         .child(
@@ -209,5 +214,5 @@ fn info_row(label: String, value: String, cx: &App) -> Div {
                 .text_color(cx.theme().muted_foreground)
                 .child(label),
         )
-        .child(div().flex_1().child(value))
+        .child(div().flex_1().min_w_0().child(value))
 }
