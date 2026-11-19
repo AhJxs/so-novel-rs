@@ -46,8 +46,11 @@ pub fn hide_dir(dir: &Path) {
 }
 
 /// 非 Windows 上没有隐藏属性可设，点开头的目录名已经足够。
+///
+/// 空实现要写成 `const fn`：Linux 的 clippy 会建议
+/// （`missing_const_for_fn`），Windows 分支因为要起 `attrib` 进程而做不到，两侧差异无妨。
 #[cfg(not(target_os = "windows"))]
-pub fn hide_dir(_dir: &Path) {}
+pub const fn hide_dir(_dir: &Path) {}
 
 #[cfg(test)]
 mod tests {
