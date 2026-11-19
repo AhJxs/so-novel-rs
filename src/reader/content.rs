@@ -3,13 +3,16 @@
 use std::path::Path;
 
 use rust_i18n::t;
+use serde::{Deserialize, Serialize};
 
 use crate::library::BookFormat;
 use crate::tools::ToolError;
 use crate::tools::load::{LoadOptions, load_path};
 
 /// 阅读器内的整本书。
-#[derive(Debug, Clone)]
+///
+/// `Serialize` / `Deserialize` 供 [`super::cache`] 落盘复用，不参与其它协议。
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReaderBook {
     pub title: String,
     pub author: String,
@@ -20,7 +23,7 @@ pub struct ReaderBook {
 }
 
 /// 单章正文。
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReaderChapter {
     pub title: String,
     pub paragraphs: Vec<String>,

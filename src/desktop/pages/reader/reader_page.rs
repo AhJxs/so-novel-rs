@@ -364,15 +364,40 @@ impl ReaderPage {
         let format = self.book.format;
         let encoding = self.book.encoding.clone();
         let force = self.force_decode;
+        let book_id = self.book_id.clone();
+        let cache_dir = self.model.read(cx).reader_cache_dir();
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_executor()
                 .spawn(async move {
+                    // 「仍要打开」是跳过乱码检查的有损解码：既不能读缓存（内容口径不同），
+                    // 也不能写缓存（否则下次正常打开会吃到放宽后的结果）。
                     if force {
-                        load_book_relaxed(&path, format, encoding.as_deref())
-                    } else {
-                        load_book(&path, format, encoding.as_deref())
+                        return load_book_relaxed(&path, format, encoding.as_deref());
                     }
+                    if let Some(dir) = cache_dir.as_deref()
+                        && let Some(book) = crate::reader::cache::load(
+                            dir,
+                            &book_id,
+                            &path,
+                            format,
+                            encoding.as_deref(),
+                        )
+                    {
+                        return Ok(book);
+                    }
+                    let result = load_book(&path, format, encoding.as_deref());
+                    if let (Ok(book), Some(dir)) = (&result, cache_dir.as_deref()) {
+                        crate::reader::cache::store(
+                            dir,
+                            &book_id,
+                            &path,
+                            format,
+                            encoding.as_deref(),
+                            book,
+                        );
+                    }
+                    result
                 })
                 .await;
             let _ = this.update(cx, |page, cx| page.finish_load(generation, result, cx));

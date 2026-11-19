@@ -111,6 +111,19 @@ impl AppModel {
         self.persist_settings();
     }
 
+    /// 阅读缓存的根目录（`<下载目录>/.sonovel`）；下载目录为空时 `None`。
+    #[must_use]
+    pub fn reader_cache_dir(&self) -> Option<PathBuf> {
+        crate::reader::cache::dir_for_download(&self.config.download.download_path)
+    }
+
+    /// 删掉一本书的阅读缓存。书没了缓存留着也没人会用，只会白占小说目录空间。
+    fn forget_reader_cache(&self, id: &str) {
+        if let Some(dir) = self.reader_cache_dir() {
+            crate::reader::cache::remove(&dir, id);
+        }
+    }
+
     /// 取一本书的快照；书籍已不存在时返回 `None`。
     #[must_use]
     pub fn book_snapshot(&self, id: &str) -> Option<Book> {
@@ -244,6 +257,8 @@ impl AppModel {
                 let _ = self.library.store.remove(id);
             }
         }
+        // 移出书架的两种来源都不再能打开，缓存跟着删。
+        self.forget_reader_cache(&book.id);
         self.library.bump();
         self.persist_library();
     }
@@ -259,6 +274,7 @@ impl AppModel {
         }
         crate::library::remove_cover_file(&self.paths.covers_dir, book.cover_file.as_deref());
         let _ = self.library.store.remove(id);
+        self.forget_reader_cache(&book.id);
         self.library.bump();
         self.persist_library();
     }
@@ -275,6 +291,10 @@ impl AppModel {
             .get(id)
             .and_then(|book| book.cover_file.clone());
         let new_id = self.library.store.relink(id, new_path)?;
+        // id 变了就是另一条路径的缓存键：旧缓存不会再有命中者。
+        if new_id != id {
+            self.forget_reader_cache(id);
+        }
         let renamed = crate::library::cover::rename_cover_for_relink(
             &self.paths.covers_dir,
             id,
