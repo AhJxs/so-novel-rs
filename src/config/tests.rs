@@ -346,6 +346,7 @@ fn reader_defaults_when_section_missing() {
     assert_eq!(cfg.reader.theme, ReaderTheme::App);
     assert_eq!(cfg.reader.default_mode, ReadingMode::Scroll);
     assert_eq!(cfg.reader.font_family, "");
+    assert_eq!(cfg.reader.font_weight, 400);
 }
 
 #[test]
@@ -354,14 +355,15 @@ fn reader_values_are_clamped_on_load() {
     let path = dir.path().join("config.toml");
     std::fs::write(
         &path,
-        "[reader]\nfont-size = 99\nline-height = 0.2\npage-width = 10\nparagraph-spacing = 999\n",
+        "[reader]\nfont-size = 99\nline-height = 0.2\npage-width = 10\nparagraph-spacing = 999\nfont-weight = 999\n",
     )
     .unwrap();
     let cfg = load_config(&path).unwrap();
-    assert!((cfg.reader.font_size - 32.0).abs() < f32::EPSILON);
+    assert!((cfg.reader.font_size - ReaderConfig::FONT_SIZE_RANGE.1).abs() < f32::EPSILON);
     assert!((cfg.reader.line_height - 1.3).abs() < f32::EPSILON);
-    assert!((cfg.reader.page_width - 480.0).abs() < f32::EPSILON);
+    assert!((cfg.reader.page_width - ReaderConfig::PAGE_WIDTH_RANGE.0).abs() < f32::EPSILON);
     assert!((cfg.reader.paragraph_spacing - 32.0).abs() < f32::EPSILON);
+    assert_eq!(cfg.reader.font_weight, ReaderConfig::FONT_WEIGHT_RANGE.1);
 }
 
 #[test]
@@ -373,12 +375,14 @@ fn reader_round_trips_through_save() {
     cfg.reader.theme = ReaderTheme::Night;
     cfg.reader.default_mode = ReadingMode::Page;
     cfg.reader.indent = false;
+    cfg.reader.font_weight = 600;
     save_config(&path, &cfg).unwrap();
     let loaded = load_config(&path).unwrap();
     assert!((loaded.reader.font_size - 22.0).abs() < f32::EPSILON);
     assert_eq!(loaded.reader.theme, ReaderTheme::Night);
     assert_eq!(loaded.reader.default_mode, ReadingMode::Page);
     assert!(!loaded.reader.indent);
+    assert_eq!(loaded.reader.font_weight, 600);
 }
 
 #[test]
@@ -388,6 +392,7 @@ fn reader_clamped_respects_declared_ranges() {
         line_height: 0.1,
         page_width: 1.0,
         paragraph_spacing: 100.0,
+        font_weight: 100,
         ..ReaderConfig::default()
     }
     .clamped();
@@ -397,16 +402,21 @@ fn reader_clamped_respects_declared_ranges() {
     assert!(
         (clamped.paragraph_spacing - ReaderConfig::PARAGRAPH_SPACING_RANGE.1).abs() < f32::EPSILON
     );
+    assert_eq!(clamped.font_weight, ReaderConfig::FONT_WEIGHT_RANGE.0);
 }
 
 #[test]
 fn reader_out_of_range_rejected_by_validate() {
     let mut cfg = AppConfig::default();
-    cfg.reader.font_size = 40.0;
+    cfg.reader.font_size = 60.0;
     assert!(cfg.validate().is_err());
 
     let mut cfg = AppConfig::default();
     cfg.reader.page_width = 100.0;
+    assert!(cfg.validate().is_err());
+
+    let mut cfg = AppConfig::default();
+    cfg.reader.font_weight = 900;
     assert!(cfg.validate().is_err());
 
     let cfg = AppConfig::default();

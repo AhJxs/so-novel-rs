@@ -25,6 +25,8 @@ pub struct ReaderLayout {
     pub viewport_height: f32,
     pub indent: bool,
     pub font_family: String,
+    /// 正文字重（100–900）；标题固定加粗，不进这项。
+    pub font_weight: u16,
 }
 
 /// 分页结果何时失效：内容宽度 / 视口高度 / 排版参数 / 章节任一变化。
@@ -38,6 +40,7 @@ pub struct LayoutFingerprint {
     pub paragraph_spacing: f32,
     pub indent: bool,
     pub font_family: String,
+    pub font_weight: u16,
 }
 
 impl ReaderLayout {
@@ -54,6 +57,7 @@ impl ReaderLayout {
         viewport_height: f32,
         indent: bool,
         font_family: String,
+        font_weight: u16,
     ) -> Self {
         Self {
             font_size,
@@ -63,6 +67,7 @@ impl ReaderLayout {
             viewport_height,
             indent,
             font_family,
+            font_weight,
         }
     }
 
@@ -94,6 +99,7 @@ impl ReaderLayout {
             paragraph_spacing: self.paragraph_spacing,
             indent: self.indent,
             font_family: self.font_family.clone(),
+            font_weight: self.font_weight,
         }
     }
 }
@@ -266,7 +272,7 @@ mod tests {
 
     #[test]
     fn layout_prefixes_indent_and_fingerprints() {
-        let mut layout = ReaderLayout::new(19.0, 1.8, 12.0, 720.0, 600.0, true, String::new());
+        let mut layout = ReaderLayout::new(19.0, 1.8, 12.0, 720.0, 600.0, true, String::new(), 400);
         assert_eq!(layout.display_text("正文"), "　　正文");
         let first = layout.fingerprint(3);
         layout.indent = false;
@@ -300,7 +306,8 @@ mod tests {
 
     #[test]
     fn fingerprint_covers_every_layout_field() {
-        let layout = ReaderLayout::new(19.0, 1.8, 12.0, 720.0, 600.0, true, "衬线".to_string());
+        let layout =
+            ReaderLayout::new(19.0, 1.8, 12.0, 720.0, 600.0, true, "衬线".to_string(), 400);
         assert_eq!(
             layout.fingerprint(2),
             LayoutFingerprint {
@@ -312,8 +319,14 @@ mod tests {
                 paragraph_spacing: 12.0,
                 indent: true,
                 font_family: "衬线".to_string(),
+                font_weight: 400,
             }
         );
+
+        // 字重也要进指纹：改字重后折行会变，旧分页缓存必须失效。
+        let heavier =
+            ReaderLayout::new(19.0, 1.8, 12.0, 720.0, 600.0, true, "衬线".to_string(), 700);
+        assert_ne!(layout.fingerprint(2), heavier.fingerprint(2));
     }
 
     #[test]

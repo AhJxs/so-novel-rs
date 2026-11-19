@@ -215,6 +215,11 @@ pub fn load_config(path: &Path) -> Result<AppConfig> {
     if let Some(v) = toml_str(&doc, "reader", "font-family") {
         reader.font_family = v;
     }
+    if let Some(v) = toml_int(&doc, "reader", "font-weight")
+        && let Ok(weight) = u16::try_from(v)
+    {
+        reader.font_weight = weight;
+    }
     cfg.reader = reader.clamped();
 
     let theme_kind_present = toml_table(&doc, "global")
@@ -435,6 +440,12 @@ pub fn save_config(path: &Path, cfg: &AppConfig) -> Result<()> {
         cfg.reader.default_mode.as_str(),
     );
     set_str(&mut doc, "reader", "font-family", &cfg.reader.font_family);
+    set_int(
+        &mut doc,
+        "reader",
+        "font-weight",
+        i64::from(cfg.reader.font_weight),
+    );
 
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).ok();

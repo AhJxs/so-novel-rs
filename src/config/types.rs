@@ -538,11 +538,11 @@ impl FromStr for ReaderTheme {
 /// `[reader]` 章节：排版与阅读方式偏好。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ReaderConfig {
-    /// 正文字号 px，16–32。
+    /// 正文字号 px，12–48。
     pub font_size: f32,
     /// 行高倍数（相对字号），1.3–2.4。
     pub line_height: f32,
-    /// 正文列最大宽度 px，480–1200。
+    /// 正文列最大宽度 px，360–1800。
     pub page_width: f32,
     /// 段间距 px，0–32。
     pub paragraph_spacing: f32,
@@ -554,6 +554,8 @@ pub struct ReaderConfig {
     pub default_mode: ReadingMode,
     /// 字体族；空 = 系统默认。
     pub font_family: String,
+    /// 正文字重，300–700（步进 100）；章标题固定加粗，不跟随。
+    pub font_weight: u16,
 }
 
 impl Default for ReaderConfig {
@@ -567,19 +569,22 @@ impl Default for ReaderConfig {
             theme: ReaderTheme::App,
             default_mode: ReadingMode::Scroll,
             font_family: String::new(),
+            font_weight: 400,
         }
     }
 }
 
 impl ReaderConfig {
     /// 字号允许区间。
-    pub const FONT_SIZE_RANGE: (f32, f32) = (16.0, 32.0);
+    pub const FONT_SIZE_RANGE: (f32, f32) = (12.0, 48.0);
     /// 行高倍数允许区间。
-    pub const LINE_HEIGHT_RANGE: (f32, f32) = (1.3, 2.4);
+    pub const LINE_HEIGHT_RANGE: (f32, f32) = (1.0, 2.4);
     /// 页宽允许区间。
-    pub const PAGE_WIDTH_RANGE: (f32, f32) = (480.0, 1200.0);
+    pub const PAGE_WIDTH_RANGE: (f32, f32) = (360.0, 1800.0);
     /// 段距允许区间。
     pub const PARAGRAPH_SPACING_RANGE: (f32, f32) = (0.0, 32.0);
+    /// 正文字重允许区间。
+    pub const FONT_WEIGHT_RANGE: (u16, u16) = (300, 700);
 
     /// 把越界值夹到合法区间。读取配置时调用：手改出错也不至于排版崩掉。
     #[must_use]
@@ -598,6 +603,9 @@ impl ReaderConfig {
                 Self::PARAGRAPH_SPACING_RANGE.0,
                 Self::PARAGRAPH_SPACING_RANGE.1,
             ),
+            font_weight: self
+                .font_weight
+                .clamp(Self::FONT_WEIGHT_RANGE.0, Self::FONT_WEIGHT_RANGE.1),
             ..self.clone()
         }
     }
@@ -723,6 +731,16 @@ impl AppConfig {
                     max: f64::from(range.1),
                 });
             }
+        }
+
+        let weight_range = ReaderConfig::FONT_WEIGHT_RANGE;
+        if !(weight_range.0..=weight_range.1).contains(&reader.font_weight) {
+            return Err(ConfigError::OutOfRange {
+                field: "reader.font_weight",
+                value: f64::from(reader.font_weight),
+                min: f64::from(weight_range.0),
+                max: f64::from(weight_range.1),
+            });
         }
 
         Ok(())

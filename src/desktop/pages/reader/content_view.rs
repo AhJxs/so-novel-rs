@@ -31,6 +31,7 @@ pub(super) fn chapter_column(
 ) -> Div {
     let font_size = reader.font_size;
     let spacing = reader.paragraph_spacing;
+    let weight = FontWeight(f32::from(reader.font_weight));
     // `Option<&[...]>` 是 `Copy`：`move` 闭包捕获的只是切片引用，子元素在
     // `children()` 里同步构造完就散掉，不必每帧把整章区间拷成 owned。
     let highlight_rows = highlights;
@@ -56,7 +57,8 @@ pub(super) fn chapter_column(
                     let mut row = div()
                         .pb(px(spacing))
                         .text_size(px(font_size))
-                        .line_height(px(line_height_px));
+                        .line_height(px(line_height_px))
+                        .font_weight(weight);
                     row = match highlight_rows
                         .as_ref()
                         .and_then(|rows| rows.get(index))
@@ -76,10 +78,13 @@ pub(super) fn chapter_column(
     column
 }
 
-/// 测量时用的文本样式：字号跟随排版设置，字体族配了就用配的。
+/// 测量时用的文本样式：字号 / 字重跟随排版设置，字体族配了就用配的。
+///
+/// 字重必须在这里也设上：粗体的字宽略大，测量按 400、渲染按 700 折行时页边界会漂。
 pub(super) fn measure_style(window: &Window, reader: &ReaderConfig) -> TextStyle {
     let mut style = window.text_style();
     style.font_size = px(reader.font_size).into();
+    style.font_weight = FontWeight(f32::from(reader.font_weight));
     if !reader.font_family.is_empty() {
         style.font_family = SharedString::from(reader.font_family.clone());
     }

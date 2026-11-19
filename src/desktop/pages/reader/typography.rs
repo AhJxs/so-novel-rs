@@ -1,8 +1,10 @@
 //! 「阅读设置」弹窗：实时预览、主题、字号 / 行高 / 段距 / 页宽、首行缩进、编码。
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::select::Select;
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::{ActiveTheme as _, IconName};
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, App, ClickEvent, Context, Div, ElementId, FontWeight, InteractiveElement as _,
     IntoElement, MouseButton, ParentElement, StatefulInteractiveElement as _, Styled, div, px,
@@ -22,6 +24,16 @@ const THEMES: [ReaderTheme; 5] = [
     ReaderTheme::Night,
     ReaderTheme::Green,
     ReaderTheme::App,
+];
+
+/// 面板里的五档字重（值，文案 key）。gpui 的 `FontWeight` 只认具体数值，
+/// 阅读场景五档足够，不给任意输入。
+const WEIGHTS: [(u16, &str); 5] = [
+    (300, "Reader.typography.weight.light"),
+    (400, "Reader.typography.weight.regular"),
+    (500, "Reader.typography.weight.medium"),
+    (600, "Reader.typography.weight.semibold"),
+    (700, "Reader.typography.weight.bold"),
 ];
 
 /// 可以用「− 值 +」调整的四项数值。
@@ -117,6 +129,10 @@ impl ReaderPage {
                 div()
                     .text_size(px(reader.font_size))
                     .line_height(px(reader.font_size * reader.line_height))
+                    .font_weight(FontWeight(f32::from(reader.font_weight)))
+                    .when(!reader.font_family.is_empty(), |this| {
+                        this.font_family(reader.font_family.clone())
+                    })
                     .text_color(colors.foreground)
                     .child(preview_text),
             );
@@ -131,7 +147,8 @@ impl ReaderPage {
             .flex_col()
             .gap_4()
             .child(preview)
-            .child(Self::render_theme_section(reader.theme, cx));
+            .child(Self::render_theme_section(reader.theme, cx))
+            .child(self.render_font_section(&reader, cx));
 
         let mut fields = div().flex().flex_col().gap_3();
         for field in Field::ALL {
@@ -259,6 +276,68 @@ impl ReaderPage {
             );
         }
         section("Reader.typography.title", row, cx)
+    }
+
+    /// 字体：可搜索的系统字体下拉（首项「系统默认」）+ 五档字重按钮。
+    ///
+    /// 下拉在打开面板时由 `ensure_font_select` 建好；理论上这里拿不到 `None`，
+    /// 留空占位只是防布局塌一行。
+    fn render_font_section(&self, reader: &ReaderConfig, cx: &Context<Self>) -> Div {
+        let select = self.font_select.as_ref().map_or_else(
+            || div().flex_1().into_any_element(),
+            |state| {
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .child(Select::new(state).w_full())
+                    .into_any_element()
+            },
+        );
+        let font_row = div()
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap_2()
+            .child(
+                div()
+                    .text_sm()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(t!("Reader.typography.font_family").to_string()),
+            )
+            .child(select);
+
+        let mut weights = div().flex().flex_row().items_center().gap_2().child(
+            div()
+                .text_sm()
+                .text_color(cx.theme().muted_foreground)
+                .child(t!("Reader.typography.font_weight").to_string()),
+        );
+        for (value, key) in WEIGHTS {
+            let mut button = Button::new(ElementId::Name(format!("reader-weight-{value}").into()))
+                .compact()
+                .label(t!(key));
+            button = if reader.font_weight == value {
+                button.primary()
+            } else {
+                button.ghost()
+            };
+            weights = weights.child(button.on_click(cx.listener(
+                move |this, _event: &ClickEvent, _window, cx| {
+                    this.update_reader_config(move |reader| reader.font_weight = value, cx);
+                },
+            )));
+        }
+
+        section(
+            "Reader.typography.font",
+            div()
+                .flex()
+                .flex_col()
+                .gap_2()
+                .child(font_row)
+                .child(weights),
+            cx,
+        )
     }
 
     /// TXT 编码行：显示当前生效编码 + 「自动 / 各候选编码」按钮。

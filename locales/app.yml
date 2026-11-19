@@ -1546,6 +1546,43 @@ Reader:
       en: "Typography"
       zh-CN: 排版
       zh-TW: 排版
+    font:
+      en: "Font"
+      zh-CN: 字体
+      zh-TW: 字體
+    font_family:
+      en: "Font family"
+      zh-CN: 字体
+      zh-TW: 字體
+    font_default:
+      en: "System default"
+      zh-CN: 系统默认
+      zh-TW: 系統預設
+    font_weight:
+      en: "Weight"
+      zh-CN: 字重
+      zh-TW: 字重
+    weight:
+      light:
+        en: Light
+        zh-CN: 细
+        zh-TW: 細
+      regular:
+        en: Regular
+        zh-CN: 常规
+        zh-TW: 常規
+      medium:
+        en: Medium
+        zh-CN: 中等
+        zh-TW: 中等
+      semibold:
+        en: "Semi-bold"
+        zh-CN: 半粗
+        zh-TW: 半粗
+      bold:
+        en: Bold
+        zh-CN: 粗
+        zh-TW: 粗
     preview:
       en: "The night was quiet, and the words settled slowly on the page."
       zh-CN: 夜色很静，字句在纸上慢慢铺开。

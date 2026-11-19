@@ -13,6 +13,7 @@ use std::time::Duration;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::component::scroll::ScrollableElement as _;
+use gpui_kit::component::select::{SearchableVec, SelectDelegate, SelectEvent, SelectState};
 use gpui_kit::component::{ActiveTheme as _, Disableable as _, IconName, Selectable as _};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
@@ -146,6 +147,8 @@ pub struct ReaderPage {
     pub(super) search_cancel: Option<Arc<AtomicBool>>,
     pub(super) toc_open: bool,
     pub(super) typography_open: bool,
+    /// 系统字体下拉。首次打开设置面板时才枚举字体并创建（枚举几百个名字不值得每帧做）。
+    pub(super) font_select: Option<Entity<SelectState<SearchableVec<SharedString>>>>,
     immersive: bool,
     generation: u64,
     progress_dirty: bool,
@@ -226,6 +229,7 @@ impl ReaderPage {
             search_cancel: None,
             toc_open: false,
             typography_open: false,
+            font_select: None,
             immersive: false,
             generation: 1,
             progress_dirty: false,
@@ -312,6 +316,49 @@ impl ReaderPage {
         self.typography_open = false;
         self.persist_settings(cx);
         cx.notify();
+    }
+
+    /// 首次打开设置面板时枚举系统字体、建可搜索下拉。
+    ///
+    /// 选「系统默认」存空串（`font-family = ""`）；字体名按字典序去重，
+    /// 「系统默认」固定在第一项。字体列表一次枚举后缓存在页面上，改设置不重列。
+    fn ensure_font_select(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.font_select.is_some() {
+            return;
+        }
+        let default_label = t!("Reader.typography.font_default").to_string();
+        let mut families = cx.text_system().all_font_names();
+        families.sort();
+        families.dedup();
+        let mut names: Vec<SharedString> = Vec::with_capacity(families.len() + 1);
+        names.push(SharedString::from(default_label.clone()));
+        names.extend(families.into_iter().map(SharedString::from));
+
+        let current = self.reader_config(cx).font_family;
+        let current_label = if current.is_empty() {
+            default_label.clone()
+        } else {
+            current
+        };
+        let items: SearchableVec<SharedString> = names.into();
+        let pos = <SearchableVec<SharedString> as SelectDelegate>::position(
+            &items,
+            &SharedString::from(current_label),
+        );
+        let state = cx.new(|cx| SelectState::new(items, pos, window, cx).searchable(true));
+        cx.subscribe(&state, move |this, _state, event, cx| {
+            if let SelectEvent::Confirm(Some(picked)) = event {
+                let picked = picked.to_string();
+                let family = if picked == default_label {
+                    String::new()
+                } else {
+                    picked
+                };
+                this.update_reader_config(move |reader| reader.font_family = family, cx);
+            }
+        })
+        .detach();
+        self.font_select = Some(state);
     }
 
     /// 进出沉浸模式：进 = 隐藏应用内工具栏 + 窗口全屏；出 = 反过来。
@@ -1086,6 +1133,9 @@ impl ReaderPage {
                     // 设置弹窗与四个抽屉不共存；关掉正在开的那个时 `close_drawers`
                     // 已经替它 `persist_settings` 了，这里不必再写一次。
                     this.close_drawers(window, cx);
+                    if open {
+                        this.ensure_font_select(window, cx);
+                    }
                     this.typography_open = open;
                     cx.notify();
                 })),
@@ -1436,6 +1486,7 @@ impl ReaderPage {
             viewport_height,
             reader.indent,
             reader.font_family.clone(),
+            reader.font_weight,
         );
         // gpui 渲染文本时会把行高 `pixel_snap` 到设备像素（`elements/text.rs:643`），
         // 分页必须用同一个值，否则页起点逐页漂移、页首那行被裁。
@@ -1616,6 +1667,7 @@ impl ReaderPage {
             0.0,
             reader.indent,
             reader.font_family.clone(),
+            reader.font_weight,
         );
         let paragraphs: Vec<String> = chapter
             .paragraphs
@@ -1696,6 +1748,7 @@ impl ReaderPage {
             0.0,
             reader.indent,
             reader.font_family.clone(),
+            reader.font_weight,
         );
         let line_height = layout.line_height_px();
         let paragraphs: Vec<String> = chapter
