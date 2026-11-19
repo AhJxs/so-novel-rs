@@ -18,8 +18,9 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, App, AppContext as _, Context, Div, Entity, FocusHandle, Focusable as _,
     FontWeight, InteractiveElement as _, IntoElement, KeyDownEvent, ParentElement, Render,
-    ScrollEvent, ScrollHandle, ScrollStrategy, SharedString, StatefulInteractiveElement as _,
-    Styled, UniformListScrollHandle, Window, div, point, px, relative,
+    ScrollDelta, ScrollEvent, ScrollHandle, ScrollStrategy, SharedString,
+    StatefulInteractiveElement as _, Styled, UniformListScrollHandle, Window, div, point, px,
+    relative,
 };
 use rust_i18n::t;
 
@@ -1359,13 +1360,12 @@ impl ReaderPage {
         cx.notify();
     }
 
-    /// 翻页模式：按当前指纹测一遍本章并分页；指纹没变就直接用缓存。
-    fn ensure_pagination(&mut self, window: &Window, cx: &mut Context<Self>) {
-        let previous_ratio = self.chapter_ratio;
-        let reader = self.reader_config(cx);
-        // 目录 / 搜索 / 书签 / 更多抽屉都是根 flex row 里的正常子元素，会把正文列压窄；宽度进了指纹，
-        // 开合抽屉会自动触发重排。四者互斥，这里仍按逐个累加写，免得将来放开互斥时漏掉。
-        let dock = (if self.toc_open {
+    /// 抽屉占掉的宽度（px）。
+    ///
+    /// 目录 / 搜索 / 书签 / 更多抽屉都是根 flex row 里的正常子元素，会把正文列压窄；
+    /// 四者互斥，这里仍按逐个累加写，免得将来放开互斥时漏掉。
+    fn dock_width(&self) -> f32 {
+        (if self.toc_open {
             super::toc::TOC_WIDTH
         } else {
             0.0
@@ -1381,13 +1381,27 @@ impl ReaderPage {
             super::more_panel::MORE_WIDTH
         } else {
             0.0
-        });
+        })
+    }
+
+    /// 正文列宽：窗口宽度扣掉抽屉与两侧留白，再与用户设的页宽取小。
+    ///
+    /// 分页与渲染都必须走这一个值：页宽调大后开抽屉时，列要跟着收窄而不是
+    /// 保持 `page_width` 把抽屉挤出屏幕；两边算得不一样还会让折行与页码对不上。
+    fn content_width(&self, viewport_width: f32, cx: &App) -> f32 {
+        let page_width = self.reader_config(cx).page_width;
         // `mul_add` 而非 `a - 2 * b`：`clippy::suboptimal_flops` 是启用的（无全局放行）。
         // `f32::sub` 需要 `use std::ops::Sub`，改用运算符。
-        let content_width =
-            (2.0_f32.mul_add(-COLUMN_PADDING, f32::from(window.viewport_size().width)) - dock)
-                .min(reader.page_width)
-                .max(160.0);
+        (2.0_f32.mul_add(-COLUMN_PADDING, viewport_width) - self.dock_width())
+            .min(page_width)
+            .max(160.0)
+    }
+
+    /// 翻页模式：按当前指纹测一遍本章并分页；指纹没变就直接用缓存。
+    fn ensure_pagination(&mut self, window: &Window, cx: &mut Context<Self>) {
+        let previous_ratio = self.chapter_ratio;
+        let reader = self.reader_config(cx);
+        let content_width = self.content_width(f32::from(window.viewport_size().width), cx);
         // 探针量到的就是可排字区域（裁剪盒没有上下留白），直接用它；
         // `- 160` 只是首帧探针还没回报时的保守兜底。
         let viewport_height = self
@@ -1543,14 +1557,15 @@ impl ReaderPage {
     }
 
     /// 正文区域：翻页模式用裁剪视口 + 纵向位移，滚动模式用滚动容器。
-    fn render_body(&self, cx: &Context<Self>) -> AnyElement {
+    fn render_body(&self, window: &Window, cx: &Context<Self>) -> AnyElement {
+        let width = self.content_width(f32::from(window.viewport_size().width), cx);
         match self.mode {
-            ReadingMode::Page => self.render_page_body(cx),
-            ReadingMode::Scroll => self.render_scroll_body(cx),
+            ReadingMode::Page => self.render_page_body(width, cx),
+            ReadingMode::Scroll => self.render_scroll_body(width, cx),
         }
     }
 
-    fn render_page_body(&self, cx: &Context<Self>) -> AnyElement {
+    fn render_page_body(&self, width: f32, cx: &Context<Self>) -> AnyElement {
         let Some((start, pages, line_height)) = self.page_cache.as_ref().map(|cache| {
             (
                 cache.offset.get(self.page_index).copied().unwrap_or(0.0),
@@ -1576,7 +1591,7 @@ impl ReaderPage {
             reader.font_size,
             reader.line_height,
             reader.paragraph_spacing,
-            reader.page_width,
+            width,
             0.0,
             reader.indent,
             reader.font_family.clone(),
@@ -1592,6 +1607,7 @@ impl ReaderPage {
 
         div()
             .flex_1()
+            .min_w_0()
             .min_h_0()
             .flex()
             .flex_col()
@@ -1603,6 +1619,7 @@ impl ReaderPage {
                 // 页顶 / 页底就会各露出相邻行的一条。
                 div()
                     .flex_1()
+                    .min_w_0()
                     .min_h_0()
                     .flex()
                     .flex_col()
@@ -1611,6 +1628,7 @@ impl ReaderPage {
                         div()
                             .relative()
                             .flex_1()
+                            .min_w_0()
                             .min_h_0()
                             .overflow_hidden()
                             .px(px(COLUMN_PADDING))
@@ -1627,6 +1645,7 @@ impl ReaderPage {
                                         &title,
                                         &paragraphs,
                                         &reader,
+                                        width,
                                         line_height,
                                         highlights.as_deref(),
                                     )),
@@ -1637,7 +1656,7 @@ impl ReaderPage {
             .into_any_element()
     }
 
-    fn render_scroll_body(&self, cx: &Context<Self>) -> AnyElement {
+    fn render_scroll_body(&self, width: f32, cx: &Context<Self>) -> AnyElement {
         let Some(content) = self.content.as_ref() else {
             return div().flex_1().into_any_element();
         };
@@ -1652,7 +1671,7 @@ impl ReaderPage {
             reader.font_size,
             reader.line_height,
             reader.paragraph_spacing,
-            reader.page_width,
+            width,
             0.0,
             reader.indent,
             reader.font_family.clone(),
@@ -1668,12 +1687,14 @@ impl ReaderPage {
             &title,
             &paragraphs,
             &reader,
+            width,
             line_height,
             highlights.as_deref(),
         );
 
         div()
             .flex_1()
+            .min_w_0()
             .min_h_0()
             .flex()
             .flex_col()
@@ -1684,12 +1705,14 @@ impl ReaderPage {
                     .id("reader-scroll")
                     .relative()
                     .flex_1()
+                    .min_w_0()
                     .min_h_0()
                     .overflow_y_scroll()
                     .track_scroll(&self.scroll)
                     .vertical_scrollbar(&self.scroll)
-                    .on_scroll(cx.listener(|this, _event: &ScrollEvent, _window, cx| {
+                    .on_scroll(cx.listener(|this, event: &ScrollEvent, _window, cx| {
                         this.schedule_progress_commit(cx);
+                        this.continue_to_next_chapter(event, cx);
                     }))
                     .child(
                         // 居中靠 flex：gpui 没有 auto margin 样式。
@@ -1705,6 +1728,41 @@ impl ReaderPage {
             )
             .child(self.render_chapter_nav(count, cx))
             .into_any_element()
+    }
+
+    /// 滚到章尾后继续向下滚，接上下一章（从章首开始）。
+    ///
+    /// 只认「已经贴底 + 这一下还在往下」：到章尾就立刻跳会让人看不到最后一屏。
+    /// `restore_pending` 期间不接：`goto_chapter` 已置位，滚动句柄要等下一帧才回到章首，
+    /// 此时再收到惯性滚动就会连跳两章。
+    fn continue_to_next_chapter(&mut self, event: &ScrollEvent, cx: &mut Context<Self>) {
+        if !matches!(self.mode, ReadingMode::Scroll) || self.restore_pending {
+            return;
+        }
+        let down = match event.delta {
+            ScrollDelta::Pixels(delta) => f32::from(delta.y) < 0.0,
+            ScrollDelta::Lines(delta) => delta.y < 0.0,
+        };
+        let max = f32::from(self.scroll.max_offset().y);
+        let current = f32::from(self.scroll.offset().y);
+        if !Self::at_bottom_and_scrolling_down(down, current, max) {
+            return;
+        }
+        let Some(count) = self.content.as_ref().map(|content| content.chapters.len()) else {
+            return;
+        };
+        if self.chapter + 1 >= count {
+            return;
+        }
+        self.goto_chapter(self.chapter + 1, cx);
+    }
+
+    /// 「这一下滚动是否该接下一章」：已经贴底，且这一下还在向下。
+    ///
+    /// 偏移向下为负，贴底就是 `offset == -max`；留 1px 容差吸收亚像素与末帧取整。
+    /// 整章一屏放得下（`max == 0`）也算贴底：否则短章滚不动，永远接不上下一章。
+    fn at_bottom_and_scrolling_down(down: bool, offset_y: f32, max_offset_y: f32) -> bool {
+        down && offset_y <= 1.0 - max_offset_y.max(0.0)
     }
 
     fn render_page_nav(&self, pages: usize, count: usize, cx: &Context<Self>) -> impl IntoElement {
@@ -1779,7 +1837,7 @@ impl Render for ReaderPage {
                 .child(t!("Reader.loading").to_string())
                 .into_any_element(),
             LoadState::Error(error) => self.render_error(error, cx).into_any_element(),
-            LoadState::Ready => self.render_body(cx),
+            LoadState::Ready => self.render_body(window, cx),
         };
         let toc = if self.toc_open {
             Some(self.render_toc(cx))
@@ -1846,7 +1904,7 @@ impl Render for ReaderPage {
 
 #[cfg(test)]
 mod tests {
-    use super::{ratio_offset, scroll_ratio};
+    use super::{ReaderPage, ratio_offset, scroll_ratio};
 
     #[test]
     fn scroll_ratio_maps_negative_offsets_to_forward_progress() {
@@ -1874,5 +1932,27 @@ mod tests {
         }
         assert_eq!(ratio_offset(1.5, max), -800.0);
         assert_eq!(ratio_offset(-1.0, 0.0), 0.0);
+    }
+
+    #[test]
+    fn continues_to_next_chapter_only_at_the_bottom_scrolling_down() {
+        // 贴底（offset == -max）再往下：接。
+        assert!(ReaderPage::at_bottom_and_scrolling_down(
+            true, -800.0, 800.0
+        ));
+        // 亚像素没贴严也算贴底。
+        assert!(ReaderPage::at_bottom_and_scrolling_down(
+            true, -799.5, 800.0
+        ));
+        // 还在章中间：不接，否则最后一屏看不到。
+        assert!(!ReaderPage::at_bottom_and_scrolling_down(
+            true, -700.0, 800.0
+        ));
+        // 向上滚到章首不该跳走。
+        assert!(!ReaderPage::at_bottom_and_scrolling_down(
+            false, -800.0, 800.0
+        ));
+        // 整章一屏放得下：本来就没得滚，继续向下就该接下一章。
+        assert!(ReaderPage::at_bottom_and_scrolling_down(true, 0.0, 0.0));
     }
 }

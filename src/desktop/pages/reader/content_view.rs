@@ -18,11 +18,14 @@ use crate::config::ReaderConfig;
 pub(super) const COLUMN_PADDING: f32 = 24.0;
 
 /// 把一章渲染成一整列（含章标题）。翻页模式的外层再套一个裁剪视口。
+/// `width` 由 `ReaderPage::content_width` 算好（已扣掉抽屉与页宽上限），
+/// 与分页用的是同一个值，折行才对得上。
 /// `highlights` 按段落索引给出高亮区间。
 pub(super) fn chapter_column(
     title: &str,
     paragraphs: &[String],
     reader: &ReaderConfig,
+    width: f32,
     line_height_px: f32,
     highlights: Option<&[Vec<(std::ops::Range<usize>, HighlightStyle)>]>,
 ) -> Div {
@@ -32,8 +35,8 @@ pub(super) fn chapter_column(
     // `children()` 里同步构造完就散掉，不必每帧把整章区间拷成 owned。
     let highlight_rows = highlights;
     let mut column = div()
-        .w_full()
-        .max_w(px(reader.page_width))
+        .w(px(width))
+        .flex_none()
         .flex()
         .flex_col()
         .child(
