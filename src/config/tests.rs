@@ -360,7 +360,7 @@ fn reader_values_are_clamped_on_load() {
     .unwrap();
     let cfg = load_config(&path).unwrap();
     assert!((cfg.reader.font_size - ReaderConfig::FONT_SIZE_RANGE.1).abs() < f32::EPSILON);
-    assert!((cfg.reader.line_height - 1.3).abs() < f32::EPSILON);
+    assert!((cfg.reader.line_height - ReaderConfig::LINE_HEIGHT_RANGE.0).abs() < f32::EPSILON);
     assert!((cfg.reader.page_width - ReaderConfig::PAGE_WIDTH_RANGE.0).abs() < f32::EPSILON);
     assert!((cfg.reader.paragraph_spacing - 32.0).abs() < f32::EPSILON);
     assert_eq!(cfg.reader.font_weight, ReaderConfig::FONT_WEIGHT_RANGE.1);
