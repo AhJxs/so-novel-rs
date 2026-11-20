@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use rust_i18n::t;
 
-use super::{AppModel, MetaEvent, ScanEvent};
+use super::{AppModel, MetaEvent, Scan, ScanEvent};
 use crate::error::AppError;
 use crate::library::{AppliedMeta, Book, ReadingMode, ReadingProgress};
 
@@ -29,10 +29,11 @@ impl AppModel {
         self.library.scan_in_flight = true;
         let runtime = self.runtime;
         runtime.spawn(async move {
+            let root = dir.clone();
             let result =
                 tokio::task::spawn_blocking(move || crate::library::scan_download_dir(&dir)).await;
             let event = match result {
-                Ok(Ok(files)) => Ok(files),
+                Ok(Ok(files)) => Ok(Scan { root, files }),
                 Ok(Err(error)) => Err(AppError::io_msg(&error, t!("Library.scan_failed"))),
                 Err(error) => Err(AppError::internal(error.to_string())),
             };

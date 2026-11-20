@@ -25,6 +25,9 @@ pub struct Book {
     pub format: BookFormat,
     #[serde(default)]
     pub origin: BookOrigin,
+    /// 所属扫描根（规范化路径键）；Imported 且不在任何扫描根内时为 None。
+    #[serde(default)]
+    pub source_root: Option<String>,
     #[serde(default)]
     pub title: String,
     #[serde(default)]
@@ -87,6 +90,7 @@ impl Book {
             path: display_path(path),
             format,
             origin,
+            source_root: None,
             title: file_stem(path),
             author: String::new(),
             intro: None,
@@ -104,6 +108,13 @@ impl Book {
             progress: ReadingProgress::default(),
             bookmarks: Vec::new(),
         })
+    }
+
+    /// 设置所属扫描根（规范化键），由扫描合并调用。
+    #[must_use]
+    pub fn with_source_root(mut self, root: &Path) -> Self {
+        self.source_root = Some(normalize_path_key(root));
+        self
     }
 
     /// 派生状态（不持久化）。

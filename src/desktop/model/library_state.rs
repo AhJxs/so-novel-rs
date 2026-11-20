@@ -10,11 +10,21 @@ use smol::channel::Receiver;
 use crate::error::AppResult;
 use crate::library::{AppliedMeta, LibraryStore, ScannedFile, ShelfQuery, now_unix};
 
+/// 一次目录扫描的结果：扫描根 + 文件列表。
+///
+/// 根随事件一起回送，而不是从 `scanned_dir` 取：`scanned_dir` 同时是「目录已扫描」哨兵，
+/// 任务结束时会被清空，拿它当根会把结果记到错误的目录下。
+#[derive(Debug)]
+pub struct Scan {
+    pub root: PathBuf,
+    pub files: Vec<ScannedFile>,
+}
+
 /// 后台扫描结果。
 ///
 /// 一次扫描只回送**一个**事件：`drain_scan` 收满一个就丢掉接收端，
 /// 工作线程若再发第二个，会被静默忽略。
-pub type ScanEvent = AppResult<Vec<ScannedFile>>;
+pub type ScanEvent = AppResult<Scan>;
 
 /// 单本书的元数据提取结果（封面已由工作线程落盘）。
 ///
@@ -93,8 +103,8 @@ impl LibraryState {
                     any = true;
                     self.scan_in_flight = false;
                     match event {
-                        Ok(files) => {
-                            let meta_ids = self.store.merge_scan(&files);
+                        Ok(scan) => {
+                            let meta_ids = self.store.merge_scan(&scan.files, &scan.root);
                             self.meta_queue.extend(meta_ids);
                             self.bump();
                             self.last_error = None;
@@ -179,11 +189,14 @@ mod tests {
         let mut state = LibraryState::new(LibraryStore::default());
         state.scan_rx = Some(rx);
         state.scan_in_flight = true;
-        smol::block_on(tx.send(Ok(vec![ScannedFile {
-            path,
-            size_bytes: 1,
-            mtime: 1,
-        }])))
+        smol::block_on(tx.send(Ok(Scan {
+            root: dir.path().to_path_buf(),
+            files: vec![ScannedFile {
+                path,
+                size_bytes: 1,
+                mtime: 1,
+            }],
+        })))
         .unwrap();
         drop(tx);
 
@@ -243,11 +256,14 @@ mod tests {
         let mut state = LibraryState::new(LibraryStore::default());
         let id = state
             .store
-            .merge_scan(&[ScannedFile {
-                path,
-                size_bytes: 1,
-                mtime: 1,
-            }])
+            .merge_scan(
+                &[ScannedFile {
+                    path,
+                    size_bytes: 1,
+                    mtime: 1,
+                }],
+                dir.path(),
+            )
             .first()
             .cloned()
             .expect("一本书应入队元数据");

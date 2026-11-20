@@ -20,6 +20,14 @@ use crate::error::{AppError, AppResult};
 /// 当前书架文件版本。
 pub const LIBRARY_VERSION: u32 = 1;
 
+/// `path_key` 是否位于 `root_key` 下。两者都必须是 `normalize_path_key` 的输出。
+///
+/// 按路径段比较（`Path::starts_with`），不是字符串前缀：`D:\books2` 不能命中 `D:\books`。
+#[must_use]
+pub fn path_key_is_within(path_key: &str, root_key: &str) -> bool {
+    Path::new(path_key).starts_with(Path::new(root_key))
+}
+
 /// 书架 blob 的根结构。
 #[derive(Debug, Serialize, Deserialize)]
 struct LibraryFile {
@@ -195,10 +203,11 @@ impl LibraryStore {
     /// 合并一次目录扫描结果，返回需要提取元数据的书籍 id。
     ///
     /// 规则见设计文档 3.1：新文件入队、变化文件按需重新提取、隐藏项跳过、
-    /// 扫描结果里缺席的下载书标失效（记录保留，文件放回后自动恢复）。
+    /// 只在**本次扫描根内**的下载书才因缺席标失效（记录保留，文件放回后自动恢复）。
     #[must_use]
-    pub fn merge_scan(&mut self, files: &[ScannedFile]) -> Vec<String> {
+    pub fn merge_scan(&mut self, files: &[ScannedFile], scan_root: &Path) -> Vec<String> {
         let mut meta_ids = Vec::new();
+        let root_key = normalize_path_key(scan_root);
         let present: HashSet<String> = files
             .iter()
             .map(|file| normalize_path_key(&file.path))
@@ -209,6 +218,11 @@ impl LibraryStore {
             if let Some(book) = self.books.iter_mut().find(|book| book.path_key == key) {
                 if book.hidden {
                     continue;
+                }
+                // 命中扫描结果 = 它确实在这个根下；导入书后来被放进下载目录也在这里自愈。
+                if book.source_root.as_deref() != Some(root_key.as_str()) {
+                    book.source_root = Some(root_key.clone());
+                    self.dirty = true;
                 }
                 // 用元组比较而不是逐字段 `!=`：两个同形字段分开写会触发
                 // `suspicious_operation_groupings`（怀疑写反了），元组形式等价且免掉 allow。
@@ -234,6 +248,7 @@ impl LibraryStore {
                         .iter()
                         .any(|other| other.path_key == book.path_key) =>
                 {
+                    let book = book.with_source_root(scan_root);
                     meta_ids.push(book.id.clone());
                     self.books.push(book);
                     self.dirty = true;
@@ -246,9 +261,20 @@ impl LibraryStore {
         }
 
         for book in &mut self.books {
+            // `source_root` 显式记录归属；旧数据没有它时按路径段做一次启发式判定。
+            let within_root = match &book.source_root {
+                Some(root) => root == &root_key,
+                None => path_key_is_within(&book.path_key, &root_key),
+            };
+            // 旧数据自愈：位于本次扫描根内但没记录根的书补上。
+            if book.source_root.is_none() && within_root {
+                book.source_root = Some(root_key.clone());
+                self.dirty = true;
+            }
+            // 只有属于本根的书才用「不在扫描结果里」推断缺失；别的根（或导入）回落到磁盘判定。
             let missing = match book.origin {
-                BookOrigin::Downloaded => !present.contains(&book.path_key),
-                BookOrigin::Imported => !Path::new(&book.path).exists(),
+                BookOrigin::Downloaded if within_root => !present.contains(&book.path_key),
+                _ => !Path::new(&book.path).exists(),
             };
             if book.missing != missing {
                 book.missing = missing;
@@ -666,7 +692,7 @@ mod tests {
 
         let path = dir.path().join("a.txt");
         std::fs::write(&path, b"one").unwrap();
-        let _ = store.merge_scan(&[scanned(&path)]);
+        let _ = store.merge_scan(&[scanned(&path)], dir.path());
         assert!(store.is_dirty());
         store.clear_dirty();
         assert!(!store.is_dirty());
@@ -688,7 +714,7 @@ mod tests {
         std::fs::write(&path, b"one").unwrap();
         let mut store = LibraryStore::default();
 
-        let meta_ids = store.merge_scan(&[scanned(&path)]);
+        let meta_ids = store.merge_scan(&[scanned(&path)], dir.path());
         assert_eq!(store.books().len(), 1);
         assert_eq!(meta_ids.len(), 1);
         assert_eq!(store.books()[0].origin, BookOrigin::Downloaded);
@@ -698,7 +724,7 @@ mod tests {
         store.books[0].progress.chapter = 3;
         store.clear_dirty();
 
-        let again = store.merge_scan(&[scanned(&path)]);
+        let again = store.merge_scan(&[scanned(&path)], dir.path());
         assert!(again.is_empty(), "文件未变不应重复提取元数据");
         assert_eq!(store.get(&id).unwrap().progress.chapter, 3);
         assert!(!store.is_dirty());
@@ -710,13 +736,13 @@ mod tests {
         let path = dir.path().join("a.txt");
         std::fs::write(&path, b"one").unwrap();
         let mut store = LibraryStore::default();
-        let _ = store.merge_scan(&[scanned(&path)]);
+        let _ = store.merge_scan(&[scanned(&path)], dir.path());
         let id = store.books()[0].id.clone();
 
-        let _ = store.merge_scan(&[]);
+        let _ = store.merge_scan(&[], dir.path());
         assert!(store.get(&id).unwrap().missing);
 
-        let _ = store.merge_scan(&[scanned(&path)]);
+        let _ = store.merge_scan(&[scanned(&path)], dir.path());
         assert!(!store.get(&id).unwrap().missing);
     }
 
@@ -726,13 +752,13 @@ mod tests {
         let path = dir.path().join("a.txt");
         std::fs::write(&path, b"one").unwrap();
         let mut store = LibraryStore::default();
-        let _ = store.merge_scan(&[scanned(&path)]);
+        let _ = store.merge_scan(&[scanned(&path)], dir.path());
         let id = store.books()[0].id.clone();
         store.set_hidden(&id, true);
 
         // 文件真的变了也不许动隐藏书：既不重新提取元数据，也不刷新文件信息。
         std::fs::write(&path, b"one and more").unwrap();
-        let ids = store.merge_scan(&[scanned(&path)]);
+        let ids = store.merge_scan(&[scanned(&path)], dir.path());
         assert_eq!(ids, Vec::<String>::new());
         let book = store.get(&id).unwrap();
         assert!(book.hidden);
@@ -745,12 +771,12 @@ mod tests {
         let path = dir.path().join("a.txt");
         std::fs::write(&path, b"one").unwrap();
         let mut store = LibraryStore::default();
-        let id = store.merge_scan(&[scanned(&path)]).remove(0);
+        let id = store.merge_scan(&[scanned(&path)], dir.path()).remove(0);
         assert!(store.set_encoding(&id, Some("GBK".to_string())));
 
         // 重新下载成另一个文件：旧的编码标签对新字节未必成立，必须清掉重新探测。
         std::fs::write(&path, b"one and more").unwrap();
-        let _ = store.merge_scan(&[scanned(&path)]);
+        let _ = store.merge_scan(&[scanned(&path)], dir.path());
         let book = store.get(&id).unwrap();
         assert_eq!(book.size_bytes, 12, "书还在，文件信息照旧刷新");
         assert!(book.encoding.is_none(), "文件内容变了，旧编码标签必须清空");
@@ -762,11 +788,11 @@ mod tests {
         let path = dir.path().join("a.txt");
         std::fs::write(&path, b"one").unwrap();
         let mut store = LibraryStore::default();
-        let id = store.merge_scan(&[scanned(&path)]).remove(0);
+        let id = store.merge_scan(&[scanned(&path)], dir.path()).remove(0);
         assert!(store.set_encoding(&id, Some("GBK".to_string())));
 
         // 文件没变就不该清编码：否则每次启动扫描都会把用户的显式选择丢掉。
-        let _ = store.merge_scan(&[scanned(&path)]);
+        let _ = store.merge_scan(&[scanned(&path)], dir.path());
         assert_eq!(
             store.get(&id).and_then(|book| book.encoding.clone()),
             Some("GBK".to_string())
@@ -779,12 +805,12 @@ mod tests {
         let path = dir.path().join("a.txt");
         std::fs::write(&path, b"one").unwrap();
         let mut store = LibraryStore::default();
-        let _ = store.merge_scan(&[scanned(&path)]);
+        let _ = store.merge_scan(&[scanned(&path)], dir.path());
         let id = store.books()[0].id.clone();
 
         // 大小变了就重新提取元数据并刷新文件信息。
         std::fs::write(&path, b"one and more").unwrap();
-        let ids = store.merge_scan(&[scanned(&path)]);
+        let ids = store.merge_scan(&[scanned(&path)], dir.path());
         assert_eq!(ids, vec![id.clone()]);
         assert_eq!(store.get(&id).unwrap().size_bytes, 12);
     }
@@ -799,11 +825,11 @@ mod tests {
         assert_eq!(outcome.added, 1);
         let id = outcome.meta_ids[0].clone();
 
-        let _ = store.merge_scan(&[]);
+        let _ = store.merge_scan(&[], dir.path());
         assert!(!store.get(&id).unwrap().missing, "不在下载目录不等于失效");
 
         std::fs::remove_file(&path).unwrap();
-        let _ = store.merge_scan(&[]);
+        let _ = store.merge_scan(&[], dir.path());
         assert!(store.get(&id).unwrap().missing);
     }
 
@@ -831,7 +857,7 @@ mod tests {
         let path = dir.path().join("a.txt");
         std::fs::write(&path, b"one").unwrap();
         let mut store = LibraryStore::default();
-        let id = store.merge_scan(&[scanned(&path)]).remove(0);
+        let id = store.merge_scan(&[scanned(&path)], dir.path()).remove(0);
 
         store.apply_meta(
             &id,
@@ -863,7 +889,7 @@ mod tests {
         let path = dir.path().join("a.txt");
         std::fs::write(&path, b"one").unwrap();
         let mut store = LibraryStore::default();
-        let id = store.merge_scan(&[scanned(&path)]).remove(0);
+        let id = store.merge_scan(&[scanned(&path)], dir.path()).remove(0);
         assert!(store.remove(&id).is_some());
         assert!(store.books().is_empty());
         assert!(store.remove(&id).is_none());
@@ -875,7 +901,7 @@ mod tests {
         let path = dir.path().join("a.txt");
         std::fs::write(&path, b"one").unwrap();
         let mut store = LibraryStore::default();
-        let id = store.merge_scan(&[scanned(&path)]).remove(0);
+        let id = store.merge_scan(&[scanned(&path)], dir.path()).remove(0);
         store.books[0].chapter_count = Some(10);
 
         store.record_progress(&id, 4, 0.5, crate::config::ReadingMode::Page, false);
@@ -896,7 +922,7 @@ mod tests {
         let path = dir.path().join("a.txt");
         std::fs::write(&path, b"one").unwrap();
         let mut store = LibraryStore::default();
-        let id = store.merge_scan(&[scanned(&path)]).remove(0);
+        let id = store.merge_scan(&[scanned(&path)], dir.path()).remove(0);
 
         assert!(store.add_bookmark(&id, crate::library::Bookmark::new(1, 0.4, "甲".into())));
         assert!(!store.add_bookmark(&id, crate::library::Bookmark::new(1, 0.402, "乙".into())));
@@ -914,7 +940,9 @@ mod tests {
         let old_path = dir.path().join("old.txt");
         std::fs::write(&old_path, b"one").unwrap();
         let mut store = LibraryStore::default();
-        let id = store.merge_scan(&[scanned(&old_path)]).remove(0);
+        let id = store
+            .merge_scan(&[scanned(&old_path)], dir.path())
+            .remove(0);
         store.books[0].progress.chapter = 7;
         store.books[0].missing = true;
         assert!(store.add_bookmark(&id, crate::library::Bookmark::new(1, 0.4, "甲".into())));
@@ -943,7 +971,7 @@ mod tests {
         let path = dir.path().join("a.txt");
         std::fs::write(&path, b"one").unwrap();
         let mut store = LibraryStore::default();
-        let id = store.merge_scan(&[scanned(&path)]).remove(0);
+        let id = store.merge_scan(&[scanned(&path)], dir.path()).remove(0);
         store.clear_dirty();
 
         store.set_favorite(&id, true);
@@ -975,6 +1003,50 @@ mod tests {
             LibraryStore::from_json(br#"{"version": 99, "books": []}"#, dir.path());
         assert!(warning.is_some());
         assert!(store.to_json().is_err());
+    }
+
+    #[test]
+    fn changing_download_dir_does_not_mark_old_books_missing() {
+        let a = tempfile::tempdir().unwrap();
+        let b = tempfile::tempdir().unwrap();
+        let path = a.path().join("a.txt");
+        std::fs::write(&path, b"one").unwrap();
+        let mut store = LibraryStore::default();
+        let id = store.merge_scan(&[scanned(&path)], a.path()).remove(0);
+
+        // 扫描另一个目录：a 里的书还在磁盘上，不能标失效。
+        let _ = store.merge_scan(&[], b.path());
+        let book = store.get(&id).unwrap();
+        assert!(!book.missing, "别的扫描根里的书不能因本次缺席而失效");
+        assert_eq!(
+            book.source_root.as_deref(),
+            Some(normalize_path_key(a.path()).as_str())
+        );
+    }
+
+    #[test]
+    fn same_root_missing_still_works() {
+        let a = tempfile::tempdir().unwrap();
+        let path = a.path().join("a.txt");
+        std::fs::write(&path, b"one").unwrap();
+        let mut store = LibraryStore::default();
+        let id = store.merge_scan(&[scanned(&path)], a.path()).remove(0);
+        std::fs::remove_file(&path).unwrap();
+        let _ = store.merge_scan(&[], a.path());
+        assert!(store.get(&id).unwrap().missing);
+    }
+
+    #[test]
+    fn path_key_within_compares_path_segments() {
+        let root = normalize_path_key(Path::new("D:/books"));
+        assert!(path_key_is_within(
+            &normalize_path_key(Path::new("D:/books/a.txt")),
+            &root
+        ));
+        assert!(!path_key_is_within(
+            &normalize_path_key(Path::new("D:/books2/a.txt")),
+            &root
+        ));
     }
 
     #[test]

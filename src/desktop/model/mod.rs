@@ -28,7 +28,7 @@ mod update_state;
 pub(crate) mod ops;
 
 pub use cover::{CoverEntry, hash_short};
-pub use library_state::{LibraryState, MetaEvent, ScanEvent};
+pub use library_state::{LibraryState, MetaEvent, Scan, ScanEvent};
 pub use list_cache::{ListCache, ListCacheKey, PageKind, filter_signature};
 pub use runtime::build_shared_runtime;
 pub use search_state::{

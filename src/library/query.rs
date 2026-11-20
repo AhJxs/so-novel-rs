@@ -153,6 +153,7 @@ mod tests {
             path: format!("C:/books/{id}.txt"),
             format: BookFormat::Txt,
             origin: BookOrigin::Downloaded,
+            source_root: None,
             title: title.to_string(),
             author: author.to_string(),
             intro: None,
