@@ -667,6 +667,13 @@ impl ReaderPage {
     }
 
     pub(super) fn record_progress(&mut self, cx: &mut Context<Self>) {
+        if matches!(self.mode, ReadingMode::Page)
+            && self.page_cache.is_none()
+            && matches!(self.load_state, LoadState::Ready)
+        {
+            // 翻页模式还没排好页：此刻的 chapter_ratio 是旧布局的量化结果，不写。
+            return;
+        }
         let chapter_count = self
             .content
             .as_ref()
@@ -1484,14 +1491,14 @@ impl ReaderPage {
 
     /// 翻页模式：按当前指纹测一遍本章并分页；指纹没变就直接用缓存。
     fn ensure_pagination(&mut self, window: &Window, cx: &mut Context<Self>) {
+        let Some(viewport_height) = self.viewport_height else {
+            // 还没量到正文视口：用估算高度分页会让页号在探针回报后二次漂移。
+            // 占位视图里带探针，下一帧量到后再排。
+            return;
+        };
         let previous_ratio = self.chapter_ratio;
         let reader = self.reader_config(cx);
         let content_width = self.content_width(f32::from(window.viewport_size().width), cx);
-        // 探针量到的就是可排字区域（裁剪盒没有上下留白），直接用它；
-        // `- 160` 只是首帧探针还没回报时的保守兜底。
-        let viewport_height = self
-            .viewport_height
-            .unwrap_or_else(|| (f32::from(window.viewport_size().height) - 160.0).max(120.0));
         let layout = ReaderLayout::new(
             reader.font_size,
             reader.line_height,
@@ -1659,9 +1666,45 @@ impl ReaderPage {
                 cache.line_height_px,
             )
         }) else {
-            // 还没排好页：给一帧空占位。退回滚动容器会在翻页模式里挂上
+            // 还没排好页：给一帧带探针的占位。退回滚动容器会在翻页模式里挂上
             // `on_scroll`，可能把陈旧的滚动偏移写成进度。
-            return div().flex_1().into_any_element();
+            //
+            // 结构必须与正式布局一致：探针外面是同样的留白内容盒，下面再挂同高的
+            // 页脚占位。少了页脚，探针会把页脚高度也算进正文视口，首排永远偏高、
+            // 页号在正式布局出来后还要再跳一次；整章一页放得下的书还会被记成已读完。
+            let probe = content_view::viewport_probe(
+                cx.entity().downgrade(),
+                self.viewport_measured.clone(),
+            );
+            return div()
+                .flex_1()
+                .min_w_0()
+                .min_h_0()
+                .flex()
+                .flex_col()
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .min_h_0()
+                        .flex()
+                        .flex_col()
+                        .py(px(COLUMN_PADDING))
+                        .child(
+                            div()
+                                .relative()
+                                .flex_1()
+                                .min_w_0()
+                                .min_h_0()
+                                .overflow_hidden()
+                                .px(px(COLUMN_PADDING))
+                                .child(probe),
+                        ),
+                )
+                // `invisible()` 是 `Visibility::Hidden`：保留布局、不绘制。
+                // 不用 `hidden()` —— 那是 `display: none`，页脚高度会消失。
+                .child(div().child(self.render_page_nav(1, 1, cx)).invisible())
+                .into_any_element();
         };
         let Some(content) = self.content.as_ref() else {
             return div().flex_1().into_any_element();
