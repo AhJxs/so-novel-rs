@@ -17,7 +17,7 @@ pub(super) fn load(
 ) -> Result<SourceBook, ToolError> {
     let bytes = std::fs::read(path)?;
     let (text, _encoding) = decode_bytes(&bytes, opts.source_encoding);
-    let paragraphs = paragraphs_from_text(&text);
+    let paragraphs = paragraphs_from_text(&text, regex);
     if paragraphs.is_empty() {
         return Err(ToolError::NoContent);
     }
@@ -30,24 +30,30 @@ pub(super) fn load(
     })
 }
 
-fn paragraphs_from_text(text: &str) -> Vec<String> {
+fn paragraphs_from_text(text: &str, regex: &Regex) -> Vec<String> {
     let has_blank_line = text.lines().any(|line| line.trim().is_empty());
     let mut paragraphs = Vec::new();
     if has_blank_line {
         let mut current: Vec<&str> = Vec::new();
+        let flush = |current: &mut Vec<&str>, paragraphs: &mut Vec<String>| {
+            if !current.is_empty() {
+                paragraphs.push(current.join("\n").trim().to_string());
+                current.clear();
+            }
+        };
         for line in text.lines() {
-            if line.trim().is_empty() {
-                if !current.is_empty() {
-                    paragraphs.push(current.join("\n").trim().to_string());
-                    current.clear();
-                }
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                flush(&mut current, &mut paragraphs);
+            } else if regex.is_match(trimmed) {
+                // 标题行必须独占一段，否则 split_chapters 的单行判据会漏掉它。
+                flush(&mut current, &mut paragraphs);
+                paragraphs.push(trimmed.to_string());
             } else {
                 current.push(line.trim_end());
             }
         }
-        if !current.is_empty() {
-            paragraphs.push(current.join("\n").trim().to_string());
-        }
+        flush(&mut current, &mut paragraphs);
     } else {
         for line in text.lines() {
             let line = line.trim();
@@ -102,6 +108,28 @@ mod tests {
         assert_eq!(book.chapters.len(), 1);
         assert_eq!(book.chapters[0].title, "无空行");
         assert_eq!(book.chapters[0].paragraphs, vec!["第一段", "第二段"]);
+    }
+
+    #[test]
+    fn heading_is_not_glued_to_following_body() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("novel.txt");
+        // 标题后没有空行：中文小说最常见的排版。
+        std::fs::write(&path, "第一章 起\n正文甲\n\n正文乙\n第二章 到\n正文丙\n").unwrap();
+
+        let book = load_path(
+            &path,
+            &LoadOptions {
+                source_encoding: Some(encoding_rs::UTF_8),
+                chapter_regex: None,
+            },
+        )
+        .unwrap();
+
+        let titles: Vec<_> = book.chapters.iter().map(|c| c.title.as_str()).collect();
+        assert_eq!(titles, vec!["第一章 起", "第二章 到"]);
+        assert_eq!(book.chapters[0].paragraphs, vec!["正文甲", "正文乙"]);
+        assert_eq!(book.chapters[1].paragraphs, vec!["正文丙"]);
     }
 
     #[test]
