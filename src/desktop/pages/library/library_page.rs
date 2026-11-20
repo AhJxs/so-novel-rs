@@ -1,7 +1,8 @@
 //! 书架页：封面卡片网格 + 搜索 / 状态筛选 / 收藏开关 / 排序 / 导入 / 重新扫描。
 //!
-//! - 数据全部来自 `AppModel.library.store`，每帧用 `library::visible_books` 过滤排序
-//!   （书架规模是「个人书库」量级，纯计算过滤比维护缓存简单且不会失效）；
+//! - 数据全部来自 `AppModel.library.store`；`render_cache` 以
+//!   `(books_version, query, covers_dir)` 为键缓存可见卡片，数据没变就不重跑
+//!   `visible_books` 的过滤排序与 `CardData::from_book`（含 `is_file()` stat）；
 //! - 卡片点击 → `RootView::open_reader`，通过 `set_open_reader_handler` 注入的回调，
 //!   页面不持有根视图（避免循环强引用）；
 //! - 扫描 / 元数据提取都在后台跑，drain 循环回传后窗口自动重绘。
@@ -34,6 +35,9 @@ pub type OpenReaderFn = Rc<dyn Fn(&str, &mut Window, &mut App)>;
 /// 每批渲染的卡片数；「加载更多」每次追加一批。
 const BATCH: usize = 60;
 
+/// 书架页渲染缓存：`(books_version, query, covers_dir, cards, total)`。
+type RenderCache = (u64, ShelfQuery, Option<PathBuf>, Rc<Vec<CardData>>, usize);
+
 /// 书架页面 entity。
 pub struct LibraryPage {
     /// `dialogs` 子模块也要读写它。
@@ -43,6 +47,11 @@ pub struct LibraryPage {
     scroll: ScrollHandle,
     /// 当前渲染的卡片上限。
     visible_limit: usize,
+    /// `(books_version, query, covers_dir, cards, total)`：键没变就复用上一帧的卡片。
+    ///
+    /// 缓存里是**全部**可见书的卡片；`visible_limit` 在渲染时才裁剪，
+    /// 所以「加载更多」不会重建缓存。过滤排序与 `is_file()` 磁盘 stat 只在键变化时发生。
+    render_cache: Option<RenderCache>,
     /// 打开阅读器的回调（`dialogs` 的「继续阅读」也要用）。
     pub(super) open_reader: Option<OpenReaderFn>,
 }
@@ -76,6 +85,7 @@ impl LibraryPage {
             search_input,
             scroll: ScrollHandle::new(),
             visible_limit: BATCH,
+            render_cache: None,
             open_reader: None,
         }
     }
@@ -471,7 +481,10 @@ impl LibraryPage {
     }
 
     /// 卡片网格 + 「加载更多」；整块纵向滚动。
-    fn render_grid(&self, cards: Vec<CardData>, total: usize, cx: &Context<Self>) -> AnyElement {
+    ///
+    /// `cards` 是本帧要画的那一段（已按 `visible_limit` 裁剪），从缓存借用，
+    /// 只有每个可见项的 `CardData` 复制一份交给 `BookCard`（元素不能借用）。
+    fn render_grid(&self, cards: &[CardData], total: usize, cx: &Context<Self>) -> AnyElement {
         let more = total > cards.len();
         let mut grid = div().flex().flex_wrap().gap_5().w_full().pb_2();
         for data in cards {
@@ -490,8 +503,9 @@ impl LibraryPage {
                     });
                     cx.notify();
                 }));
-            let menu = Self::book_menu(&data, cx);
-            grid = grid.child(BookCard::new(data, on_open, on_favorite).with_context_menu(menu));
+            let menu = Self::book_menu(data, cx);
+            grid = grid
+                .child(BookCard::new(data.clone(), on_open, on_favorite).with_context_menu(menu));
         }
 
         div()
@@ -526,8 +540,9 @@ impl Render for LibraryPage {
 
         let limit = self.visible_limit;
         let (
-            cards,
-            total,
+            version,
+            query,
+            covers,
             has_books,
             scan_error,
             scan_in_flight,
@@ -536,19 +551,11 @@ impl Render for LibraryPage {
             status,
             favorite_only,
         ) = self.model.read_with(cx, |model, _cx| {
-            let covers_dir = model.covers_dir();
-            let visible = visible_books(model.library.store.books(), &model.library.query);
-            let total = visible.len();
-            let cards: Vec<CardData> = visible
-                .iter()
-                .take(limit)
-                .map(|book| CardData::from_book(book, covers_dir.as_deref()))
-                .collect();
-            let has_books = !model.library.store.books().is_empty();
             (
-                cards,
-                total,
-                has_books,
+                model.library.books_version,
+                model.library.query.clone(),
+                model.covers_dir(),
+                !model.library.store.books().is_empty(),
                 model.library.last_error.clone(),
                 model.library.scan_in_flight,
                 model.config.download.download_path.clone(),
@@ -558,10 +565,35 @@ impl Render for LibraryPage {
             )
         });
 
+        // 数据没变（版本号 / 查询 / 封面目录都相同）就复用上一帧的卡片：
+        // 过滤排序和 `CardData::from_book` 里的 `is_file()` stat 都不再每帧发生。
+        let cached = self.render_cache.as_ref().and_then(
+            |(cached_version, cached_query, cached_covers, cards, total)| {
+                (*cached_version == version && *cached_query == query && cached_covers == &covers)
+                    .then(|| (Rc::clone(cards), *total))
+            },
+        );
+        let (cards, total) = if let Some(hit) = cached {
+            hit
+        } else {
+            let (cards, total) = self.model.read_with(cx, |model, _cx| {
+                let visible = visible_books(model.library.store.books(), &model.library.query);
+                let total = visible.len();
+                let cards: Vec<CardData> = visible
+                    .iter()
+                    .map(|book| CardData::from_book(book, covers.as_deref()))
+                    .collect();
+                (Rc::new(cards), total)
+            });
+            self.render_cache = Some((version, query, covers, Rc::clone(&cards), total));
+            (cards, total)
+        };
+
         let body: AnyElement = if total == 0 {
             Self::render_empty(has_books, cx)
         } else {
-            self.render_grid(cards, total, cx)
+            let shown = &cards[..limit.min(cards.len())];
+            self.render_grid(shown, total, cx)
         };
 
         v_flex()

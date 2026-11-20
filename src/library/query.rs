@@ -71,7 +71,7 @@ impl ShelfSort {
 }
 
 /// 书架视图查询：搜索 + 状态筛选 + 收藏开关 + 排序。
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ShelfQuery {
     /// 已 `trim`；空串 = 不过滤。
     pub text: String,
@@ -171,6 +171,29 @@ mod tests {
             progress: ReadingProgress::default(),
             bookmarks: Vec::new(),
         }
+    }
+
+    #[test]
+    fn query_equality_covers_all_filters() {
+        let a = ShelfQuery::default();
+        let mut b = a.clone();
+        assert_eq!(a, b);
+        b.favorite_only = true;
+        assert_ne!(a, b);
+
+        // 缓存键是整份查询：任一筛选 / 排序 / 搜索词变化都必须算「不等」。
+        let mut text = a.clone();
+        text.text = "斗破".to_string();
+        assert_ne!(a, text);
+        let mut status = a.clone();
+        status.status = ShelfStatusFilter::Finished;
+        assert_ne!(a, status);
+        let mut favorite = a.clone();
+        favorite.favorite_only = true;
+        assert_ne!(a, favorite);
+        let mut sort = a.clone();
+        sort.sort = ShelfSort::Size;
+        assert_ne!(a, sort);
     }
 
     #[test]

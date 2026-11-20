@@ -20,6 +20,10 @@ const COVER_W: f32 = 140.0;
 const COVER_H: f32 = 210.0;
 
 /// 卡片渲染所需的只读快照 —— 每帧只取这些字段，不 clone 整本 `Book`。
+///
+/// `Clone` 只服务于书架页缓存：缓存里的卡片每个可见项复制一份交给 `BookCard`（元素必须是
+/// `'static`，不能借用），代价是几次字符串拷贝，不再有磁盘 stat。
+#[derive(Clone)]
 pub(super) struct CardData {
     pub id: String,
     pub title: String,
