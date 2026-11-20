@@ -1,5 +1,6 @@
 // `PickFolderListener` 用到的 `Rc`。
 use std::rc::Rc;
+use std::time::Duration;
 
 use gpui_kit::component::group_box::GroupBoxVariant;
 use gpui_kit::component::input::{InputEvent, InputState, TextareaState};
@@ -34,6 +35,9 @@ pub struct SettingsPage {
     /// 「下载目录」输入框右侧「浏览」按钮的 click listener —— render 闭包拿不到
     /// `Context<Self>`，所以 `new` 里 `cx.listener(...)` 建一次缓存成 `Rc<dyn Fn>`。
     pick_folder_listener: PickFolderListener,
+
+    /// 合并写盘代次：输入/滑块每变化一次 +1，400ms 计时器醒来只写自己那一代。
+    persist_generation: u64,
 }
 
 /// 构造一个可搜索的主题 `SelectState`。用函数而不是闭包：闭包捕获 `window: &mut Window`
@@ -107,18 +111,22 @@ impl SettingsPage {
                 .default_value(initial_download_path.clone())
         });
 
-        // 前后对比避免无意义 persist（InputState 第一次建也会发 Change）。
-        cx.subscribe(&download_path_input, |this, input, event, cx| {
-            if matches!(event, InputEvent::Change) {
+        // 前后对比避免无意义写盘（InputState 第一次建也会发 Change）。
+        // 打字期间只改内存 config + 排一个 400ms 计时器，停止输入后才真正写一次文件；
+        // 单行输入按回车表示输完了，立即落盘（失焦事件组件不保证上报，不依赖它）。
+        cx.subscribe(&download_path_input, |this, input, event, cx| match event {
+            InputEvent::Change => {
                 let new_val = input.read(cx).value().to_string();
                 let cur = this.model.read(cx).config.download.download_path.clone();
                 if new_val != cur {
                     this.model.update(cx, |m, _| {
                         m.config.download.download_path = new_val;
-                        m.persist_settings();
                     });
+                    this.schedule_persist(cx);
                 }
             }
+            InputEvent::PressEnter { .. } => this.flush_persist(cx),
+            InputEvent::Focus | InputEvent::Blur => {}
         })
         .detach();
 
@@ -138,6 +146,7 @@ impl SettingsPage {
                 .default_value(initial_qidian_cookie.clone())
         });
 
+        // 多行输入：回车是换行，不能当"输完"信号，只能靠 400ms 计时器合并落盘。
         cx.subscribe(&qidian_cookie_input, |this, input, event, cx| {
             if matches!(event, InputEvent::Change) {
                 let new_val = input.read(cx).value().to_string();
@@ -145,8 +154,8 @@ impl SettingsPage {
                 if new_val != cur {
                     this.model.update(cx, |m, _| {
                         m.config.cookie.qidian_cookie = new_val;
-                        m.persist_settings();
                     });
+                    this.schedule_persist(cx);
                 }
             }
         })
@@ -167,22 +176,24 @@ impl SettingsPage {
                 .default_value(initial_font_size)
         });
 
-        // 拖拽每 px 触发：写 config + persist（500ms debounce 合并）+ apply_font_size。
-        // 字号写入 `Theme.font_size` 后 `Root::render` 下一帧用新值设 rem_size → 全 app 缩放。
+        // 拖拽每 px 触发：写 config + apply_font_size，写盘按 400ms 合并（拖完才落一次）；
+        // 松开滑块视为一次操作结束，立即落盘。字号写入 `Theme.font_size` 后
+        // `Root::render` 下一帧用新值设 rem_size → 全 app 缩放。
         cx.subscribe(&font_size_state, |this, _state, event, cx| {
-            // 连续拖拽期间只关心 `Change`，`Release` 不携带新值（最后一次 Change 已落盘）。
-            let SliderEvent::Change(value) = event else {
-                return;
-            };
-            let size = match *value {
-                SliderValue::Single(v) => v,
-                SliderValue::Range(_, end) => end,
-            };
-            this.model.update(cx, |m, _| {
-                m.config.global.font_size = size;
-                m.persist_settings();
-            });
-            themes::apply_font_size(size, cx);
+            match event {
+                SliderEvent::Change(value) => {
+                    let size = match *value {
+                        SliderValue::Single(v) => v,
+                        SliderValue::Range(_, end) => end,
+                    };
+                    this.model
+                        .update(cx, |m, _| m.config.global.font_size = size);
+                    themes::apply_font_size(size, cx);
+                    this.schedule_persist(cx);
+                }
+                // `Release` 在拖拽/点击结束（以及键盘每步）后触发一次，作为显式落盘点。
+                SliderEvent::Release(_) => this.flush_persist(cx),
+            }
         })
         .detach();
 
@@ -198,7 +209,37 @@ impl SettingsPage {
             pick_folder_listener,
             font_size_state,
             qidian_cookie_input,
+            persist_generation: 0,
         }
+    }
+
+    /// 输入框 / 滑块变化后调：把真正写盘推迟到停止输入 400ms，期间再多变化也只写一次。
+    ///
+    /// 每次调用 +1 代次；计时器醒来时若代次已变说明后面还有输入/显式 flush，直接放弃。
+    fn schedule_persist(&mut self, cx: &Context<Self>) {
+        self.persist_generation = self.persist_generation.wrapping_add(1);
+        let generation = self.persist_generation;
+        let model = self.model.clone();
+        cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(Duration::from_millis(400))
+                .await;
+            let _ = this.update(cx, |page, cx| {
+                if page.persist_generation != generation {
+                    return;
+                }
+                model.update(cx, |model, _cx| model.persist_settings());
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// 显式落盘（单行输入回车、松开字号滑块）：先 +1 代次让在途计时器失效，再立即写。
+    fn flush_persist(&mut self, cx: &mut Context<Self>) {
+        self.persist_generation = self.persist_generation.wrapping_add(1);
+        self.model.update(cx, |model, _cx| model.persist_settings());
+        cx.notify();
     }
 
     /// 把当前 `config.global.theme_pref` 应用到全局 Theme + 重应用字号（`apply_theme_pref` 内部

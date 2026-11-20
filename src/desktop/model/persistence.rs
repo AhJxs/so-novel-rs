@@ -22,9 +22,12 @@ impl AppModel {
 
     /// 把当前 config 写回 config.toml。
     ///
-    /// **Auto-save 模式**: 每个 setter 改完字段后立即调本方法, 没有"立即保存"按钮、
-    /// 没有 dirty 概念。成功静默, 失败弹 error notification。单次写盘只有几 ms,
-    /// 暂不做 debounce。
+    /// **Auto-save 模式**: 没有"立即保存"按钮、没有 dirty 概念。成功静默, 失败弹
+    /// error notification。
+    ///
+    /// 调用时机: 设置页的下载目录 / Cookie 输入与字号滑块由页面按 400ms 合并写
+    /// （`SettingsPage::schedule_persist`, 回车 / 松开滑块 / 退出时立即 flush）;
+    /// 其余 setter（开关、主题选择等）低频且语义明确, 改完立即调本方法。
     pub fn persist_settings(&mut self) {
         if let Err(e) = crate::desktop::model::ops::settings::persist_settings(
             &self.config,
