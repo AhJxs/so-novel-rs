@@ -32,7 +32,7 @@ pub fn cover_file_name(id: &str, bytes: &[u8]) -> Option<String> {
     Some(format!("{id}-{:016x}.{ext}", hash64(bytes)))
 }
 
-/// 封面缓存的最大尺寸：卡片尺寸的 2×，给高 DPI 屏留余量。
+/// 封面缓存的最大尺寸：限制在 560×840 内，覆盖高 DPI 卡片显示。
 const MAX_COVER_WIDTH: u32 = 560;
 const MAX_COVER_HEIGHT: u32 = 840;
 
@@ -56,7 +56,7 @@ fn shrink_cover(bytes: &[u8]) -> Option<Vec<u8>> {
 
 /// 把封面字节写入缓存目录，返回文件名；目录不可写或格式不认识时返回 `None`。
 ///
-/// 超过 2× 卡片尺寸的封面会先按比例缩小并重编码为 PNG。
+/// 超过 560×840 的封面会先按比例缩小并重编码为 PNG。
 #[must_use]
 pub fn write_cover(dir: &Path, id: &str, bytes: &[u8]) -> Option<String> {
     // 认不出的格式直接丢弃，缩放也只对能解码的光栅图生效。
@@ -211,7 +211,7 @@ mod tests {
         let decoded = image::open(dir.path().join(file)).unwrap();
         assert!(
             decoded.width() <= 560 && decoded.height() <= 840,
-            "应缩放到 2× 卡片尺寸"
+            "应缩放到 560×840 内"
         );
     }
 

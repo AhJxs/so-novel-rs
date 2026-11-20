@@ -27,54 +27,30 @@ pub fn covers_dir_for(download_path: &str) -> Option<PathBuf> {
     cache_root(download_path).map(|root| root.join(COVERS_DIR_NAME))
 }
 
-/// 本进程内已经处理过的目录集合。
-///
-/// 之前这里是「进程级 `AtomicBool`」，但 `attrib +h` 对不存在的路径也会退出 0（本机实测），
-/// 只要任何渲染路径在目录创建前调过一次 `hide_dir`，布尔就被置上，之后真正的目录永远不再被隐藏。
-/// 改成按路径记录：每个目录各自只尝试一次，不存在的路径根本不进入集合。
 #[cfg(target_os = "windows")]
-fn hidden_set() -> &'static std::sync::Mutex<std::collections::HashSet<PathBuf>> {
-    static HIDDEN: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<PathBuf>>> =
-        std::sync::OnceLock::new();
-    HIDDEN.get_or_init(|| std::sync::Mutex::new(std::collections::HashSet::new()))
-}
+const FILE_ATTRIBUTE_HIDDEN: u32 = 0x0000_0002;
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
-/// 某个路径是否已登记为「尝试过隐藏」。只给 Windows 测试用，不对外暴露。
+/// 给缓存根目录设隐藏属性（Windows）。仓库禁 `unsafe`，所以调系统自带的 `attrib`。
 ///
-/// `cfg(test)` 一起卡上：非测试构建里它没有被调用点，否则 `dead_code` 会让
-/// `clippy --all-targets -- -D warnings` 失败。
-#[cfg(all(target_os = "windows", test))]
-fn is_marked_hidden(dir: &Path) -> bool {
-    hidden_set()
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .contains(dir)
-}
-
-/// 给缓存根目录设隐藏属性（Windows）。仓库禁 `unsafe`，所以调系统自带的 `attrib`；
-/// 每个目录每次进程运行最多成功发起一次，点开头的名字在其它平台已经足够。
+/// 真实文件属性是唯一真相：不存在的路径直接返回（`attrib` 对缺失路径也返回 0），
+/// 已隐藏则跳过。目录被删掉重建后属性随之丢失，下次调用会重新隐藏，不需要进程内状态。
 #[cfg(target_os = "windows")]
 pub fn hide_dir(dir: &Path) {
+    use std::os::windows::fs::MetadataExt as _;
     use std::os::windows::process::CommandExt as _;
     use std::process::Command;
 
-    // `attrib` 对不存在的路径也返回 0（本机实测），不能靠退出码判断；
-    // 目录不存在时直接返回，避免把路径错误地登记成「已隐藏」。
-    if !dir.exists() {
+    let Ok(metadata) = std::fs::metadata(dir) else {
+        return; // 不存在的路径不进任何状态（`attrib` 对缺失路径也返回 0）。
+    };
+    if metadata.file_attributes() & FILE_ATTRIBUTE_HIDDEN != 0 {
         return;
     }
-    {
-        let mut hidden = hidden_set()
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if !hidden.insert(dir.to_path_buf()) {
-            return;
-        }
-    }
-    // GUI 子系统里不弹控制台窗口。
     let mut command = Command::new("attrib");
     command.arg("+h").arg(dir);
-    command.creation_flags(0x0800_0000);
+    command.creation_flags(CREATE_NO_WINDOW);
     let _ = command.status();
 }
 
@@ -90,6 +66,13 @@ mod tests {
     #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
 
     use super::*;
+
+    /// 只给 Windows 测试用：读真实文件属性判断目录是否隐藏。
+    #[cfg(target_os = "windows")]
+    fn is_hidden(dir: &Path) -> bool {
+        use std::os::windows::fs::MetadataExt as _;
+        std::fs::metadata(dir).is_ok_and(|metadata| metadata.file_attributes() & 0x2 != 0)
+    }
 
     #[test]
     fn blank_download_path_has_no_cache() {
@@ -121,11 +104,18 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let missing = dir.path().join("missing");
         hide_dir(&missing);
-        assert!(!is_marked_hidden(&missing), "不存在的路径不能进已隐藏集合");
+        assert!(!missing.exists());
 
         let real = dir.path().join("real");
         std::fs::create_dir(&real).unwrap();
         hide_dir(&real);
-        assert!(is_marked_hidden(&real), "真实目录必须被登记");
+        assert!(is_hidden(&real), "真实目录必须被隐藏");
+
+        // 删掉重建：进程内没有残留状态，新建目录先不带隐藏属性。
+        std::fs::remove_dir(&real).unwrap();
+        std::fs::create_dir(&real).unwrap();
+        assert!(!is_hidden(&real), "重建后不能残留隐藏状态");
+        hide_dir(&real);
+        assert!(is_hidden(&real), "重建后的目录必须再次被隐藏");
     }
 }

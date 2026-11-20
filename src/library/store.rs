@@ -21,12 +21,13 @@ use crate::error::{AppError, AppResult};
 /// 当前书架文件版本。
 pub const LIBRARY_VERSION: u32 = 1;
 
-/// `path_key` 是否位于 `root_key` 下。两者都必须是 `normalize_path_key` 的输出。
+/// `path_key` 是否是 `root_key` 的直接子项。
 ///
-/// 按路径段比较（`Path::starts_with`），不是字符串前缀：`D:\books2` 不能命中 `D:\books`。
+/// 扫描不递归（`scan_download_dir` 只读根目录），所以只有直接子项会被发现；
+/// 两者都必须是 `normalize_path_key` 的输出。
 #[must_use]
-pub fn path_key_is_within(path_key: &str, root_key: &str) -> bool {
-    Path::new(path_key).starts_with(Path::new(root_key))
+pub fn path_key_is_child_of(path_key: &str, root_key: &str) -> bool {
+    Path::new(path_key).parent() == Some(Path::new(root_key))
 }
 
 /// 书架 blob 的根结构。
@@ -262,10 +263,10 @@ impl LibraryStore {
         }
 
         for book in &mut self.books {
-            // `source_root` 显式记录归属；旧数据没有它时按路径段做一次启发式判定。
+            // `source_root` 显式记录归属；旧数据没有它时按直接子项做一次启发式判定。
             let within_root = match &book.source_root {
                 Some(root) => root == &root_key,
-                None => path_key_is_within(&book.path_key, &root_key),
+                None => path_key_is_child_of(&book.path_key, &root_key),
             };
             // 旧数据自愈：位于本次扫描根内但没记录根的书补上。
             if book.source_root.is_none() && within_root {
@@ -569,7 +570,7 @@ impl LibraryStore {
         let root_key = scan_root.map(normalize_path_key);
         let within_root = root_key
             .as_deref()
-            .is_some_and(|root_key| path_key_is_within(&fresh.path_key, root_key));
+            .is_some_and(|root_key| path_key_is_child_of(&fresh.path_key, root_key));
         let book = &mut self.books[index];
         book.id = fresh.id;
         book.path_key = fresh.path_key;
@@ -1075,6 +1076,56 @@ mod tests {
         let book = store.get(&new_id).unwrap();
         assert_eq!(book.origin, BookOrigin::Imported);
         assert!(book.source_root.is_none());
+        let _ = store.merge_scan(&[], a.path());
+        assert!(!store.get(&new_id).unwrap().missing);
+    }
+
+    #[test]
+    fn relink_into_scan_root_subdir_stays_imported_and_not_missing() {
+        let a = tempfile::tempdir().unwrap();
+        let b = tempfile::tempdir().unwrap();
+        let sub = a.path().join("sub");
+        std::fs::create_dir(&sub).unwrap();
+        let sub_file = sub.join("new.txt");
+        std::fs::write(&sub_file, b"one").unwrap();
+        let b_book = b.path().join("b.txt");
+        std::fs::write(&b_book, b"one").unwrap();
+
+        let mut store = LibraryStore::default();
+        let id = store.merge_scan(&[scanned(&b_book)], b.path()).remove(0);
+
+        let new_id = store.relink(&id, &sub_file, Some(a.path())).unwrap();
+        let book = store.get(&new_id).unwrap();
+        assert_eq!(book.origin, BookOrigin::Imported);
+        assert!(book.source_root.is_none());
+        let _ = store.merge_scan(&[], a.path());
+        assert!(
+            !store.get(&new_id).unwrap().missing,
+            "子目录里的文件扫描根直接列不出来，不能按缺席标失效"
+        );
+    }
+
+    #[test]
+    fn relink_into_scan_root_root_stays_downloaded_and_not_missing() {
+        let a = tempfile::tempdir().unwrap();
+        let b = tempfile::tempdir().unwrap();
+        let root_file = a.path().join("new.txt");
+        std::fs::write(&root_file, b"one").unwrap();
+        let b_book = b.path().join("b.txt");
+        std::fs::write(&b_book, b"one").unwrap();
+
+        let mut store = LibraryStore::default();
+        let id = store.merge_scan(&[scanned(&b_book)], b.path()).remove(0);
+
+        let new_id = store.relink(&id, &root_file, Some(a.path())).unwrap();
+        let book = store.get(&new_id).unwrap();
+        assert_eq!(book.origin, BookOrigin::Downloaded);
+        assert_eq!(
+            book.source_root.as_deref(),
+            Some(normalize_path_key(a.path()).as_str())
+        );
+        let _ = store.merge_scan(&[scanned(&root_file)], a.path());
+        assert!(!store.get(&new_id).unwrap().missing);
     }
 
     #[test]
@@ -1149,13 +1200,17 @@ mod tests {
     }
 
     #[test]
-    fn path_key_within_compares_path_segments() {
+    fn path_key_child_of_matches_direct_children_only() {
         let root = normalize_path_key(Path::new("D:/books"));
-        assert!(path_key_is_within(
+        assert!(path_key_is_child_of(
             &normalize_path_key(Path::new("D:/books/a.txt")),
             &root
         ));
-        assert!(!path_key_is_within(
+        assert!(!path_key_is_child_of(
+            &normalize_path_key(Path::new("D:/books/sub/a.txt")),
+            &root
+        ));
+        assert!(!path_key_is_child_of(
             &normalize_path_key(Path::new("D:/books2/a.txt")),
             &root
         ));

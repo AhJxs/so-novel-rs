@@ -23,6 +23,6 @@ pub use paths::{
 };
 pub use query::{ShelfQuery, ShelfSort, ShelfStatusFilter, visible_books};
 pub use scan::{ScannedFile, scan_download_dir};
-pub use store::{AppliedMeta, LIBRARY_VERSION, LibraryStore, path_key_is_within};
+pub use store::{AppliedMeta, LIBRARY_VERSION, LibraryStore, path_key_is_child_of};
 
 pub use crate::config::ReadingMode;

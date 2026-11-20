@@ -290,7 +290,7 @@ impl AppModel {
         // 这里不 trim：扫描器不 trim，比较要回答的是「下一次扫描会不会找到这个文件」。
         let root = crate::library::absolute_dir(Path::new(download_path));
         let root_key = crate::library::normalize_path_key(&root);
-        crate::library::path_key_is_within(&book.path_key, &root_key)
+        crate::library::path_key_is_child_of(&book.path_key, &root_key)
     }
 
     /// 移出书架：扫描范围内的书只隐藏（重扫不会再加回），范围外直接删记录。

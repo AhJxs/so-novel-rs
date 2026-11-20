@@ -37,7 +37,10 @@ const TARGET_ENCODINGS: &[&str] = &["UTF-8", "GBK", "GB18030", "Big5", "Big5-HKS
 
 /// 工具产出是否落在下载目录里 —— 落在里面书库扫描才能发现，需要清掉扫描哨兵。
 ///
-/// 比较根与扫描共用 `absolute_dir`；只有空值判断用 trim，扫描器本身不 trim。
+/// 扫描不递归，只认下载目录的**直接子项**，所以比较的是产出的父目录与下载根。
+/// 两侧都按 `normalize_path_key` 归一：Windows 上 `Path` 相等大小写敏感，
+/// 直接用 `Path` 比较会漏判。
+#[must_use]
 fn output_lands_in_download_dir(output: &Path, download_path: &str) -> bool {
     if download_path.trim().is_empty() {
         return false;
@@ -45,7 +48,8 @@ fn output_lands_in_download_dir(output: &Path, download_path: &str) -> bool {
     let Some(parent) = output.parent() else {
         return false;
     };
-    parent == crate::library::absolute_dir(Path::new(download_path)).as_path()
+    crate::library::normalize_path_key(parent)
+        == crate::library::normalize_path_key(Path::new(download_path))
 }
 
 /// 三个工具。
