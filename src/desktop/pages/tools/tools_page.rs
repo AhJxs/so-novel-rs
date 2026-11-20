@@ -189,16 +189,29 @@ impl ToolsPage {
                 }
                 let detect_path = path;
                 cx.spawn(async move |this, async_cx| {
+                    // 探测可能跨越用户改选文件；后台只拿克隆，回写前再比对当前路径。
+                    let probe = detect_path.clone();
                     let detected = async_cx
                         .background_executor()
-                        .spawn(async move { detect_file_encoding(&detect_path) })
+                        .spawn(async move { detect_file_encoding(&probe) })
                         .await;
                     if let Ok(encoding) = detected {
                         let name: SharedString = encoding.name().into();
-                        let _ = this.update(async_cx, |this, cx| {
-                            this.forms[kind.index()].detected = Some(name);
+                        let Ok(applied) = this.update(async_cx, |this, cx| {
+                            let form = &mut this.forms[kind.index()];
+                            // 先结束对 `form.source` 的不可变借用，再写 `form.detected`。
+                            let still_current =
+                                detected_matches(form.source.as_deref(), &detect_path);
+                            if !still_current {
+                                return false;
+                            }
+                            form.detected = Some(name);
                             cx.notify();
-                        });
+                            true
+                        }) else {
+                            return;
+                        };
+                        let _ = applied;
                     }
                 })
                 .detach();
@@ -491,6 +504,7 @@ impl ToolsPage {
                     Button::new(("tool-pick-source", self.kind.index() as u64))
                         .flex_none()
                         .label(t!("Tools.pick.choose_file"))
+                        .disabled(form.running)
                         .on_click(cx.listener(|this, _, _window, cx| this.pick_source(cx))),
                 ),
         );
@@ -520,6 +534,7 @@ impl ToolsPage {
                     Button::new(("tool-pick-out", self.kind.index() as u64))
                         .flex_none()
                         .label(t!("Tools.pick.choose_folder"))
+                        .disabled(form.running)
                         .on_click(cx.listener(|this, _, _window, cx| this.pick_out_dir(cx))),
                 ),
             cx,
@@ -839,6 +854,14 @@ fn supports_chapter_regex(path: &Path) -> bool {
     )
 }
 
+/// 后台编码探测的结果能否回写：当前选中的源文件必须仍是发起探测的那个。
+///
+/// 探测期间用户可能改选了别的文件，旧结果不能盖到新文件上；`form.source`
+/// 始终由 `pick_source` 写入同一份 `PathBuf`，因此精确比较即可。
+fn detected_matches(current: Option<&Path>, probe: &Path) -> bool {
+    current == Some(probe)
+}
+
 /// 空串 / `auto` 交给后端探测。
 fn normalize_encoding(value: &str) -> Option<String> {
     let trimmed = value.trim();
@@ -860,6 +883,22 @@ mod tests {
     #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
 
     use super::*;
+
+    #[test]
+    fn detected_matches_only_when_selection_is_unchanged() {
+        let probe = Path::new("books").join("a.txt");
+        let other = Path::new("books").join("b.txt");
+
+        assert!(detected_matches(Some(&probe), &probe));
+        assert!(
+            !detected_matches(Some(&other), &probe),
+            "改选文件后旧探测结果不能回写"
+        );
+        assert!(
+            !detected_matches(None, &probe),
+            "没有选中文件时不展示探测结果"
+        );
+    }
 
     #[test]
     fn output_lands_in_download_dir_only_for_direct_children() {
