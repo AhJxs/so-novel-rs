@@ -39,7 +39,10 @@ pub fn load_path(path: &Path, opts: &LoadOptions<'_>) -> Result<SourceBook, Tool
         }
         "html" | "htm" => html::load_file(path, opts, &split::compile_pattern(opts.chapter_regex)?),
         "zip" => html::load_zip(path),
-        "epub" => epub::load(path),
+        "epub" => epub::load(path).map(|mut book| {
+            book.chapters = split::normalize_chapters(book.chapters);
+            book
+        }),
         _ => Err(ToolError::UnsupportedFormat(ext)),
     }
 }

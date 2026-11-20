@@ -81,6 +81,11 @@ pub fn split_chapters(
             });
         }
     }
+    normalize_chapters(chapters)
+}
+
+/// 对任意来源的章节做统一后处理：超长章切块（EPUB 也走这里）。
+pub(crate) fn normalize_chapters(chapters: Vec<SourceChapter>) -> Vec<SourceChapter> {
     split_oversized(chapters)
 }
 
@@ -105,13 +110,15 @@ fn split_oversized(chapters: Vec<SourceChapter>) -> Vec<SourceChapter> {
         let mut current: Vec<String> = Vec::new();
         let mut size = 0_usize;
         for paragraph in chapter.paragraphs {
-            let len = paragraph.chars().count() + 1;
-            if !current.is_empty() && size + len > MAX_CHAPTER_CHARS {
-                parts.push(std::mem::take(&mut current));
-                size = 0;
+            for piece in split_paragraph(&paragraph, MAX_CHAPTER_CHARS) {
+                let len = piece.chars().count() + 1;
+                if size + len > MAX_CHAPTER_CHARS && !current.is_empty() {
+                    parts.push(std::mem::take(&mut current));
+                    size = 0;
+                }
+                current.push(piece);
+                size += len;
             }
-            size += len;
-            current.push(paragraph);
         }
         if !current.is_empty() {
             parts.push(current);
@@ -128,6 +135,45 @@ fn split_oversized(chapters: Vec<SourceChapter>) -> Vec<SourceChapter> {
     out
 }
 
+/// 单段超限时按句末标点切；找不到标点就按第 `limit` 个字符硬切。
+/// 切出的每块不超过 `limit` 个字符（单字符 utf8 长度不影响计数）。
+fn split_paragraph(paragraph: &str, limit: usize) -> Vec<String> {
+    if limit == 0 || paragraph.chars().count() <= limit {
+        return vec![paragraph.to_string()];
+    }
+    let mut out = Vec::new();
+    let mut rest = paragraph;
+    let mut remaining = paragraph.chars().count();
+    while remaining > limit {
+        let mut cut = None;
+        for (chars, (byte, ch)) in rest.char_indices().enumerate() {
+            // 标点后最多带 `limit` 个字符才不超限，因此只在前 `limit` 个字符里找。
+            if chars >= limit {
+                break;
+            }
+            if matches!(ch, '。' | '！' | '？' | '…') {
+                cut = Some(byte + ch.len_utf8());
+            }
+        }
+        let at = cut.unwrap_or_else(|| {
+            rest.char_indices()
+                .nth(limit)
+                .map_or(rest.len(), |(byte, _)| byte)
+        });
+        // 切点来自 `char_indices` / `ch.len_utf8()`，必在字符边界上。
+        let at = at.clamp(1, rest.len());
+        debug_assert!(rest.is_char_boundary(at), "切点必须落在字符边界");
+        let piece = &rest[..at];
+        remaining -= piece.chars().count();
+        out.push(piece.to_string());
+        rest = &rest[at..];
+    }
+    if !rest.is_empty() {
+        out.push(rest.to_string());
+    }
+    out
+}
+
 fn default_regex() -> Regex {
     static RE: LazyLock<Regex> = LazyLock::new(|| {
         Regex::new(DEFAULT_CHAPTER_PATTERN)
@@ -140,7 +186,11 @@ fn default_regex() -> Regex {
 mod tests {
     #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
 
-    use super::{compile_pattern, split_chapters};
+    use super::{
+        MAX_CHAPTER_CHARS, SourceChapter, compile_pattern, normalize_chapters, split_chapters,
+        split_oversized,
+    };
+    use crate::tools::source_book::SourceBook;
 
     fn paragraphs(items: &[&str]) -> Vec<String> {
         items.iter().map(|item| (*item).to_string()).collect()
@@ -215,6 +265,36 @@ mod tests {
         assert_eq!(chapters[1].title, "第一章 起（2）");
         assert_eq!(chapters[2].title, "第一章 起（3）");
         assert!(chapters.iter().all(|c| c.paragraphs.len() == 1));
+    }
+
+    #[test]
+    fn splits_single_giant_paragraph() {
+        let huge = "这是一句话。".repeat(5_000); // 3 万字，单段
+        let chapters = split_oversized(vec![SourceChapter {
+            title: "甲".to_string(),
+            paragraphs: vec![huge],
+        }]);
+        assert!(chapters.len() >= 3);
+        assert!(chapters.iter().all(|c| {
+            c.paragraphs
+                .iter()
+                .map(|p| p.chars().count())
+                .sum::<usize>()
+                <= MAX_CHAPTER_CHARS
+        }));
+    }
+
+    #[test]
+    fn epub_chapters_are_normalized() {
+        let book = SourceBook {
+            chapters: vec![SourceChapter {
+                title: "整本".to_string(),
+                paragraphs: vec!["字".repeat(MAX_CHAPTER_CHARS * 2)],
+            }],
+            ..SourceBook::default()
+        };
+        let normalized = normalize_chapters(book.chapters);
+        assert!(normalized.len() >= 2);
     }
 
     #[test]
