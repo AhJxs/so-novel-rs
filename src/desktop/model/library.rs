@@ -16,6 +16,12 @@ fn remove_file_if_exists(path: &Path) -> std::io::Result<()> {
     }
 }
 
+/// 只有「可信加载」且章节数确实变少时才清书签：有损强制打开的分章结果不能当作
+/// 章节消失的证据，同章数的重复打开也不该触发任何删除。
+fn should_prune_bookmarks(previous: Option<u32>, chapter_count: usize, trusted: bool) -> bool {
+    trusted && chapter_count < previous.map_or(0, |count| count as usize)
+}
+
 impl AppModel {
     /// 扫描下载目录（异步）。重复触发由 `scan_in_flight` 拦截。
     pub fn refresh_library_async(&mut self) {
@@ -243,14 +249,11 @@ impl AppModel {
     /// 调用方必须在本函数之前**不要**写回新的 `chapter_count` —— 比较的基准是 store 里
     /// 上一次加载留下的章节数。
     pub fn prune_bookmarks_after_load(&mut self, id: &str, chapter_count: usize, trusted: bool) {
-        if !trusted {
-            return;
-        }
         let Some(book) = self.library.store.get(id) else {
             return;
         };
-        let previous = book.chapter_count.map_or(0usize, |count| count as usize);
-        if chapter_count >= previous {
+        let previous = book.chapter_count;
+        if !should_prune_bookmarks(previous, chapter_count, trusted) {
             return;
         }
         if self.library.store.prune_bookmarks(id, chapter_count) > 0 {
@@ -411,5 +414,32 @@ mod tests {
         std::fs::write(&path, b"x").unwrap();
         assert!(super::remove_file_if_exists(&path).is_ok());
         assert!(!path.exists());
+    }
+
+    /// 书签清理的唯一放行条件：可信加载且章节数确实变少。
+    ///
+    /// 表里每一行都钉住一种会让分支重新开始误删的改法：删掉 `trusted` 判断
+    /// （`(Some(10), 1, false)` 会误删有损打开前就存在的书签）、把 `<` 放宽成
+    /// `<=`（同章数的 `(Some(10), 10, true)` 与 `(Some(0), 0, true)` 会开始删）、
+    /// 把「章节数未知」当成越界（`(None, 1, true)`），以及把比较方向写反
+    /// （变多的 `(Some(10), 11, true)` 虽只会少删、不会误删，仍要钉住）。
+    #[test]
+    fn only_trusted_shrinking_loads_prune() {
+        // (上次记录的章节数, 本次解析出的章节数, 是否可信, 是否应清理)
+        let cases = [
+            (Some(10), 9, true, true),
+            (Some(10), 10, true, false),
+            (Some(10), 11, true, false),
+            (Some(10), 1, false, false),
+            (None, 1, true, false),
+            (Some(0), 0, true, false),
+        ];
+        for (previous, chapter_count, trusted, expected) in cases {
+            assert_eq!(
+                super::should_prune_bookmarks(previous, chapter_count, trusted),
+                expected,
+                "previous={previous:?}, chapter_count={chapter_count}, trusted={trusted}"
+            );
+        }
     }
 }
