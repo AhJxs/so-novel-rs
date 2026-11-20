@@ -558,6 +558,7 @@ impl ReaderPage {
                 self.chapter = self.chapter.min(chapter_count - 1);
                 self.chapter_ratio = self.chapter_ratio.clamp(0.0, 1.0);
                 let encoding = content.encoding.clone();
+                let forced = self.force_decode;
                 self.toc_titles = Some(Rc::new(
                     content
                         .chapters
@@ -571,11 +572,15 @@ impl ReaderPage {
                 self.restore_pending = true;
                 let book_id = self.book_id.clone();
                 self.model.update(cx, |model, _| {
+                    // 「仍要打开」是一次性有损打开：探测结果也不可信，别写回书架，
+                    // 否则下次正常打开仍会撞同一个乱码检查。
+                    let encoding = if forced { None } else { encoding };
                     model.mark_book_opened(&book_id, chapter_count as u32, encoding);
                 });
-                // 放在 `mark_book_opened` 之后：它在 encoding.is_none() 时会写探测结果，
-                // 用户点「自动」（None）必须先让它写、再覆盖回 None 才留得住。
-                if let Some(pending) = self.pending_encoding.take() {
+                if forced {
+                    self.pending_encoding = None;
+                    self.force_decode = false;
+                } else if let Some(pending) = self.pending_encoding.take() {
                     let book_id = self.book_id.clone();
                     self.model.update(cx, |model, _| {
                         model.set_book_encoding(&book_id, pending.into_option());
