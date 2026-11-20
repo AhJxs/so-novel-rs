@@ -31,7 +31,9 @@ use super::search_panel::{self, SearchPanel};
 use crate::config::{ReaderConfig, ReadingMode};
 use crate::desktop::model::AppModel;
 use crate::library::{Book, BookFormat, Bookmark, ReadingProgress};
-use crate::reader::layout::{page_for_ratio, page_ratio, paragraph_offsets, visible_paragraphs};
+use crate::reader::layout::{
+    block_window, page_for_ratio, page_ratio, paragraph_offsets, visible_paragraphs,
+};
 use crate::reader::{
     LayoutFingerprint, ParagraphMetrics, ReaderBook, ReaderError, ReaderLayout, load_book,
     load_book_relaxed, paginate,
@@ -1854,34 +1856,26 @@ impl ReaderPage {
     }
 
     fn render_page_body(&mut self, width: f32, cx: &Context<Self>) -> AnyElement {
-        let Some((pages, line_height, blocks, paragraph_range, pad_top)) =
-            self.page_cache.as_ref().map(|cache| {
-                let start = cache.offset.get(self.page_index).copied().unwrap_or(0.0);
-                // 用分页时的视口高度算可见块，保证区间一定覆盖当前页；
-                // 列顶再垫回 `offsets[blocks.start]`，几何与整章渲染逐像素一致。
-                let blocks = visible_paragraphs(
-                    start,
-                    cache.fingerprint.viewport_height,
-                    &cache.paragraph_offsets,
-                );
-                let pad_top = cache
-                    .paragraph_offsets
-                    .get(blocks.start)
-                    .copied()
-                    .unwrap_or(0.0)
-                    - start;
-                // 块 0 是章标题，块 i + 1 是第 i 段。
-                let paragraph_start = blocks.start.saturating_sub(1);
-                let paragraph_end = blocks.end.saturating_sub(1).max(paragraph_start);
-                (
-                    cache.offset.len(),
-                    cache.line_height_px,
-                    blocks,
-                    paragraph_start..paragraph_end,
-                    pad_top,
-                )
-            })
-        else {
+        let Some((pages, line_height, blocks, pad_top)) = self.page_cache.as_ref().map(|cache| {
+            let start = cache.offset.get(self.page_index).copied().unwrap_or(0.0);
+            // 用分页时的视口高度算可见块，保证区间一定覆盖当前页；
+            // 列顶再垫回 `offsets[blocks.start]`，几何与整章渲染逐像素一致。
+            let blocks = visible_paragraphs(
+                start,
+                cache.fingerprint.viewport_height,
+                &cache.paragraph_offsets,
+            );
+            let pad_top = cache
+                .paragraph_offsets
+                .get(blocks.start)
+                .copied()
+                .unwrap_or(0.0)
+                - start;
+            // `blocks.start` 是包含 `start` 的那一块，其顶部必在页起点之上，
+            // 所以 `pad_top <= 0`（0 只在首块正好从页顶开始时出现）。
+            debug_assert!(pad_top <= 0.0, "列顶内边距不应为正：{pad_top}");
+            (cache.offset.len(), cache.line_height_px, blocks, pad_top)
+        }) else {
             // 还没排好页：给一帧带探针的占位。退回滚动容器会在翻页模式里挂上
             // `on_scroll`，可能把陈旧的滚动偏移写成进度。
             //
@@ -1934,6 +1928,8 @@ impl ReaderPage {
         let colors = reader_colors(reader.theme, cx);
         let paragraphs = self.display_paragraphs(&reader, width);
         let highlights = self.chapter_highlights(&reader, cx);
+        // 块 0 是章标题、块 i + 1 是段落 i；映射抽成纯函数由表测试钉住。
+        let (show_title, paragraph_range) = block_window(blocks, paragraphs.len());
         let probe =
             content_view::viewport_probe(cx.entity().downgrade(), self.viewport_measured.clone());
 
@@ -1976,7 +1972,7 @@ impl ReaderPage {
                                     .flex_row()
                                     .justify_center()
                                     .child(content_view::chapter_column(
-                                        (blocks.start == 0).then_some(title.as_str()),
+                                        show_title.then_some(title.as_str()),
                                         paragraphs.as_slice(),
                                         &reader,
                                         width,

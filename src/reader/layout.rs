@@ -196,6 +196,18 @@ pub fn visible_paragraphs(page_start: f32, viewport: f32, offsets: &[f32]) -> Ra
     first..end.clamp(first + 1, block_count)
 }
 
+/// 相交块区间 →（是否渲染标题, 段落区间）。
+///
+/// 块 0 是章标题、块 i+1 是段落 i；`blocks` 来自 [`visible_paragraphs`]，
+/// 因此 `blocks.end` 不会超过 `paragraph_count + 1`。
+#[must_use]
+pub fn block_window(blocks: Range<usize>, paragraph_count: usize) -> (bool, Range<usize>) {
+    let show_title = blocks.start == 0;
+    let start = blocks.start.saturating_sub(1);
+    let end = blocks.end.saturating_sub(1).max(start).min(paragraph_count);
+    (show_title, start..end)
+}
+
 /// 整章内容高度：行数 × 行高 + 段距总和。
 #[must_use]
 pub fn content_height(paragraphs: &[ParagraphMetrics], line_height: f32) -> f32 {
@@ -538,6 +550,19 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn block_window_maps_blocks_to_paragraphs() {
+        // 块 0 是标题，块 i + 1 是段落 i。
+        assert_eq!(block_window(0..3, 5), (true, 0..2));
+        assert_eq!(block_window(2..5, 10), (false, 1..4));
+        // 只渲染标题：不渲染任何段落。
+        assert_eq!(block_window(0..1, 5), (true, 0..0));
+        // 空块区间也不能倒挂。
+        assert_eq!(block_window(5..5, 10), (false, 4..4));
+        // 防御：块区间比实际段落多（例如陈旧缓存）时，end 夹到 paragraph_count。
+        assert_eq!(block_window(2..7, 3), (false, 1..3));
     }
 
     #[test]
