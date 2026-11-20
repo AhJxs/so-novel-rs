@@ -403,7 +403,7 @@ mod tests {
     fn extract_tag_text_static_table_and_fallback_agree() {
         let html = r#"<html><head><title>书名</title></head><body><h1 class="t">同名</h1><h2>第二章</h2><h3>第三节</h3><h4>第四节</h4></body></html>"#;
 
-        // 静态表路径。
+        // 静态路径。
         assert_eq!(super::extract_tag_text(html, "h1").as_deref(), Some("同名"));
         assert_eq!(
             super::extract_tag_text(html, "h2").as_deref(),
@@ -417,6 +417,31 @@ mod tests {
             super::extract_tag_text(html, "title").as_deref(),
             Some("书名")
         );
+        // 静态正则照样跳过标签属性。
+        assert_eq!(
+            super::extract_tag_text(r#"<h2 class="x">带属性</h2>"#, "h2").as_deref(),
+            Some("带属性")
+        );
+
+        // 钉住静态表本身：若 tag_regex 被改成一律返回 None（已知 tag 也走即时编译
+        // 回退），上面只比较文本的断言仍会通过，下面这些指针相等断言才会失败。
+        assert!(std::ptr::eq(
+            std::ptr::from_ref(super::tag_regex("h1").expect("h1")),
+            std::ptr::from_ref(&*super::H1_RE)
+        ));
+        assert!(std::ptr::eq(
+            std::ptr::from_ref(super::tag_regex("h2").expect("h2")),
+            std::ptr::from_ref(&*super::H2_RE)
+        ));
+        assert!(std::ptr::eq(
+            std::ptr::from_ref(super::tag_regex("h3").expect("h3")),
+            std::ptr::from_ref(&*super::H3_RE)
+        ));
+        assert!(std::ptr::eq(
+            std::ptr::from_ref(super::tag_regex("title").expect("title")),
+            std::ptr::from_ref(&*super::TITLE_RE)
+        ));
+        assert!(super::tag_regex("h4").is_none());
 
         // 未收录 tag 走即时编译回退，结果必须与静态表完全一致。
         assert_eq!(

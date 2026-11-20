@@ -401,6 +401,39 @@ mod tests {
     }
 
     #[test]
+    fn dc_text_static_table_and_fallback_agree() {
+        let opf = r"<metadata><dc:title>书名</dc:title><dc:creator>作者</dc:creator><dc:description>简介</dc:description><dc:language>zh</dc:language><dc:publisher>某社</dc:publisher></metadata>";
+
+        assert_eq!(dc_text(opf, "title").as_deref(), Some("书名"));
+        assert_eq!(dc_text(opf, "creator").as_deref(), Some("作者"));
+        assert_eq!(dc_text(opf, "description").as_deref(), Some("简介"));
+        assert_eq!(dc_text(opf, "language").as_deref(), Some("zh"));
+        // 未收录字段走 format! 即时编译回退，仍能正常提取；匹配不到时为 None。
+        assert_eq!(dc_text(opf, "publisher").as_deref(), Some("某社"));
+        assert_eq!(dc_text(opf, "rights"), None);
+
+        // 钉住静态表本身：若 dc_regex 被改成一律返回 None（已知字段也走回退），
+        // 上面只比较文本的断言仍会通过，下面这些指针相等断言才会失败。
+        assert!(std::ptr::eq(
+            std::ptr::from_ref(dc_regex("title").expect("title")),
+            std::ptr::from_ref(&*DC_TITLE_RE)
+        ));
+        assert!(std::ptr::eq(
+            std::ptr::from_ref(dc_regex("creator").expect("creator")),
+            std::ptr::from_ref(&*DC_CREATOR_RE)
+        ));
+        assert!(std::ptr::eq(
+            std::ptr::from_ref(dc_regex("description").expect("description")),
+            std::ptr::from_ref(&*DC_DESCRIPTION_RE)
+        ));
+        assert!(std::ptr::eq(
+            std::ptr::from_ref(dc_regex("language").expect("language")),
+            std::ptr::from_ref(&*DC_LANGUAGE_RE)
+        ));
+        assert!(dc_regex("publisher").is_none());
+    }
+
+    #[test]
     fn read_metadata_reads_all_fields() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("书.epub");
