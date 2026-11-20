@@ -307,32 +307,44 @@ impl RootView {
     fn render_title_bar(&self, cx: &Context<Self>) -> impl IntoElement {
         // `SidebarToggleButton::on_click` 收 `Fn(...)` 而非 listener, 用 entity.update 桥接。
         let root_entity = cx.entity();
-        TitleBar::new().child(
-            // 必须用 `occlude()` 把按钮从祖先 drag hitbox 里「挖」出来:
-            // gpui-kit 组件库 `TitleBar` 把整条 children 行标成 `window_control_area(Drag)`,
-            // Windows 上 NCHITTEST 对按钮区返回 HTCAPTION, OS 按下即接管为拖窗,
-            // 按钮收不到 mouse_up → click 失效 (悬浮有反应但点不动)。occlude 让该点
-            // NCHITTEST 落回 HTCLIENT, 再在 mousedown 上 `stop_propagation` 免得
-            // TitleBar 自己的拖窗监听抢走手势。
-            div()
-                .id("sidebar-toggle-hitbox")
-                .flex()
-                .h_full()
-                .items_center()
-                .occlude()
-                .on_mouse_down(MouseButton::Left, |_ev, _window, cx| {
-                    cx.stop_propagation();
-                })
-                .child(
-                    SidebarToggleButton::new()
-                        .collapsed(self.sidebar_collapsed)
-                        .on_click(move |_ev, _window, app_cx| {
-                            root_entity.update(app_cx, |this, ctx| {
-                                this.toggle_sidebar(ctx);
-                            });
-                        }),
-                ),
-        )
+        // Linux 自绘关闭按钮走 gpui-component 的 `ControlIcon`，直接 `window.remove_window()`：
+        // 它既不过 `on_should_close`，也不会等 `on_app_quit`，窗口与 `RootView` 一起销毁，
+        // 所以必须在这之前同步落盘。该回调只在 Linux 被读取（`TitleBar::on_close_window`
+        // 内部 `cfg!(target_os = "linux")`）；Windows 关闭按钮是原生 `WindowControlArea`、
+        // macOS 用系统按钮，注册了也不会被调用，不影响那两条路由。若极端情况下
+        // `on_app_quit` 之后还能跑到，`flush_before_quit` 幂等，重复调用安全。
+        let root_for_close = cx.entity().downgrade();
+        TitleBar::new()
+            .on_close_window(move |_ev, window, cx| {
+                let _ = root_for_close.update(cx, Self::flush_before_quit);
+                window.remove_window();
+            })
+            .child(
+                // 必须用 `occlude()` 把按钮从祖先 drag hitbox 里「挖」出来:
+                // gpui-kit 组件库 `TitleBar` 把整条 children 行标成 `window_control_area(Drag)`,
+                // Windows 上 NCHITTEST 对按钮区返回 HTCAPTION, OS 按下即接管为拖窗,
+                // 按钮收不到 mouse_up → click 失效 (悬浮有反应但点不动)。occlude 让该点
+                // NCHITTEST 落回 HTCLIENT, 再在 mousedown 上 `stop_propagation` 免得
+                // TitleBar 自己的拖窗监听抢走手势。
+                div()
+                    .id("sidebar-toggle-hitbox")
+                    .flex()
+                    .h_full()
+                    .items_center()
+                    .occlude()
+                    .on_mouse_down(MouseButton::Left, |_ev, _window, cx| {
+                        cx.stop_propagation();
+                    })
+                    .child(
+                        SidebarToggleButton::new()
+                            .collapsed(self.sidebar_collapsed)
+                            .on_click(move |_ev, _window, app_cx| {
+                                root_entity.update(app_cx, |this, ctx| {
+                                    this.toggle_sidebar(ctx);
+                                });
+                            }),
+                    ),
+            )
     }
 
     /// 按 `current_page` 渲染对应 page entity。
@@ -347,7 +359,11 @@ impl RootView {
             .child(self.render_current_page())
     }
 
-    /// 退出落盘只有一条路径：`on_app_quit` → `flush_before_quit`（见 `new`）。
+    /// 退出落盘收敛到三条路由，最终都进 `flush_before_quit`（见 `new` / `render_title_bar`）：
+    /// - Cmd+Q / `Quit` action → `cx.quit()` → `on_app_quit`；
+    /// - Windows / macOS 原生关窗（`WM_CLOSE` / `windowShouldClose`）→ `on_window_should_close`；
+    /// - Linux 自绘标题栏关闭按钮 → `TitleBar::on_close_window`。
+    ///
     /// 这里只负责按关闭契约收起阅读器，别在这里再刷一次书架。
     ///
     /// 单独拆出来是因为阅读器分支只挂它：阅读器内 Cmd+Q 仍可退出，但 Cmd+1..6 /
