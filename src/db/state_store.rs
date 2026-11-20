@@ -8,7 +8,6 @@
 //! （`Durability::Immediate`，fsync）约 0.5ms，可以直接在 UI 线程同步写。
 
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use surrealkv::{Durability, Tree, TreeBuilder};
@@ -36,6 +35,17 @@ pub enum StateOpenError {
     Other(anyhow::Error),
 }
 
+/// `read_only` 的成因：决定 [`StateStore::put`] 拒绝写入时给用户看的文案。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReadOnlyReason {
+    /// 磁盘 schema 高于本程序支持：正常只读，不是损坏。
+    FutureSchema,
+    /// schema 标记损坏（长度不是 4 字节）。
+    CorruptSchema,
+    /// 库打不开 / 读不出：本次运行完全不写。
+    Unavailable,
+}
+
 /// 一次读取的全部运行数据（缺失的域为 `None`）。
 #[derive(Debug, Default)]
 pub struct StateSnapshot {
@@ -51,6 +61,8 @@ pub struct StateSnapshot {
     pub read_only: bool,
     /// 非致命的打开 / 读取错误（打不开库时以空状态启动）。
     pub error: Option<String>,
+    /// `read_only` 的成因；非只读时为 `None`。
+    pub(crate) read_only_reason: Option<ReadOnlyReason>,
 }
 
 /// 运行数据存储句柄。持有打开到进程退出为止的 `Tree`。
@@ -61,6 +73,8 @@ pub struct StateStore {
     tree: Option<Tree>,
     runtime: &'static Runtime,
     read_only: bool,
+    /// 只读的原因：写入被拒时据此区分「版本过新」与「schema 损坏」。
+    read_only_reason: Option<ReadOnlyReason>,
 }
 
 impl StateStore {
@@ -91,6 +105,7 @@ impl StateStore {
                         tree: None,
                         runtime,
                         read_only: true,
+                        read_only_reason: Some(ReadOnlyReason::Unavailable),
                     },
                     StateSnapshot {
                         read_only: true,
@@ -105,6 +120,7 @@ impl StateStore {
             tree: Some(tree),
             runtime,
             read_only: false,
+            read_only_reason: None,
         };
         let snapshot = store.tree.as_ref().map_or_else(
             || Ok(StateSnapshot::default()),
@@ -116,6 +132,7 @@ impl StateStore {
                 tracing::error!("运行数据读取失败，本次运行不会保存: {error:#}");
                 let message = format!("运行数据读取失败，本次运行不会保存：{error:#}");
                 store.read_only = true;
+                store.read_only_reason = Some(ReadOnlyReason::Unavailable);
                 return Ok((
                     store,
                     StateSnapshot {
@@ -127,6 +144,7 @@ impl StateStore {
             }
         };
         store.read_only = snapshot.read_only;
+        store.read_only_reason = snapshot.read_only_reason;
         Ok((store, snapshot))
     }
 
@@ -140,12 +158,21 @@ impl StateStore {
     ///
     /// # Errors
     ///
-    /// schema 版本过新、事务失败时返回错误。
+    /// 只读（schema 过新 / schema 标记损坏 / 库不可用）、事务失败时返回错误。
     pub fn put(&self, key: &[u8], value: &[u8]) -> anyhow::Result<()> {
         if self.read_only {
-            anyhow::bail!(
-                "运行数据由更新版本的程序写入（schema 高于 {STATE_SCHEMA_VERSION}），本程序只读"
-            );
+            let message = match self.read_only_reason {
+                Some(ReadOnlyReason::CorruptSchema) => {
+                    "运行数据 schema 标记损坏（长度不是 4 字节），本程序只读，不会覆盖".to_string()
+                }
+                Some(ReadOnlyReason::Unavailable) => {
+                    "运行数据存储不可用，本次运行不会保存".to_string()
+                }
+                Some(ReadOnlyReason::FutureSchema) | None => format!(
+                    "运行数据由更新版本的程序写入（schema 高于 {STATE_SCHEMA_VERSION}），本程序只读"
+                ),
+            };
+            anyhow::bail!("{message}");
         }
         let Some(tree) = self.tree.as_ref() else {
             anyhow::bail!("运行数据存储不可用，本次运行不会保存");
@@ -179,15 +206,13 @@ impl StateStore {
     /// 把无法解析的 blob 原文另存一份，返回备份路径。
     ///
     /// 文件版 `library.json` 是改名备份，KV 里没有「文件」可改名，只能把值落成文件。
+    /// 备份名带时间戳；同秒内再次损坏（含崩溃后立刻重启）会追加 `-1`、`-2`… 后缀，
+    /// 绝不覆盖上一份 —— 那可能是用户数据仅存的副本。
     #[must_use]
     pub fn backup_corrupt(&self, name: &str, bytes: &[u8]) -> Option<PathBuf> {
-        static SEQ: AtomicU64 = AtomicU64::new(0);
         std::fs::create_dir_all(&self.dir).ok()?;
-        let seq = SEQ.fetch_add(1, Ordering::Relaxed);
-        let path = self.dir.join(format!(
-            "{name}.corrupt-{}-{seq}.json",
-            crate::library::now_unix()
-        ));
+        let secs = u64::try_from(crate::library::now_unix()).unwrap_or(0);
+        let path = unique_backup_path(&self.dir, name, secs);
         std::fs::write(&path, bytes).ok()?;
         Some(path)
     }
@@ -231,14 +256,22 @@ fn read_snapshot(runtime: &Runtime, tree: &Tree) -> anyhow::Result<StateSnapshot
                 schema_version
             );
         }
+        let read_only_reason = if schema_corrupt {
+            Some(ReadOnlyReason::CorruptSchema)
+        } else if future_version {
+            Some(ReadOnlyReason::FutureSchema)
+        } else {
+            None
+        };
         Ok(StateSnapshot {
             schema_version,
             library,
             tasks,
             sources,
-            read_only: schema_corrupt || future_version,
+            read_only: read_only_reason.is_some(),
             error: schema_corrupt
                 .then(|| "运行数据 schema 标记损坏，本次运行按只读处理，不会覆盖".to_string()),
+            read_only_reason,
         })
     })
 }
@@ -247,6 +280,27 @@ fn read_snapshot(runtime: &Runtime, tree: &Tree) -> anyhow::Result<StateSnapshot
 /// 损坏（`None`），后续写入会拒绝而不是覆盖。
 fn decode_schema(value: &[u8]) -> Option<u32> {
     value.try_into().ok().map(u32::from_be_bytes)
+}
+
+/// 损坏 blob 的备份路径：`<stem>.corrupt-<secs>.json`，已被占用就追加 `-1`、`-2`…
+///
+/// 同一秒内两次损坏（崩溃后立刻重启再损坏）不能覆盖上一份备份 —— 那可能是
+/// 用户数据仅存的副本。时间戳始终保留在文件名里，便于用户辨认。
+fn unique_backup_path(dir: &Path, stem: &str, secs: u64) -> PathBuf {
+    let base = format!("{stem}.corrupt-{secs}");
+    for suffix in 0..1000 {
+        let name = if suffix == 0 {
+            format!("{base}.json")
+        } else {
+            format!("{base}-{suffix}.json")
+        };
+        let candidate = dir.join(name);
+        if !candidate.exists() {
+            return candidate;
+        }
+    }
+    // 1000 个候选都被占用（现实中不会发生）：换一个名字，绝不覆盖已有备份。
+    dir.join(format!("{base}-{secs}.json"))
 }
 
 async fn open_with_retry(dir: &Path) -> Result<Tree, StateOpenError> {
@@ -384,7 +438,11 @@ mod tests {
         assert!(snapshot.read_only);
         assert_eq!(snapshot.schema_version, Some(999));
         assert!(store.is_read_only());
-        assert!(store.put(KEY_LIBRARY, b"new").is_err());
+        let error = store.put(KEY_LIBRARY, b"new").unwrap_err();
+        assert!(
+            error.to_string().contains("更新版本"),
+            "版本过新的错误文案应点明原因，实际: {error}"
+        );
         store.close();
 
         let (_store, snapshot) = open(dir.path());
@@ -431,9 +489,10 @@ mod tests {
             );
             assert!(snapshot.error.is_some(), "损坏时应给用户明确提示");
             assert!(store.is_read_only());
+            let error = store.put(KEY_LIBRARY, b"new").unwrap_err();
             assert!(
-                store.put(KEY_LIBRARY, b"new").is_err(),
-                "schema 损坏时写入必须失败"
+                error.to_string().contains("损坏"),
+                "损坏 schema 的错误文案不能误报成「版本过新」，实际: {error}"
             );
             store.close();
 
@@ -496,6 +555,52 @@ mod tests {
                 .to_string_lossy()
                 .starts_with("library.corrupt-")
         );
+        store.close();
+    }
+
+    /// 同一秒内两次备份（含崩溃后重启）必须落到不同文件，且第一次的原文不被覆盖。
+    #[test]
+    fn unique_backup_path_never_reuses_existing_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let secs = 1_700_000_000_u64;
+
+        let first = unique_backup_path(dir.path(), "library", secs);
+        assert!(
+            first
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with(&format!("library.corrupt-{secs}"))
+        );
+        std::fs::write(&first, b"first").unwrap();
+
+        let second = unique_backup_path(dir.path(), "library", secs);
+        assert_ne!(first, second, "同名候选被占用时必须换一个路径");
+        assert!(
+            second
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with(&format!("library.corrupt-{secs}")),
+            "时间戳要保留在备份名里"
+        );
+        assert_eq!(
+            std::fs::read(&first).unwrap(),
+            b"first",
+            "上一份备份不能被新备份覆盖"
+        );
+    }
+
+    #[test]
+    fn backup_corrupt_never_overwrites_previous_backup() {
+        let dir = tempfile::tempdir().unwrap();
+        let (store, _) = open(dir.path());
+        let first = store.backup_corrupt("tasks", b"first").unwrap();
+        let second = store.backup_corrupt("tasks", b"second").unwrap();
+
+        assert_ne!(first, second);
+        assert_eq!(std::fs::read(&first).unwrap(), b"first");
+        assert_eq!(std::fs::read(&second).unwrap(), b"second");
         store.close();
     }
 }
