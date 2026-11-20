@@ -49,6 +49,7 @@ impl AppModel {
         self.library.scan_rx = Some(rx);
         self.library.scan_in_flight = true;
         let runtime = self.runtime;
+        let wakeup = self.wakeup.clone();
         runtime.spawn(async move {
             let root = dir.clone();
             let result =
@@ -59,6 +60,7 @@ impl AppModel {
                 Err(error) => Err(AppError::internal(error.to_string())),
             };
             let _ = tx.send(event).await;
+            wakeup.notify();
         });
     }
 
@@ -82,6 +84,7 @@ impl AppModel {
             let format = book.format;
             let cover_id = id.clone();
             let runtime = self.runtime;
+            let wakeup = self.wakeup.clone();
             runtime.spawn(async move {
                 let outcome = tokio::task::spawn_blocking(move || {
                     let meta = crate::library::meta::extract(&path, format);
@@ -101,6 +104,7 @@ impl AppModel {
                 .await
                 .map_err(|error| error.to_string());
                 let _ = tx.send(MetaEvent { id, outcome }).await;
+                wakeup.notify();
             });
             return;
         }
