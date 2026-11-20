@@ -112,9 +112,16 @@ impl AppModel {
 
     /// 书架落盘；失败只推一次错误，且失败同样计入 5 秒节流。
     ///
+    /// 干净（没有未落盘变更）时直接返回：多数调用点改完即标脏，但重复操作
+    /// （删已不存在的书签、移出已隐藏的书、导入全部失败）不会标脏，重复写盘纯属浪费。
+    /// 退出等必须落盘的路径先 `mark_dirty`（见 [`Self::flush_library`]）。
+    ///
     /// 落盘错误记在 `last_save_error` 而不是 `last_error`：后者是扫描错误，
     /// 下一次扫描成功会把它清掉，混用会让两种失败互相掩盖。
     pub fn persist_library(&mut self) {
+        if !self.library.store.is_dirty() {
+            return;
+        }
         self.library.last_save_attempt_unix = crate::library::now_unix();
         let outcome = self.library.store.to_json().and_then(|bytes| {
             self.state
@@ -138,8 +145,9 @@ impl AppModel {
         }
     }
 
-    /// 关闭阅读器 / 退出应用时强制落盘。
+    /// 关闭阅读器 / 退出应用时强制落盘书架，并顺带写入设置。
     pub fn flush_library(&mut self) {
+        self.library.store.mark_dirty();
         self.persist_library();
         self.persist_settings();
     }

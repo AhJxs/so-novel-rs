@@ -30,13 +30,20 @@ pub fn path_key_is_child_of(path_key: &str, root_key: &str) -> bool {
     Path::new(path_key).parent() == Some(Path::new(root_key))
 }
 
-/// 书架 blob 的根结构。
-#[derive(Debug, Serialize, Deserialize)]
+/// 书架 blob 的根结构（反序列化用，拥有 `Vec<Book>`）。
+#[derive(Debug, Deserialize)]
 struct LibraryFile {
     #[serde(default)]
     version: u32,
     #[serde(default)]
     books: Vec<Book>,
+}
+
+/// 序列化视图：借用书列表，避开每次落盘前整库深拷贝。
+#[derive(Serialize)]
+struct LibraryFileRef<'a> {
+    version: u32,
+    books: &'a [Book],
 }
 
 /// 后台工作线程把封面写入封面缓存目录之后的结果；drain 只做内存回写，不碰磁盘。
@@ -147,7 +154,7 @@ impl LibraryStore {
         (store, warning)
     }
 
-    /// 序列化成待写入的 JSON 字节。
+    /// 序列化成待写入的 JSON 字节。紧凑格式（无换行），直接从借用切片序列化。
     ///
     /// # Errors
     ///
@@ -163,11 +170,11 @@ impl LibraryStore {
                 t!("Library.error.save_refused").to_string(),
             ));
         }
-        let file = LibraryFile {
+        let file = LibraryFileRef {
             version: LIBRARY_VERSION,
-            books: self.books.clone(),
+            books: &self.books,
         };
-        serde_json::to_vec_pretty(&file).map_err(|error| AppError::internal(error.to_string()))
+        serde_json::to_vec(&file).map_err(|error| AppError::internal(error.to_string()))
     }
 
     /// 全部书籍（含隐藏项，UI 自行过滤）。
@@ -191,6 +198,11 @@ impl LibraryStore {
     /// 保存成功后清除脏标记。
     pub const fn clear_dirty(&mut self) {
         self.dirty = false;
+    }
+
+    /// 标脏：退出等需要无条件落盘的调用方用。
+    pub const fn mark_dirty(&mut self) {
+        self.dirty = true;
     }
 
     /// 重新按 `path_key` 计算 ID，并消解重复 ID（极低概率的哈希碰撞 / 手改文件）。
@@ -1232,6 +1244,32 @@ mod tests {
         store.clear_dirty();
         store.set_favorite(&id, true);
         assert!(!store.is_dirty(), "值没变不该标脏");
+    }
+
+    #[test]
+    fn to_json_is_compact_and_round_trips() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = LibraryStore::default();
+        let first = sample_book(dir.path(), "甲.txt");
+        let second = sample_book(dir.path(), "乙.txt");
+        let ids = [first.id.clone(), second.id.clone()];
+        store.books.push(first);
+        store.books.push(second);
+
+        let bytes = store.to_json().unwrap();
+        assert!(
+            !bytes.contains(&b'\n'),
+            "书架 blob 必须是紧凑 JSON（改前 to_vec_pretty 每个字段一行）"
+        );
+
+        let (loaded, warning) = LibraryStore::from_json(&bytes, dir.path());
+        assert!(warning.is_none());
+        assert_eq!(loaded.books().len(), ids.len());
+        let loaded_ids: Vec<&str> = loaded.books().iter().map(|book| book.id.as_str()).collect();
+        assert_eq!(
+            loaded_ids,
+            ids.iter().map(String::as_str).collect::<Vec<_>>()
+        );
     }
 
     #[test]
