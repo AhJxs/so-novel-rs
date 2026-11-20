@@ -35,6 +35,28 @@ pub(super) fn chapter_column(
     // `Option<&[...]>` 是 `Copy`：`move` 闭包捕获的只是切片引用，子元素在
     // `children()` 里同步构造完就散掉，不必每帧把整章区间拷成 owned。
     let highlight_rows = highlights;
+    let rows = paragraphs
+        .iter()
+        .map(String::as_str)
+        .enumerate()
+        .map(move |(index, text)| {
+            let mut row = div()
+                .pb(px(spacing))
+                .text_size(px(font_size))
+                .line_height(px(line_height_px))
+                .font_weight(weight);
+            row = match highlight_rows
+                .as_ref()
+                .and_then(|rows| rows.get(index))
+                .filter(|ranges| !ranges.is_empty())
+            {
+                Some(ranges) => row.child(StyledText::new(text).with_highlights(ranges.clone())),
+                // 元素自己持有文本，这里必须建一份 `SharedString`；
+                // 但不再先克隆整章 `String` 再转换，每段只分配一次。
+                None => row.child(SharedString::from(text)),
+            };
+            row
+        });
     let mut column = div()
         .w(px(width))
         .flex_none()
@@ -48,30 +70,7 @@ pub(super) fn chapter_column(
                 .font_weight(FontWeight::BOLD)
                 .child(SharedString::from(title.to_string())),
         )
-        .children(
-            paragraphs
-                .iter()
-                .cloned()
-                .enumerate()
-                .map(move |(index, text)| {
-                    let mut row = div()
-                        .pb(px(spacing))
-                        .text_size(px(font_size))
-                        .line_height(px(line_height_px))
-                        .font_weight(weight);
-                    row = match highlight_rows
-                        .as_ref()
-                        .and_then(|rows| rows.get(index))
-                        .filter(|ranges| !ranges.is_empty())
-                    {
-                        Some(ranges) => {
-                            row.child(StyledText::new(text).with_highlights(ranges.clone()))
-                        }
-                        None => row.child(text),
-                    };
-                    row
-                }),
-        );
+        .children(rows);
     if !reader.font_family.is_empty() {
         column = column.font_family(reader.font_family.clone());
     }

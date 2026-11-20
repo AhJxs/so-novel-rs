@@ -79,6 +79,26 @@ fn position_ratio(offset_y: f32, max_y: f32) -> f32 {
     (-offset_y / max_y).clamp(0.0, 1.0)
 }
 
+/// 当前章 `display_text` 的缓存键：`(章节号, 排版指纹)`。
+///
+/// 只收 `display_text` 真正依赖的字段：章节号、缩进，以及渲染 / 折行用到的字号、
+/// 字重、行高、字体族；宽度按 `to_bits()` 格式化，避免 `19.0` / `19` 这类浮点噪声。
+/// `viewport_height` 与段距不进键 —— `display_text` 不读它们。
+fn display_cache_key(chapter: usize, reader: &ReaderConfig, width: f32) -> (u64, String) {
+    (
+        chapter as u64,
+        format!(
+            "{}:{:08x}:{}:{}:{}:{}",
+            reader.indent,
+            width.to_bits(),
+            reader.font_size,
+            reader.font_weight,
+            reader.line_height,
+            reader.font_family
+        ),
+    )
+}
+
 /// 打开状态。
 pub enum LoadState {
     Loading,
@@ -138,6 +158,11 @@ pub struct ReaderPage {
     page_index: usize,
     /// 翻页模式：当前章的分页缓存。
     pub(super) page_cache: Option<PageCache>,
+    /// 当前章 `display_text` 的结果 + 生成它的指纹；章节 / 排版 / 列宽不变就复用。
+    ///
+    /// 整章一次性缓存：翻页模式每帧要算两遍（分页测量 + 正文渲染），滚动模式一遍，
+    /// 再加 `chapter_column` 的逐段拷贝，省掉每帧数千次字符串分配。
+    display_cache: Option<(u64, String, Rc<Vec<String>>)>,
     /// 越界向前翻页时置位：重算分页后落到新章最后一页。
     pub(super) page_turn_to_last: bool,
     /// 正文视口实测高度（px）；`None` = 还没量到，先按窗口高度估。
@@ -238,6 +263,7 @@ impl ReaderPage {
             last_chapter_jump: None,
             page_index: 0,
             page_cache: None,
+            display_cache: None,
             page_turn_to_last: false,
             viewport_height: None,
             viewport_measured: Rc::new(Cell::new(None)),
@@ -496,6 +522,8 @@ impl ReaderPage {
         self.cancel_search();
         self.search = SearchPanel::new();
         self.content = None;
+        // 同一章号也可能换了一份正文（换编码 / 重新定位 / 重新分章），章节号单独不足以失效。
+        self.display_cache = None;
         self.page_cache = None;
         self.toc_titles = None;
         // 位置由调用方决定，一律按 `chapter` / `chapter_ratio` 恢复。
@@ -603,6 +631,8 @@ impl ReaderPage {
                         .collect(),
                 ));
                 self.content = Some(content);
+                // 重新加载后同章号指向新正文：旧缓存必须作废（指纹里的章节号看不出这点）。
+                self.display_cache = None;
                 self.load_state = LoadState::Ready;
                 self.invalidate_scroll_commit();
                 // 加载完成按书架里的进度（`chapter_ratio`）恢复，不接旧的抽样值。
@@ -1569,6 +1599,46 @@ impl ReaderPage {
             .max(160.0)
     }
 
+    /// 当前章的 `display_text` 结果；章节 / 排版 / 列宽任一变化才重建。
+    ///
+    /// 分页测量与两个渲染入口共用这一份 `Rc`，不再每帧整章重新拼缩进前缀、
+    /// 也不再在 `chapter_column` 里逐段克隆。
+    fn display_paragraphs(&mut self, reader: &ReaderConfig, width: f32) -> Rc<Vec<String>> {
+        let (chapter, key) = display_cache_key(self.chapter, reader, width);
+        if let Some((cached_chapter, cached_key, texts)) = &self.display_cache
+            && *cached_chapter == chapter
+            && *cached_key == key
+        {
+            return texts.clone();
+        }
+        // `display_text` 只看缩进；其余字段传进来只是让排版参数与两个渲染入口同源。
+        let layout = ReaderLayout::new(
+            reader.font_size,
+            reader.line_height,
+            reader.paragraph_spacing,
+            width,
+            0.0,
+            reader.indent,
+            reader.font_family.clone(),
+            reader.font_weight,
+        );
+        let texts = Rc::new(
+            self.content
+                .as_ref()
+                .and_then(|content| content.chapters.get(self.chapter))
+                .map(|chapter| {
+                    chapter
+                        .paragraphs
+                        .iter()
+                        .map(|paragraph| layout.display_text(paragraph).into_owned())
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default(),
+        );
+        self.display_cache = Some((chapter, key, texts.clone()));
+        texts
+    }
+
     /// 翻页模式：按当前指纹测一遍本章并分页；指纹没变就直接用缓存。
     fn ensure_pagination(&mut self, window: &Window, cx: &mut Context<Self>) {
         let Some(viewport_height) = self.viewport_height else {
@@ -1599,28 +1669,24 @@ impl ReaderPage {
         }) {
             return;
         }
-        let Some(chapter) = self
+        let Some(title) = self
             .content
             .as_ref()
             .and_then(|content| content.chapters.get(self.chapter))
+            .map(|chapter| chapter.title.clone())
         else {
             return;
         };
+        // 缓存里是本体的 `display_text`；借出来的切片直接喂测量，不再整章 collect 一份 owned。
+        let texts = self.display_paragraphs(&reader, content_width);
         // 章标题也算一段（同字号、加粗），否则分页偏移和实际内容高度对不上。
-        let texts: Vec<String> = std::iter::once(chapter.title.clone())
-            .chain(
-                chapter
-                    .paragraphs
-                    .iter()
-                    .map(|paragraph| layout.display_text(paragraph).into_owned()),
-            )
-            .collect();
+        let paragraphs = std::iter::once(title.as_str()).chain(texts.iter().map(String::as_str));
+        let count = texts.len() + 1;
         let style = content_view::measure_style(window, &reader);
         let mut title_style = style.clone();
         title_style.font_weight = FontWeight::BOLD;
         let spacing = reader.paragraph_spacing;
-        let metrics: Vec<ParagraphMetrics> = texts
-            .iter()
+        let metrics: Vec<ParagraphMetrics> = paragraphs
             .enumerate()
             .map(|(index, text)| ParagraphMetrics {
                 lines: content_view::measure_lines(
@@ -1632,7 +1698,7 @@ impl ReaderPage {
                 ),
                 spacing_after: if index == 0 {
                     line_height_px * 0.75
-                } else if index + 1 == texts.len() {
+                } else if index + 1 == count {
                     0.0
                 } else {
                     spacing
@@ -1729,7 +1795,7 @@ impl ReaderPage {
     }
 
     /// 正文区域：翻页模式用裁剪视口 + 纵向位移，滚动模式用滚动容器。
-    fn render_body(&self, window: &Window, cx: &Context<Self>) -> AnyElement {
+    fn render_body(&mut self, window: &Window, cx: &Context<Self>) -> AnyElement {
         let width = self.content_width(f32::from(window.viewport_size().width), cx);
         match self.mode {
             ReadingMode::Page => self.render_page_body(width, cx),
@@ -1737,7 +1803,7 @@ impl ReaderPage {
         }
     }
 
-    fn render_page_body(&self, width: f32, cx: &Context<Self>) -> AnyElement {
+    fn render_page_body(&mut self, width: f32, cx: &Context<Self>) -> AnyElement {
         let Some((start, pages, line_height)) = self.page_cache.as_ref().map(|cache| {
             (
                 cache.offset.get(self.page_index).copied().unwrap_or(0.0),
@@ -1788,28 +1854,14 @@ impl ReaderPage {
         let Some(content) = self.content.as_ref() else {
             return div().flex_1().into_any_element();
         };
-        let Some(chapter) = content.chapters.get(self.chapter) else {
-            return div().flex_1().into_any_element();
+        let (title, count) = match content.chapters.get(self.chapter) {
+            Some(chapter) => (chapter.title.clone(), content.chapters.len()),
+            None => return div().flex_1().into_any_element(),
         };
-        let count = content.chapters.len();
-        let title = chapter.title.clone();
+        // 上面已经把标题和章数拷成值：`content` 的借用到此结束，下面才能 `&mut self` 取缓存。
         let reader = self.reader_config(cx);
         let colors = reader_colors(reader.theme, cx);
-        let layout = ReaderLayout::new(
-            reader.font_size,
-            reader.line_height,
-            reader.paragraph_spacing,
-            width,
-            0.0,
-            reader.indent,
-            reader.font_family.clone(),
-            reader.font_weight,
-        );
-        let paragraphs: Vec<String> = chapter
-            .paragraphs
-            .iter()
-            .map(|paragraph| layout.display_text(paragraph).into_owned())
-            .collect();
+        let paragraphs = self.display_paragraphs(&reader, width);
         let highlights = self.chapter_highlights(&reader, cx);
         let probe =
             content_view::viewport_probe(cx.entity().downgrade(), self.viewport_measured.clone());
@@ -1852,7 +1904,7 @@ impl ReaderPage {
                                     .justify_center()
                                     .child(content_view::chapter_column(
                                         &title,
-                                        &paragraphs,
+                                        paragraphs.as_slice(),
                                         &reader,
                                         width,
                                         line_height,
@@ -1865,37 +1917,24 @@ impl ReaderPage {
             .into_any_element()
     }
 
-    fn render_scroll_body(&self, width: f32, cx: &Context<Self>) -> AnyElement {
+    fn render_scroll_body(&mut self, width: f32, cx: &Context<Self>) -> AnyElement {
         let Some(content) = self.content.as_ref() else {
             return div().flex_1().into_any_element();
         };
-        let Some(chapter) = content.chapters.get(self.chapter) else {
-            return div().flex_1().into_any_element();
+        let (title, count) = match content.chapters.get(self.chapter) {
+            Some(chapter) => (chapter.title.clone(), content.chapters.len()),
+            None => return div().flex_1().into_any_element(),
         };
-        let count = content.chapters.len();
-        let title = chapter.title.clone();
+        // 标题 / 章数已拷成值，`content` 的借用结束；下面取缓存要 `&mut self`。
         let reader = self.reader_config(cx);
         let colors = reader_colors(reader.theme, cx);
-        let layout = ReaderLayout::new(
-            reader.font_size,
-            reader.line_height,
-            reader.paragraph_spacing,
-            width,
-            0.0,
-            reader.indent,
-            reader.font_family.clone(),
-            reader.font_weight,
-        );
-        let line_height = layout.line_height_px();
-        let paragraphs: Vec<String> = chapter
-            .paragraphs
-            .iter()
-            .map(|paragraph| layout.display_text(paragraph).into_owned())
-            .collect();
+        // `ReaderLayout::line_height_px()` 就是这两个字段的乘积，不必再构造一份排版。
+        let line_height = reader.font_size * reader.line_height;
+        let paragraphs = self.display_paragraphs(&reader, width);
         let highlights = self.chapter_highlights(&reader, cx);
         let column = content_view::chapter_column(
             &title,
-            &paragraphs,
+            paragraphs.as_slice(),
             &reader,
             width,
             line_height,
@@ -2162,7 +2201,45 @@ impl Render for ReaderPage {
 
 #[cfg(test)]
 mod tests {
-    use super::{ReaderPage, position_ratio, ratio_offset, scroll_ratio};
+    use super::{ReaderPage, display_cache_key, position_ratio, ratio_offset, scroll_ratio};
+
+    #[test]
+    fn display_cache_key_covers_chapter_indent_width_and_typography() {
+        type Mutator = fn(&mut crate::config::ReaderConfig);
+        let reader = crate::config::ReaderConfig::default();
+        let base = display_cache_key(1, &reader, 720.0);
+
+        // 同样的输入必须相等：缓存命中全靠这条。
+        assert_eq!(base, display_cache_key(1, &reader, 720.0));
+
+        // 章节变了要重建，否则跳到新章还渲染上一章的文字。
+        assert_ne!(base, display_cache_key(2, &reader, 720.0));
+
+        // 缩进只影响 `display_text`，不在别的排版字段里：漏了就会缩进切换后不重绘。
+        let mut no_indent = reader.clone();
+        no_indent.indent = false;
+        assert_ne!(base, display_cache_key(1, &no_indent, 720.0));
+
+        // 列宽变化也要换 key：虽然 `display_text` 本身不读宽度，但键与排版 / 分页同源，
+        // 宽度变了整章按新列宽重建一次，省得两份缓存各自失效、口径分叉。
+        assert_ne!(base, display_cache_key(1, &reader, 721.0));
+
+        let cases: [(&str, Mutator); 4] = [
+            ("font_size", |r| r.font_size = 22.0),
+            ("font_weight", |r| r.font_weight = 700),
+            ("line_height", |r| r.line_height = 2.0),
+            ("font_family", |r| r.font_family = "衬线".to_string()),
+        ];
+        for (name, mutate) in cases {
+            let mut changed = reader.clone();
+            mutate(&mut changed);
+            assert_ne!(
+                base,
+                display_cache_key(1, &changed, 720.0),
+                "改 {name} 后 key 必须变化"
+            );
+        }
+    }
 
     #[test]
     fn position_ratio_treats_unscrollable_content_as_the_top() {
