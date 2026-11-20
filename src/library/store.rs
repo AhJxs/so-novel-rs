@@ -308,10 +308,20 @@ impl LibraryStore {
                 .iter_mut()
                 .find(|other| other.path_key == book.path_key)
             {
+                // 元组比较的理由同 `merge_scan`：避免拆字段后触发可疑分组告警。
+                let changed = (existing.size_bytes, existing.file_mtime)
+                    != (book.size_bytes, book.file_mtime);
                 existing.hidden = false;
                 existing.missing = false;
-                existing.size_bytes = book.size_bytes;
-                existing.file_mtime = book.file_mtime;
+                if changed {
+                    existing.size_bytes = book.size_bytes;
+                    existing.file_mtime = book.file_mtime;
+                    // 旧编码标签对改写后的内容未必成立，让后台重新探测。
+                    existing.encoding = None;
+                    if !existing.metadata_edited {
+                        outcome.meta_ids.push(existing.id.clone());
+                    }
+                }
                 outcome.existing += 1;
                 self.dirty = true;
                 continue;
@@ -869,6 +879,25 @@ mod tests {
         assert_eq!((second.added, second.existing), (0, 1));
         assert_eq!(second.failed.len(), 1);
         assert_eq!(store.books().len(), 1);
+    }
+
+    #[test]
+    fn import_existing_changed_file_refreshes_and_requeues() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.txt");
+        std::fs::write(&path, b"one").unwrap();
+        let mut store = LibraryStore::default();
+        let first = store.import_files(std::slice::from_ref(&path));
+        let id = first.meta_ids[0].clone();
+        assert!(store.set_encoding(&id, Some("GBK".to_string())));
+
+        std::fs::write(&path, b"one and more").unwrap();
+        let again = store.import_files(std::slice::from_ref(&path));
+        assert_eq!(again.existing, 1);
+        assert_eq!(again.meta_ids, vec![id.clone()]);
+        let book = store.get(&id).unwrap();
+        assert_eq!(book.size_bytes, 12);
+        assert!(book.encoding.is_none(), "文件变了，旧编码标签必须清空");
     }
 
     #[test]
