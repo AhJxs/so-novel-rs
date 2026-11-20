@@ -609,6 +609,13 @@ impl ReaderPage {
                 self.restore_position = None;
                 self.restore_pending = true;
                 let book_id = self.book_id.clone();
+                // 重新解析（换编码 / 重新定位 / 新分章规则）后章节数可能变少：
+                // 越界书签指向不存在的章，先清掉再写进度。必须早于 `mark_book_opened`：
+                // 那时 store 里还是上一次的章节数，才能判断出「这次真的变少了」；
+                // 「仍要打开」是有损解析，不算章节消失的证据，交给 `trusted` 拦下。
+                self.model.update(cx, |model, _| {
+                    model.prune_bookmarks_after_load(&book_id, chapter_count, !forced);
+                });
                 self.model.update(cx, |model, _| {
                     // 「仍要打开」是一次性有损打开：探测结果也不可信，别写回书架，
                     // 否则下次正常打开仍会撞同一个乱码检查。
@@ -624,11 +631,6 @@ impl ReaderPage {
                         model.set_book_encoding(&book_id, pending.into_option());
                     });
                 }
-                // 重新解析（换编码 / 重新定位 / 新分章规则）后章节数可能变少：
-                // 越界书签指向不存在的章，先清掉再写进度。
-                self.model.update(cx, |model, _| {
-                    model.prune_bookmarks_after_load(&book_id, chapter_count);
-                });
                 self.record_progress(cx);
                 self.start_autosave(cx);
             }
@@ -678,7 +680,7 @@ impl ReaderPage {
         self.model.update(cx, |model, _| model.persist_library());
     }
 
-    /// 把当前滚动位置换算成章内比例（滚不动时保持原值）。
+    /// 把当前滚动位置换算成章内比例（滚不动时整章已读，记 1.0）。
     pub(super) fn capture_scroll_ratio(&mut self) {
         self.invalidate_scroll_commit();
         // 跳章 / 切模式 / 改排版之后、恢复帧跑之前，滚动句柄里还是**旧**位置；
@@ -756,6 +758,11 @@ impl ReaderPage {
         // 页脚百分比与页号自相矛盾）。
         if matches!(self.mode, ReadingMode::Page) {
             self.page_cache = None;
+            // 进翻页前先丢掉滚动模式留下的旧测量，占位帧带探针会重新量。
+            self.viewport_height = None;
+            // 探针只在「与上次实测不同」时回报；不清掉共享缓存，重新进翻页模式可能量了也不回调，
+            // 正文会一直停在占位帧上。
+            self.viewport_measured.set(None);
         }
         // 切模式按 `chapter_ratio` 归位（翻页模式靠它算页号），不接滚动模式的抽样值。
         self.restore_position = None;
@@ -766,6 +773,21 @@ impl ReaderPage {
             .update(cx, |model, _| model.set_reading_mode(&book_id, mode));
         self.record_progress(cx);
         cx.notify();
+    }
+
+    /// 换章 / 章内跳转共用：旧分页与旧恢复状态都属于上一处位置。
+    pub(super) fn reset_chapter_navigation(&mut self, to_last: bool) {
+        self.invalidate_scroll_commit();
+        // 分页缓存属于上一处位置：不清掉的话同一帧里的第二次翻页会拿旧书页数继续跳（N → N+2）。
+        self.page_cache = None;
+        self.page_index = 0;
+        // 恢复状态同理：跳章 / 章内跳转都按新的 `chapter_ratio` 归位，
+        // 别让宽度变化或改排版留下的抽样值接管这次恢复。
+        self.restore_position = None;
+        // 跨章回退只是本次翻页的一次性提示：每个跳转入口都要重新决定，
+        // 否则残留的 true 会让下一次分页落到目标章末页。
+        self.page_turn_to_last = to_last;
+        self.restore_pending = true;
     }
 
     /// 跳到第 `index` 章（0-based），章内位置归零。
@@ -781,17 +803,8 @@ impl ReaderPage {
             return;
         }
         self.chapter = index;
-        // 分页缓存属于旧章：不清掉的话同一帧里的第二次翻页会拿旧书页数继续跳（N → N+2）。
-        self.page_cache = None;
-        self.page_index = 0;
-        self.invalidate_scroll_commit();
+        self.reset_chapter_navigation(to_last);
         self.chapter_ratio = 0.0;
-        // 跳章按 `chapter_ratio`（=章首）恢复：别让宽度变化留下的抽样值接管这次恢复。
-        self.restore_position = None;
-        // 跨章回退只是本次翻页的一次性提示：每个跳章入口都要重新决定，
-        // 否则残留的 true 会让下一次分页落到目标章末页。
-        self.page_turn_to_last = to_last;
-        self.restore_pending = true;
         self.record_progress(cx);
         cx.notify();
     }

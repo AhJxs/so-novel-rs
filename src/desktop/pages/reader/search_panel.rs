@@ -244,13 +244,9 @@ impl ReaderPage {
         let ratio = crate::reader::layout::char_ratio(&target.paragraphs, paragraph, byte_offset);
         // 命中可能在当前章：指纹不变时分页缓存会直接早退、`page_index` 不追随新比例，
         // 所以要作废在途防抖并强制重排一次。
-        self.invalidate_scroll_commit();
-        self.page_cache = None;
-        // 显式跳转必须清掉跨章回退的残留标志，否则分页会落到目标章末页。
-        self.page_turn_to_last = false;
+        self.reset_chapter_navigation(false);
         self.chapter = chapter;
         self.chapter_ratio = ratio;
-        self.restore_pending = true;
         self.search.active = Some((chapter, paragraph, byte_offset));
         self.record_progress(cx);
         cx.notify();

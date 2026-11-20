@@ -236,8 +236,23 @@ impl AppModel {
         self.persist_library();
     }
 
-    /// 重新解析后章节数可能变少：清掉越界书签并立即落盘；没删就不写盘。
-    pub fn prune_bookmarks_after_load(&mut self, id: &str, chapter_count: usize) {
+    /// 重新解析后章节数变少：清掉越界书签并立即落盘；没删就不写盘。
+    ///
+    /// 只处理「可信加载且章数真的变少」：`trusted == false` 是「仍要打开」的有损解码，
+    /// 乱码会把 500 章收成 100 章，但那不是章节消失的证据，照删会永久丢掉后半本书的书签。
+    /// 调用方必须在本函数之前**不要**写回新的 `chapter_count` —— 比较的基准是 store 里
+    /// 上一次加载留下的章节数。
+    pub fn prune_bookmarks_after_load(&mut self, id: &str, chapter_count: usize, trusted: bool) {
+        if !trusted {
+            return;
+        }
+        let Some(book) = self.library.store.get(id) else {
+            return;
+        };
+        let previous = book.chapter_count.map_or(0usize, |count| count as usize);
+        if chapter_count >= previous {
+            return;
+        }
         if self.library.store.prune_bookmarks(id, chapter_count) > 0 {
             self.library.bump();
             self.persist_library();
