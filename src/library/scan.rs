@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use super::book::{BookFormat, mtime_secs};
+use super::book::{BookFormat, mtime_secs, normalize_path_key};
 
 /// 扫描到的单个文件。
 #[derive(Debug, Clone)]
@@ -10,6 +10,8 @@ pub struct ScannedFile {
     pub path: PathBuf,
     pub size_bytes: u64,
     pub mtime: i64,
+    /// 规范化路径键，扫描线程算一次；合并时直接用作哈希索引。
+    pub key: String,
 }
 
 /// 扫描目录（不递归），只保留首版书库支持的扩展名，按修改时间倒序。
@@ -39,10 +41,13 @@ pub fn scan_download_dir(dir: &Path) -> std::io::Result<Vec<ScannedFile>> {
         let Ok(metadata) = entry.metadata() else {
             continue;
         };
+        // 路径键在后台线程算：合并时 UI 线程不再为每个文件做一次 canonicalize。
+        let key = normalize_path_key(&path);
         out.push(ScannedFile {
             path,
             size_bytes: metadata.len(),
             mtime: mtime_secs(&metadata),
+            key,
         });
     }
     // 修改时间倒序；同一秒内按路径升序，保证同一目录两次扫描顺序一致。
@@ -93,6 +98,15 @@ mod tests {
             files.windows(2).all(|pair| pair[0].mtime >= pair[1].mtime),
             "必须按修改时间倒序"
         );
+    }
+
+    #[test]
+    fn scanned_files_carry_normalized_keys() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.txt");
+        std::fs::write(&path, b"x").unwrap();
+        let files = scan_download_dir(dir.path()).unwrap();
+        assert_eq!(files[0].key, normalize_path_key(&path));
     }
 
     #[test]

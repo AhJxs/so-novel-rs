@@ -3,7 +3,7 @@
 //!
 //! store 不启动线程、不持有 channel —— 扫描与元数据由 `desktop/model` 调度。
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use rust_i18n::t;
@@ -58,6 +58,21 @@ pub struct ImportOutcome {
     pub failed: Vec<(PathBuf, String)>,
     /// 需要后台提取元数据的书籍 id。
     pub meta_ids: Vec<String>,
+}
+
+/// `merge_scan` 的待执行动作。
+///
+/// 索引借用着 `self.books`，查表期间不能改书；先把动作按文件顺序记下来，
+/// 借用结束后再统一落库（顺带保住 `meta_ids` 的产出顺序）。
+enum MergeAction {
+    /// 命中已有书：刷新大小 / 时间，必要时重新提取元数据。
+    Existing {
+        index: usize,
+        size_bytes: u64,
+        mtime: i64,
+    },
+    /// 本次扫描新发现的书（`Box` 避免枚举被 `Book` 撑大）。
+    Fresh(Box<Book>),
 }
 
 /// 书架内存状态 + 脏标记。
@@ -206,58 +221,87 @@ impl LibraryStore {
     ///
     /// 规则见设计文档 3.1：新文件入队、变化文件按需重新提取、隐藏项跳过、
     /// 只在**本次扫描根内**的下载书才因缺席标失效（记录保留，文件放回后自动恢复）。
+    /// 路径键由扫描线程算好（`ScannedFile::key`），这里走哈希索引，不再逐文件 canonicalize。
     #[must_use]
     pub fn merge_scan(&mut self, files: &[ScannedFile], scan_root: &Path) -> Vec<String> {
         let mut meta_ids = Vec::new();
         let root_key = normalize_path_key(scan_root);
-        let present: HashSet<String> = files
-            .iter()
-            .map(|file| normalize_path_key(&file.path))
-            .collect();
+        // 路径键已在扫描线程算好：这里只查集合，不再为每个文件 canonicalize 一次。
+        let present: HashSet<&str> = files.iter().map(|file| file.key.as_str()).collect();
 
+        // 一次建索引，之后每个文件 O(1) 命中；旧实现是每文件一次线性 `find`（O(N·M)）。
+        let mut index_by_key: HashMap<&str, usize> = HashMap::with_capacity(self.books.len());
+        for (index, book) in self.books.iter().enumerate() {
+            // 与旧的 `find` 一致：坏数据里重复的 `path_key` 取第一条。
+            index_by_key.entry(book.path_key.as_str()).or_insert(index);
+        }
+        // 同一次扫描里一个规范化路径只建一本书（大小写 / 短文件名等别名可能落到同一路径）。
+        let mut fresh_keys: HashSet<String> = HashSet::new();
+        let mut actions = Vec::with_capacity(files.len());
         for file in files {
-            let key = normalize_path_key(&file.path);
-            if let Some(book) = self.books.iter_mut().find(|book| book.path_key == key) {
-                if book.hidden {
-                    continue;
-                }
-                // 命中扫描结果 = 它确实在这个根下；导入书后来被放进下载目录也在这里自愈。
-                if book.source_root.as_deref() != Some(root_key.as_str()) {
-                    book.source_root = Some(root_key.clone());
-                    self.dirty = true;
-                }
-                // 用元组比较而不是逐字段 `!=`：两个同形字段分开写会触发
-                // `suspicious_operation_groupings`（怀疑写反了），元组形式等价且免掉 allow。
-                let changed = (book.size_bytes, book.file_mtime) != (file.size_bytes, file.mtime)
-                    || book.missing;
-                if changed {
-                    book.size_bytes = file.size_bytes;
-                    book.file_mtime = file.mtime;
-                    book.missing = false;
-                    // 文件内容变了：上一次记录的编码对新字节未必成立，让它重新探测。
-                    book.encoding = None;
-                    self.dirty = true;
-                    if !book.metadata_edited {
-                        meta_ids.push(book.id.clone());
-                    }
-                }
+            if let Some(&index) = index_by_key.get(file.key.as_str()) {
+                actions.push(MergeAction::Existing {
+                    index,
+                    size_bytes: file.size_bytes,
+                    mtime: file.mtime,
+                });
                 continue;
             }
             match Book::from_file(&file.path, BookOrigin::Downloaded) {
+                // 旧实现用一次全量 `any` 兜住「与已有书重复」和「与本次新书重复」，
+                // 这里换成索引 O(1) 查询 + 本次新书集合，语义等价。
                 Ok(book)
-                    if !self
-                        .books
-                        .iter()
-                        .any(|other| other.path_key == book.path_key) =>
+                    if !index_by_key.contains_key(book.path_key.as_str())
+                        && fresh_keys.insert(book.path_key.clone()) =>
                 {
-                    let book = book.with_source_root(scan_root);
-                    meta_ids.push(book.id.clone());
-                    self.books.push(book);
-                    self.dirty = true;
+                    actions.push(MergeAction::Fresh(Box::new(book)));
                 }
                 Ok(_) => {}
                 Err(error) => {
                     tracing::warn!("扫描到的文件无法建书 {}: {error}", file.path.display());
+                }
+            }
+        }
+        // 索引借用着 `self.books`，到此结束；下面才能改书。
+        drop(index_by_key);
+
+        for action in actions {
+            match action {
+                MergeAction::Existing {
+                    index,
+                    size_bytes,
+                    mtime,
+                } => {
+                    let book = &mut self.books[index];
+                    if book.hidden {
+                        continue;
+                    }
+                    // 命中扫描结果 = 它确实在这个根下；导入书后来被放进下载目录也在这里自愈。
+                    if book.source_root.as_deref() != Some(root_key.as_str()) {
+                        book.source_root = Some(root_key.clone());
+                        self.dirty = true;
+                    }
+                    // 用元组比较而不是逐字段 `!=`：两个同形字段分开写会触发
+                    // `suspicious_operation_groupings`（怀疑写反了），元组形式等价且免掉 allow。
+                    let changed =
+                        (book.size_bytes, book.file_mtime) != (size_bytes, mtime) || book.missing;
+                    if changed {
+                        book.size_bytes = size_bytes;
+                        book.file_mtime = mtime;
+                        book.missing = false;
+                        // 文件内容变了：上一次记录的编码对新字节未必成立，让它重新探测。
+                        book.encoding = None;
+                        self.dirty = true;
+                        if !book.metadata_edited {
+                            meta_ids.push(book.id.clone());
+                        }
+                    }
+                }
+                MergeAction::Fresh(book) => {
+                    let book = book.with_source_root(scan_root);
+                    meta_ids.push(book.id.clone());
+                    self.books.push(book);
+                    self.dirty = true;
                 }
             }
         }
@@ -275,7 +319,7 @@ impl LibraryStore {
             }
             // 只有属于本根的书才用「不在扫描结果里」推断缺失；别的根（或导入）回落到磁盘判定。
             let missing = match book.origin {
-                BookOrigin::Downloaded if within_root => !present.contains(&book.path_key),
+                BookOrigin::Downloaded if within_root => !present.contains(book.path_key.as_str()),
                 _ => !Path::new(&book.path).exists(),
             };
             if book.missing != missing {
@@ -758,6 +802,7 @@ mod tests {
             path: path.to_path_buf(),
             size_bytes: metadata.len(),
             mtime: crate::library::book::mtime_secs(&metadata),
+            key: normalize_path_key(path),
         }
     }
 

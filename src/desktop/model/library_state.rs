@@ -179,6 +179,7 @@ mod tests {
     #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
 
     use super::*;
+    use crate::library::normalize_path_key;
 
     #[test]
     fn drain_scan_merges_files_and_bumps_version() {
@@ -192,6 +193,7 @@ mod tests {
         smol::block_on(tx.send(Ok(Scan {
             root: dir.path().to_path_buf(),
             files: vec![ScannedFile {
+                key: normalize_path_key(&path),
                 path,
                 size_bytes: 1,
                 mtime: 1,
@@ -258,6 +260,7 @@ mod tests {
             .store
             .merge_scan(
                 &[ScannedFile {
+                    key: normalize_path_key(&path),
                     path,
                     size_bytes: 1,
                     mtime: 1,
