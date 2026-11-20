@@ -1,5 +1,6 @@
 //! 书内搜索抽屉：逐章扫描、结果分组、点击跳转与命中高亮。
 
+use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -10,23 +11,37 @@ use gpui_kit::component::{ActiveTheme as _, IconName};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, App, Context, FontWeight, HighlightStyle, InteractiveElement as _, IntoElement,
-    ParentElement, ScrollHandle, StatefulInteractiveElement as _, Styled, StyledText, div, px,
+    ParentElement, StatefulInteractiveElement as _, Styled, StyledText, UniformListScrollHandle,
+    div, px, uniform_list,
 };
 use rust_i18n::t;
 use smol::channel;
 
 use super::reader_page::ReaderPage;
-use super::theme::{ReaderColors, reader_colors};
+use super::theme::reader_colors;
 use crate::config::ReaderConfig;
 use crate::reader::content::ReaderBook;
 use crate::reader::search::search_chapter_interruptible;
-use crate::reader::{HITS_TOTAL, ReaderLayout, SearchGroup, SearchHit};
+use crate::reader::{HITS_TOTAL, ReaderLayout, SearchGroup};
 
 /// 搜索抽屉宽度（px）。正文列宽要减掉它，与 `toc::TOC_WIDTH` 同理。
 pub(super) const SEARCH_WIDTH: f32 = 320.0;
 
 /// 后台扫描每累计多少章回送一批；整批只触发一次重绘。
 const BATCH_CHAPTERS: usize = 32;
+
+/// 结果列表的固定行高（px）。`uniform_list` 要求所有行等高，所以分组标题与命中
+/// 共用这一高度：标题压成「标题 · 数量」一行，命中压成一行截断片段。
+const ROW_HEIGHT: f32 = 32.0;
+
+/// 结果列表的一行：只存下标，不复制任何标题 / 片段字符串。
+#[derive(Clone, Copy)]
+enum SearchRow {
+    /// 第 `group` 组的标题行。
+    Header { group: usize },
+    /// 第 `group` 组里的第 `hit` 条命中。
+    Hit { group: usize, hit: usize },
+}
 
 /// 后台扫描回送的事件。
 enum SearchEvent {
@@ -91,7 +106,8 @@ fn merge_hit_ranges(hits: &[HitRange]) -> Vec<HitRange> {
 pub(super) struct SearchPanel {
     /// 当前生效的关键词（已 trim）。
     query: String,
-    groups: Vec<SearchGroup>,
+    /// 结果分组。用 `Rc` 让每帧交给 `uniform_list` 闭包共享同一份数据，不必逐帧深拷。
+    groups: Rc<Vec<SearchGroup>>,
     scanning: bool,
     /// 已扫描章数。
     scanned: usize,
@@ -104,7 +120,7 @@ pub(super) struct SearchPanel {
     /// 当前定位的命中 `(章, 段, 字节偏移)`。
     active: Option<(usize, usize, usize)>,
     /// 结果列表的滚动位置。
-    pub(super) scroll: ScrollHandle,
+    pub(super) scroll: UniformListScrollHandle,
 }
 
 impl SearchPanel {
@@ -112,14 +128,14 @@ impl SearchPanel {
     pub(super) fn new() -> Self {
         Self {
             query: String::new(),
-            groups: Vec::new(),
+            groups: Rc::new(Vec::new()),
             scanning: false,
             scanned: 0,
             total: 0,
             hits: 0,
             generation: 0,
             active: None,
-            scroll: ScrollHandle::new(),
+            scroll: UniformListScrollHandle::new(),
         }
     }
 }
@@ -240,22 +256,24 @@ impl ReaderPage {
         self.search.scanning = false;
         // 关掉抽屉 / 重载后不能把高亮留在正文上：没有可见的结果列表时，满屏黄块既无法
         // 解释也无法清除。查询词保留，重新按回车可以再扫一遍（关闭抽屉时由 `set_search_open` 清空输入）。
-        self.search.groups.clear();
+        // 换成新的 `Rc`：上一帧的列表仍持有旧快照，`Rc::make_mut` 也不必深拷整个结果。
+        self.search.groups = Rc::new(Vec::new());
         self.search.hits = 0;
         self.search.active = None;
         self.search.scanned = 0;
     }
 
     /// 收下一批后台命中；一批覆盖 [`BATCH_CHAPTERS`] 章，进度按批推进（末批按总章数截断）。
-    fn apply_search_batch(&mut self, groups: Vec<SearchGroup>) {
+    fn apply_search_batch(&mut self, groups_in: Vec<SearchGroup>) {
         self.search.scanned = self
             .search
             .scanned
             .saturating_add(BATCH_CHAPTERS)
             .min(self.search.total);
-        for group in groups {
+        let groups = Rc::make_mut(&mut self.search.groups);
+        for group in groups_in {
             self.search.hits += group.hits.len();
-            self.search.groups.push(group);
+            groups.push(group);
         }
     }
 
@@ -370,30 +388,106 @@ impl ReaderPage {
         // 配色一帧只取一次：`reader_config` 会 clone `font_family`，逐行取在上千条结果时是纯浪费。
         let colors = reader_colors(self.reader_config(cx).theme, cx);
 
-        let mut results = div()
+        // 行索引一帧建一次：只存下标，最多 1000 + 分组数个小结构，不复制任何字符串。
+        let groups = self.search.groups.clone();
+        let mut rows = Vec::with_capacity(groups.len() + self.search.hits);
+        for (group, item) in groups.iter().enumerate() {
+            rows.push(SearchRow::Header { group });
+            rows.extend((0..item.hits.len()).map(|hit| SearchRow::Hit { group, hit }));
+        }
+        let rows: Rc<Vec<SearchRow>> = Rc::new(rows);
+
+        // `uniform_list` 的闭包必须 `'static`：结果数据靠 `Rc` 共享，只有可见行才建元素。
+        let list_rows = rows.clone();
+        let handle = cx.entity().downgrade();
+        let active = self.search.active;
+        let muted = cx.theme().muted_foreground;
+        let hover_bg = cx.theme().list_hover;
+        let active_bg = cx.theme().selection;
+        let list = uniform_list("reader-search-rows", rows.len(), move |range, _window, _cx| {
+            range
+                .map(|slot| match list_rows[slot] {
+                    SearchRow::Header { group } => {
+                        let group = &groups[group];
+                        div()
+                            .w_full()
+                            .h(px(ROW_HEIGHT))
+                            .flex()
+                            .items_center()
+                            .px_2()
+                            .text_xs()
+                            .text_color(muted)
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .truncate()
+                                    .child(format!("{} · {}", group.title, group.hits.len())),
+                            )
+                            .into_any_element()
+                    }
+                    SearchRow::Hit { group, hit } => {
+                        let group = &groups[group];
+                        let hit = &group.hits[hit];
+                        let chapter = group.chapter;
+                        let paragraph = hit.paragraph;
+                        let byte_offset = hit.byte_offset;
+                        let is_active = active == Some((chapter, paragraph, byte_offset));
+                        let highlight = if is_active {
+                            colors.active_highlight
+                        } else {
+                            colors.highlight
+                        };
+                        let handle = handle.clone();
+                        // 片段整体交给 `truncate()` 裁掉：手工截断会破坏高亮的字节区间。
+                        let snippet = StyledText::new(hit.snippet.clone()).with_highlights([(
+                            hit.snippet_match.clone(),
+                            HighlightStyle {
+                                background_color: Some(highlight),
+                                ..HighlightStyle::default()
+                            },
+                        )]);
+                        div()
+                            .id(("reader-search-row", slot))
+                            .w_full()
+                            .h(px(ROW_HEIGHT))
+                            .flex()
+                            .items_center()
+                            .px_2()
+                            .rounded_md()
+                            .cursor_pointer()
+                            .text_sm()
+                            .when(is_active, |this| this.bg(active_bg))
+                            .hover(move |style| style.bg(hover_bg))
+                            .child(div().flex_1().min_w_0().truncate().child(snippet))
+                            .on_click(move |_event, window, cx| {
+                                let _ = handle.update(cx, |page, cx| {
+                                    page.goto_hit(chapter, paragraph, byte_offset, cx);
+                                    // 跳转后把焦点从输入框收回正文，方向键才不会继续编辑查询词。
+                                    page.focus_body(window, cx);
+                                });
+                            })
+                            .into_any_element()
+                    }
+                })
+                .collect::<Vec<_>>()
+        })
+        // `ListSizingBehavior::Auto` 在 flex 容器里量不到高度，列表会整块空白；
+        // 必须给它一个确定的高度，铺满抽屉剩余空间。
+        .h_full()
+        .w_full()
+        .track_scroll(&self.search.scroll);
+
+        let results = div()
             .id("reader-search-results")
             .flex_1()
             .min_h_0()
-            .overflow_y_scroll()
-            .track_scroll(&self.search.scroll)
-            .vertical_scrollbar(&self.search.scroll)
+            .relative()
             .p_2()
             .flex()
             .flex_col()
-            .gap_1();
-        for group in &self.search.groups {
-            results = results.child(
-                div()
-                    .px_2()
-                    .pt_2()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(format!("{} · {}", group.title, group.hits.len())),
-            );
-            for hit in &group.hits {
-                results = results.child(self.render_search_hit(group.chapter, hit, colors, cx));
-            }
-        }
+            .child(list)
+            .vertical_scrollbar(&self.search.scroll);
 
         div()
             .w(px(SEARCH_WIDTH))
@@ -448,50 +542,6 @@ impl ReaderPage {
             )
             .child(results)
             .into_any_element()
-    }
-
-    fn render_search_hit(
-        &self,
-        chapter: usize,
-        hit: &SearchHit,
-        colors: ReaderColors,
-        cx: &Context<Self>,
-    ) -> impl IntoElement {
-        let paragraph = hit.paragraph;
-        let byte_offset = hit.byte_offset;
-        let active = self.search.active == Some((chapter, paragraph, byte_offset));
-        let highlight = if active {
-            colors.active_highlight
-        } else {
-            colors.highlight
-        };
-        let hover_bg = cx.theme().list_hover;
-        let active_bg = cx.theme().selection;
-        let snippet = StyledText::new(hit.snippet.clone()).with_highlights([(
-            hit.snippet_match.clone(),
-            HighlightStyle {
-                background_color: Some(highlight),
-                ..HighlightStyle::default()
-            },
-        )]);
-
-        div()
-            .id(format!(
-                "reader-search-hit-{chapter}-{paragraph}-{byte_offset}"
-            ))
-            .px_2()
-            .py_1()
-            .rounded_md()
-            .cursor_pointer()
-            .text_sm()
-            .when(active, |this| this.bg(active_bg))
-            .hover(move |style| style.bg(hover_bg))
-            .child(snippet)
-            .on_click(cx.listener(move |this, _event, window, cx| {
-                this.goto_hit(chapter, paragraph, byte_offset, cx);
-                // 跳转后把焦点从输入框收回正文，方向键才不会继续编辑查询词。
-                this.focus_body(window, cx);
-            }))
     }
 }
 
