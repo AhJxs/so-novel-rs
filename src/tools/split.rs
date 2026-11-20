@@ -28,6 +28,7 @@ pub fn compile_pattern(custom: Option<&str>) -> Result<Regex, ToolError> {
 }
 
 /// 标题必须独占一个段落（单行），正文里的“第一章”不会被误判。
+/// 标题章即使没有正文也保留（卷标题），只有首个标题前的前言会因空正文被丢弃。
 #[must_use]
 pub fn split_chapters(
     paragraphs: &[String],
@@ -36,6 +37,7 @@ pub fn split_chapters(
 ) -> Vec<SourceChapter> {
     let mut chapters = Vec::new();
     let mut saw_heading = false;
+    let mut current_is_heading = false;
     let mut current = SourceChapter {
         title: "前言".to_string(),
         paragraphs: Vec::new(),
@@ -48,18 +50,19 @@ pub fn split_chapters(
         let is_heading = !trimmed.contains('\n') && regex.is_match(trimmed);
         if is_heading {
             saw_heading = true;
-            if !current.paragraphs.is_empty() {
+            if !current.paragraphs.is_empty() || current_is_heading {
                 chapters.push(current);
             }
             current = SourceChapter {
                 title: trimmed.to_string(),
                 paragraphs: Vec::new(),
             };
+            current_is_heading = true;
         } else {
             current.paragraphs.push(trimmed.to_string());
         }
     }
-    if !current.paragraphs.is_empty() {
+    if !current.paragraphs.is_empty() || (saw_heading && current_is_heading) {
         if !saw_heading && chapters.is_empty() {
             current.title = book_title.to_string();
         }
@@ -162,6 +165,16 @@ mod tests {
         let chapters = split_chapters(&paragraphs, &compile_pattern(None).unwrap(), "书");
         assert_eq!(chapters.len(), 1);
         assert_eq!(chapters[0].title, "第1章 开始");
+    }
+
+    #[test]
+    fn keeps_heading_only_chapter() {
+        let paragraphs = paragraphs(&["第一卷 风起", "第一章 甲", "正文"]);
+        let regex = compile_pattern(None).unwrap();
+        let chapters = split_chapters(&paragraphs, &regex, "书");
+        let titles: Vec<_> = chapters.iter().map(|c| c.title.as_str()).collect();
+        assert_eq!(titles, vec!["第一卷 风起", "第一章 甲"]);
+        assert_eq!(chapters[0].paragraphs, Vec::<String>::new());
     }
 
     #[test]
