@@ -91,6 +91,7 @@ pub fn drain(model: &mut AppModel) -> bool {
     //    要推的 UIEvent, 循环结束后统一 push。
     let mut finished_events: Vec<UIEvent> = Vec::new();
     let mut need_save = false;
+    let mut library_changed = false;
     for t in &mut model.tasks {
         let was_running = t.is_running();
         any |= t.drain();
@@ -106,9 +107,12 @@ pub fn drain(model: &mut AppModel) -> bool {
                 .unwrap_or(t.origin.book_name.as_str());
             let book_name = crate::utils::formatting::truncate(book_name, 50);
             let event = match &t.finished {
-                Some(Ok(_)) => UIEvent::Success(
-                    t!("Tasks.download_finished.completed", book_name = &book_name).to_string(),
-                ),
+                Some(Ok(_)) => {
+                    library_changed = true;
+                    UIEvent::Success(
+                        t!("Tasks.download_finished.completed", book_name = &book_name).to_string(),
+                    )
+                }
                 Some(Err(reason)) if reason.is_cancelled() => UIEvent::Info(
                     t!("Tasks.download_finished.cancelled", book_name = &book_name).to_string(),
                 ),
@@ -119,6 +123,10 @@ pub fn drain(model: &mut AppModel) -> bool {
             };
             finished_events.push(event);
         }
+    }
+    if library_changed {
+        // 下载目录内容变了：清掉「已扫描」哨兵，书库页下次渲染自动重扫。
+        model.library.scanned_dir = None;
     }
     // 批量保存任务到文件 — fire-and-forget, 不阻塞 drain_loop。
     if need_save {

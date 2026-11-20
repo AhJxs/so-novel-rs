@@ -35,6 +35,19 @@ const SOURCE_ENCODINGS: &[&str] = &["auto", "UTF-8", "GBK", "GB18030", "Big5", "
 /// 可选的输出编码；不含 UTF-16（`encoding_rs` 的 UTF-16 只支持解码）。
 const TARGET_ENCODINGS: &[&str] = &["UTF-8", "GBK", "GB18030", "Big5", "Big5-HKSCS"];
 
+/// 工具产出是否落在下载目录里 —— 落在里面书库扫描才能发现，需要清掉扫描哨兵。
+///
+/// 比较根与扫描共用 `absolute_dir`；只有空值判断用 trim，扫描器本身不 trim。
+fn output_lands_in_download_dir(output: &Path, download_path: &str) -> bool {
+    if download_path.trim().is_empty() {
+        return false;
+    }
+    let Some(parent) = output.parent() else {
+        return false;
+    };
+    parent == crate::library::absolute_dir(Path::new(download_path)).as_path()
+}
+
 /// 三个工具。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ToolKind {
@@ -303,7 +316,16 @@ impl ToolsPage {
                         form.result = Some(path.clone());
                         let message = t!("Tools.toast.success", name = path.display().to_string())
                             .to_string();
-                        model.update(cx, |model, _cx| model.push_success(message));
+                        model.update(cx, |model, _cx| {
+                            model.push_success(message);
+                            if output_lands_in_download_dir(
+                                &path,
+                                &model.config.download.download_path,
+                            ) {
+                                // 产出落在扫描范围内：下次渲染书库页时重扫。
+                                model.library.scanned_dir = None;
+                            }
+                        });
                     }
                     Err(error) => {
                         let summary: SharedString = t!(error.message_key()).into();
@@ -826,5 +848,37 @@ const fn format_key(format: ExportFormat) -> &'static str {
         ExportFormat::Html => "Tools.format.html",
         ExportFormat::Pdf => "Tools.format.pdf",
         ExportFormat::Markdown => "Tools.format.markdown",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
+
+    use super::*;
+
+    #[test]
+    fn output_lands_in_download_dir_only_for_direct_children() {
+        let download = tempfile::tempdir().unwrap();
+        let inside = download.path().join("converted.txt");
+        let nested = download.path().join("sub").join("converted.txt");
+        let elsewhere = tempfile::tempdir().unwrap().path().join("converted.txt");
+
+        assert!(output_lands_in_download_dir(
+            &inside,
+            &download.path().to_string_lossy()
+        ));
+        assert!(
+            !output_lands_in_download_dir(&nested, &download.path().to_string_lossy()),
+            "工具栏产出是目录直接子项，子目录里的文件扫描根也不会直接列出"
+        );
+        assert!(!output_lands_in_download_dir(
+            &elsewhere,
+            &download.path().to_string_lossy()
+        ));
+        assert!(
+            !output_lands_in_download_dir(&inside, "   "),
+            "下载目录为空时不能扫，也不能误判命中"
+        );
     }
 }
