@@ -142,7 +142,7 @@ impl RootView {
         cx.notify();
     }
 
-    /// 关闭阅读器：落盘进度、恢复窗口装饰。
+    /// 关闭阅读器：落盘进度、恢复窗口装饰，并把键盘焦点交还主窗口。
     pub fn close_reader(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(reader) = self.reader.take() else {
             return;
@@ -153,6 +153,10 @@ impl RootView {
             window.toggle_fullscreen();
         }
         cx.notify();
+        // 焦点原本在 `ReaderPage` 自己的 focus handle 上，entity 随本函数被丢掉后
+        // 键盘不再有归属。显式交还 `RootView` 的 handle —— 主窗口两条渲染分支的
+        // 根 div 都 `track_focus` 它、并挂 `KEY_CONTEXT`，所以 Cmd+3 等无需先点窗口。
+        window.focus(&self.focus, cx);
     }
 
     /// 退出前的唯一落盘点（`on_app_quit` 调用；Cmd+Q 与原生关窗都会走到这里）。
@@ -330,8 +334,22 @@ impl RootView {
             .child(self.render_current_page())
     }
 
-    /// 9 个导航 action 的 listener 挂到传入的 div 上。
+    /// 退出落盘只有一条路径：`on_app_quit` → `flush_before_quit`（见 `new`）。
+    /// 这里只负责按关闭契约收起阅读器，别在这里再刷一次书架。
+    ///
+    /// 单独拆出来是因为阅读器分支只挂它：阅读器内 Cmd+Q 仍可退出，但 Cmd+1..6 /
+    /// F6 / Cmd+B 不该把用户从正在读的书里踢出去。
+    fn bind_quit_action(root: Div, cx: &Context<Self>) -> Div {
+        root.on_action(cx.listener(|this, _: &super::Quit, window, cx| {
+            this.close_reader(window, cx);
+            cx.quit();
+        }))
+    }
+
+    /// 9 个导航 action 的 listener 挂到传入的 div 上；先挂退出 listener，
+    /// 保证非阅读器路径不会漏掉 Cmd+Q 的收起阅读器行为。
     fn bind_nav_actions(root: Div, cx: &Context<Self>) -> Div {
+        let root = Self::bind_quit_action(root, cx);
         root.on_action(cx.listener(|this, _: &ShowSearch, window, cx| {
             this.close_reader(window, cx);
             this.navigate(NavPage::Search, cx);
@@ -367,12 +385,6 @@ impl RootView {
             this.navigate(prev, cx);
         }))
         .on_action(cx.listener(|this, _: &ToggleSidebar, _, cx| this.toggle_sidebar(cx)))
-        // 退出落盘只有一条路径：`on_app_quit` → `flush_before_quit`（见 `new`）。
-        // 这里只负责按关闭契约收起阅读器，别在这里再刷一次书架。
-        .on_action(cx.listener(|this, _: &super::Quit, window, cx| {
-            this.close_reader(window, cx);
-            cx.quit();
-        }))
     }
 }
 
@@ -391,11 +403,13 @@ impl Render for RootView {
         }
 
         // 阅读器打开时覆盖整个主区域（Sidebar + TitleBar + 内容区），仅沉浸模式下也隐藏
-        // TitleBar；关闭由 RootView 丢弃 entity 完成。键盘 / 退出旁路同样挂在这一分支：
+        // TitleBar；关闭由 RootView 丢弃 entity 完成。退出旁路挂在这一分支：
         // 两个分支互斥（早返回），每帧只有一套 listener，不会双绑定。
         if let Some(reader) = self.reader.clone() {
             let immersive = reader.read(cx).is_immersive();
-            return Self::bind_nav_actions(
+            // 阅读器内只保留 Cmd+Q：导航快捷键不挂在这个分支，Cmd+1..6 / F6
+            // 与 Cmd+B 落地无 listener；阅读器自己的 Esc / 方向键仍由 `ReaderPage` 处理。
+            return Self::bind_quit_action(
                 div()
                     .track_focus(&self.focus)
                     .key_context(KEY_CONTEXT)
