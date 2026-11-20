@@ -139,7 +139,7 @@ pub struct ReaderPage {
     /// 翻页模式：当前章的分页缓存。
     pub(super) page_cache: Option<PageCache>,
     /// 越界向前翻页时置位：重算分页后落到新章最后一页。
-    page_turn_to_last: bool,
+    pub(super) page_turn_to_last: bool,
     /// 正文视口实测高度（px）；`None` = 还没量到，先按窗口高度估。
     viewport_height: Option<f32>,
     /// 与 `viewport_probe` 共享的最近一次实测值，用来判断要不要通知。
@@ -770,6 +770,10 @@ impl ReaderPage {
 
     /// 跳到第 `index` 章（0-based），章内位置归零。
     pub(super) fn goto_chapter(&mut self, index: usize, cx: &mut Context<Self>) {
+        self.goto_chapter_with(index, false, cx);
+    }
+
+    fn goto_chapter_with(&mut self, index: usize, to_last: bool, cx: &mut Context<Self>) {
         let Some(content) = self.content.as_ref() else {
             return;
         };
@@ -784,6 +788,9 @@ impl ReaderPage {
         self.chapter_ratio = 0.0;
         // 跳章按 `chapter_ratio`（=章首）恢复：别让宽度变化留下的抽样值接管这次恢复。
         self.restore_position = None;
+        // 跨章回退只是本次翻页的一次性提示：每个跳章入口都要重新决定，
+        // 否则残留的 true 会让下一次分页落到目标章末页。
+        self.page_turn_to_last = to_last;
         self.restore_pending = true;
         self.record_progress(cx);
         cx.notify();
@@ -904,6 +911,11 @@ impl ReaderPage {
             window.focus(&handle, cx);
         } else {
             self.cancel_search();
+            // 查询词不跨次保留：重开时是「输入关键词」提示，而不是上次的结果状态。
+            if !self.search_input.read(cx).value().is_empty() {
+                self.search_input
+                    .update(cx, |input, cx| input.set_value("", window, cx));
+            }
             self.focus_body(window, cx);
         }
     }
@@ -1684,9 +1696,8 @@ impl ReaderPage {
             if self.chapter == 0 {
                 return;
             }
-            self.page_turn_to_last = true;
             let target = self.chapter - 1;
-            self.goto_chapter(target, cx);
+            self.goto_chapter_with(target, true, cx);
             return;
         }
         if next as usize >= pages {

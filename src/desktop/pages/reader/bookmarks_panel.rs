@@ -88,6 +88,8 @@ impl ReaderPage {
         // 书签可能在当前章：指纹不变时分页缓存会直接早退、`page_index` 不追随新比例。
         self.invalidate_scroll_commit();
         self.page_cache = None;
+        // 显式跳转必须清掉跨章回退的残留标志，否则分页会落到目标章末页。
+        self.page_turn_to_last = false;
         self.chapter = chapter.min(count - 1);
         self.chapter_ratio = ratio.clamp(0.0, 1.0);
         self.restore_pending = true;

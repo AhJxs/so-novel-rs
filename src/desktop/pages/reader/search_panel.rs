@@ -177,7 +177,7 @@ impl ReaderPage {
         }
         self.search.scanning = false;
         // 关掉抽屉 / 重载后不能把高亮留在正文上：没有可见的结果列表时，满屏黄块既无法
-        // 解释也无法清除。查询词保留，重新按回车可以再扫一遍。
+        // 解释也无法清除。查询词保留，重新按回车可以再扫一遍（关闭抽屉时由 `set_search_open` 清空输入）。
         self.search.groups.clear();
         self.search.hits = 0;
         self.search.active = None;
@@ -246,6 +246,8 @@ impl ReaderPage {
         // 所以要作废在途防抖并强制重排一次。
         self.invalidate_scroll_commit();
         self.page_cache = None;
+        // 显式跳转必须清掉跨章回退的残留标志，否则分页会落到目标章末页。
+        self.page_turn_to_last = false;
         self.chapter = chapter;
         self.chapter_ratio = ratio;
         self.restore_pending = true;
