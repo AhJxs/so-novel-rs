@@ -17,7 +17,7 @@ use crate::db::{
 };
 use crate::http::{HttpClients, SystemProxy, detect_system_proxy};
 use crate::library::LibraryStore;
-use crate::models::Rule;
+use crate::models::{DownloadTaskRecord, Rule};
 
 /// 应用整体状态。UI 中立 —— 不依赖任何 GUI 框架, 由 `desktop` 层渲染。
 pub struct AppModel {
@@ -56,6 +56,14 @@ pub struct AppModel {
     /// 活动 / 已完成的下载任务。最新加在末尾。
     pub tasks: Vec<DownloadTask>,
     pub(super) next_task_id: u64,
+    /// 加载时 `state:tasks` 解析失败（原文已备份）：本次运行不再覆盖写。
+    pub(super) tasks_readonly: bool,
+    /// 加载时 `state:sources` 解析失败（原文已备份）：本次运行不再覆盖写。
+    pub(super) sources_readonly: bool,
+    /// 只读告警是否已发过，避免每次落盘都刷日志。
+    pub(super) tasks_readonly_warned: bool,
+    /// 只读告警是否已发过，避免每次落盘都刷日志。
+    pub(super) sources_readonly_warned: bool,
 
     /// 下载文件库页状态。
     pub library: LibraryState,
@@ -106,10 +114,8 @@ impl AppModel {
             })?;
 
         // 2. 书源选择要先于规则加载：规则目录按活跃书源文件解析。
-        let sources_config = snapshot
-            .sources
-            .as_deref()
-            .map_or_else(SourcesConfig::default, SourcesConfig::from_json);
+        let (sources_config, sources_readonly) =
+            load_sources_config(&state, snapshot.sources.as_deref());
         if snapshot.sources.is_none() {
             // 首次运行：把默认选择写进存储（顺带写入 schema 版本）。
             match sources_config.to_json() {
@@ -123,8 +129,8 @@ impl AppModel {
         }
 
         // 3. 下载任务：未完成的标成「应用重启中断」，需要时立刻回写。
-        let (LoadedTasks { tasks, max_id }, tasks_rewrite) =
-            load_tasks_from_bytes(snapshot.tasks.as_deref());
+        let (LoadedTasks { tasks, max_id }, tasks_rewrite, tasks_readonly) =
+            load_tasks(&state, snapshot.tasks.as_deref());
         tracing::info!("从运行数据加载 {} 个历史下载任务", tasks.len());
         if let Some(rewrite) = tasks_rewrite
             && let Err(error) = state.put(KEY_TASKS, &rewrite)
@@ -167,6 +173,10 @@ impl AppModel {
             search: SearchState::default(),
             tasks,
             next_task_id,
+            tasks_readonly,
+            sources_readonly,
+            tasks_readonly_warned: false,
+            sources_readonly_warned: false,
             library: LibraryState::new(library_store),
             sources_state: SourcesState::default(),
             update_state: UpdateState::default(),
@@ -240,5 +250,152 @@ impl AppModel {
             runtime: self.runtime,
             wakeup: &self.wakeup,
         }
+    }
+}
+
+/// 读取书源选择。解析失败时先把原始字节备份进 state 目录，再回落默认值。
+///
+/// 返回的 bool 表示「本次运行拒写 sources」：损坏原文已备份，若再把默认值写回，
+/// 下次启动就看不到用户原来的选择了（与 [`LibraryStore`] 的 `readonly` 同语义）。
+fn load_sources_config(state: &StateStore, bytes: Option<&[u8]>) -> (SourcesConfig, bool) {
+    let Some(bytes) = bytes else {
+        return (SourcesConfig::default(), false);
+    };
+    match serde_json::from_slice(bytes) {
+        Ok(config) => (config, false),
+        Err(error) => {
+            tracing::warn!("书源选择数据解析失败，本次运行不再覆盖写入: {error}");
+            backup_corrupt(state, "sources", bytes);
+            (SourcesConfig::default(), true)
+        }
+    }
+}
+
+/// 读取下载任务。解析失败时先备份原文，再回落空表 + 本次运行拒写 tasks。
+fn load_tasks(state: &StateStore, bytes: Option<&[u8]>) -> (LoadedTasks, Option<Vec<u8>>, bool) {
+    if let Some(bytes) = bytes
+        && serde_json::from_slice::<Vec<DownloadTaskRecord>>(bytes).is_err()
+    {
+        tracing::warn!("下载任务数据解析失败，本次运行不再覆盖写入");
+        backup_corrupt(state, "tasks", bytes);
+        return (
+            LoadedTasks {
+                tasks: Vec::new(),
+                max_id: 0,
+            },
+            None,
+            true,
+        );
+    }
+    let (loaded, rewrite) = load_tasks_from_bytes(bytes);
+    (loaded, rewrite, false)
+}
+
+/// 把无法解析的 blob 原文另存一份；备份失败也只记日志，只读标志照样生效。
+fn backup_corrupt(state: &StateStore, name: &str, bytes: &[u8]) {
+    if let Some(path) = state.backup_corrupt(name, bytes) {
+        tracing::warn!("损坏的 {name} 数据已备份到 {}", path.display());
+    } else {
+        tracing::warn!("备份损坏的 {name} 数据失败，仍按只读处理");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
+
+    use std::path::{Path, PathBuf};
+
+    use super::*;
+
+    /// 临时目录里的真实 `StateStore`（不触碰 `~/.sonovel`）。
+    fn temp_state() -> (tempfile::TempDir, StateStore) {
+        let dir = tempfile::tempdir().unwrap();
+        let (state, _) =
+            StateStore::open(dir.path().to_path_buf(), build_shared_runtime().unwrap()).unwrap();
+        (dir, state)
+    }
+
+    fn backups(dir: &Path, name: &str) -> Vec<PathBuf> {
+        let prefix = format!("{name}.corrupt-");
+        std::fs::read_dir(dir)
+            .unwrap()
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .filter(|path| {
+                path.file_name()
+                    .is_some_and(|file| file.to_string_lossy().starts_with(&prefix))
+            })
+            .collect()
+    }
+
+    #[test]
+    fn corrupt_sources_blob_is_backed_up_and_readonly() {
+        let (dir, state) = temp_state();
+        let (config, readonly) = load_sources_config(&state, Some(b"{ not json"));
+
+        assert!(readonly, "解析失败应标记本次运行拒写");
+        assert_eq!(config.active_file, SourcesConfig::default().active_file);
+        let backups = backups(dir.path(), "sources");
+        assert_eq!(backups.len(), 1, "原文必须留一份备份");
+        assert_eq!(std::fs::read(&backups[0]).unwrap(), b"{ not json");
+        state.close();
+    }
+
+    #[test]
+    fn valid_sources_blob_parses_and_is_writable() {
+        let (_dir, state) = temp_state();
+        let bytes = SourcesConfig {
+            active_file: "cloudflare.json".to_string(),
+            ..SourcesConfig::default()
+        }
+        .to_json()
+        .unwrap();
+
+        let (config, readonly) = load_sources_config(&state, Some(&bytes));
+        assert!(!readonly);
+        assert_eq!(config.active_file, "cloudflare.json");
+        state.close();
+    }
+
+    #[test]
+    fn corrupt_tasks_blob_is_backed_up_and_readonly() {
+        let (dir, state) = temp_state();
+        let (loaded, rewrite, readonly) = load_tasks(&state, Some(b"{ not json"));
+
+        assert!(readonly, "解析失败应标记本次运行拒写");
+        assert!(loaded.tasks.is_empty(), "损坏数据回落空表");
+        assert_eq!(loaded.max_id, 0);
+        assert!(rewrite.is_none());
+        let backups = backups(dir.path(), "tasks");
+        assert_eq!(backups.len(), 1, "原文必须留一份备份");
+        assert_eq!(std::fs::read(&backups[0]).unwrap(), b"{ not json");
+        state.close();
+    }
+
+    #[test]
+    fn valid_tasks_blob_loads_without_readonly() {
+        let (_dir, state) = temp_state();
+        let bytes = serde_json::to_vec(&[DownloadTaskRecord {
+            id: 7,
+            origin: crate::models::SearchResult::default(),
+            started_at_unix: 1,
+            finished_at_unix: Some(2),
+            book_meta: None,
+            total_chapters: 1,
+            completed: 1,
+            failed: 0,
+            last_chapter_title: String::new(),
+            finished: Some(Ok(std::path::PathBuf::from("/tmp/a.epub"))),
+            failures: Vec::new(),
+        }])
+        .unwrap();
+
+        let (loaded, rewrite, readonly) = load_tasks(&state, Some(&bytes));
+        assert!(!readonly);
+        assert_eq!(loaded.tasks.len(), 1);
+        assert_eq!(loaded.max_id, 7);
+        assert!(rewrite.is_none());
+        state.close();
     }
 }

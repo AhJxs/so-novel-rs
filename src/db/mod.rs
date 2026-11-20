@@ -29,5 +29,6 @@ pub use state_store::{
     KEY_LIBRARY, KEY_SCHEMA, KEY_SOURCES, KEY_TASKS, STATE_SCHEMA_VERSION, StateOpenError,
     StateSnapshot, StateStore,
 };
+pub(crate) use tasks::trim_completed_runtime;
 pub use tasks::{parse as parse_tasks, tasks_json_with_trim};
 pub use tasks_init::{LoadedTasks, load_tasks_from_bytes};

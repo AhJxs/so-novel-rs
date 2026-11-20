@@ -7,7 +7,16 @@ use super::AppModel;
 
 impl AppModel {
     /// 把书源选择状态写回运行数据；失败仅记日志。
-    pub fn save_sources_config(&self) {
+    ///
+    /// 加载时 blob 损坏（原文已备份）则本次运行拒写，只告警一次。
+    pub fn save_sources_config(&mut self) {
+        if self.sources_readonly {
+            if !self.sources_readonly_warned {
+                self.sources_readonly_warned = true;
+                tracing::warn!("书源选择数据加载时已损坏（原文已备份），本次运行不再覆盖写入");
+            }
+            return;
+        }
         let bytes = match self.sources_config.to_json() {
             Ok(bytes) => bytes,
             Err(error) => {
@@ -54,7 +63,16 @@ impl AppModel {
     ///
     /// 序列化（含超额完成任务的裁剪）与写入都在调用线程完成：提交前已 fsync，
     /// 调用返回后数据一定在磁盘上，退出时不需要额外的 flush。
-    pub fn persist_tasks(&self) {
+    ///
+    /// 加载时 blob 损坏（原文已备份）则本次运行拒写，只告警一次。
+    pub fn persist_tasks(&mut self) {
+        if self.tasks_readonly {
+            if !self.tasks_readonly_warned {
+                self.tasks_readonly_warned = true;
+                tracing::warn!("下载任务数据加载时已损坏（原文已备份），本次运行不再覆盖写入");
+            }
+            return;
+        }
         let json = match crate::db::tasks_json_with_trim(&self.tasks) {
             Ok(json) => json,
             Err(e) => {

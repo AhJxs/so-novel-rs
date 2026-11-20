@@ -154,7 +154,12 @@ impl StateStore {
             let mut tx = tree.begin()?;
             match tx.get(KEY_SCHEMA)? {
                 Some(bytes) => {
-                    let version = decode_schema(&bytes);
+                    let Some(version) = decode_schema(&bytes) else {
+                        anyhow::bail!(
+                            "运行数据 schema 值损坏（{} 字节，应为 4 字节），拒绝覆盖写入",
+                            bytes.len()
+                        );
+                    };
                     if version > STATE_SCHEMA_VERSION {
                         anyhow::bail!(
                             "运行数据 schema 版本 {version} 高于当前程序支持的 {STATE_SCHEMA_VERSION}"
@@ -205,13 +210,22 @@ impl StateStore {
 fn read_snapshot(runtime: &Runtime, tree: &Tree) -> anyhow::Result<StateSnapshot> {
     runtime.block_on(async {
         let tx = tree.begin()?;
-        let schema_version = tx.get(KEY_SCHEMA)?.map(|value| decode_schema(&value));
+        let schema = tx.get(KEY_SCHEMA)?;
         let library = tx.get(KEY_LIBRARY)?;
         let tasks = tx.get(KEY_TASKS)?;
         let sources = tx.get(KEY_SOURCES)?;
         drop(tx);
-        let read_only = schema_version.is_some_and(|version| version > STATE_SCHEMA_VERSION);
-        if read_only {
+        let schema_version = schema.as_deref().and_then(decode_schema);
+        // 键存在但长度不是 4 字节：不认识的 schema 标记，宁可只读也绝不按 0 覆盖。
+        let schema_corrupt = schema.is_some() && schema_version.is_none();
+        if schema_corrupt {
+            tracing::warn!(
+                "运行数据 schema 值损坏（{} 字节，应为 4 字节），本次只读",
+                schema.as_ref().map_or(0, Vec::len)
+            );
+        }
+        let future_version = schema_version.is_some_and(|version| version > STATE_SCHEMA_VERSION);
+        if future_version {
             tracing::warn!(
                 "运行数据 schema {:?} 高于当前程序支持的 {STATE_SCHEMA_VERSION}，本次只读",
                 schema_version
@@ -222,18 +236,17 @@ fn read_snapshot(runtime: &Runtime, tree: &Tree) -> anyhow::Result<StateSnapshot
             library,
             tasks,
             sources,
-            read_only,
-            error: None,
+            read_only: schema_corrupt || future_version,
+            error: schema_corrupt
+                .then(|| "运行数据 schema 标记损坏，本次运行按只读处理，不会覆盖".to_string()),
         })
     })
 }
 
-/// schema 值按 4 字节大端读；长度不对时当成 0（未知），后续写入会拒绝而不是覆盖。
-fn decode_schema(value: &[u8]) -> u32 {
-    value
-        .get(..4)
-        .and_then(|bytes| bytes.try_into().ok())
-        .map_or(0, u32::from_be_bytes)
+/// schema 值按 4 字节大端读（与 `put` 的 `to_be_bytes` 对应）。长度不是 4 字节视为
+/// 损坏（`None`），后续写入会拒绝而不是覆盖。
+fn decode_schema(value: &[u8]) -> Option<u32> {
+    value.try_into().ok().map(u32::from_be_bytes)
 }
 
 async fn open_with_retry(dir: &Path) -> Result<Tree, StateOpenError> {
@@ -380,6 +393,78 @@ mod tests {
             Some(&b"old"[..]),
             "只读时不能覆盖别人的数据"
         );
+    }
+
+    /// 直接往库里写一组原始字节（绕开 `put` 的 schema 校验），模拟历史 / 损坏数据。
+    fn seed_raw(dir: &Path, schema: Option<&[u8]>, library: &[u8]) {
+        let path = dir.to_path_buf();
+        runtime().block_on(async {
+            let tree = TreeBuilder::new().with_path(path).build().unwrap();
+            let mut tx = tree.begin().unwrap();
+            if let Some(schema) = schema {
+                tx.set(KEY_SCHEMA, schema.to_vec()).unwrap();
+            }
+            tx.set(KEY_LIBRARY, library.to_vec()).unwrap();
+            tx.commit().await.unwrap();
+            drop(tx);
+            tree.close().await.unwrap();
+            drop(tree);
+        });
+    }
+
+    #[test]
+    fn malformed_schema_is_read_only_and_never_overwritten() {
+        // 3 字节（截断）与 8 字节（多写）都应视为损坏，而不是当成版本 0 继续覆盖。
+        for schema in [&[0_u8, 0, 1][..], &[0_u8; 8][..]] {
+            let dir = tempfile::tempdir().unwrap();
+            seed_raw(dir.path(), Some(schema), b"old");
+
+            let (store, snapshot) = open(dir.path());
+            assert!(
+                snapshot.read_only,
+                "schema {} 字节：长度不为 4 应只读",
+                schema.len()
+            );
+            assert!(
+                snapshot.schema_version.is_none(),
+                "损坏的 schema 不给出伪造版本"
+            );
+            assert!(snapshot.error.is_some(), "损坏时应给用户明确提示");
+            assert!(store.is_read_only());
+            assert!(
+                store.put(KEY_LIBRARY, b"new").is_err(),
+                "schema 损坏时写入必须失败"
+            );
+            store.close();
+
+            let (_store, snapshot) = open(dir.path());
+            assert_eq!(
+                snapshot.library.as_deref(),
+                Some(&b"old"[..]),
+                "schema 损坏时绝不能覆盖原数据"
+            );
+            assert!(snapshot.read_only);
+        }
+    }
+
+    #[test]
+    fn four_byte_schema_is_writable() {
+        let dir = tempfile::tempdir().unwrap();
+        seed_raw(
+            dir.path(),
+            Some(&STATE_SCHEMA_VERSION.to_be_bytes()),
+            b"old",
+        );
+
+        let (store, snapshot) = open(dir.path());
+        assert!(!snapshot.read_only, "4 字节 schema 是正常数据");
+        assert_eq!(snapshot.schema_version, Some(STATE_SCHEMA_VERSION));
+        assert!(snapshot.error.is_none());
+        store.put(KEY_LIBRARY, b"new").unwrap();
+        store.close();
+
+        let (_store, snapshot) = open(dir.path());
+        assert_eq!(snapshot.library.as_deref(), Some(&b"new"[..]));
     }
 
     #[test]

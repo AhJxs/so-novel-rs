@@ -6,7 +6,9 @@ use crate::core::DownloadTask;
 use crate::models::DownloadTaskRecord;
 
 /// 已完成任务的最大保留数量, 超出后按完成时间从旧到新删除; 运行中的任务不受限制。
-const MAX_COMPLETED_TASKS: usize = 1000;
+///
+/// 落盘裁剪（[`trim_completed`]）与运行时裁剪（[`trim_completed_runtime`]）共用这一阈值。
+pub const MAX_COMPLETED_TASKS: usize = 1000;
 
 /// 从 JSON 字节解析历史任务；损坏时返回空列表。
 #[must_use]
@@ -60,6 +62,41 @@ pub fn trim_completed(tasks: &mut Vec<DownloadTaskRecord>) -> usize {
     let before = tasks.len();
     tasks.retain(|t| !remove_ids.contains(&t.id));
     before - tasks.len()
+}
+
+/// 运行时的任务表裁剪：直接在 `Vec<DownloadTask>` 上删掉最旧的超额已完成任务。
+///
+/// 阈值与落盘时的 [`trim_completed`] 相同（最近 [`MAX_COMPLETED_TASKS`] 条已完成），
+/// 保留原有顺序，运行中的任务永不删除。返回是否有任务被删（调用方据此决定落盘）。
+pub fn trim_completed_runtime(tasks: &mut Vec<DownloadTask>) -> bool {
+    let completed_count = tasks.iter().filter(|t| t.finished.is_some()).count();
+    if completed_count <= MAX_COMPLETED_TASKS {
+        return false;
+    }
+    let to_remove = completed_count - MAX_COMPLETED_TASKS;
+
+    // 先记下索引，再按 `finished_at_unix` 从旧到新排出要删的位置；缺该字段的视为最旧。
+    let mut completed: Vec<(usize, i64)> = tasks
+        .iter()
+        .enumerate()
+        .filter(|(_, t)| t.finished.is_some())
+        .map(|(index, t)| (index, t.finished_at_unix.unwrap_or(0)))
+        .collect();
+    completed.sort_by_key(|(_, ts)| *ts);
+
+    let mut remove = vec![false; tasks.len()];
+    for (index, _) in completed.into_iter().take(to_remove) {
+        remove[index] = true;
+    }
+    // `retain` 按原顺序访问元素，用同步推进的下标决定去留，顺序因此保持不变。
+    let mut index = 0;
+    tasks.retain(|_| {
+        let keep = !remove[index];
+        index += 1;
+        keep
+    });
+    tracing::info!("运行时自动清理了 {to_remove} 条旧的已完成任务");
+    true
 }
 
 #[cfg(test)]
@@ -214,6 +251,85 @@ mod tests {
         let trimmed = trim_completed(&mut tasks);
         assert_eq!(trimmed, 0, "未超上限时不应清理");
         assert_eq!(tasks.len(), 50);
+    }
+
+    fn completed_task(id: u64, finished_at: i64) -> DownloadTask {
+        let mut rec = sample_rec(
+            id,
+            Some(Ok(std::path::PathBuf::from(format!("/tmp/{id}.epub")))),
+        );
+        rec.finished_at_unix = Some(finished_at);
+        DownloadTask::from_record(rec)
+    }
+
+    fn running_task(id: u64) -> DownloadTask {
+        DownloadTask::from_record(sample_rec(id, None))
+    }
+
+    #[test]
+    fn trim_completed_runtime_keeps_newest_in_order() {
+        let mut tasks: Vec<DownloadTask> = Vec::new();
+        for id in 1..=600 {
+            tasks.push(completed_task(
+                id,
+                1_700_000_000 + i64::try_from(id).unwrap_or(0),
+            ));
+        }
+        // 运行中的任务夹在中间：裁剪后位置也不能变。
+        tasks.push(running_task(1300));
+        for id in 601..=1205 {
+            tasks.push(completed_task(
+                id,
+                1_700_000_000 + i64::try_from(id).unwrap_or(0),
+            ));
+        }
+
+        assert!(
+            trim_completed_runtime(&mut tasks),
+            "1205 条已完成超过上限，应返回 true"
+        );
+
+        let ids: Vec<u64> = tasks.iter().map(|t| t.id).collect();
+        let mut expected: Vec<u64> = (206..=600).collect();
+        expected.push(1300);
+        expected.extend(601..=1205);
+        assert_eq!(ids, expected, "只删最旧的 205 条；顺序与运行中任务都不变");
+    }
+
+    #[test]
+    fn trim_completed_runtime_noop_under_limit() {
+        let mut tasks: Vec<DownloadTask> = (1..=999)
+            .map(|id| completed_task(id, 1_000 + i64::try_from(id).unwrap_or(0)))
+            .collect();
+        tasks.push(running_task(5000));
+
+        assert!(
+            !trim_completed_runtime(&mut tasks),
+            "未超上限时应返回 false"
+        );
+        assert_eq!(tasks.len(), 1000, "未超上限时不应改动表");
+    }
+
+    #[test]
+    fn trim_completed_runtime_treats_missing_finished_at_as_oldest() {
+        let mut tasks: Vec<DownloadTask> = Vec::new();
+        let mut no_ts = sample_rec(1, Some(Ok(std::path::PathBuf::from("/tmp/1.epub"))));
+        no_ts.finished_at_unix = None;
+        tasks.push(DownloadTask::from_record(no_ts));
+        for id in 2..=1001 {
+            tasks.push(completed_task(
+                id,
+                1_700_000_000 + i64::try_from(id).unwrap_or(0),
+            ));
+        }
+
+        assert!(trim_completed_runtime(&mut tasks));
+        assert_eq!(tasks.len(), 1000);
+        assert!(
+            !tasks.iter().any(|t| t.id == 1),
+            "缺完成时间视为最旧，应最先被删"
+        );
+        assert!(tasks.iter().any(|t| t.id == 1001), "最新的应保留");
     }
 
     /// 混合状态 (running + finished) 下序列化无损：finished payload + completed 字段都要在。
