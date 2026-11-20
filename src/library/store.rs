@@ -518,6 +518,22 @@ impl LibraryStore {
         }
     }
 
+    /// 章节数变少后丢掉越界书签；返回删除条数。
+    #[must_use]
+    pub fn prune_bookmarks(&mut self, id: &str, chapter_count: usize) -> usize {
+        let Some(book) = self.books.iter_mut().find(|book| book.id == id) else {
+            return 0;
+        };
+        let before = book.bookmarks.len();
+        book.bookmarks
+            .retain(|bookmark| bookmark.chapter < chapter_count);
+        let removed = before - book.bookmarks.len();
+        if removed > 0 {
+            self.dirty = true;
+        }
+        removed
+    }
+
     /// 重新定位到新文件：重算 ID / 路径键，保留进度与书签。返回新 ID。
     ///
     /// `scan_root` 是当前下载目录：新文件位于其下才继续算下载来源，否则转为导入来源
@@ -1019,6 +1035,33 @@ mod tests {
 
         let bookmark_id = store.get(&id).unwrap().bookmarks[0].id.clone();
         store.remove_bookmark(&id, &bookmark_id);
+        assert_eq!(store.get(&id).unwrap().bookmarks.len(), 1);
+    }
+
+    #[test]
+    fn prune_bookmarks_drops_out_of_range() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.txt");
+        std::fs::write(&path, b"one").unwrap();
+        let mut store = LibraryStore::default();
+        let id = store.merge_scan(&[scanned(&path)], dir.path()).remove(0);
+        store.books[0].bookmarks = vec![
+            Bookmark::new(1, 0.5, "甲".into()),
+            Bookmark::new(3, 0.5, "丙".into()),
+            Bookmark::new(9, 0.5, "乙".into()),
+        ];
+
+        // 边界章号（== chapter_count）与更远的越界章都要删，只留下合法的第 1 章。
+        assert_eq!(store.prune_bookmarks(&id, 3), 2);
+        let bookmarks = store.get(&id).unwrap().bookmarks.clone();
+        assert_eq!(bookmarks.len(), 1);
+        assert_eq!(bookmarks[0].chapter, 1);
+        assert_eq!(bookmarks[0].excerpt, "甲");
+        assert_eq!(store.prune_bookmarks("missing", 3), 0);
+
+        // 合法的最后一章（chapter_count - 1）不能被误删。
+        store.books[0].bookmarks = vec![Bookmark::new(2, 0.5, "丁".into())];
+        assert_eq!(store.prune_bookmarks(&id, 3), 0);
         assert_eq!(store.get(&id).unwrap().bookmarks.len(), 1);
     }
 

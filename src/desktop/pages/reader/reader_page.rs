@@ -624,6 +624,11 @@ impl ReaderPage {
                         model.set_book_encoding(&book_id, pending.into_option());
                     });
                 }
+                // 重新解析（换编码 / 重新定位 / 新分章规则）后章节数可能变少：
+                // 越界书签指向不存在的章，先清掉再写进度。
+                self.model.update(cx, |model, _| {
+                    model.prune_bookmarks_after_load(&book_id, chapter_count);
+                });
                 self.record_progress(cx);
                 self.start_autosave(cx);
             }

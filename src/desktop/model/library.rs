@@ -236,6 +236,14 @@ impl AppModel {
         self.persist_library();
     }
 
+    /// 重新解析后章节数可能变少：清掉越界书签并立即落盘；没删就不写盘。
+    pub fn prune_bookmarks_after_load(&mut self, id: &str, chapter_count: usize) {
+        if self.library.store.prune_bookmarks(id, chapter_count) > 0 {
+            self.library.bump();
+            self.persist_library();
+        }
+    }
+
     /// 导入一批文件（引用式，不复制）。完成后启动元数据提取。
     pub fn import_library_files(&mut self, paths: &[PathBuf]) {
         if paths.is_empty() {
