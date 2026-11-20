@@ -132,6 +132,8 @@ pub struct ReaderPage {
     restore_position: Option<f32>,
     /// 每次滚动自增，只有最新一代的防抖任务会写进度。
     scroll_generation: u64,
+    /// 上一次自动续章的时间；冷却期内不再接下一章。
+    last_chapter_jump: Option<std::time::Instant>,
     /// 翻页模式：当前页号。
     page_index: usize,
     /// 翻页模式：当前章的分页缓存。
@@ -233,6 +235,7 @@ impl ReaderPage {
             restore_pending: true,
             restore_position: None,
             scroll_generation: 0,
+            last_chapter_jump: None,
             page_index: 0,
             page_cache: None,
             page_turn_to_last: false,
@@ -1893,11 +1896,20 @@ impl ReaderPage {
             .into_any_element()
     }
 
+    const CONTINUE_COOLDOWN: std::time::Duration = std::time::Duration::from_millis(600);
+
+    /// 距上次自动续章是否已经过了冷却期。
+    fn may_continue_after(last: Option<std::time::Instant>, now: std::time::Instant) -> bool {
+        last.is_none_or(|last| now.duration_since(last) >= Self::CONTINUE_COOLDOWN)
+    }
+
     /// 滚到章尾后继续向下滚，接上下一章（从章首开始）。
     ///
     /// 只认「已经贴底 + 这一下还在往下」：到章尾就立刻跳会让人看不到最后一屏。
     /// `restore_pending` 期间不接：`goto_chapter` 已置位，滚动句柄要等下一帧才回到章首，
     /// 此时再收到惯性滚动就会连跳两章。
+    /// 两次自动续章之间隔 `CONTINUE_COOLDOWN`：触控板惯性在一跳后还会继续送向下事件，
+    /// 短章会被一口气连跳好几章；往回滚则立刻解除冷却。
     fn continue_to_next_chapter(&mut self, event: &ScrollEvent, cx: &mut Context<Self>) {
         if !matches!(self.mode, ReadingMode::Scroll) || self.restore_pending {
             return;
@@ -1906,6 +1918,14 @@ impl ReaderPage {
             ScrollDelta::Pixels(delta) => f32::from(delta.y) < 0.0,
             ScrollDelta::Lines(delta) => delta.y < 0.0,
         };
+        if !down {
+            // 用户往回滚：立刻解除冷却，下一次触底可以正常续章。
+            self.last_chapter_jump = None;
+            return;
+        }
+        if !Self::may_continue_after(self.last_chapter_jump, std::time::Instant::now()) {
+            return;
+        }
         let max = f32::from(self.scroll.max_offset().y);
         let current = f32::from(self.scroll.offset().y);
         if !Self::at_bottom_and_scrolling_down(down, current, max) {
@@ -1918,6 +1938,7 @@ impl ReaderPage {
             return;
         }
         self.goto_chapter(self.chapter + 1, cx);
+        self.last_chapter_jump = Some(std::time::Instant::now());
     }
 
     /// 「这一下滚动是否该接下一章」：已经贴底，且这一下还在向下。
@@ -2163,5 +2184,18 @@ mod tests {
         ));
         // 整章一屏放得下：本来就没得滚，继续向下就该接下一章。
         assert!(ReaderPage::at_bottom_and_scrolling_down(true, 0.0, 0.0));
+    }
+
+    #[test]
+    fn short_chapters_need_a_pause_between_jumps() {
+        let now = std::time::Instant::now();
+        assert!(!ReaderPage::may_continue_after(Some(now), now));
+        // `Instant - Duration` 会触发 `clippy::unchecked_time_subtraction`；
+        // 这里 `now` 刚取到，减 700ms 一定成立，直接 `unwrap`。
+        let earlier = now
+            .checked_sub(std::time::Duration::from_millis(700))
+            .unwrap();
+        assert!(ReaderPage::may_continue_after(Some(earlier), now));
+        assert!(ReaderPage::may_continue_after(None, now));
     }
 }
