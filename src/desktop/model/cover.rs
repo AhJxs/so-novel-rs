@@ -15,11 +15,11 @@ pub enum CoverEntry {
         /// 唯一 URI（`cover://{source_id}/{hash}`），用于 GPUI 端做纹理缓存去重。
         uri: String,
     },
-    /// 下载或解码失败，附展示用文案。
+    /// 下载失败或字节不是有效图片，附展示用文案。
     Failed(String),
 }
 
-/// 把后台下载的字节构造为 `CoverEntry`。失败 (空 body / 解码错误) 时给出中文短文案,
+/// 把后台下载的字节构造为 `CoverEntry`。失败 (空 body / 读不出图片头) 时给出中文短文案,
 /// UI 仍会显示一行小字提示。
 pub fn cover_entry_from_bytes(
     source_id: i32,
@@ -32,16 +32,17 @@ pub fn cover_entry_from_bytes(
             CoverEntry::Failed("下载为空或失败".to_string())
         },
         |b| {
-            // 提前用 image::ImageReader 验证字节是真的图片 (避免 lazy 解码时 ui.add 失败)。
-            let probe = ImageReader::new(std::io::Cursor::new(&b))
+            // 只读图片头确认是有效图片（不解码像素），避免 lazy 解码时 ui.add 失败。
+            let is_image = ImageReader::new(std::io::Cursor::new(&b))
                 .with_guessed_format()
                 .ok()
-                .and_then(|r| r.decode().ok());
-            if probe.is_some() {
+                .and_then(|reader| reader.into_dimensions().ok())
+                .is_some();
+            if is_image {
                 let uri = format!("cover://{source_id}/{}", hash_short(cover_url));
                 CoverEntry::Ready { bytes: b, uri }
             } else {
-                tracing::warn!(source_id = source_id, cover_url = %cover_url, size = b.len(), "封面字节解码失败（非有效图片或格式不支持）");
+                tracing::warn!(source_id = source_id, cover_url = %cover_url, size = b.len(), "封面字节读不出图片尺寸（非有效图片或格式不支持）");
                 CoverEntry::Failed("图片解码失败（非有效图片或格式不支持）".to_string())
             }
         },

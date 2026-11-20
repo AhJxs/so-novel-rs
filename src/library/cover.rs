@@ -32,9 +32,38 @@ pub fn cover_file_name(id: &str, bytes: &[u8]) -> Option<String> {
     Some(format!("{id}-{:016x}.{ext}", hash64(bytes)))
 }
 
+/// 封面缓存的最大尺寸：卡片尺寸的 2×，给高 DPI 屏留余量。
+const MAX_COVER_WIDTH: u32 = 560;
+const MAX_COVER_HEIGHT: u32 = 840;
+
+/// 超过 [`MAX_COVER_WIDTH`]×[`MAX_COVER_HEIGHT`] 的封面按比例缩小并重编码为 PNG。
+///
+/// 返回 `None` 表示保持原字节：尺寸已合适，或字节无法解码（截断 / 非常规格式）。
+fn shrink_cover(bytes: &[u8]) -> Option<Vec<u8>> {
+    let image = image::load_from_memory(bytes).ok()?;
+    if image.width() <= MAX_COVER_WIDTH && image.height() <= MAX_COVER_HEIGHT {
+        return None;
+    }
+    let scaled = image.resize(
+        MAX_COVER_WIDTH,
+        MAX_COVER_HEIGHT,
+        image::imageops::FilterType::Triangle,
+    );
+    let mut out = std::io::Cursor::new(Vec::new());
+    scaled.write_to(&mut out, image::ImageFormat::Png).ok()?;
+    Some(out.into_inner())
+}
+
 /// 把封面字节写入缓存目录，返回文件名；目录不可写或格式不认识时返回 `None`。
+///
+/// 超过 2× 卡片尺寸的封面会先按比例缩小并重编码为 PNG。
 #[must_use]
 pub fn write_cover(dir: &Path, id: &str, bytes: &[u8]) -> Option<String> {
+    // 认不出的格式直接丢弃，缩放也只对能解码的光栅图生效。
+    sniff_extension(bytes)?;
+    // 超尺寸的封面先缩小；文件名按落盘字节重算，保证哈希与扩展名和内容一致。
+    let shrunk = shrink_cover(bytes);
+    let bytes = shrunk.as_deref().unwrap_or(bytes);
     let file = cover_file_name(id, bytes)?;
     std::fs::create_dir_all(dir).ok()?;
     // 封面目录是 `<下载目录>/.sonovel/covers`：隐藏的是共用的缓存根。
@@ -167,6 +196,23 @@ mod tests {
         );
         remove_cover_file(dir.path(), Some(&file));
         assert!(!dir.path().join(&file).exists());
+    }
+
+    #[test]
+    fn cover_write_scales_oversized_images() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut png = Vec::new();
+        let img = image::RgbaImage::from_pixel(1200, 1800, image::Rgba([1, 2, 3, 255]));
+        image::DynamicImage::ImageRgba8(img)
+            .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+            .unwrap();
+
+        let file = write_cover(dir.path(), "id", &png).expect("应写入");
+        let decoded = image::open(dir.path().join(file)).unwrap();
+        assert!(
+            decoded.width() <= 560 && decoded.height() <= 840,
+            "应缩放到 2× 卡片尺寸"
+        );
     }
 
     #[test]
