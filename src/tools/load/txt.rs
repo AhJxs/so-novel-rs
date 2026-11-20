@@ -16,7 +16,7 @@ pub(super) fn load(
     regex: &Regex,
 ) -> Result<SourceBook, ToolError> {
     let bytes = std::fs::read(path)?;
-    let (text, _encoding) = decode_bytes(&bytes, opts.source_encoding);
+    let (text, encoding) = decode_bytes(&bytes, opts.source_encoding);
     let paragraphs = paragraphs_from_text(&text, regex);
     if paragraphs.is_empty() {
         return Err(ToolError::NoContent);
@@ -26,6 +26,7 @@ pub(super) fn load(
     Ok(SourceBook {
         title,
         chapters,
+        encoding: Some(encoding.name().to_string()),
         ..SourceBook::default()
     })
 }
@@ -130,6 +131,29 @@ mod tests {
         assert_eq!(titles, vec!["第一章 起", "第二章 到"]);
         assert_eq!(book.chapters[0].paragraphs, vec!["正文甲", "正文乙"]);
         assert_eq!(book.chapters[1].paragraphs, vec!["正文丙"]);
+    }
+
+    #[test]
+    fn records_actual_decoded_encoding() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("bom.txt");
+        // UTF-8 BOM 优先于显式 GBK：记录的必须是实际解码用的编码。
+        std::fs::write(
+            &path,
+            b"\xEF\xBB\xBF\xE7\xAC\xAC\xE4\xB8\x80\xE7\xAB\xA0\n\xE6\xAD\xA3\xE6\x96\x87",
+        )
+        .unwrap();
+
+        let book = load_path(
+            &path,
+            &LoadOptions {
+                source_encoding: Some(encoding_rs::GBK),
+                chapter_regex: None,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(book.encoding.as_deref(), Some("UTF-8"));
     }
 
     #[test]

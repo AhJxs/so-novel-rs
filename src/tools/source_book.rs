@@ -14,6 +14,8 @@ pub struct SourceBook {
     pub language: String,
     /// EPUB 封面原始字节（其他格式为 `None`）。
     pub cover: Option<Vec<u8>>,
+    /// TXT 实际解码用的编码名（BOM 优先于显式标签；其他格式为 `None`）。
+    pub encoding: Option<String>,
     pub chapters: Vec<SourceChapter>,
 }
 

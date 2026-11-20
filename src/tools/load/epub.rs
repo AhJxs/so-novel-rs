@@ -133,6 +133,7 @@ pub(super) fn load(path: &Path) -> Result<SourceBook, ToolError> {
         language: dc_text(&package.opf, "language").unwrap_or_else(|| "zh".to_string()),
         cover,
         chapters,
+        ..SourceBook::default()
     })
 }
 

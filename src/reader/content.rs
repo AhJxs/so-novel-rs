@@ -17,8 +17,7 @@ pub struct ReaderBook {
     pub title: String,
     pub author: String,
     pub chapters: Vec<ReaderChapter>,
-    /// TXT 请求 / 探测到的编码名（显式标签优先于探测；文件带 BOM 时实际解码可能以 BOM 为准）。
-    /// EPUB 不走编码标签，恒为 `None`。
+    /// TXT 实际解码用的编码名（BOM 优先于显式标签）。EPUB 不走编码标签，恒为 `None`。
     pub encoding: Option<String>,
 }
 
@@ -129,13 +128,6 @@ fn load_book_impl(
     }
     let explicit = crate::tools::encoding::parse_encoding(encoding)
         .map_err(|_| ReaderError::InvalidEncoding(encoding.unwrap_or_default().to_string()))?;
-    let detected = if format == BookFormat::Txt {
-        crate::tools::encoding::detect_file_encoding(path)
-            .ok()
-            .map(|value| value.name().to_string())
-    } else {
-        None
-    };
     let source = load_path(
         path,
         &LoadOptions {
@@ -163,9 +155,9 @@ fn load_book_impl(
     if check_text && format == BookFormat::Txt {
         check_decoded_text(format, &chapters)?;
     }
-    // EPUB 不经过编码标签（`epub::load` 不接受 `source_encoding`），报了就是假话。
+    // 记录解码器实际使用的编码（BOM 可能覆盖显式标签）；EPUB 不经过编码标签，恒为 `None`。
     let encoding = if format == BookFormat::Txt {
-        explicit.map(|value| value.name().to_string()).or(detected)
+        source.encoding
     } else {
         None
     };
@@ -282,6 +274,26 @@ mod tests {
         assert_eq!(book.chapters.len(), 2);
         assert_eq!(book.chapters[0].paragraphs, vec!["正文一"]);
         assert_eq!(book.encoding.as_deref(), Some("GBK"));
+    }
+
+    #[test]
+    fn bom_wins_over_explicit_encoding_for_recording() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.txt");
+        // UTF-8 BOM + 正文；用户错误地显式选了 GBK。
+        std::fs::write(
+            &path,
+            b"\xEF\xBB\xBF\xE7\xAC\xAC\xE4\xB8\x80\xE7\xAB\xA0\n\xE6\xAD\xA3\xE6\x96\x87",
+        )
+        .unwrap();
+
+        let book =
+            crate::reader::load_book(&path, crate::library::BookFormat::Txt, Some("GBK")).unwrap();
+        assert_eq!(
+            book.encoding.as_deref(),
+            Some("UTF-8"),
+            "应记录实际解码编码"
+        );
     }
 
     #[test]
