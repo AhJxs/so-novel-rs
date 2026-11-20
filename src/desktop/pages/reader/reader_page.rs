@@ -67,6 +67,18 @@ fn ratio_offset(ratio: f32, max_y: f32) -> f32 {
     -(max_y.max(0.0) * ratio.clamp(0.0, 1.0))
 }
 
+/// 偏移 → 恢复位置用的比例。
+///
+/// 与 `scroll_ratio` 的区别只在「内容不足一屏」：那种章整章可见，**进度的语义**
+/// 是 1.0（已读完，见 `scroll_ratio`），但**位置的语义**是章首 0.0 —— 抽屉开合或
+/// 窗口缩放让它变得可滚动时，按 1.0 恢复会直接落到章尾。
+fn position_ratio(offset_y: f32, max_y: f32) -> f32 {
+    if max_y <= 1.0 {
+        return 0.0;
+    }
+    (-offset_y / max_y).clamp(0.0, 1.0)
+}
+
 /// 打开状态。
 pub enum LoadState {
     Loading,
@@ -116,6 +128,8 @@ pub struct ReaderPage {
     pub(super) scroll: ScrollHandle,
     /// 待恢复的位置：`max_offset` 要等布局完成，所以恢复放到下一帧。
     pub(super) restore_pending: bool,
+    /// 下一帧恢复用的位置比例；None 表示沿用 `chapter_ratio`（跳章 / 切模式）。
+    restore_position: Option<f32>,
     /// 每次滚动自增，只有最新一代的防抖任务会写进度。
     scroll_generation: u64,
     /// 翻页模式：当前页号。
@@ -128,6 +142,8 @@ pub struct ReaderPage {
     viewport_height: Option<f32>,
     /// 与 `viewport_probe` 共享的最近一次实测值，用来判断要不要通知。
     viewport_measured: Rc<Cell<Option<f32>>>,
+    /// 上一帧的正文列宽；抽屉开合 / 窗口缩放后据此恢复滚动位置。
+    last_content_width: Option<f32>,
     /// 测量异常提示过就不再刷屏。
     layout_warned: bool,
     /// 章节标题快照；加载完成时建一次，抽屉每帧零拷贝共享。
@@ -215,12 +231,14 @@ impl ReaderPage {
             finished,
             scroll: ScrollHandle::new(),
             restore_pending: true,
+            restore_position: None,
             scroll_generation: 0,
             page_index: 0,
             page_cache: None,
             page_turn_to_last: false,
             viewport_height: None,
             viewport_measured: Rc::new(Cell::new(None)),
+            last_content_width: None,
             layout_warned: false,
             toc_titles: None,
             toc_filter,
@@ -399,6 +417,12 @@ impl ReaderPage {
     ) {
         // 字号一变内容高度就变，先把「读到哪」按比例记下来，下一帧再按比例恢复。
         self.capture_scroll_ratio();
+        // 位置用 `position_ratio` 而不是 `chapter_ratio`：一屏放得下的章进度是 1.0，
+        // 改小字号让它变得可滚动时会直接落到章尾。
+        self.restore_position = Some(position_ratio(
+            f32::from(self.scroll.offset().y),
+            f32::from(self.scroll.max_offset().y),
+        ));
         self.restore_pending = true;
         self.model.update(cx, |model, _cx| {
             let mut reader = model.config.reader.clamped();
@@ -471,6 +495,8 @@ impl ReaderPage {
         self.content = None;
         self.page_cache = None;
         self.toc_titles = None;
+        // 位置由调用方决定，一律按 `chapter` / `chapter_ratio` 恢复。
+        self.restore_position = None;
         self.restore_pending = true;
         self.load_state = LoadState::Loading;
         self.generation = self.generation.wrapping_add(1);
@@ -576,6 +602,8 @@ impl ReaderPage {
                 self.content = Some(content);
                 self.load_state = LoadState::Ready;
                 self.invalidate_scroll_commit();
+                // 加载完成按书架里的进度（`chapter_ratio`）恢复，不接旧的抽样值。
+                self.restore_position = None;
                 self.restore_pending = true;
                 let book_id = self.book_id.clone();
                 self.model.update(cx, |model, _| {
@@ -710,6 +738,8 @@ impl ReaderPage {
         if matches!(self.mode, ReadingMode::Page) {
             self.page_cache = None;
         }
+        // 切模式按 `chapter_ratio` 归位（翻页模式靠它算页号），不接滚动模式的抽样值。
+        self.restore_position = None;
         self.restore_pending = true;
         let book_id = self.book_id.clone();
         let mode = self.mode;
@@ -733,6 +763,8 @@ impl ReaderPage {
         self.page_index = 0;
         self.invalidate_scroll_commit();
         self.chapter_ratio = 0.0;
+        // 跳章按 `chapter_ratio`（=章首）恢复：别让宽度变化留下的抽样值接管这次恢复。
+        self.restore_position = None;
         self.restore_pending = true;
         self.record_progress(cx);
         cx.notify();
@@ -1938,10 +1970,40 @@ impl Render for ReaderPage {
         let reader = self.reader_config(cx);
         let colors = reader_colors(reader.theme, cx);
 
+        // 抽屉开合、窗口缩放都会改列宽 → 折行变了 → 同一个绝对偏移指向别的文字。
+        // 必须在下面的恢复块之前跑：`capture_scroll_ratio` 刷新 `chapter_ratio`，
+        // 恢复块同一帧就要用这个值。
+        let width = self.content_width(f32::from(window.viewport_size().width), cx);
+        let width_changed = self
+            .last_content_width
+            .is_some_and(|previous| (previous - width).abs() > 0.5);
+        if width_changed
+            && matches!(self.mode, ReadingMode::Scroll)
+            && matches!(self.load_state, LoadState::Ready)
+            && !self.restore_pending
+        {
+            // 折行变了，绝对偏移会指向另一段文字：先记比例，下一帧按新高度恢复。
+            self.capture_scroll_ratio();
+            // 位置另按 `position_ratio` 采：一屏放得下的章进度是 1.0，让它变得可滚动后
+            // 按 1.0 恢复会落到章尾。两个读取都在旧布局上，正是用户此刻看到的位置。
+            self.restore_position = Some(position_ratio(
+                f32::from(self.scroll.offset().y),
+                f32::from(self.scroll.max_offset().y),
+            ));
+            self.restore_pending = true;
+        }
+        // 未命中守卫的帧也要更新，否则下一次比较仍对着旧值。
+        self.last_content_width = Some(width);
+
         // 首帧布局算完才知道 max_offset，所以恢复位置一定发生在下一帧。
         if self.restore_pending && matches!(self.load_state, LoadState::Ready) {
             let handle = self.scroll.clone();
-            let ratio = self.chapter_ratio.clamp(0.0, 1.0);
+            // 宽度 / 排版变化时用采样到的位置；跳章、切模式、加载走 `chapter_ratio`。
+            let ratio = self
+                .restore_position
+                .take()
+                .unwrap_or(self.chapter_ratio)
+                .clamp(0.0, 1.0);
             cx.on_next_frame(window, move |page, window, cx| {
                 let max = f32::from(handle.max_offset().y);
                 handle.set_offset(point(px(0.0), px(ratio_offset(ratio, max))));
@@ -2035,7 +2097,17 @@ impl Render for ReaderPage {
 
 #[cfg(test)]
 mod tests {
-    use super::{ReaderPage, ratio_offset, scroll_ratio};
+    use super::{ReaderPage, position_ratio, ratio_offset, scroll_ratio};
+
+    #[test]
+    fn position_ratio_treats_unscrollable_content_as_the_top() {
+        // 一屏放得下的章：进度是 1.0（见 `scroll_ratio`），位置却是章首。
+        assert_eq!(position_ratio(0.0, 0.0), 0.0);
+        // 同一章变宽 / 换字号后可滚动时，从章首开始，而不是落到章尾。
+        assert_eq!(position_ratio(0.0, 100.0), 0.0);
+        assert_eq!(position_ratio(-50.0, 100.0), 0.5);
+        assert_eq!(position_ratio(-200.0, 100.0), 1.0);
+    }
 
     #[test]
     fn scroll_ratio_maps_negative_offsets_to_forward_progress() {
