@@ -4,6 +4,7 @@
 //! 两边共用「行数」这一约定，所以测量对不上时能用纯函数测出来。
 
 use std::cell::Cell;
+use std::ops::Range;
 use std::rc::Rc;
 
 use gpui_kit::{
@@ -17,17 +18,24 @@ use crate::config::ReaderConfig;
 /// 正文列左右留白（每侧 px）。测量与渲染必须用同一个值。
 pub(super) const COLUMN_PADDING: f32 = 24.0;
 
-/// 把一章渲染成一整列（含章标题）。翻页模式的外层再套一个裁剪视口。
+/// 把一章（翻页模式下只渲染与当前页相交的块）渲染成一整列。翻页模式的外层再套一个裁剪视口。
 /// `width` 由 `ReaderPage::content_width` 算好（已扣掉抽屉与页宽上限），
 /// 与分页用的是同一个值，折行才对得上。
 /// `highlights` 按段落索引给出高亮区间。
+///
+/// `paragraphs` 永远是整章切片：`paragraph_range` 只决定渲染哪几段，高亮与搜索偏移
+/// 都按原始段落下标索引，传裁剪后的子切片会让下标错位。
+/// `title` 为 `None` 表示章标题块不在当前页内（翻页模式跳过了它）。
+/// `pad_top` 补回被跳过的块高度；翻页模式下可能是负数（页起点落在某块中间）。
 pub(super) fn chapter_column(
-    title: &str,
+    title: Option<&str>,
     paragraphs: &[String],
     reader: &ReaderConfig,
     width: f32,
     line_height_px: f32,
-    highlights: Option<&[Vec<(std::ops::Range<usize>, HighlightStyle)>]>,
+    highlights: Option<&[Vec<(Range<usize>, HighlightStyle)>]>,
+    paragraph_range: Range<usize>,
+    pad_top: f32,
 ) -> Div {
     let font_size = reader.font_size;
     let spacing = reader.paragraph_spacing;
@@ -35,11 +43,14 @@ pub(super) fn chapter_column(
     // `Option<&[...]>` 是 `Copy`：`move` 闭包捕获的只是切片引用，子元素在
     // `children()` 里同步构造完就散掉，不必每帧把整章区间拷成 owned。
     let highlight_rows = highlights;
-    let rows = paragraphs
+    let first = paragraph_range.start;
+    let rows = paragraphs[paragraph_range]
         .iter()
         .map(String::as_str)
         .enumerate()
-        .map(move |(index, text)| {
+        .map(move |(offset, text)| {
+            // 高亮区间按整章的原始段落下标索引，不能改成裁剪后的相对下标。
+            let index = first + offset;
             let mut row = div()
                 .pb(px(spacing))
                 .text_size(px(font_size))
@@ -62,15 +73,20 @@ pub(super) fn chapter_column(
         .flex_none()
         .flex()
         .flex_col()
-        .child(
+        // 跳过页前的块后，用顶部内边距把列首对齐回 `offsets[paragraph_range.start]`：
+        // 列内第 j 块仍落在 `offsets[j] - start`，与整章渲染的几何完全一致。
+        .pt(px(pad_top));
+    if let Some(title) = title {
+        column = column.child(
             div()
                 .pb(px(line_height_px * 0.75))
                 .text_size(px(font_size))
                 .line_height(px(line_height_px))
                 .font_weight(FontWeight::BOLD)
                 .child(SharedString::from(title.to_string())),
-        )
-        .children(rows);
+        );
+    }
+    column = column.children(rows);
     if !reader.font_family.is_empty() {
         column = column.font_family(reader.font_family.clone());
     }

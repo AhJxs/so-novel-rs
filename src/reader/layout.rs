@@ -4,6 +4,7 @@
 //! 在这里用纯函数验证，两边共用同一份行数定义。
 
 use std::borrow::Cow;
+use std::ops::Range;
 
 /// 单个段落的测量结果。
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -150,6 +151,49 @@ pub fn paginate(
         }
     }
     starts
+}
+
+/// 每块（章标题 + 各段）起始的纵向偏移（px，首项恒为 0），末项是整章高度。
+///
+/// `offsets[j + 1]` 即第 j 块的底边，可见区间不用再对最后一块兜底。
+/// 累计方式与 `paginate` 逐行相加完全一致：翻页模式要用它把「跳过页前块」的列顶
+/// 对齐回整章布局，任何一处舍入差都会让页首那行被裁掉半行。
+#[must_use]
+pub fn paragraph_offsets(paragraphs: &[ParagraphMetrics], line_height: f32) -> Vec<f32> {
+    let line_height = line_height.max(1.0);
+    let mut offsets = Vec::with_capacity(paragraphs.len() + 1);
+    let mut cursor = 0.0;
+    for paragraph in paragraphs {
+        offsets.push(cursor);
+        for _ in 0..paragraph.lines.max(1) {
+            cursor += line_height;
+        }
+        cursor += paragraph.spacing_after.max(0.0);
+    }
+    if !paragraphs.is_empty() {
+        offsets.push(cursor);
+    }
+    offsets
+}
+
+/// 与 `[page_start, page_start + viewport)` 相交的块下标区间。
+///
+/// `offsets` 是 `paragraph_offsets` 的结果（末项为内容底边），因此块数是
+/// `offsets.len() - 1`。`first` 取「包含 `page_start` 的块」（页起点落在块中间时
+/// 从这一块的顶部开始渲染，上半部分由外层裁剪掉）；`end` 是第一个不早于页底的块。
+/// 区间至少含一块。
+#[must_use]
+pub fn visible_paragraphs(page_start: f32, viewport: f32, offsets: &[f32]) -> Range<usize> {
+    // 末项是内容底边而不是一块的起点：空输入与只有底边的输入都没有块。
+    let Some(block_count) = offsets.len().checked_sub(1).filter(|&count| count > 0) else {
+        return 0..0;
+    };
+    let first = offsets
+        .partition_point(|&offset| offset < page_start)
+        .saturating_sub(1)
+        .min(block_count - 1);
+    let end = offsets.partition_point(|&offset| offset < page_start + viewport);
+    first..end.clamp(first + 1, block_count)
 }
 
 /// 整章内容高度：行数 × 行高 + 段距总和。
@@ -408,6 +452,113 @@ mod tests {
         let heavier =
             ReaderLayout::new(19.0, 1.8, 12.0, 720.0, 600.0, true, "衬线".to_string(), 700);
         assert_ne!(layout.fingerprint(2), heavier.fingerprint(2));
+    }
+
+    #[test]
+    fn visible_range_covers_boundary_paragraphs() {
+        let offsets = vec![0.0, 100.0, 200.0, 300.0];
+        assert_eq!(visible_paragraphs(150.0, 100.0, &offsets), 1..3);
+        // 页起点正好落在块边界时，前一块也算进来（只多渲染一段，几何不受影响）。
+        assert_eq!(visible_paragraphs(100.0, 100.0, &offsets), 0..2);
+        // 空输入与末页也要给出非空、不越界的区间。
+        assert_eq!(visible_paragraphs(0.0, 100.0, &[]), 0..0);
+        // 末项是内容底边，因此末页只剩最后一块。
+        assert_eq!(visible_paragraphs(300.0, 100.0, &offsets), 2..3);
+    }
+
+    #[test]
+    fn paragraph_offsets_accumulate_lines_and_spacing() {
+        // [2 行、段距 0] → 40；[3 行、段距 8] → 40 + 60 + 8 = 108。
+        let paragraphs = [
+            ParagraphMetrics {
+                lines: 2,
+                spacing_after: 0.0,
+            },
+            ParagraphMetrics {
+                lines: 3,
+                spacing_after: 8.0,
+            },
+        ];
+        assert_eq!(paragraph_offsets(&paragraphs, 20.0), vec![0.0, 40.0, 108.0]);
+        assert_eq!(paragraph_offsets(&[], 20.0), Vec::<f32>::new());
+    }
+
+    #[test]
+    fn culled_range_keeps_unculled_geometry() {
+        // 行数 1..=7 循环，每 4 段一组，最后一段段距为 0（与 `ensure_pagination` 一致）。
+        let mut paragraphs = Vec::new();
+        for lines in 1..=7 {
+            for _ in 0..4 {
+                paragraphs.push(ParagraphMetrics {
+                    lines,
+                    spacing_after: 8.0,
+                });
+            }
+        }
+        if let Some(last) = paragraphs.last_mut() {
+            last.spacing_after = 0.0;
+        }
+        let line_height = 20.0;
+        let viewport = 60.0;
+        let offsets = paragraph_offsets(&paragraphs, line_height);
+        // 每块一个起点，末项是整章高度。
+        assert_eq!(offsets.len(), paragraphs.len() + 1);
+        let pages = paginate(&paragraphs, line_height, viewport);
+        assert!(pages.len() > 1);
+
+        for start in pages {
+            let range = visible_paragraphs(start, viewport, &offsets);
+            assert!(range.start < range.end, "页 {start} 的可见区间为空");
+            assert!(range.end <= offsets.len());
+            // 首个渲染块必须包含页起点（几何上它就是列顶对齐的那一块）。
+            assert!(
+                offsets[range.start] <= start,
+                "页 {start} 的首块 {} 在页起点之后",
+                offsets[range.start]
+            );
+            // 与 [start, start + viewport) 相交的块一个都不能漏。
+            for (index, &top) in offsets.iter().enumerate() {
+                let bottom = offsets.get(index + 1).copied().unwrap_or(f32::INFINITY);
+                if bottom > start && top < start + viewport {
+                    assert!(
+                        range.contains(&index),
+                        "页 {start}：块 {index}（{top}..{bottom}）与页相交却未渲染"
+                    );
+                }
+            }
+            // 跳过页前的块后，pad_top + 列内偏移必须还原成不裁剪时的位置。
+            let pad_top = offsets[range.start] - start;
+            let column_start = offsets[range.start];
+            for &top in &offsets[range.clone()] {
+                let rendered = pad_top + (top - column_start);
+                let unculled = top - start;
+                assert!(
+                    (rendered - unculled).abs() < 1e-3,
+                    "页 {start}：块 {top} 渲染在 {rendered}，不裁剪时应为 {unculled}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn visible_range_is_page_sized_not_chapter_sized() {
+        // 代表值：5000 段、每段 2 行、段距 8px、行高 20px、视口 600px。
+        // 每块 2×20+8 = 48px，一页约 12.5 块；裁剪后最多 14 块，而不是整章 5000 段。
+        let paragraphs = vec![
+            ParagraphMetrics {
+                lines: 2,
+                spacing_after: 8.0,
+            };
+            5000
+        ];
+        let offsets = paragraph_offsets(&paragraphs, 20.0);
+        assert_eq!(offsets.len(), 5001);
+        let range = visible_paragraphs(offsets[2500], 600.0, &offsets);
+        assert!(
+            range.len() <= 16,
+            "翻页只应渲染当前页附近的块，实际 {}",
+            range.len()
+        );
     }
 
     #[test]

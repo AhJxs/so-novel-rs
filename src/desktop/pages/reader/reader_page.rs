@@ -31,7 +31,7 @@ use super::search_panel::{self, SearchPanel};
 use crate::config::{ReaderConfig, ReadingMode};
 use crate::desktop::model::AppModel;
 use crate::library::{Book, BookFormat, ReadingProgress};
-use crate::reader::layout::{page_for_ratio, page_ratio};
+use crate::reader::layout::{page_for_ratio, page_ratio, paragraph_offsets, visible_paragraphs};
 use crate::reader::{
     LayoutFingerprint, ParagraphMetrics, ReaderBook, ReaderError, ReaderLayout, load_book,
     load_book_relaxed, paginate,
@@ -212,6 +212,8 @@ pub struct ReaderPage {
 /// 一章的分页缓存：指纹变了才整章重算。
 ///
 /// `offset` 是每页的起始纵向偏移（px，首项恒为 0），由 `paginate` 产出。
+/// `paragraph_offsets` 是每块（标题 + 各段）的起始偏移再加一项整章高度，
+/// 与 `offset` 用同一套累计方式；翻页模式靠它只渲染与当前页相交的块。
 ///
 /// `pub(super)` 是为了让同级的 `search_panel` 能在跳转命中时作废缓存，字段仍只在本模块读写。
 pub(super) struct PageCache {
@@ -219,6 +221,8 @@ pub(super) struct PageCache {
     /// 分页与渲染共用的行高（已按设备像素取整）。
     line_height_px: f32,
     offset: Vec<f32>,
+    /// 块起点 + 末项内容高度（`len = 块数 + 1`），见 `layout::paragraph_offsets`。
+    paragraph_offsets: Vec<f32>,
 }
 
 impl ReaderPage {
@@ -1708,6 +1712,7 @@ impl ReaderPage {
             })
             .collect();
         let page_offsets = paginate(&metrics, line_height_px, viewport_height);
+        let block_offsets = paragraph_offsets(&metrics, line_height_px);
         let content_height = crate::reader::layout::content_height(&metrics, line_height_px);
         // 防御：`paginate` 不变量下不会命中，留着是为了测量实现将来变化时不静默出错。
         let broken =
@@ -1740,6 +1745,7 @@ impl ReaderPage {
             fingerprint,
             line_height_px,
             offset: page_offsets,
+            paragraph_offsets: block_offsets,
         });
         // 跨章回退时 `goto_chapter` 记下的是 ratio = 0，真正的位置由这里改写；
         // 翻页模式下 `capture_scroll_ratio` 已早退，不在这里补记就再没人刷新它。
@@ -1806,13 +1812,34 @@ impl ReaderPage {
     }
 
     fn render_page_body(&mut self, width: f32, cx: &Context<Self>) -> AnyElement {
-        let Some((start, pages, line_height)) = self.page_cache.as_ref().map(|cache| {
-            (
-                cache.offset.get(self.page_index).copied().unwrap_or(0.0),
-                cache.offset.len(),
-                cache.line_height_px,
-            )
-        }) else {
+        let Some((pages, line_height, blocks, paragraph_range, pad_top)) =
+            self.page_cache.as_ref().map(|cache| {
+                let start = cache.offset.get(self.page_index).copied().unwrap_or(0.0);
+                // 用分页时的视口高度算可见块，保证区间一定覆盖当前页；
+                // 列顶再垫回 `offsets[blocks.start]`，几何与整章渲染逐像素一致。
+                let blocks = visible_paragraphs(
+                    start,
+                    cache.fingerprint.viewport_height,
+                    &cache.paragraph_offsets,
+                );
+                let pad_top = cache
+                    .paragraph_offsets
+                    .get(blocks.start)
+                    .copied()
+                    .unwrap_or(0.0)
+                    - start;
+                // 块 0 是章标题，块 i + 1 是第 i 段。
+                let paragraph_start = blocks.start.saturating_sub(1);
+                let paragraph_end = blocks.end.saturating_sub(1).max(paragraph_start);
+                (
+                    cache.offset.len(),
+                    cache.line_height_px,
+                    blocks,
+                    paragraph_start..paragraph_end,
+                    pad_top,
+                )
+            })
+        else {
             // 还没排好页：给一帧带探针的占位。退回滚动容器会在翻页模式里挂上
             // `on_scroll`，可能把陈旧的滚动偏移写成进度。
             //
@@ -1898,19 +1925,23 @@ impl ReaderPage {
                             .child(probe)
                             .child(
                                 div()
+                                    // 不再整列上移 `-start`：只渲染当前页相交的块，
+                                    // 由 `chapter_column` 的 `pad_top` 把列顶对齐回
+                                    // `offsets[blocks.start]`，两者同时用会重复相减。
                                     .relative()
-                                    .top(px(-start))
                                     .w_full()
                                     .flex()
                                     .flex_row()
                                     .justify_center()
                                     .child(content_view::chapter_column(
-                                        &title,
+                                        (blocks.start == 0).then_some(title.as_str()),
                                         paragraphs.as_slice(),
                                         &reader,
                                         width,
                                         line_height,
                                         highlights.as_deref(),
+                                        paragraph_range,
+                                        pad_top,
                                     )),
                             ),
                     ),
@@ -1935,12 +1966,14 @@ impl ReaderPage {
         let paragraphs = self.display_paragraphs(&reader, width);
         let highlights = self.chapter_highlights(&reader, cx);
         let column = content_view::chapter_column(
-            &title,
+            Some(&title),
             paragraphs.as_slice(),
             &reader,
             width,
             line_height,
             highlights.as_deref(),
+            0..paragraphs.len(),
+            0.0,
         );
 
         div()
