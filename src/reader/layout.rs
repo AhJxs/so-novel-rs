@@ -170,6 +170,15 @@ pub fn ratio_for_page(page_index: usize, page_count: usize) -> f32 {
     count_f32(page_index.min(page_count - 1)) / count_f32(page_count - 1)
 }
 
+/// 页号 → 章内进度；只有一页时整章已可见，进度为 1。
+#[must_use]
+pub fn page_ratio(page_index: usize, page_count: usize) -> f32 {
+    if page_count <= 1 {
+        return 1.0;
+    }
+    ratio_for_page(page_index, page_count)
+}
+
 /// 章内相对进度 → 最接近的页号。
 #[must_use]
 pub fn page_for_ratio(ratio: f32, page_count: usize) -> usize {
@@ -268,6 +277,13 @@ mod tests {
         assert_eq!(page_for_ratio(0.5, 5), 2);
         assert_eq!(page_for_ratio(0.0, 0), 0);
         assert_eq!(page_for_ratio(9.0, 1), 0);
+    }
+
+    #[test]
+    fn single_page_chapter_is_complete() {
+        assert!((page_ratio(0, 1) - 1.0).abs() < f32::EPSILON);
+        assert!((page_ratio(0, 3) - 0.0).abs() < f32::EPSILON);
+        assert!((page_ratio(2, 3) - 1.0).abs() < f32::EPSILON);
     }
 
     #[test]

@@ -31,7 +31,7 @@ use super::search_panel::{self, SearchPanel};
 use crate::config::{ReaderConfig, ReadingMode};
 use crate::desktop::model::AppModel;
 use crate::library::{Book, BookFormat, ReadingProgress};
-use crate::reader::layout::{page_for_ratio, ratio_for_page};
+use crate::reader::layout::{page_for_ratio, page_ratio};
 use crate::reader::{
     LayoutFingerprint, ParagraphMetrics, ReaderBook, ReaderError, ReaderLayout, load_book,
     load_book_relaxed, paginate,
@@ -50,9 +50,16 @@ pub type ImmersiveFn = Rc<dyn Fn(&mut App)>;
 
 /// gpui 的滚动偏移向下为负（`set_offset`：越往下滚偏移越负），而进度要的是
 /// 0..=1 的正向比例。全部换算都走这两个函数，别在调用点各写一份。
-/// 偏移 → 章内比例；内容不足一屏（滚不动）时返回 `None`。
+/// 偏移 → 章内比例；内容不足一屏（滚不动）时整章已完全可见，返回 1.0。
+// `Option` 是采样接口的既有形状（「这次采样是否可信」），保留它省得调用点与测试
+// 跟着改签名；目前所有输入都能给出确定比例，故这一处不做 `unnecessary_wraps` 合并。
+#[allow(clippy::unnecessary_wraps)]
 fn scroll_ratio(offset_y: f32, max_y: f32) -> Option<f32> {
-    (max_y > 1.0).then(|| (-offset_y / max_y).clamp(0.0, 1.0))
+    if max_y <= 1.0 {
+        // 内容不足一屏：整章已完全可见。
+        return Some(1.0);
+    }
+    Some((-offset_y / max_y).clamp(0.0, 1.0))
 }
 
 /// 章内比例 → 滚动偏移（负值）。
@@ -1573,7 +1580,7 @@ impl ReaderPage {
         } else {
             page_for_ratio(self.chapter_ratio, pages)
         };
-        self.chapter_ratio = ratio_for_page(self.page_index, pages);
+        self.chapter_ratio = page_ratio(self.page_index, pages);
         self.page_cache = Some(PageCache {
             fingerprint,
             line_height_px,
@@ -1596,7 +1603,7 @@ impl ReaderPage {
         }
         self.invalidate_scroll_commit();
         self.page_index = page.min(pages - 1);
-        self.chapter_ratio = ratio_for_page(self.page_index, pages);
+        self.chapter_ratio = page_ratio(self.page_index, pages);
         self.record_progress(cx);
         cx.notify();
     }
@@ -1999,10 +2006,16 @@ mod tests {
     }
 
     #[test]
-    fn scroll_ratio_is_none_when_nothing_scrolls() {
-        assert_eq!(scroll_ratio(0.0, 0.0), None);
-        assert_eq!(scroll_ratio(-0.5, 1.0), None);
-        assert_eq!(scroll_ratio(0.0, -3.0), None);
+    fn a_chapter_that_fits_on_screen_is_fully_read() {
+        assert_eq!(super::scroll_ratio(0.0, 0.0), Some(1.0));
+        assert_eq!(super::scroll_ratio(0.0, 100.0), Some(0.0));
+    }
+
+    #[test]
+    fn scroll_ratio_treats_unscrollable_content_as_fully_read() {
+        assert_eq!(scroll_ratio(0.0, 0.0), Some(1.0));
+        assert_eq!(scroll_ratio(-0.5, 1.0), Some(1.0));
+        assert_eq!(scroll_ratio(0.0, -3.0), Some(1.0));
     }
 
     #[test]
