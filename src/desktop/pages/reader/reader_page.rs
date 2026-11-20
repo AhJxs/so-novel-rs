@@ -697,7 +697,15 @@ impl ReaderPage {
         self.scroll_generation = self.scroll_generation.wrapping_add(1);
     }
 
+    /// 正文真的可读了：加载完成且内容在手。加载中 / 错误态没有可信的位置可写。
+    pub(super) const fn is_ready(&self) -> bool {
+        matches!(self.load_state, LoadState::Ready) && self.content.is_some()
+    }
+
     pub(super) fn record_progress(&mut self, cx: &mut Context<Self>) {
+        if !self.is_ready() {
+            return;
+        }
         if matches!(self.mode, ReadingMode::Page)
             && self.page_cache.is_none()
             && matches!(self.load_state, LoadState::Ready)
@@ -730,6 +738,9 @@ impl ReaderPage {
     }
 
     fn toggle_mode(&mut self, cx: &mut Context<Self>) {
+        if !self.is_ready() {
+            return;
+        }
         self.capture_scroll_ratio();
         self.mode = match self.mode {
             ReadingMode::Scroll => ReadingMode::Page,
@@ -962,6 +973,10 @@ impl ReaderPage {
                 self.close_drawers(window, cx);
                 cx.notify();
             }
+            return;
+        }
+        // 加载中 / 错误态只留 Esc（关抽屉 / 退沉浸 / 返回）：别滚动、切模式或开空书签。
+        if !self.is_ready() && key != "escape" {
             return;
         }
 

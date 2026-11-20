@@ -32,13 +32,17 @@ impl ReaderPage {
     /// 滚动模式下 `chapter_ratio` 只由 `on_scroll` 与 5 s 一次的 autosave 更新，
     /// 而**拖动滚动条不触发 `on_scroll`**：不先按当前偏移校准，书签会落在拖之前的位置。
     pub(super) fn add_bookmark(&mut self, cx: &mut Context<Self>) {
+        if !self.is_ready() {
+            return;
+        }
         self.capture_scroll_ratio();
         self.record_progress(cx);
-        let bookmark = Bookmark::new(
-            self.chapter,
-            self.chapter_ratio.clamp(0.0, 1.0),
-            self.current_excerpt(),
-        );
+        let excerpt = self.current_excerpt();
+        // 摘录为空说明当前位置落不到正文（章列表还没就绪 / 空章）：不记一枚空白书签。
+        if excerpt.is_empty() {
+            return;
+        }
+        let bookmark = Bookmark::new(self.chapter, self.chapter_ratio.clamp(0.0, 1.0), excerpt);
         let book_id = self.book_id.clone();
         let exists = self.model.read(cx).bookmarks_of(&book_id).is_some();
         let added = self.model.update(cx, |model, _cx| {
