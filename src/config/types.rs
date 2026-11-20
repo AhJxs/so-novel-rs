@@ -17,6 +17,11 @@ impl std::fmt::Display for ParseConfigValueError {
 
 impl std::error::Error for ParseConfigValueError {}
 
+/// 全局字号下限 (px)。`validate` / `load_config` 夹取 / 设置页 slider 共用这一份真值。
+pub const FONT_SIZE_MIN: f32 = 12.0;
+/// 全局字号上限 (px)。
+pub const FONT_SIZE_MAX: f32 = 24.0;
+
 /// 导出文件格式。EPUB / TXT / HTML / PDF / Markdown。
 #[derive(Debug, Copy, Clone, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub enum ExportFormat {
@@ -658,8 +663,8 @@ impl AppConfig {
         }
     }
 
-    /// 校验配置合法性（启动时调一次，失败让用户改 config.toml 重启）：
-    /// `font_size` ∈ [12.0, 24.0]（与 `desktop::themes::FONT_SIZE_MIN/MAX` 一致）、
+    /// 校验配置合法性（`load_config` 夹取字号后调一次，失败仅 warn）：
+    /// `font_size` ∈ [`FONT_SIZE_MIN`, `FONT_SIZE_MAX`]、
     /// `min_interval <= max_interval`、`retry_min_interval <= retry_max_interval`、`download_path` 非空、
     /// `[reader]` 排版数值落在各自区间。
     ///
@@ -667,14 +672,12 @@ impl AppConfig {
     ///
     /// 任一字段超出合法范围或区间颠倒时返回对应的 [`ConfigError`]。
     pub fn validate(&self) -> Result<(), ConfigError> {
-        const FONT_MIN: f32 = 12.0;
-        const FONT_MAX: f32 = 24.0;
-        if !(FONT_MIN..=FONT_MAX).contains(&self.global.font_size) {
+        if !(FONT_SIZE_MIN..=FONT_SIZE_MAX).contains(&self.global.font_size) {
             return Err(ConfigError::OutOfRange {
                 field: "global.font_size",
                 value: self.global.font_size as f64,
-                min: FONT_MIN as f64,
-                max: FONT_MAX as f64,
+                min: FONT_SIZE_MIN as f64,
+                max: FONT_SIZE_MAX as f64,
             });
         }
 

@@ -12,8 +12,8 @@ use toml_edit::{DocumentMut, Item, Table, value};
 
 use super::defaults;
 use super::types::{
-    AppConfig, ExportFormat, Language, ProxyMode, ReaderTheme, ReadingMode, ThemeDynMode,
-    ThemeKind, ThemePref,
+    AppConfig, ExportFormat, FONT_SIZE_MAX, FONT_SIZE_MIN, Language, ProxyMode, ReaderTheme,
+    ReadingMode, ThemeDynMode, ThemeKind, ThemePref,
 };
 
 /// 从 TOML 文档中取 `table.key` 对应的 `Item`。
@@ -71,6 +71,31 @@ fn sat_u16(v: i64) -> u16 {
     v.clamp(0, u16::MAX as i64) as u16
 }
 
+/// 加载收尾：把全局字号夹进 [`FONT_SIZE_MIN`, `FONT_SIZE_MAX`]，再校验整份配置。
+///
+/// 夹取必须发生在任何读取 `font_size` 之前（设置页 / 启动期 `themes::apply_font_size`），
+/// 所以放在 `load_config` 这个唯一的反序列化出口；越界是用户手改配置，按 info 记录
+/// 改前 / 改后。校验失败只 warn —— 桌面端约定启动不因配置失败而中断，用户改
+/// `config.toml` 重启即可。
+fn finalize(mut cfg: AppConfig) -> AppConfig {
+    let requested = cfg.global.font_size;
+    let clamped = requested.clamp(FONT_SIZE_MIN, FONT_SIZE_MAX);
+    // `clamp` 只回传原值或两个边界之一，逐位比较即可判断是否真的越界（避开 float_cmp）。
+    if clamped.to_bits() != requested.to_bits() {
+        tracing::info!(
+            before = requested,
+            after = clamped,
+            "global.font-size 超出合法范围，已夹取"
+        );
+    }
+    cfg.global.font_size = clamped;
+
+    if let Err(error) = cfg.validate() {
+        tracing::warn!(%error, "配置校验失败，使用已夹取的值继续启动");
+    }
+    cfg
+}
+
 /// 加载配置。文件不存在时返回 `Default::default()`。
 ///
 /// # Examples
@@ -83,7 +108,7 @@ fn sat_u16(v: i64) -> u16 {
 #[tracing::instrument(name = "config::load", skip_all, fields(path = %path.display()))]
 pub fn load_config(path: &Path) -> Result<AppConfig> {
     if !path.exists() {
-        return Ok(AppConfig::default());
+        return Ok(finalize(AppConfig::default()));
     }
 
     let content = std::fs::read_to_string(path)
@@ -233,7 +258,7 @@ pub fn load_config(path: &Path) -> Result<AppConfig> {
         };
     }
 
-    Ok(cfg)
+    Ok(finalize(cfg))
 }
 
 /// 把 `AppConfig` 写回 TOML：原文件存在就在它上面 in-place 改字段（保留注释），

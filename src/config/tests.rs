@@ -11,9 +11,10 @@
 use std::path::PathBuf;
 
 use crate::config::{
-    AppConfig, CookieConfig, CrawlConfig, DownloadConfig, ExportFormat, GlobalConfig, LangType,
-    Language, ProxyConfig, ProxyMode, ReaderConfig, ReaderTheme, ReadingMode, SourceConfig,
-    ThemeDynMode, ThemeKind, ThemePref, load_config, save_config,
+    AppConfig, CookieConfig, CrawlConfig, DownloadConfig, ExportFormat, FONT_SIZE_MAX,
+    FONT_SIZE_MIN, GlobalConfig, LangType, Language, ProxyConfig, ProxyMode, ReaderConfig,
+    ReaderTheme, ReadingMode, SourceConfig, ThemeDynMode, ThemeKind, ThemePref, load_config,
+    save_config,
 };
 
 #[test]
@@ -40,6 +41,28 @@ fn font_size_accepts_int_and_float_literal() {
     assert!(
         (load_config(&path).unwrap().global.font_size - 20.5).abs() < f32::EPSILON,
         "font-size should round-trip 20.5",
+    );
+}
+
+#[test]
+fn global_font_size_is_clamped_on_load() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+
+    std::fs::write(&path, "[global]\nfont-size = 0\n").unwrap();
+    let cfg = load_config(&path).unwrap();
+    assert!(
+        (cfg.global.font_size - FONT_SIZE_MIN).abs() < f32::EPSILON,
+        "font-size = 0 应夹到下限 {FONT_SIZE_MIN}，实际 {}",
+        cfg.global.font_size
+    );
+
+    std::fs::write(&path, "[global]\nfont-size = 999\n").unwrap();
+    let cfg = load_config(&path).unwrap();
+    assert!(
+        (cfg.global.font_size - FONT_SIZE_MAX).abs() < f32::EPSILON,
+        "font-size = 999 应夹到上限 {FONT_SIZE_MAX}，实际 {}",
+        cfg.global.font_size
     );
 }
 

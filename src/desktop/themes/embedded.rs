@@ -3,9 +3,9 @@
 //! `super::user_dir::ensure_user_themes_dir` 同步到 `~/.sonovel/themes/`。
 
 /// 字号范围 (px)。gpui-kit 组件库默认 16; 设置页 slider 的 min/max 复用这两个常量。
-pub const FONT_SIZE_MIN: f32 = 12.0;
-/// 字号上限 (px)。
-pub const FONT_SIZE_MAX: f32 = 24.0;
+/// 真值在 `crate::config::types`（`validate` / `load_config` 夹取共用），这里只为
+/// `themes::FONT_SIZE_*` 旧路径保留 re-export。
+pub use crate::config::{FONT_SIZE_MAX, FONT_SIZE_MIN};
 /// 默认字号 (px)。
 pub const FONT_SIZE_DEFAULT: f32 = 16.0;
 
