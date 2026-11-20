@@ -502,6 +502,9 @@ impl LibraryStore {
 
     /// 重新定位到新文件：重算 ID / 路径键，保留进度与书签。返回新 ID。
     ///
+    /// `scan_root` 是当前下载目录：新文件位于其下才继续算下载来源，否则转为导入来源
+    /// （否则下一次扫描会因「不在本次扫描结果里」把它误标失效）。
+    ///
     /// 封面文件改名由桌面层负责（store 不持有封面缓存目录）。
     ///
     /// # Errors
@@ -511,10 +514,15 @@ impl LibraryStore {
     /// # Examples
     ///
     /// ```ignore
-    /// let new_id = store.relink(&old_id, Path::new("/books/新位置.txt"))?;
+    /// let new_id = store.relink(&old_id, Path::new("/books/新位置.txt"), Some(Path::new("/books")))?;
     /// ```
     #[tracing::instrument(name = "library::LibraryStore::relink", skip_all, fields(old_id, path = %new_path.display()))]
-    pub fn relink(&mut self, old_id: &str, new_path: &Path) -> AppResult<String> {
+    pub fn relink(
+        &mut self,
+        old_id: &str,
+        new_path: &Path,
+        scan_root: Option<&Path>,
+    ) -> AppResult<String> {
         let index = self
             .books
             .iter()
@@ -539,10 +547,22 @@ impl LibraryStore {
                 t!("Library.error.already_on_shelf").to_string(),
             ));
         }
+        // 先按新路径判定归属再改记录：根内的书继续跟扫描走，根外（或没有根）转为导入，
+        // 下次扫描才不会把它当成「缺席的下载书」标失效。
+        let root_key = scan_root.map(normalize_path_key);
+        let within_root = root_key
+            .as_deref()
+            .is_some_and(|root_key| path_key_is_within(&fresh.path_key, root_key));
         let book = &mut self.books[index];
         book.id = fresh.id;
         book.path_key = fresh.path_key;
         book.path = fresh.path;
+        book.origin = if within_root {
+            BookOrigin::Downloaded
+        } else {
+            BookOrigin::Imported
+        };
+        book.source_root = if within_root { root_key } else { None };
         book.size_bytes = fresh.size_bytes;
         book.file_mtime = fresh.file_mtime;
         book.missing = false;
@@ -949,20 +969,45 @@ mod tests {
 
         let wrong = dir.path().join("new.epub");
         std::fs::write(&wrong, b"x").unwrap();
-        assert!(store.relink(&id, &wrong).is_err());
+        assert!(store.relink(&id, &wrong, Some(dir.path())).is_err());
         let before = store.get(&id).unwrap();
         assert!(before.missing);
         assert_eq!(Path::new(&before.path), old_path.as_path());
 
         let new_path = dir.path().join("new.txt");
         std::fs::write(&new_path, b"two").unwrap();
-        let new_id = store.relink(&id, &new_path).unwrap();
+        let new_id = store.relink(&id, &new_path, Some(dir.path())).unwrap();
         assert_ne!(new_id, id);
         let book = store.get(&new_id).unwrap();
         assert_eq!(book.progress.chapter, 7);
         assert_eq!(book.bookmarks.len(), 1);
         assert!(!book.missing);
         assert_eq!(book.size_bytes, 3);
+        // 根内的新路径：继续算下载书，归属根同步成新文件所在的根。
+        assert_eq!(book.origin, BookOrigin::Downloaded);
+        assert_eq!(
+            book.source_root.as_deref(),
+            Some(normalize_path_key(dir.path()).as_str())
+        );
+    }
+
+    #[test]
+    fn relink_outside_scan_root_becomes_imported() {
+        let a = tempfile::tempdir().unwrap();
+        let b = tempfile::tempdir().unwrap();
+        let old = a.path().join("old.txt");
+        let new = b.path().join("new.txt");
+        std::fs::write(&old, b"one").unwrap();
+        std::fs::write(&new, b"one").unwrap();
+
+        let mut store = LibraryStore::default();
+        let id = store.merge_scan(&[scanned(&old)], a.path()).remove(0);
+        store.books[0].missing = true;
+
+        let new_id = store.relink(&id, &new, Some(a.path())).unwrap();
+        let book = store.get(&new_id).unwrap();
+        assert_eq!(book.origin, BookOrigin::Imported);
+        assert!(book.source_root.is_none());
     }
 
     #[test]

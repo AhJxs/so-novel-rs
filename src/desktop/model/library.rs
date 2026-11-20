@@ -309,7 +309,14 @@ impl AppModel {
             .store
             .get(id)
             .and_then(|book| book.cover_file.clone());
-        let new_id = self.library.store.relink(id, new_path)?;
+        let new_id = {
+            // 与扫描共用同一个根：新路径在下载目录内才算「下载书」，
+            // 否则 relink 会把它转为导入来源，避免下次扫描误标失效。
+            let trimmed = self.config.download.download_path.trim();
+            let root =
+                (!trimmed.is_empty()).then(|| crate::library::absolute_dir(Path::new(trimmed)));
+            self.library.store.relink(id, new_path, root.as_deref())?
+        };
         // id 变了就是另一条路径的缓存键：旧缓存不会再有命中者。
         if new_id != id {
             self.forget_reader_cache(id);
