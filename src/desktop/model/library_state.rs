@@ -3,7 +3,7 @@
 //! 这里只排空 channel、更新 store 内存；落盘由 `AppModel::persist_library` 负责。
 
 use std::collections::VecDeque;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use smol::channel::Receiver;
 
@@ -128,9 +128,9 @@ impl LibraryState {
         any
     }
 
-    /// 排空元数据通道；返回是否有进展。
+    /// 排空元数据通道；返回是否有进展。`covers_dir` 透传给 `apply_meta` 用于清理旧封面。
     #[must_use]
-    pub fn drain_meta(&mut self) -> bool {
+    pub fn drain_meta(&mut self, covers_dir: Option<&Path>) -> bool {
         let Some(rx) = self.meta_rx.take() else {
             return false;
         };
@@ -141,7 +141,7 @@ impl LibraryState {
                     any = true;
                     self.meta_in_flight = false;
                     match event.outcome {
-                        Ok(meta) => self.store.apply_meta(&event.id, meta),
+                        Ok(meta) => self.store.apply_meta(&event.id, meta, covers_dir),
                         Err(error) => {
                             // 不自动重试：重新入队只在 size/mtime 变化或 missing 时才发生
                             // （`store::merge_scan`），这里额外加重试队列会无限重试同一份坏文件。
@@ -285,7 +285,7 @@ mod tests {
         .unwrap();
         drop(tx);
 
-        assert!(state.drain_meta());
+        assert!(state.drain_meta(None));
         assert!(!state.meta_in_flight);
         assert!(state.meta_rx.is_none());
         assert!(state.books_version > version);
@@ -308,7 +308,7 @@ mod tests {
         .unwrap();
         drop(tx);
 
-        assert!(state.drain_meta());
+        assert!(state.drain_meta(None));
         assert!(!state.meta_in_flight);
         assert_eq!(state.last_error.as_deref(), Some("坏了"));
     }

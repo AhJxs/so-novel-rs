@@ -13,6 +13,7 @@ use super::book::{
     Book, BookFormat, BookOrigin, Bookmark, ReadingProgress, id_for_key, normalize_path_key,
     now_unix,
 };
+use super::cover::remove_cover_file;
 use super::scan::ScannedFile;
 use crate::config::ReadingMode;
 use crate::error::{AppError, AppResult};
@@ -335,9 +336,12 @@ impl LibraryStore {
     }
 
     /// 回写后台提取的元数据；手动编辑过的书不接受自动覆盖。
+    ///
+    /// `covers_dir` 是封面缓存目录：替换封面时顺手删掉旧文件，避免缓存里留下孤儿。
+    /// 传 `None` 只更新字段、不碰磁盘（测试或无下载目录时）。
     // 逐字段用 `changed` 累计是否真的写入了新值，比拆成五个 if 表达式更易读。
     #[allow(clippy::useless_let_if_seq)]
-    pub fn apply_meta(&mut self, id: &str, meta: AppliedMeta) {
+    pub fn apply_meta(&mut self, id: &str, meta: AppliedMeta, covers_dir: Option<&Path>) {
         let Some(book) = self.books.iter_mut().find(|book| book.id == id) else {
             return;
         };
@@ -363,10 +367,13 @@ impl LibraryStore {
             book.intro = Some(intro);
             changed = true;
         }
-        if let Some(cover_file) = meta.cover_file
-            && book.cover_file.as_deref() != Some(cover_file.as_str())
+        if let Some(cover) = meta.cover_file.as_deref()
+            && book.cover_file.as_deref() != Some(cover)
         {
-            book.cover_file = Some(cover_file);
+            if let Some(dir) = covers_dir {
+                remove_cover_file(dir, book.cover_file.as_deref());
+            }
+            book.cover_file = Some(cover.to_string());
             changed = true;
         }
         if let Some(encoding) = meta.encoding
@@ -915,6 +922,7 @@ mod tests {
                 author: Some("自动作者".to_string()),
                 ..AppliedMeta::default()
             },
+            None,
         );
         assert_eq!(store.get(&id).unwrap().title, "自动标题");
 
@@ -925,11 +933,41 @@ mod tests {
                 title: Some("再次自动".to_string()),
                 ..AppliedMeta::default()
             },
+            None,
         );
         let book = store.get(&id).unwrap();
         assert_eq!(book.title, "手改标题");
         assert_eq!(book.author, "手改作者");
         assert!(book.metadata_edited);
+    }
+
+    #[test]
+    fn apply_meta_removes_previous_cover_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let covers = dir.path().join("covers");
+        std::fs::create_dir(&covers).unwrap();
+        let old = covers.join("old.bin");
+        std::fs::write(&old, b"x").unwrap();
+
+        let path = dir.path().join("a.txt");
+        std::fs::write(&path, b"one").unwrap();
+        let mut store = LibraryStore::default();
+        let id = store.merge_scan(&[scanned(&path)], dir.path()).remove(0);
+        store.books[0].cover_file = Some("old.bin".to_string());
+
+        store.apply_meta(
+            &id,
+            AppliedMeta {
+                cover_file: Some("new.bin".to_string()),
+                ..AppliedMeta::default()
+            },
+            Some(&covers),
+        );
+        assert!(!old.exists(), "旧封面必须删除");
+        assert_eq!(
+            store.get(&id).unwrap().cover_file.as_deref(),
+            Some("new.bin")
+        );
     }
 
     #[test]

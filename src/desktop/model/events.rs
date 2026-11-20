@@ -75,7 +75,8 @@ pub fn drain(model: &mut AppModel) -> bool {
 
     // 2b. 书架：扫描 / 元数据通道 + 进度节流落盘（5 秒最多一次，失败也计入节流）。
     any |= model.library.drain_scan();
-    any |= model.library.drain_meta();
+    let covers_dir = model.covers_dir();
+    any |= model.library.drain_meta(covers_dir.as_deref());
     model.spawn_meta_worker();
     if model.library.store.is_dirty()
         && crate::library::now_unix() - model.library.last_save_attempt_unix >= 5
