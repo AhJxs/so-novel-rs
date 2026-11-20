@@ -1,5 +1,6 @@
 //! 书内搜索抽屉：逐章扫描、结果分组、点击跳转与命中高亮。
 
+use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -327,25 +328,17 @@ impl ReaderPage {
         cx.notify();
     }
 
-    /// 当前章的高亮区间（按段落索引）；没有命中的段落是空表。
+    /// 当前章的稀疏高亮表：只含命中的段落，没有命中的段落不占位。
     pub(super) fn chapter_highlights(
         &self,
         reader: &ReaderConfig,
         cx: &App,
-    ) -> Option<Vec<Vec<(std::ops::Range<usize>, HighlightStyle)>>> {
+    ) -> Option<HashMap<usize, Vec<(std::ops::Range<usize>, HighlightStyle)>>> {
         let group = self
             .search
             .groups
             .iter()
             .find(|group| group.chapter == self.chapter)?;
-        let count = self
-            .content
-            .as_ref()
-            .and_then(|content| content.chapters.get(self.chapter))
-            .map_or(0, |chapter| chapter.paragraphs.len());
-        if count == 0 {
-            return None;
-        }
         let colors = reader_colors(reader.theme, cx);
         // 渲染时段落前面会加两个全角空格（6 字节），搜索结果没有这段前缀。
         let indent = if reader.indent {
@@ -353,19 +346,20 @@ impl ReaderPage {
         } else {
             0
         };
-        let mut per_paragraph: Vec<Vec<(std::ops::Range<usize>, bool)>> = vec![Vec::new(); count];
+        // 只给有命中的段落建行；`chapter_column` 按段落下标 `get`，空段落不必存在。
+        let mut per_paragraph: HashMap<usize, Vec<HitRange>> = HashMap::new();
         for hit in &group.hits {
             let start = hit.byte_offset + indent;
             let active = self.search.active == Some((self.chapter, hit.paragraph, hit.byte_offset));
-            if let Some(row) = per_paragraph.get_mut(hit.paragraph) {
-                row.push((start..start + hit.byte_len, active));
-            }
+            per_paragraph
+                .entry(hit.paragraph)
+                .or_default()
+                .push((start..start + hit.byte_len, active));
         }
-        let mut rows: Vec<Vec<(std::ops::Range<usize>, HighlightStyle)>> =
-            Vec::with_capacity(count);
-        for hits in per_paragraph {
-            rows.push(
-                merge_hit_ranges(&hits)
+        let rows = per_paragraph
+            .into_iter()
+            .map(|(paragraph, hits)| {
+                let ranges = merge_hit_ranges(&hits)
                     .into_iter()
                     .map(|(range, active)| {
                         let style = HighlightStyle {
@@ -378,9 +372,10 @@ impl ReaderPage {
                         };
                         (range, style)
                     })
-                    .collect(),
-            );
-        }
+                    .collect();
+                (paragraph, ranges)
+            })
+            .collect();
         Some(rows)
     }
 

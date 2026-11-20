@@ -4,6 +4,7 @@
 //! 两边共用「行数」这一约定，所以测量对不上时能用纯函数测出来。
 
 use std::cell::Cell;
+use std::collections::HashMap;
 use std::ops::Range;
 use std::rc::Rc;
 
@@ -21,7 +22,7 @@ pub(super) const COLUMN_PADDING: f32 = 24.0;
 /// 把一章（翻页模式下只渲染与当前页相交的块）渲染成一整列。翻页模式的外层再套一个裁剪视口。
 /// `width` 由 `ReaderPage::content_width` 算好（已扣掉抽屉与页宽上限），
 /// 与分页用的是同一个值，折行才对得上。
-/// `highlights` 按段落索引给出高亮区间。
+/// `highlights` 是按段落索引的稀疏高亮表：只含命中的段落，其余段落不建空表。
 ///
 /// `paragraphs` 永远是整章切片：`paragraph_range` 只决定渲染哪几段，高亮与搜索偏移
 /// 都按原始段落下标索引，传裁剪后的子切片会让下标错位。
@@ -33,14 +34,14 @@ pub(super) fn chapter_column(
     reader: &ReaderConfig,
     width: f32,
     line_height_px: f32,
-    highlights: Option<&[Vec<(Range<usize>, HighlightStyle)>]>,
+    highlights: Option<&HashMap<usize, Vec<(Range<usize>, HighlightStyle)>>>,
     paragraph_range: Range<usize>,
     pad_top: f32,
 ) -> Div {
     let font_size = reader.font_size;
     let spacing = reader.paragraph_spacing;
     let weight = FontWeight(f32::from(reader.font_weight));
-    // `Option<&[...]>` 是 `Copy`：`move` 闭包捕获的只是切片引用，子元素在
+    // `Option<&HashMap>` 是 `Copy`：`move` 闭包捕获的只是引用，子元素在
     // `children()` 里同步构造完就散掉，不必每帧把整章区间拷成 owned。
     let highlight_rows = highlights;
     let first = paragraph_range.start;
@@ -57,8 +58,7 @@ pub(super) fn chapter_column(
                 .line_height(px(line_height_px))
                 .font_weight(weight);
             row = match highlight_rows
-                .as_ref()
-                .and_then(|rows| rows.get(index))
+                .and_then(|rows| rows.get(&index))
                 .filter(|ranges| !ranges.is_empty())
             {
                 Some(ranges) => row.child(StyledText::new(text).with_highlights(ranges.clone())),

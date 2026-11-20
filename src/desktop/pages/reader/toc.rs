@@ -23,7 +23,9 @@ const TOC_ROW_HEIGHT: f32 = 34.0;
 impl ReaderPage {
     /// 目录抽屉。没有内容（加载中 / 失败）时给一句占位而不是空面板。
     pub(super) fn render_toc(&self, cx: &Context<Self>) -> AnyElement {
-        let Some(titles) = self.toc_titles.clone() else {
+        // 标题与小写副本在加载时一起建好（`finish_load`）；这里不再逐帧 `to_lowercase`。
+        // 过滤仍然每帧现算：几千条章节 O(n) 扫描比维护一份过滤索引简单，且只在抽屉打开时发生。
+        let Some((titles, lower)) = self.toc_titles.clone().zip(self.toc_lower.clone()) else {
             return div()
                 .w(px(TOC_WIDTH))
                 .h_full()
@@ -37,13 +39,10 @@ impl ReaderPage {
                 .into_any_element();
         };
 
-        // 过滤每帧现算：几千条章节 O(n) 扫描比维护一份过滤索引简单，且只在抽屉打开时发生。
         let needle = self.toc_filter.read(cx).value().trim().to_lowercase();
         let indices: Rc<Vec<usize>> = Rc::new(
             (0..titles.len())
-                .filter(|index| {
-                    needle.is_empty() || titles[*index].to_lowercase().contains(&needle)
-                })
+                .filter(|index| needle.is_empty() || lower[*index].contains(&needle))
                 .collect(),
         );
         let filtered = indices.len();

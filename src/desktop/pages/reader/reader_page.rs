@@ -177,6 +177,11 @@ pub struct ReaderPage {
     layout_warned: bool,
     /// 章节标题快照；加载完成时建一次，抽屉每帧零拷贝共享。
     pub(super) toc_titles: Option<Rc<Vec<String>>>,
+    /// 与 [`Self::toc_titles`] 逐项对应的小写标题，目录过滤每帧直接复用。
+    ///
+    /// 与 `toc_titles` 同建同清、整体换成新的 `Rc`：上一帧的列表可能还持有旧快照，
+    /// 原地改会让两个字段短暂错位。
+    pub(super) toc_lower: Option<Rc<Vec<String>>>,
     /// 目录顶部的章节过滤框。
     pub(super) toc_filter: Entity<InputState>,
     /// 目录列表的滚动句柄：打开时滚到当前章。
@@ -280,6 +285,7 @@ impl ReaderPage {
             last_content_width: None,
             layout_warned: false,
             toc_titles: None,
+            toc_lower: None,
             toc_filter,
             toc_scroll: UniformListScrollHandle::new(),
             search: SearchPanel::new(),
@@ -577,6 +583,7 @@ impl ReaderPage {
         self.display_cache = None;
         self.page_cache = None;
         self.toc_titles = None;
+        self.toc_lower = None;
         // 位置由调用方决定，一律按 `chapter` / `chapter_ratio` 恢复。
         self.restore_position = None;
         self.restore_pending = true;
@@ -674,13 +681,15 @@ impl ReaderPage {
                 self.chapter_ratio = self.chapter_ratio.clamp(0.0, 1.0);
                 let encoding = content.encoding.clone();
                 let forced = self.force_decode;
-                self.toc_titles = Some(Rc::new(
-                    content
-                        .chapters
-                        .iter()
-                        .map(|chapter| chapter.title.clone())
-                        .collect(),
-                ));
+                // 标题与小写副本同一次遍历建好，目录过滤不必每帧再 `to_lowercase`。
+                let mut titles = Vec::with_capacity(content.chapters.len());
+                let mut lower = Vec::with_capacity(content.chapters.len());
+                for chapter in &content.chapters {
+                    titles.push(chapter.title.clone());
+                    lower.push(chapter.title.to_lowercase());
+                }
+                self.toc_titles = Some(Rc::new(titles));
+                self.toc_lower = Some(Rc::new(lower));
                 self.content = Some(content);
                 // 重新加载后同章号指向新正文：旧缓存必须作废（指纹里的章节号看不出这点）。
                 self.display_cache = None;
@@ -1978,7 +1987,7 @@ impl ReaderPage {
                                         &reader,
                                         width,
                                         line_height,
-                                        highlights.as_deref(),
+                                        highlights.as_ref(),
                                         paragraph_range,
                                         pad_top,
                                     )),
@@ -2010,7 +2019,7 @@ impl ReaderPage {
             &reader,
             width,
             line_height,
-            highlights.as_deref(),
+            highlights.as_ref(),
             0..paragraphs.len(),
             0.0,
         );

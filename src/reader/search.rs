@@ -75,9 +75,26 @@ fn matches_at(haystack: &[u8], offset: usize, needle: &[u8]) -> bool {
 }
 
 /// 取命中附近的上下文，返回 `(片段, 片段内命中区间)`。
+///
+/// 单次调用方便随手用；同一段里有多条命中时先建一次
+/// [`snippet_with_starts`] 要的边界表，别逐条重复扫。
 #[must_use]
 pub fn snippet(text: &str, offset: usize, len: usize) -> (String, Range<usize>) {
     let starts: Vec<usize> = text.char_indices().map(|(index, _)| index).collect();
+    snippet_with_starts(text, &starts, offset, len)
+}
+
+/// 同 [`snippet`]，但复用调用方已经建好的字符边界表：`starts` 是
+/// `text.char_indices()` 收集的字节位置（升序，首项恒为 0）。
+///
+/// 空表（空文本）或越界偏移返回整段文本与空区间，与 [`snippet`] 一致。
+#[must_use]
+pub fn snippet_with_starts(
+    text: &str,
+    starts: &[usize],
+    offset: usize,
+    len: usize,
+) -> (String, Range<usize>) {
     if starts.is_empty() || offset >= text.len() {
         return (text.to_string(), 0..0);
     }
@@ -131,8 +148,15 @@ pub fn search_chapter_interruptible(
         if paragraph_index % CANCEL_CHECK_INTERVAL == 0 && cancel.load(Ordering::Relaxed) {
             return None;
         }
-        for (byte_offset, byte_len) in find_hits(paragraph, needle) {
-            let (snippet, snippet_match) = snippet(paragraph, byte_offset, byte_len);
+        let paragraph_hits = find_hits(paragraph, needle);
+        // 边界表按段建一次、本段所有命中共用；无命中的段落根本不建。
+        if paragraph_hits.is_empty() {
+            continue;
+        }
+        let starts: Vec<usize> = paragraph.char_indices().map(|(index, _)| index).collect();
+        for (byte_offset, byte_len) in paragraph_hits {
+            let (snippet, snippet_match) =
+                snippet_with_starts(paragraph, &starts, byte_offset, byte_len);
             hits.push(SearchHit {
                 paragraph: paragraph_index,
                 byte_offset,
@@ -302,6 +326,65 @@ mod tests {
         assert_eq!(&snippet[range.clone()], "hello");
         assert_ne!(range.start, byte_offset, "range 是相对片段的，不是相对整段");
         assert!(range.end < snippet.len());
+    }
+
+    fn char_starts(text: &str) -> Vec<usize> {
+        text.char_indices().map(|(index, _)| index).collect()
+    }
+
+    #[test]
+    fn snippet_with_starts_matches_snippet_on_ascii_and_multibyte() {
+        for text in ["Hello world hello", "你好 Hello 世界", "aé中😀b 再见"] {
+            let starts = char_starts(text);
+            for &offset in &starts {
+                let len = text[offset..]
+                    .chars()
+                    .next()
+                    .expect("char boundary")
+                    .len_utf8();
+                assert_eq!(
+                    snippet_with_starts(text, &starts, offset, len),
+                    snippet(text, offset, len),
+                    "text={text:?} offset={offset} len={len}"
+                );
+            }
+            // 越过末字之后的偏移两边都回落成整段 + 空区间。
+            assert_eq!(
+                snippet_with_starts(text, &starts, text.len(), 3),
+                snippet(text, text.len(), 3)
+            );
+        }
+    }
+
+    #[test]
+    fn snippet_with_starts_clamps_at_paragraph_edges() {
+        // 24 个字符正好等于一个 SNIPPET_RADIUS：首尾两侧都会被夹到文本边界。
+        let text = &format!("{}中段尾字", "前缀".repeat(10));
+        let starts = char_starts(text);
+        // 段首命中：from_char 夹到 0，片段就是整段开头。
+        let (head, head_range) = snippet_with_starts(text, &starts, 0, "前".len());
+        assert_eq!(head, *text);
+        assert_eq!(head_range, 0.."前".len());
+        // 段尾命中：to_char 超出表长，end 收到 `text.len()`，区间相对整段。
+        let last = starts[starts.len() - 1];
+        let (tail, tail_range) = snippet_with_starts(text, &starts, last, "字".len());
+        assert_eq!(tail, *text);
+        assert_eq!(tail_range, last..last + "字".len());
+        assert_eq!(&tail[tail_range], "字");
+        // 比半径短得多的段落：不足上下文时片段就是整段本身。
+        let (short, short_range) = snippet_with_starts("ab", &char_starts("ab"), 1, 1);
+        assert_eq!((short.as_str(), short_range), ("ab", 1..2));
+    }
+
+    #[test]
+    fn snippet_with_starts_handles_empty_table() {
+        assert_eq!(
+            snippet_with_starts("abc", &[], 0, 1),
+            ("abc".to_string(), 0..0)
+        );
+        assert_eq!(snippet_with_starts("", &[], 0, 0), (String::new(), 0..0));
+        // 空文本走 `snippet` 也是同一条路径。
+        assert_eq!(snippet("", 0, 0), (String::new(), 0..0));
     }
 
     #[test]
