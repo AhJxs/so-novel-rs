@@ -520,7 +520,9 @@ impl ReaderPage {
     /// 这里只置 `restore_pending`，保证新布局跑完后再按 `chapter` / `chapter_ratio` 恢复。
     fn reload_from_disk(&mut self, cx: &mut Context<Self>) {
         self.cancel_search();
-        self.search = SearchPanel::new();
+        // 不能重建面板：`generation` 必须跨重载保留，否则旧书在途的接收循环会在
+        // 下一次搜索时重新撞上同一个代次。`cancel_search` 已经先推进过它。
+        self.search.reset();
         self.content = None;
         // 同一章号也可能换了一份正文（换编码 / 重新定位 / 重新分章），章节号单独不足以失效。
         self.display_cache = None;
