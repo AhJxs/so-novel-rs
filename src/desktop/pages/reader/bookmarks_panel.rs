@@ -4,7 +4,7 @@ use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::{ActiveTheme as _, Disableable as _, IconName};
 use gpui_kit::{
-    AnyElement, App, Context, FontWeight, InteractiveElement as _, IntoElement, ParentElement,
+    AnyElement, Context, FontWeight, InteractiveElement as _, IntoElement, ParentElement,
     StatefulInteractiveElement as _, Styled, div, px,
 };
 use rust_i18n::t;
@@ -17,16 +17,6 @@ use crate::utils::formatting::{format_local_unix_secs, truncate};
 pub(super) const BOOKMARKS_WIDTH: f32 = 300.0;
 
 impl ReaderPage {
-    /// 书签列表快照：store 是唯一真相，`self.book` 只是打开时的副本。
-    ///
-    /// 走 `bookmarks_of` 而不是 `book_snapshot`：抽屉每帧都要读，别为此整本 clone。
-    pub(super) fn bookmarks_snapshot(&self, cx: &App) -> Vec<Bookmark> {
-        self.model
-            .read(cx)
-            .bookmarks_of(&self.book_id)
-            .unwrap_or_default()
-    }
-
     /// 把当前位置加成书签；同章同位置重复时提示「已存在」。
     ///
     /// 滚动模式下 `chapter_ratio` 只由 `on_scroll` 与 5 s 一次的 autosave 更新，
@@ -95,7 +85,12 @@ impl ReaderPage {
 
     /// 右侧书签抽屉。
     pub(super) fn render_bookmarks(&self, cx: &Context<Self>) -> AnyElement {
-        let bookmarks = self.bookmarks_snapshot(cx);
+        // 快照由 `ReaderPage::refresh_drawer_caches` 在每帧 render 开头按版本刷新；
+        // 这里只读引用，不再每帧 clone 整个书签列表。
+        let bookmarks = self
+            .bookmarks_cache
+            .as_ref()
+            .map_or(&[][..], |(_, bookmarks)| bookmarks.as_slice());
         let titles = self.toc_titles.clone();
         let mut list = div()
             .id("reader-bookmarks")
@@ -118,7 +113,7 @@ impl ReaderPage {
             );
         }
 
-        for bookmark in &bookmarks {
+        for bookmark in bookmarks {
             let chapter = bookmark.chapter;
             let ratio = bookmark.chapter_ratio;
             let bookmark_id = bookmark.id.clone();

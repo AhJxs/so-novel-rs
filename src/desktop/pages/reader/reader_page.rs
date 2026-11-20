@@ -30,7 +30,7 @@ use super::reader_colors;
 use super::search_panel::{self, SearchPanel};
 use crate::config::{ReaderConfig, ReadingMode};
 use crate::desktop::model::AppModel;
-use crate::library::{Book, BookFormat, ReadingProgress};
+use crate::library::{Book, BookFormat, Bookmark, ReadingProgress};
 use crate::reader::layout::{page_for_ratio, page_ratio, paragraph_offsets, visible_paragraphs};
 use crate::reader::{
     LayoutFingerprint, ParagraphMetrics, ReaderBook, ReaderError, ReaderLayout, load_book,
@@ -191,6 +191,10 @@ pub struct ReaderPage {
     toolbar_hide_gen: u64,
     /// 「更多」抽屉。
     pub(super) more_open: bool,
+    /// 「更多」抽屉的数据快照：`(books_version, Book)`；版本没变就复用，别每帧整本 clone。
+    pub(super) more_cache: Option<(u64, Book)>,
+    /// 书签抽屉的数据快照：`(books_version, 书签列表)`；同上。
+    pub(super) bookmarks_cache: Option<(u64, Vec<Bookmark>)>,
     /// 书签列表的滚动位置。
     pub(super) bookmarks_scroll: ScrollHandle,
     /// 在跑的扫描任务的取消旗标。
@@ -283,6 +287,8 @@ impl ReaderPage {
             toolbar_visible: false,
             toolbar_hide_gen: 0,
             more_open: false,
+            more_cache: None,
+            bookmarks_cache: None,
             bookmarks_scroll: ScrollHandle::new(),
             search_cancel: None,
             toc_open: false,
@@ -312,6 +318,42 @@ impl ReaderPage {
         .detach();
         page.spawn_load(cx);
         page
+    }
+
+    /// 抽屉数据按需刷新：只在抽屉打开、且 store 版本变了时从 model 取一次快照。
+    ///
+    /// 抽屉每帧都要画；不缓存的话「更多」每帧整本 clone、书签每帧 clone 整个列表。
+    fn refresh_drawer_caches(&mut self, cx: &Context<Self>) {
+        if !self.more_open && !self.bookmarks_open {
+            return;
+        }
+        let version = self.model.read(cx).library.books_version;
+        if self.more_open
+            && self
+                .more_cache
+                .as_ref()
+                .is_none_or(|(cached, _)| *cached != version)
+        {
+            let book = self
+                .model
+                .read(cx)
+                .book_snapshot(&self.book_id)
+                .unwrap_or_else(|| self.book.clone());
+            self.more_cache = Some((version, book));
+        }
+        if self.bookmarks_open
+            && self
+                .bookmarks_cache
+                .as_ref()
+                .is_none_or(|(cached, _)| *cached != version)
+        {
+            let bookmarks = self
+                .model
+                .read(cx)
+                .bookmarks_of(&self.book_id)
+                .unwrap_or_default();
+            self.bookmarks_cache = Some((version, bookmarks));
+        }
     }
 
     /// 注入关闭回调（`RootView` 调用）。
@@ -2106,6 +2148,8 @@ impl ReaderPage {
 
 impl Render for ReaderPage {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // 抽屉快照先于渲染刷新：面板只读缓存，别在面板里每帧 clone。
+        self.refresh_drawer_caches(cx);
         let reader = self.reader_config(cx);
         let colors = reader_colors(reader.theme, cx);
 

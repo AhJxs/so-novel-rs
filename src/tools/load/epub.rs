@@ -8,7 +8,7 @@ use regex::Regex;
 use zip::ZipArchive;
 
 use super::html::{attr, body_fragment, capture_text, extract_tag_text, html_to_paragraphs};
-use super::stem;
+use super::{LoadOptions, stem};
 use crate::tools::ToolError;
 use crate::tools::source_book::{SourceBook, SourceChapter};
 
@@ -93,7 +93,8 @@ pub fn read_metadata(path: &Path) -> Result<EpubMetadata, ToolError> {
     })
 }
 
-pub(super) fn load(path: &Path) -> Result<SourceBook, ToolError> {
+/// 解析 spine 正文；`opts.include_cover` 为 false 时不解压封面（阅读器不显示它）。
+pub(super) fn load(path: &Path, opts: &LoadOptions<'_>) -> Result<SourceBook, ToolError> {
     let file = std::fs::File::open(path)?;
     let mut archive =
         ZipArchive::new(file).map_err(|error| ToolError::EpubStructure(error.to_string()))?;
@@ -132,7 +133,11 @@ pub(super) fn load(path: &Path) -> Result<SourceBook, ToolError> {
         ));
     }
 
-    let cover = read_cover(&mut archive, &package);
+    let cover = if opts.include_cover {
+        read_cover(&mut archive, &package)
+    } else {
+        None
+    };
 
     Ok(SourceBook {
         title: dc_text(&package.opf, "title").unwrap_or_else(|| stem(path)),
@@ -335,6 +340,28 @@ mod tests {
         assert_eq!(book.chapters[0].paragraphs, vec!["甲"]);
         assert_eq!(book.chapters[1].paragraphs, vec!["乙"]);
         assert!(book.cover.as_ref().is_some_and(|bytes| !bytes.is_empty()));
+    }
+
+    #[test]
+    fn reader_load_skips_cover_decompression() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("书.epub");
+        write_epub(&path);
+
+        let book = load_path(
+            &path,
+            &LoadOptions {
+                include_cover: false,
+                ..LoadOptions::default()
+            },
+        )
+        .unwrap();
+
+        // 阅读器路径：不读封面条目，其余字段与默认路径一致。
+        assert_eq!(book.cover, None);
+        assert_eq!(book.title, "测试书");
+        assert_eq!(book.author, "作者甲");
+        assert_eq!(book.chapters.len(), 2);
     }
 
     #[test]

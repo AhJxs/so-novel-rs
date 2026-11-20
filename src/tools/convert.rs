@@ -27,6 +27,7 @@ pub fn run_convert(
     let options = LoadOptions {
         source_encoding: parse_encoding(source_encoding)?,
         chapter_regex,
+        include_cover: true,
     };
     let book = load_path(source, &options)?;
     on_progress(ToolProgress::new(ToolStage::Loading, 1, 1));

@@ -13,12 +13,25 @@ use super::source_book::SourceBook;
 use super::{ToolError, split};
 
 /// 加载选项。
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy)]
 pub struct LoadOptions<'a> {
     /// 用户显式指定的源编码；`None` = BOM / 自动探测。
     pub source_encoding: Option<&'static Encoding>,
     /// 用户自定义章节正则；`None` = 内置规则。
     pub chapter_regex: Option<&'a str>,
+    /// 是否解压 EPUB 封面；阅读器不显示封面，可跳过这次 ZIP 条目读取。
+    pub include_cover: bool,
+}
+
+impl Default for LoadOptions<'_> {
+    /// 默认读封面：工具箱 / 转换流程沿用原有行为，只有阅读器显式关掉。
+    fn default() -> Self {
+        Self {
+            source_encoding: None,
+            chapter_regex: None,
+            include_cover: true,
+        }
+    }
 }
 
 /// 按扩展名加载文件。
@@ -39,7 +52,7 @@ pub fn load_path(path: &Path, opts: &LoadOptions<'_>) -> Result<SourceBook, Tool
         }
         "html" | "htm" => html::load_file(path, opts, &split::compile_pattern(opts.chapter_regex)?),
         "zip" => html::load_zip(path),
-        "epub" => epub::load(path).map(|mut book| {
+        "epub" => epub::load(path, opts).map(|mut book| {
             book.chapters = split::normalize_chapters(book.chapters);
             book
         }),

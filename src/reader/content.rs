@@ -133,6 +133,8 @@ fn load_book_impl(
         &LoadOptions {
             source_encoding: explicit,
             chapter_regex: None,
+            // 阅读器从不显示封面：别为它解压一次 ZIP 条目、分配一份图片字节。
+            include_cover: false,
         },
     )
     .map_err(|error| map_error(format, error))?;

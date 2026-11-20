@@ -122,7 +122,7 @@ mod tests {
             &path,
             &LoadOptions {
                 source_encoding: Some(encoding_rs::UTF_8),
-                chapter_regex: None,
+                ..LoadOptions::default()
             },
         )
         .unwrap();
@@ -148,7 +148,7 @@ mod tests {
             &path,
             &LoadOptions {
                 source_encoding: Some(encoding_rs::GBK),
-                chapter_regex: None,
+                ..LoadOptions::default()
             },
         )
         .unwrap();

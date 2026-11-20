@@ -11,7 +11,6 @@ use gpui_kit::{
 use rust_i18n::t;
 
 use super::reader_page::ReaderPage;
-use crate::library::Book;
 use crate::utils::formatting::format_local_unix_secs;
 use crate::utils::fs::format_size;
 use crate::utils::system;
@@ -20,14 +19,6 @@ use crate::utils::system;
 pub(super) const MORE_WIDTH: f32 = 340.0;
 
 impl ReaderPage {
-    /// 书在 store 里的最新快照；拿不到就退回打开时的副本。
-    fn current_book(&self, cx: &App) -> Book {
-        self.model
-            .read(cx)
-            .book_snapshot(&self.book_id)
-            .unwrap_or_else(|| self.book.clone())
-    }
-
     /// 「在文件夹中显示」/「用默认程序打开」共用的执行体。
     fn run_file_action(&self, path: &str, open_with_app: bool, cx: &mut Context<Self>) {
         let target = PathBuf::from(path);
@@ -44,7 +35,12 @@ impl ReaderPage {
 
     /// 右侧「更多」抽屉。
     pub(super) fn render_more(&self, cx: &Context<Self>) -> AnyElement {
-        let book = self.current_book(cx);
+        // 快照由 `ReaderPage::refresh_drawer_caches` 在每帧 render 开头按版本刷新。
+        // 抽屉只在 `more_open` 时渲染，缓存必已就绪；退回打开时的副本只是防御。
+        let book = self
+            .more_cache
+            .as_ref()
+            .map_or(&self.book, |(_, book)| book);
         let unknown = t!("Reader.info.unknown").to_string();
         // 时间戳缺失 / 非法 / 格式化失败都显示同一个占位。
         let time_unknown = "Reader.info.unknown";
@@ -108,7 +104,7 @@ impl ReaderPage {
 
         let title = book.title.clone();
         let reveal_path = book.path.clone();
-        let open_path = book.path;
+        let open_path = book.path.clone();
 
         div()
             .w(px(MORE_WIDTH))
