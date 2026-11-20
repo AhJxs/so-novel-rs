@@ -11,7 +11,6 @@ use rust_i18n::t;
 
 use super::reader_page::ReaderPage;
 use crate::library::Bookmark;
-use crate::reader::layout::count_f32;
 use crate::utils::formatting::{format_local_unix_secs, truncate};
 
 /// 书签抽屉宽度（px）。正文列宽要减掉它，与 `toc::TOC_WIDTH` / `search_panel::SEARCH_WIDTH` 同理。
@@ -69,11 +68,9 @@ impl ReaderPage {
         if chapter.paragraphs.is_empty() {
             return String::new();
         }
-        let last = chapter.paragraphs.len() - 1;
-        // `len() as f32` 会撞 `cast_precision_loss`（无全局放行），走 `count_f32`。
         let index =
-            (self.chapter_ratio.clamp(0.0, 1.0) * count_f32(chapter.paragraphs.len())) as usize;
-        truncate(&chapter.paragraphs[index.min(last)], 40)
+            crate::reader::layout::paragraph_at_ratio(&chapter.paragraphs, self.chapter_ratio);
+        truncate(&chapter.paragraphs[index], 40)
     }
 
     /// 跳到 `(章, 章内比例)`。书签跳转用它；搜索 / 目录各自有更精确的入口。

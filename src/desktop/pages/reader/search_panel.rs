@@ -18,7 +18,6 @@ use rust_i18n::t;
 use super::reader_page::ReaderPage;
 use super::theme::{ReaderColors, reader_colors};
 use crate::config::ReaderConfig;
-use crate::reader::layout::count_f32;
 use crate::reader::search::search_chapter;
 use crate::reader::{HITS_TOTAL, ReaderLayout, SearchGroup, SearchHit};
 
@@ -227,7 +226,7 @@ impl ReaderPage {
         more
     }
 
-    /// 跳到某条命中：章按段落比例定位，并把它设为「当前命中」。
+    /// 跳到某条命中：按命中在章内的字符偏移定位，并把它设为「当前命中」。
     pub(super) fn goto_hit(
         &mut self,
         chapter: usize,
@@ -242,13 +241,7 @@ impl ReaderPage {
         else {
             return;
         };
-        let paragraphs = target.paragraphs.len();
-        // 段落下标 / 段数经 `count_f32` 转换：`as f32` 会触发 `cast_precision_loss`（无全局放行）。
-        let ratio = if paragraphs == 0 {
-            0.0
-        } else {
-            (count_f32(paragraph) / count_f32(paragraphs)).clamp(0.0, 1.0)
-        };
+        let ratio = crate::reader::layout::char_ratio(&target.paragraphs, paragraph, byte_offset);
         // 命中可能在当前章：指纹不变时分页缓存会直接早退、`page_index` 不追随新比例，
         // 所以要作废在途防抖并强制重排一次。
         self.invalidate_scroll_commit();

@@ -189,6 +189,51 @@ pub fn page_for_ratio(ratio: f32, page_count: usize) -> usize {
     ((ratio * count_f32(page_count - 1)).round() as usize).min(page_count - 1)
 }
 
+/// 段落下标 + 段内字节偏移 → 章内字符比例。段长差异大时比「段序号 / 段数」准。
+#[must_use]
+pub fn char_ratio(paragraphs: &[String], index: usize, byte_offset: usize) -> f32 {
+    let total: usize = paragraphs.iter().map(|p| p.chars().count() + 1).sum();
+    if total == 0 {
+        return 0.0;
+    }
+    let before: usize = paragraphs
+        .iter()
+        .take(index)
+        .map(|p| p.chars().count() + 1)
+        .sum();
+    let inside = paragraphs.get(index).map_or(0, |p| {
+        // 搜索结果给的是字节偏移，可能落在多字节字符中间：退到最近的字符边界。
+        let end = (0..=byte_offset.min(p.len()))
+            .rev()
+            .find(|&offset| p.is_char_boundary(offset))
+            .unwrap_or(0);
+        p[..end].chars().count()
+    });
+    count_f32(before + inside) / count_f32(total)
+}
+
+/// 章内比例 → 段落下标（书签摘录用）。
+///
+/// 比例正好落在某段开头时归该段：比较用 `seen > target`（而非 `>=`），
+/// 命中段首第一字符也算这一段；比例 1.0 落到最后一段。
+#[must_use]
+pub fn paragraph_at_ratio(paragraphs: &[String], ratio: f32) -> usize {
+    let total: usize = paragraphs.iter().map(|p| p.chars().count() + 1).sum();
+    if total == 0 {
+        return 0;
+    }
+    // 比例本身就是 f32，`count_f32(total)` 不额外丢精度；整数转换由全局 allow 放行。
+    let target = (ratio.clamp(0.0, 1.0) * count_f32(total)) as usize;
+    let mut seen = 0;
+    for (index, paragraph) in paragraphs.iter().enumerate() {
+        seen += paragraph.chars().count() + 1;
+        if seen > target {
+            return index;
+        }
+    }
+    paragraphs.len().saturating_sub(1)
+}
+
 /// 计数（行数 / 页数）转 f32。
 ///
 /// 一本书的行数、页数以千计，远在 f32 的 2^24 有效位以内；集中在这一处转换，
@@ -318,6 +363,26 @@ mod tests {
         for page in 0..5 {
             assert_eq!(page_for_ratio(ratio_for_page(page, 5), 5), page);
         }
+    }
+
+    #[test]
+    fn char_ratio_weights_long_paragraphs() {
+        let paragraphs = vec!["长".repeat(900), "短".to_string(), "尾".to_string()];
+        // 第二段开头：901 / (901 + 2 + 2) ≈ 0.99558，而不是 1/3。
+        let ratio = char_ratio(&paragraphs, 1, 0);
+        assert!(ratio > 0.99, "实际 {ratio}");
+        assert_eq!(paragraph_at_ratio(&paragraphs, 0.996), 1);
+    }
+
+    #[test]
+    fn char_ratio_handles_empty_and_mid_character_offsets() {
+        // 空章：没有字符，比例为 0；空章查下标也得 0（调用方另有空段早退）。
+        assert!((char_ratio(&[], 0, 0) - 0.0).abs() < f32::EPSILON);
+        assert_eq!(paragraph_at_ratio(&[], 0.5), 0);
+        // 偏移落在多字节字符中间：退到最近的字符边界，不算半个字。
+        let paragraphs = vec!["长".to_string()];
+        assert!((char_ratio(&paragraphs, 0, 1) - 0.0).abs() < f32::EPSILON);
+        assert!((char_ratio(&paragraphs, 0, 3) - 0.5).abs() < f32::EPSILON);
     }
 
     #[test]
