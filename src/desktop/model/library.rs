@@ -260,21 +260,37 @@ impl AppModel {
         }
     }
 
-    /// 移出书架：扫描来源只隐藏（重扫不会再加回），导入来源直接删记录。
+    /// 这本书是否位于当前下载目录内（扫描会再次发现它）。
+    ///
+    /// 按路径判定而不是 `origin`：导入书后来被挪进下载目录后，扫描同样会把它收回来，
+    /// 这类书必须隐藏而不是删记录 —— 否则下次扫描又冒出来，「移出」等于没生效。
+    fn book_is_scanned(&self, book: &Book) -> bool {
+        let download_path = &self.config.download.download_path;
+        if download_path.trim().is_empty() {
+            return false;
+        }
+        // 与 `refresh_library_async` 用同一个根：先 `absolute_dir`，再用与 `path_key`
+        // 完全相同的规则规范化（扫描合并里也是先 `absolute_dir` 再 `normalize_path_key`）。
+        // 这里不 trim：扫描器不 trim，比较要回答的是「下一次扫描会不会找到这个文件」。
+        let root = crate::library::absolute_dir(Path::new(download_path));
+        let root_key = crate::library::normalize_path_key(&root);
+        crate::library::path_key_is_within(&book.path_key, &root_key)
+    }
+
+    /// 移出书架：扫描范围内的书只隐藏（重扫不会再加回），范围外直接删记录。
     pub fn hide_book(&mut self, id: &str) {
         let Some(book) = self.library.store.get(id).cloned() else {
             return;
         };
-        match book.origin {
-            crate::library::BookOrigin::Downloaded => self.library.store.set_hidden(id, true),
-            crate::library::BookOrigin::Imported => {
-                if let Some(dir) = self.covers_dir() {
-                    crate::library::remove_cover_file(&dir, book.cover_file.as_deref());
-                }
-                let _ = self.library.store.remove(id);
+        if self.book_is_scanned(&book) {
+            self.library.store.set_hidden(id, true);
+        } else {
+            if let Some(dir) = self.covers_dir() {
+                crate::library::remove_cover_file(&dir, book.cover_file.as_deref());
             }
+            let _ = self.library.store.remove(id);
         }
-        // 移出书架的两种来源都不再能打开，缓存跟着删。
+        // 移出书架的两种结果都不再能打开，缓存跟着删。
         self.forget_reader_cache(&book.id);
         self.library.bump();
         self.persist_library();
