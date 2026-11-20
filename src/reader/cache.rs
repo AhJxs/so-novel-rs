@@ -14,7 +14,13 @@ use super::ReaderBook;
 pub use crate::library::CACHE_DIR_NAME;
 use crate::library::{BOOKS_DIR_NAME, BookFormat, mtime_secs};
 /// 缓存格式版本；解析行为或字段变了就 +1，旧缓存自动失效。
-pub const CACHE_VERSION: u32 = 1;
+pub const CACHE_VERSION: u32 = 2;
+
+/// 解析器修订号；缓存命中要求它相等，用来在解析逻辑变更后废弃旧缓存。
+///
+/// **修改 `split` / `paragraphs_from_text` / 各格式加载器行为时必须 +1**，否则旧缓存里
+/// 的分章结构会一直沿用，用户看不到修复效果。
+pub const PARSER_REVISION: u32 = 1;
 
 /// `<下载目录>/.sonovel`；下载目录为空时返回 `None`（不缓存）。
 ///
@@ -28,6 +34,7 @@ pub fn dir_for_download(download_path: &str) -> Option<PathBuf> {
 #[derive(Deserialize)]
 struct CacheFile {
     version: u32,
+    parser_revision: u32,
     format: BookFormat,
     size_bytes: u64,
     mtime: i64,
@@ -42,6 +49,7 @@ struct CacheFile {
 #[derive(Serialize)]
 struct CacheRef<'a> {
     version: u32,
+    parser_revision: u32,
     format: BookFormat,
     size_bytes: u64,
     mtime: i64,
@@ -65,6 +73,7 @@ pub fn load(
     let raw = fs::read_to_string(book_path(dir, book_id)).ok()?;
     let cached: CacheFile = serde_json::from_str(&raw).ok()?;
     let fresh = cached.version == CACHE_VERSION
+        && cached.parser_revision == PARSER_REVISION
         && cached.format == format
         && cached.size_bytes == metadata.len()
         && cached.mtime == mtime_secs(&metadata)
@@ -73,6 +82,9 @@ pub fn load(
 }
 
 /// 解析成功后写缓存；失败只记日志，绝不能影响阅读。
+///
+/// `expected` 是解析前记录的源文件指纹；若解析期间源文件被改动（大小 / 修改时间变了），
+/// 这次结果就对应一份已经不存在的快照，直接跳过写入，避免把脏缓存留给下次打开。
 pub fn store(
     dir: &Path,
     book_id: &str,
@@ -80,18 +92,22 @@ pub fn store(
     format: BookFormat,
     requested: Option<&str>,
     book: &ReaderBook,
+    expected: Option<(u64, i64)>,
 ) {
-    let Ok(metadata) = fs::metadata(path) else {
+    let Some((size, mtime)) = source_fingerprint(path) else {
         return;
     };
-    if !metadata.is_file() {
+    if let Some(expected) = expected
+        && (size, mtime) != expected
+    {
         return;
     }
     let payload = CacheRef {
         version: CACHE_VERSION,
+        parser_revision: PARSER_REVISION,
         format,
-        size_bytes: metadata.len(),
-        mtime: mtime_secs(&metadata),
+        size_bytes: size,
+        mtime,
         requested_encoding: requested,
         book,
     };
@@ -101,6 +117,15 @@ pub fn store(
             dir.display()
         );
     }
+}
+
+/// 源文件指纹：大小 + 修改时间（秒）。只对存在的普通文件返回 `Some`。
+#[must_use]
+pub fn source_fingerprint(path: &Path) -> Option<(u64, i64)> {
+    let metadata = fs::metadata(path).ok()?;
+    metadata
+        .is_file()
+        .then(|| (metadata.len(), mtime_secs(&metadata)))
 }
 
 /// 删掉一本书的缓存（删文件 / 移出书架 / 重新定位后旧 id 都走这里）。
@@ -148,10 +173,8 @@ fn write_json(dir: &Path, book_id: &str, payload: &CacheRef<'_>) -> io::Result<(
     }
     crate::library::hide_dir(dir);
     let json = serde_json::to_vec(payload).map_err(io::Error::other)?;
-    // 先写临时文件再改名：写到一半崩掉也不会留下半截 JSON 被下次当成有效缓存。
-    let tmp = path.with_extension("json.tmp");
-    fs::write(&tmp, json)?;
-    fs::rename(&tmp, &path)
+    // 与项目其它持久化一致：同目录 tmp → fsync → rename，崩在中间不会留下半截 JSON。
+    crate::db::write_atomically(&path, &json)
 }
 
 #[cfg(test)]
@@ -193,6 +216,7 @@ mod tests {
             BookFormat::Txt,
             Some("GBK"),
             &book,
+            None,
         );
         let loaded = load(&cache, "abc123", &source, BookFormat::Txt, Some("GBK")).expect("命中");
         assert_eq!(loaded.title, book.title);
@@ -212,6 +236,7 @@ mod tests {
             BookFormat::Txt,
             None,
             &sample_book(None),
+            None,
         );
 
         // 内容变了（大小 + mtime 都会变）。
@@ -235,6 +260,7 @@ mod tests {
             BookFormat::Txt,
             None,
             &sample_book(Some("GBK")),
+            None,
         );
         assert!(
             load(&cache, "abc123", &source, BookFormat::Txt, Some("GBK")).is_some(),
@@ -262,6 +288,7 @@ mod tests {
             BookFormat::Txt,
             Some("UTF-8"),
             &sample_book(Some("UTF-8")),
+            None,
         );
         assert!(
             load(&cache, "abc123", &source, BookFormat::Txt, None).is_none(),
@@ -292,6 +319,7 @@ mod tests {
             BookFormat::Txt,
             None,
             &sample_book(None),
+            None,
         );
         store(
             &cache,
@@ -300,6 +328,7 @@ mod tests {
             BookFormat::Txt,
             None,
             &sample_book(None),
+            None,
         );
 
         remove(&cache, "aaa");
@@ -319,6 +348,7 @@ mod tests {
             BookFormat::Txt,
             None,
             &sample_book(None),
+            None,
         );
         assert!(
             !dir.path().join("evil.json").exists(),
@@ -335,5 +365,45 @@ mod tests {
         assert!(dir_for_download("   ").is_none());
         let dir = dir_for_download("C:/books").expect("有目录");
         assert!(dir.ends_with(CACHE_DIR_NAME));
+    }
+
+    #[test]
+    fn fingerprint_matches_stat() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.txt");
+        std::fs::write(&path, b"abc").unwrap();
+        let (size, mtime) = source_fingerprint(&path).unwrap();
+        assert_eq!(size, 3);
+        assert!(mtime > 0);
+    }
+
+    #[test]
+    fn store_skips_when_source_changed_midway() {
+        let dir = tempfile::tempdir().unwrap();
+        let books = dir.path().join("books");
+        let path = dir.path().join("a.txt");
+        std::fs::write(&path, b"one").unwrap();
+        let before = source_fingerprint(&path).unwrap();
+        std::fs::write(&path, b"one and more").unwrap();
+
+        let book = ReaderBook {
+            title: "t".into(),
+            author: String::new(),
+            chapters: vec![],
+            encoding: None,
+        };
+        store(
+            &books,
+            "id",
+            &path,
+            BookFormat::Txt,
+            None,
+            &book,
+            Some(before),
+        );
+        assert!(
+            !book_path(&books, "id").exists(),
+            "解析后文件变了就不能写缓存"
+        );
     }
 }

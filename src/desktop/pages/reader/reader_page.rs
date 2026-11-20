@@ -433,6 +433,7 @@ impl ReaderPage {
                     {
                         return Ok(book);
                     }
+                    let before = crate::reader::cache::source_fingerprint(&path);
                     let result = load_book(&path, format, encoding.as_deref());
                     if let (Ok(book), Some(dir)) = (&result, cache_dir.as_deref()) {
                         crate::reader::cache::store(
@@ -442,6 +443,7 @@ impl ReaderPage {
                             format,
                             encoding.as_deref(),
                             book,
+                            before,
                         );
                     }
                     result
