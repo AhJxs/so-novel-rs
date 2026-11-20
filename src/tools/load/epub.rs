@@ -7,7 +7,7 @@ use std::sync::LazyLock;
 use regex::Regex;
 use zip::ZipArchive;
 
-use super::html::{attr, body_fragment, extract_tag_text, html_to_paragraphs, strip_html};
+use super::html::{attr, body_fragment, capture_text, extract_tag_text, html_to_paragraphs};
 use super::stem;
 use crate::tools::ToolError;
 use crate::tools::source_book::{SourceBook, SourceChapter};
@@ -16,6 +16,14 @@ static ITEM_RE: LazyLock<Regex> = LazyLock::new(|| compile_regex(r"(?is)<item\b[
 static ITEMREF_RE: LazyLock<Regex> = LazyLock::new(|| compile_regex(r"(?is)<itemref\b[^>]*>"));
 static ROOTFILE_RE: LazyLock<Regex> = LazyLock::new(|| compile_regex(r"(?is)<rootfile\b[^>]*>"));
 static META_RE: LazyLock<Regex> = LazyLock::new(|| compile_regex(r"(?is)<meta\b[^>]*>"));
+static DC_TITLE_RE: LazyLock<Regex> =
+    LazyLock::new(|| compile_regex(r"(?is)<dc:title\b[^>]*>(.*?)</dc:title>"));
+static DC_CREATOR_RE: LazyLock<Regex> =
+    LazyLock::new(|| compile_regex(r"(?is)<dc:creator\b[^>]*>(.*?)</dc:creator>"));
+static DC_DESCRIPTION_RE: LazyLock<Regex> =
+    LazyLock::new(|| compile_regex(r"(?is)<dc:description\b[^>]*>(.*?)</dc:description>"));
+static DC_LANGUAGE_RE: LazyLock<Regex> =
+    LazyLock::new(|| compile_regex(r"(?is)<dc:language\b[^>]*>(.*?)</dc:language>"));
 
 #[derive(Debug)]
 struct ManifestItem {
@@ -183,13 +191,24 @@ fn read_cover(archive: &mut ZipArchive<std::fs::File>, package: &Package) -> Opt
     (!bytes.is_empty()).then_some(bytes)
 }
 
+/// 已知 Dublin Core 字段只编译一次；未收录的字段仍即时编译，行为与旧实现一致。
+fn dc_regex(tag: &str) -> Option<&'static Regex> {
+    match tag {
+        "title" => Some(&*DC_TITLE_RE),
+        "creator" => Some(&*DC_CREATOR_RE),
+        "description" => Some(&*DC_DESCRIPTION_RE),
+        "language" => Some(&*DC_LANGUAGE_RE),
+        _ => None,
+    }
+}
+
 fn dc_text(opf: &str, tag: &str) -> Option<String> {
+    if let Some(regex) = dc_regex(tag) {
+        return capture_text(regex, opf);
+    }
     let pattern = format!(r"(?is)<dc:{tag}\b[^>]*>(.*?)</dc:{tag}>");
     let regex = Regex::new(&pattern).ok()?;
-    regex
-        .captures(opf)
-        .map(|cap| strip_html(&cap[1]))
-        .filter(|value| !value.is_empty())
+    capture_text(&regex, opf)
 }
 
 fn read_entry(archive: &mut ZipArchive<std::fs::File>, name: &str) -> Result<Vec<u8>, ToolError> {

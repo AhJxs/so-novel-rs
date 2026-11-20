@@ -30,6 +30,8 @@ static BLOCK_RE: LazyLock<Regex> = LazyLock::new(|| {
 static H1_RE: LazyLock<Regex> = LazyLock::new(|| compile_regex(r"(?is)<h1\b[^>]*>(.*?)</h1>"));
 static H2_RE: LazyLock<Regex> = LazyLock::new(|| compile_regex(r"(?is)<h2\b[^>]*>(.*?)</h2>"));
 static H3_RE: LazyLock<Regex> = LazyLock::new(|| compile_regex(r"(?is)<h3\b[^>]*>(.*?)</h3>"));
+static TITLE_RE: LazyLock<Regex> =
+    LazyLock::new(|| compile_regex(r"(?is)<title\b[^>]*>(.*?)</title>"));
 
 pub(super) fn load_file(
     path: &Path,
@@ -226,9 +228,28 @@ pub(crate) fn body_fragment(html: &str) -> &str {
         .map_or(html, |cap| cap.get(1).map_or("", |m| m.as_str()))
 }
 
+/// 已知 tag 只编译一次；未收录的 tag 仍按同名模板即时编译，行为与旧实现一致。
+fn tag_regex(tag: &str) -> Option<&'static Regex> {
+    match tag {
+        "h1" => Some(&*H1_RE),
+        "h2" => Some(&*H2_RE),
+        "h3" => Some(&*H3_RE),
+        "title" => Some(&*TITLE_RE),
+        _ => None,
+    }
+}
+
 pub(crate) fn extract_tag_text(html: &str, tag: &str) -> Option<String> {
+    if let Some(regex) = tag_regex(tag) {
+        return capture_text(regex, html);
+    }
     let pattern = format!(r"(?is)<{tag}\b[^>]*>(.*?)</{tag}>");
     let regex = Regex::new(&pattern).ok()?;
+    capture_text(&regex, html)
+}
+
+/// 取正则第一个捕获组的纯文本；空串当作没取到。
+pub(super) fn capture_text(regex: &Regex, html: &str) -> Option<String> {
     regex
         .captures(html)
         .map(|cap| strip_html(&cap[1]))
@@ -376,6 +397,41 @@ mod tests {
         assert_eq!(book.chapters[0].title, "第一章");
         assert_eq!(book.chapters[1].title, "第二章");
         assert_eq!(book.chapters[0].paragraphs, vec!["甲&乙"]);
+    }
+
+    #[test]
+    fn extract_tag_text_static_table_and_fallback_agree() {
+        let html = r#"<html><head><title>书名</title></head><body><h1 class="t">同名</h1><h2>第二章</h2><h3>第三节</h3><h4>第四节</h4></body></html>"#;
+
+        // 静态表路径。
+        assert_eq!(super::extract_tag_text(html, "h1").as_deref(), Some("同名"));
+        assert_eq!(
+            super::extract_tag_text(html, "h2").as_deref(),
+            Some("第二章")
+        );
+        assert_eq!(
+            super::extract_tag_text(html, "h3").as_deref(),
+            Some("第三节")
+        );
+        assert_eq!(
+            super::extract_tag_text(html, "title").as_deref(),
+            Some("书名")
+        );
+
+        // 未收录 tag 走即时编译回退，结果必须与静态表完全一致。
+        assert_eq!(
+            super::extract_tag_text(html, "h4").as_deref(),
+            Some("第四节")
+        );
+        assert_eq!(
+            super::extract_tag_text(r#"<h1 class="t">同名</h1>"#, "h1"),
+            super::extract_tag_text(r#"<x1 class="t">同名</x1>"#, "x1")
+        );
+
+        // 回退路径匹配不到时返回 None，不 panic。
+        assert_eq!(super::extract_tag_text(html, "footer"), None);
+        // 非法 tag 名导致正则编译失败时同样是 None。
+        assert_eq!(super::extract_tag_text(html, "a("), None);
     }
 
     #[test]
