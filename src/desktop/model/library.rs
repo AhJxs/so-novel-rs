@@ -8,6 +8,14 @@ use super::{AppModel, MetaEvent, Scan, ScanEvent};
 use crate::error::AppError;
 use crate::library::{AppliedMeta, Book, ReadingMode, ReadingProgress};
 
+/// 删除文件；文件本就不存在视为成功（missing 书记录也要能删掉）。
+fn remove_file_if_exists(path: &Path) -> std::io::Result<()> {
+    match std::fs::remove_file(path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        result => result,
+    }
+}
+
 impl AppModel {
     /// 扫描下载目录（异步）。重复触发由 `scan_in_flight` 拦截。
     pub fn refresh_library_async(&mut self) {
@@ -301,7 +309,7 @@ impl AppModel {
         let Some(book) = self.library.store.get(id).cloned() else {
             return;
         };
-        if let Err(error) = std::fs::remove_file(&book.path) {
+        if let Err(error) = remove_file_if_exists(Path::new(&book.path)) {
             self.push_error(t!("Library.delete.failed", err = error.to_string()).to_string());
             return;
         }
@@ -359,5 +367,18 @@ impl AppModel {
         self.library.store.record_progress(id, 0, 0.0, mode, false);
         self.library.bump();
         self.persist_library();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn remove_file_treats_missing_as_success() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("gone.txt");
+        assert!(super::remove_file_if_exists(&path).is_ok());
+        std::fs::write(&path, b"x").unwrap();
+        assert!(super::remove_file_if_exists(&path).is_ok());
+        assert!(!path.exists());
     }
 }
