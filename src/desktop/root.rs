@@ -155,8 +155,11 @@ impl RootView {
         cx.notify();
     }
 
-    /// 退出前的兜底落盘：有阅读器就走它自己的关闭契约（采位置、存字号、落库），
-    /// 没有也至少把书库与配置写一次。
+    /// 退出前的唯一落盘点（`on_app_quit` 调用；Cmd+Q 与原生关窗都会走到这里）。
+    ///
+    /// 有阅读器就走它自己的关闭契约（采位置、存字号、落库），没有也至少把设置与书架写一次；
+    /// 任务列表最后补一次（同步提交，返回即已 fsync），随后显式关闭状态库写 WAL 收尾标记。
+    /// `StateStore::close` 幂等，实体析构时 `Tree::drop` 再碰到也只会是空操作。
     fn flush_before_quit(&mut self, cx: &mut Context<Self>) {
         if let Some(reader) = self.reader.take() {
             reader.update(cx, ReaderPage::close_and_flush);
@@ -166,8 +169,10 @@ impl RootView {
                 model.flush_library();
             });
         }
-        // 阅读器分支只落书架，任务列表在这里补一次（同步提交，返回即已 fsync）。
-        self.model.update(cx, |model, _| model.persist_tasks());
+        self.model.update(cx, |model, _| {
+            model.persist_tasks();
+            model.state.close();
+        });
     }
 
     fn navigate(&mut self, page: NavPage, cx: &mut Context<Self>) {
@@ -362,9 +367,10 @@ impl RootView {
             this.navigate(prev, cx);
         }))
         .on_action(cx.listener(|this, _: &ToggleSidebar, _, cx| this.toggle_sidebar(cx)))
+        // 退出落盘只有一条路径：`on_app_quit` → `flush_before_quit`（见 `new`）。
+        // 这里只负责按关闭契约收起阅读器，别在这里再刷一次书架。
         .on_action(cx.listener(|this, _: &super::Quit, window, cx| {
             this.close_reader(window, cx);
-            this.model.update(cx, |model, _| model.flush_library());
             cx.quit();
         }))
     }

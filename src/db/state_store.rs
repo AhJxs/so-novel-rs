@@ -188,6 +188,9 @@ impl StateStore {
     }
 
     /// 优雅关闭（写 WAL 收尾标记）。退出 / 测试里显式调用；进程直接结束也不丢已提交数据。
+    ///
+    /// **幂等**：`SurrealKV` 的 `Tree::close` 内部有 `is_closed` 标记（第二次调用直接返回
+    /// `Ok`），`Tree::drop` 也会先查该标记。因此显式关闭后实体析构不会重复关库。
     pub fn close(&self) {
         let Some(tree) = self.tree.as_ref() else {
             return;
@@ -311,6 +314,25 @@ mod tests {
         let (_store, snapshot) = open(dir.path());
         assert_eq!(snapshot.library.as_deref(), Some(&b"{\"books\":[]}"[..]));
         assert_eq!(snapshot.schema_version, Some(STATE_SCHEMA_VERSION));
+    }
+
+    #[test]
+    fn close_is_idempotent() {
+        let dir = tempfile::tempdir().unwrap();
+        let (store, _) = open(dir.path());
+        store.put(KEY_LIBRARY, b"{\"books\":[]}").unwrap();
+        // 退出路径会显式 close，随后实体析构时 `Tree::drop` 再检查一次：
+        // 第二次 close 必须是空操作，不能报错或把已落盘数据弄丢。
+        store.close();
+        store.close();
+        drop(store);
+
+        let (_store, snapshot) = open(dir.path());
+        assert_eq!(
+            snapshot.library.as_deref(),
+            Some(&b"{\"books\":[]}"[..]),
+            "重复 close 不应破坏已提交的数据"
+        );
     }
 
     #[test]
