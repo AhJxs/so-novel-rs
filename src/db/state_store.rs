@@ -324,6 +324,10 @@ mod tests {
         // 退出路径会显式 close，随后实体析构时 `Tree::drop` 再检查一次：
         // 第二次 close 必须是空操作，不能报错或把已落盘数据弄丢。
         store.close();
+        assert!(
+            store.put(KEY_LIBRARY, b"x").is_err(),
+            "关闭后的写入必须干净失败，而不是 panic 或静默成功"
+        );
         store.close();
         drop(store);
 

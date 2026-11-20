@@ -79,8 +79,18 @@ impl RootView {
         // 从 config 恢复上次折叠状态, 否则每次启动 sidebar 都会弹开。
         let sidebar_collapsed = model.read(cx).config.global.sidebar_collapsed;
 
-        // 原生关窗（标题栏 X）不经过任何 Action：挂到退出钩子上补一次落盘，
-        // 否则字号改动与最近 5 秒进度都会随窗口一起丢掉（`Quit` action 只覆盖 Cmd+Q）。
+        // 关窗落盘有两条路由，缺一不可：
+        // - 标题栏 X / Alt+F4 是原生 `WindowControlArea`，Windows 直接发 WM_CLOSE，
+        //   窗口与 `RootView` 会在 `on_app_quit` 观察者运行前销毁（弱引用升级失败），
+        //   所以必须在窗口级 `on_window_should_close` 里同步落盘，返回 true 放行关闭。
+        // - Cmd+Q / 菜单退出 / 应用级退出走 `on_app_quit`；此时窗口可能已不存在，
+        //   只能靠它兜底（macOS 的 terminate 也会先关窗口）。
+        // `flush_before_quit` 幂等（`reader.take()` + `StateStore::close`），先后触发也安全。
+        let weak_root = cx.entity().downgrade();
+        window.on_window_should_close(cx, move |_window, cx| {
+            let _ = weak_root.update(cx, Self::flush_before_quit);
+            true
+        });
         cx.on_app_quit(|root, cx| {
             root.flush_before_quit(cx);
             async {}
@@ -154,12 +164,15 @@ impl RootView {
         }
         cx.notify();
         // 焦点原本在 `ReaderPage` 自己的 focus handle 上，entity 随本函数被丢掉后
-        // 键盘不再有归属。显式交还 `RootView` 的 handle —— 主窗口两条渲染分支的
-        // 根 div 都 `track_focus` 它、并挂 `KEY_CONTEXT`，所以 Cmd+3 等无需先点窗口。
+        // 键盘不再有归属。显式交还 `RootView` 的 handle —— 阅读器分支直接 track 它，
+        // 主视图分支经 `render_content` track 它，`KEY_CONTEXT` 都挂在两者的祖先根上，
+        // 所以恢复焦点即可让 Cmd+3 等无需先点窗口。
         window.focus(&self.focus, cx);
     }
 
-    /// 退出前的唯一落盘点（`on_app_quit` 调用；Cmd+Q 与原生关窗都会走到这里）。
+    /// 退出前的统一落盘点：`on_window_should_close`（原生关窗）与 `on_app_quit`
+    /// （Cmd+Q / 应用级退出）都会调用；两条路由先后触发也不会丢数据（`reader.take()`
+    /// 与 `StateStore::close` 幂等，重复调用最多少写一次已关闭的库）。
     ///
     /// 有阅读器就走它自己的关闭契约（采位置、存字号、落库），没有也至少把设置与书架写一次；
     /// 任务列表最后补一次（同步提交，返回即已 fsync），随后显式关闭状态库写 WAL 收尾标记。

@@ -384,7 +384,8 @@ impl ReaderPage {
             self.record_progress(cx);
         }
         self.progress_dirty = false;
-        self.persist_settings(cx);
+        // 设置由紧接着的 `flush_library` 统一写入（它无条件 `persist_settings`），
+        // 这里再写一次只会让同一次关闭刷两遍 config.toml。
         self.model.update(cx, |model, _| model.flush_library());
     }
 
