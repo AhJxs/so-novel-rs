@@ -32,6 +32,13 @@ impl AppModel {
         }
         self.library.scanned_dir = Some(dir.clone());
         self.library.last_error = None;
+        // 缓存根已经存在（之前导入过书）时补设一次隐藏属性：仅靠每次创建目录时调用不够，
+        // 老版本残留的 `.sonovel` 可能在本次运行里再也不会被重新创建。
+        if let Some(root) = crate::library::cache_root(&self.config.download.download_path)
+            && root.exists()
+        {
+            crate::library::hide_dir(&root);
+        }
         let (tx, rx) = smol::channel::unbounded::<ScanEvent>();
         self.library.scan_rx = Some(rx);
         self.library.scan_in_flight = true;
@@ -136,10 +143,11 @@ impl AppModel {
     /// 封面缓存目录（`<下载目录>/.sonovel/covers`）；下载目录为空时 `None`。
     ///
     /// 现算而不是存字段：设置页改下载目录后，下一次读写自然落到新目录。
+    /// 这里是纯路径计算：不建目录、也不设隐藏属性（渲染路径每帧都会调用，
+    /// 副作用会让后面真正建目录的时机收不到隐藏）。
     #[must_use]
     pub fn covers_dir(&self) -> Option<PathBuf> {
         let root = crate::library::cache_root(&self.config.download.download_path)?;
-        crate::library::hide_dir(&root);
         Some(root.join(crate::library::COVERS_DIR_NAME))
     }
 
