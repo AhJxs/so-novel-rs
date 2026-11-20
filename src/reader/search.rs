@@ -14,9 +14,13 @@ pub const HITS_PER_CHAPTER: usize = 20;
 pub const HITS_TOTAL: usize = 1000;
 /// 命中前后各保留的字符数。
 const SNIPPET_RADIUS: usize = 24;
+/// 可中断扫描每处理多少段检查一次取消信号。
+const CANCEL_CHECK_INTERVAL: usize = 64;
+/// 永不置位的取消信号：给不需要中断的 [`search_chapter`] 共用。
+static NEVER_CANCELLED: AtomicBool = AtomicBool::new(false);
 
 /// 一章内的命中分组。
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SearchGroup {
     pub chapter: usize,
     pub title: String,
@@ -24,7 +28,7 @@ pub struct SearchGroup {
 }
 
 /// 单条命中。
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SearchHit {
     pub paragraph: usize,
     /// 段落内**原始文本**的字节偏移（不含排版层加的首行缩进）。
@@ -101,12 +105,32 @@ pub fn search_chapter(
     needle: &str,
     budget: usize,
 ) -> Option<SearchGroup> {
+    search_chapter_interruptible(chapter, title, paragraphs, needle, budget, &NEVER_CANCELLED)
+}
+
+/// 同 [`search_chapter`]，但每 [`CANCEL_CHECK_INTERVAL`] 段（以及开头）检查一次
+/// `cancel`；置位时立刻返回 `None`，已经攒下的命中一并丢弃。
+///
+/// 检查按段做而不是按字节：一段通常只有几十到几百字，取消最多推迟 64 段（大章里
+/// 也是毫秒级），换来的是热点循环里没有额外的原子读。
+#[must_use]
+pub fn search_chapter_interruptible(
+    chapter: usize,
+    title: &str,
+    paragraphs: &[String],
+    needle: &str,
+    budget: usize,
+    cancel: &AtomicBool,
+) -> Option<SearchGroup> {
     let limit = budget.min(HITS_PER_CHAPTER);
-    if limit == 0 {
+    if limit == 0 || cancel.load(Ordering::Relaxed) {
         return None;
     }
     let mut hits = Vec::new();
     for (paragraph_index, paragraph) in paragraphs.iter().enumerate() {
+        if paragraph_index % CANCEL_CHECK_INTERVAL == 0 && cancel.load(Ordering::Relaxed) {
+            return None;
+        }
         for (byte_offset, byte_len) in find_hits(paragraph, needle) {
             let (snippet, snippet_match) = snippet(paragraph, byte_offset, byte_len);
             hits.push(SearchHit {
@@ -214,6 +238,23 @@ mod tests {
         assert_eq!(group.hits[0].byte_len, 5);
         let (snippet, range) = snippet("你好 Hello 世界", 7, 5);
         assert_eq!(&snippet[range], "Hello");
+    }
+
+    #[test]
+    fn interruptible_scan_matches_plain_scan_and_honours_preset_cancel() {
+        let paragraphs = vec!["Hello world hello".to_string(), "无关".to_string()];
+        let never = AtomicBool::new(false);
+        assert_eq!(
+            search_chapter_interruptible(3, "章", &paragraphs, "hello", 7, &never),
+            search_chapter(3, "章", &paragraphs, "hello", 7),
+            "未取消时结果必须与不可中断版本一致"
+        );
+
+        let cancelled = AtomicBool::new(true);
+        assert!(
+            search_chapter_interruptible(3, "章", &paragraphs, "hello", 7, &cancelled).is_none(),
+            "取消信号预置后即使有命中也不应返回结果"
+        );
     }
 
     #[test]

@@ -2,7 +2,6 @@
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::Input;
@@ -14,15 +13,28 @@ use gpui_kit::{
     ParentElement, ScrollHandle, StatefulInteractiveElement as _, Styled, StyledText, div, px,
 };
 use rust_i18n::t;
+use smol::channel;
 
 use super::reader_page::ReaderPage;
 use super::theme::{ReaderColors, reader_colors};
 use crate::config::ReaderConfig;
-use crate::reader::search::search_chapter;
+use crate::reader::content::ReaderBook;
+use crate::reader::search::search_chapter_interruptible;
 use crate::reader::{HITS_TOTAL, ReaderLayout, SearchGroup, SearchHit};
 
 /// 搜索抽屉宽度（px）。正文列宽要减掉它，与 `toc::TOC_WIDTH` 同理。
 pub(super) const SEARCH_WIDTH: f32 = 320.0;
+
+/// 后台扫描每累计多少章回送一批；整批只触发一次重绘。
+const BATCH_CHAPTERS: usize = 32;
+
+/// 后台扫描回送的事件。
+enum SearchEvent {
+    /// 一批命中；可能为空（这 [`BATCH_CHAPTERS`] 章没有匹配），但仍代表进度。
+    Batch(Vec<SearchGroup>),
+    /// 扫描结束（扫完或命中额度耗尽）。
+    Done,
+}
 
 /// 段落内的一段命中：字节区间 + 是否为当前定位的命中。
 type HitRange = (std::ops::Range<usize>, bool);
@@ -87,7 +99,7 @@ pub(super) struct SearchPanel {
     total: usize,
     /// 累计命中数。
     hits: usize,
-    /// 每次新搜索自增；过期任务据此退出。
+    /// 每次新搜索 / 取消都自增；过期任务的回包据此丢弃。
     generation: u64,
     /// 当前定位的命中 `(章, 段, 字节偏移)`。
     active: Option<(usize, usize, usize)>,
@@ -112,58 +124,105 @@ impl SearchPanel {
     }
 }
 
+/// 后台扫描整本书：每 [`BATCH_CHAPTERS`] 章回送一批，扫完回送 [`SearchEvent::Done`]。
+///
+/// 只碰 `Arc<ReaderBook>` 快照、取消标志和 channel，不碰任何 `Entity`。取消置位
+/// 或接收端消失（抽屉已关）时立即返回；命中额度跨章累计，与旧的逐章 UI 扫描一致。
+fn scan_book(
+    book: &ReaderBook,
+    needle: &str,
+    cancel: &AtomicBool,
+    tx: &channel::Sender<SearchEvent>,
+) {
+    let mut total_hits = 0_usize;
+    let mut chapters_done = 0_usize;
+    let mut batch = Vec::new();
+    for (index, chapter) in book.chapters.iter().enumerate() {
+        if cancel.load(Ordering::Relaxed) {
+            return;
+        }
+        if total_hits >= HITS_TOTAL {
+            break;
+        }
+        if let Some(group) = search_chapter_interruptible(
+            index,
+            &chapter.title,
+            &chapter.paragraphs,
+            needle,
+            HITS_TOTAL - total_hits,
+            cancel,
+        ) {
+            total_hits += group.hits.len();
+            batch.push(group);
+        }
+        chapters_done += 1;
+        if chapters_done.is_multiple_of(BATCH_CHAPTERS)
+            && tx
+                .try_send(SearchEvent::Batch(std::mem::take(&mut batch)))
+                .is_err()
+        {
+            return;
+        }
+    }
+    if !batch.is_empty() && tx.try_send(SearchEvent::Batch(batch)).is_err() {
+        return;
+    }
+    let _ = tx.try_send(SearchEvent::Done);
+}
+
 impl ReaderPage {
-    /// 开始一次新搜索：清旧结果、起后台逐章扫描。
+    /// 开始一次新搜索：快照全书、起后台扫描，前台只负责收批。
     pub(super) fn start_search(&mut self, cx: &mut Context<Self>) {
+        // 顺带停掉旧任务并推进 generation：旧任务还在路上的回包一律作废。
         self.cancel_search();
         let needle = self.search_input.read(cx).value().trim().to_string();
         self.search.query.clone_from(&needle);
-        self.search.groups.clear();
-        self.search.scanned = 0;
-        self.search.hits = 0;
-        self.search.active = None;
-        self.search.total = self
-            .content
-            .as_ref()
-            .map_or(0, |content| content.chapters.len());
+        let Some(content) = self.content.as_ref() else {
+            self.search.total = 0;
+            self.search.scanning = false;
+            cx.notify();
+            return;
+        };
+        self.search.total = content.chapters.len();
         if needle.is_empty() || self.search.total == 0 {
             self.search.scanning = false;
             cx.notify();
             return;
         }
 
-        self.search.generation = self.search.generation.wrapping_add(1);
+        // 整本书只快照一次：后台拿到 `Arc` 后逐章扫描，UI 线程一次也不进扫描循环。
+        let book = Arc::new(content.clone());
         let generation = self.search.generation;
-        self.search.scanning = true;
         let cancel = Arc::new(AtomicBool::new(false));
         self.search_cancel = Some(cancel.clone());
+        self.search.scanning = true;
+
+        let (tx, rx) = channel::unbounded::<SearchEvent>();
+        cx.background_executor()
+            .spawn(async move {
+                scan_book(&book, &needle, &cancel, &tx);
+            })
+            .detach();
+        // 前台接收循环：每批回写一次结果并重绘；generation 变了（取消 / 新搜索）就退出。
         cx.spawn(async move |this, cx| {
-            // 每批最多扫 6 ms，扫完让出一次；结果列表每 32 章才重绘 —— 每章都重绘会把
-            // 上千条命中行整个重建一遍，扫描反而更慢。整本书 3000 章应在几秒内扫完。
-            let mut since_notify = 0_usize;
-            loop {
-                let started = std::time::Instant::now();
-                let mut more = true;
-                let mut scanned = 0_usize;
-                while more && started.elapsed() < Duration::from_millis(6) {
-                    more = this
-                        .update(cx, |page, cx| {
-                            page.search_step(generation, &needle, &cancel, cx)
-                        })
-                        .unwrap_or(false);
-                    scanned += 1;
-                }
-                since_notify += scanned;
-                if !more || since_notify >= 32 {
-                    since_notify = 0;
-                    let _ = this.update(cx, |_page, cx| cx.notify());
-                }
-                if !more {
+            while let Ok(event) = rx.recv().await {
+                let done = matches!(event, SearchEvent::Done);
+                let current = this
+                    .update(cx, |page, cx| {
+                        if page.search.generation != generation {
+                            return false;
+                        }
+                        match event {
+                            SearchEvent::Batch(groups) => page.apply_search_batch(groups),
+                            SearchEvent::Done => page.finish_search(),
+                        }
+                        cx.notify();
+                        true
+                    })
+                    .unwrap_or(false);
+                if done || !current {
                     break;
                 }
-                cx.background_executor()
-                    .timer(Duration::from_millis(4))
-                    .await;
             }
         })
         .detach();
@@ -175,6 +234,9 @@ impl ReaderPage {
         if let Some(cancel) = self.search_cancel.take() {
             cancel.store(true, Ordering::Relaxed);
         }
+        // 后台批次可能已经在 channel 里排队：只翻转标志不够，接收循环还要靠
+        // generation 认出这些回包属于被取消的旧搜索，而不是下一次搜索。
+        self.search.generation = self.search.generation.wrapping_add(1);
         self.search.scanning = false;
         // 关掉抽屉 / 重载后不能把高亮留在正文上：没有可见的结果列表时，满屏黄块既无法
         // 解释也无法清除。查询词保留，重新按回车可以再扫一遍（关闭抽屉时由 `set_search_open` 清空输入）。
@@ -184,46 +246,23 @@ impl ReaderPage {
         self.search.scanned = 0;
     }
 
-    /// 扫一章；返回是否还有下一章要扫。
-    fn search_step(
-        &mut self,
-        generation: u64,
-        needle: &str,
-        cancel: &AtomicBool,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        if generation != self.search.generation || cancel.load(Ordering::Relaxed) {
-            return false;
-        }
-        let index = self.search.scanned;
-        let Some(chapter) = self
-            .content
-            .as_ref()
-            .and_then(|content| content.chapters.get(index))
-        else {
-            self.search.scanning = false;
-            self.search_cancel = None;
-            cx.notify();
-            return false;
-        };
-        let budget = HITS_TOTAL.saturating_sub(self.search.hits);
-        let group = if budget == 0 {
-            None
-        } else {
-            search_chapter(index, &chapter.title, &chapter.paragraphs, needle, budget)
-        };
-        if let Some(group) = group {
+    /// 收下一批后台命中；一批覆盖 [`BATCH_CHAPTERS`] 章，进度按批推进（末批按总章数截断）。
+    fn apply_search_batch(&mut self, groups: Vec<SearchGroup>) {
+        self.search.scanned = self
+            .search
+            .scanned
+            .saturating_add(BATCH_CHAPTERS)
+            .min(self.search.total);
+        for group in groups {
             self.search.hits += group.hits.len();
             self.search.groups.push(group);
         }
-        self.search.scanned += 1;
-        self.search.scanning =
-            self.search.scanned < self.search.total && self.search.hits < HITS_TOTAL;
-        let more = self.search.scanning;
-        if !more {
-            self.search_cancel = None;
-        }
-        more
+    }
+
+    /// 后台扫描结束：停掉进度提示，取消句柄可以丢掉了。
+    fn finish_search(&mut self) {
+        self.search.scanning = false;
+        self.search_cancel = None;
     }
 
     /// 跳到某条命中：按命中在章内的字符偏移定位，并把它设为「当前命中」。
