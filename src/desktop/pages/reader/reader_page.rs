@@ -14,6 +14,7 @@ use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::select::{SearchableVec, SelectDelegate, SelectEvent, SelectState};
+use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::{ActiveTheme as _, Disableable as _, IconName, Selectable as _};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
@@ -2214,9 +2215,18 @@ impl Render for ReaderPage {
             LoadState::Loading => div()
                 .flex_1()
                 .flex()
+                .flex_col()
                 .items_center()
                 .justify_center()
+                .gap_2()
+                .child(Spinner::new())
                 .child(t!("Reader.loading").to_string())
+                .child(
+                    div()
+                        .text_sm()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(t!("Reader.loading_hint").to_string()),
+                )
                 .into_any_element(),
             LoadState::Error(error) => self.render_error(error, cx).into_any_element(),
             LoadState::Ready => self.render_body(window, cx),

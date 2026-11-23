@@ -1460,6 +1460,10 @@ Reader:
     en: "Loading…"
     zh-CN: 正在加载…
     zh-TW: 正在載入…
+  loading_hint:
+    en: "First open parses the whole book — this may take a moment."
+    zh-CN: 首次打开需要解析整本书，请稍候。
+    zh-TW: 首次開啟需要解析整本書，請稍候。
   error:
     io:
       en: "Failed to read the file"
