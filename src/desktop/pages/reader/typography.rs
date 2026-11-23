@@ -142,30 +142,28 @@ impl ReaderPage {
             .flex_1()
             .min_h_0()
             .overflow_y_scroll()
-            .p_4()
+            .px_5()
+            .py_4()
             .flex()
             .flex_col()
             .gap_4()
-            .child(preview)
+            .child(section("Reader.typography.preview_title", preview, cx))
             .child(Self::render_theme_section(reader.theme, cx))
-            .child(self.render_font_section(&reader, cx));
-
-        let mut fields = div().flex().flex_col().gap_3();
-        for field in Field::ALL {
-            fields = fields.child(Self::render_field_row(field, &reader, cx));
-        }
-        body = body
-            .child(fields)
-            .child(Self::render_indent_row(reader.indent, cx));
+            .child(divider(cx))
+            .child(self.render_font_section(&reader, cx))
+            .child(divider(cx))
+            .child(Self::render_layout_section(&reader, cx));
         // 编码只对 TXT 有意义；放在这里，用户随时能改回自动或换一个标签。
         if matches!(self.book.format, BookFormat::Txt) {
-            body = body.child(self.render_encoding_section(cx));
+            body = body
+                .child(divider(cx))
+                .child(self.render_encoding_section(cx));
         }
 
         let card = div()
             .id("reader-settings-card")
-            .w(px(520.0))
-            .h(px(600.0))
+            .w(px(560.0))
+            .h(px(640.0))
             .max_h(relative(0.9))
             .rounded_lg()
             .border_1()
@@ -176,11 +174,16 @@ impl ReaderPage {
             .overflow_hidden()
             .flex()
             .flex_col()
+            .occlude()
             // 卡片内部的点击不要冒泡到遮罩层，否则改设置会顺手关掉弹窗。
             .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
                 cx.stop_propagation();
             })
             .on_click(|_event: &ClickEvent, _window, cx| {
+                cx.stop_propagation();
+            })
+            // 滚轮只作用于弹窗：遮罩下的正文滚轮监听不能同时被触发。
+            .on_scroll(|_event, _window, cx| {
                 cx.stop_propagation();
             })
             .child(
@@ -190,14 +193,14 @@ impl ReaderPage {
                     .items_center()
                     .justify_between()
                     .gap_2()
-                    .px_4()
-                    .h(px(48.0))
+                    .px_5()
+                    .h(px(56.0))
                     .flex_none()
                     .border_b_1()
                     .border_color(cx.theme().border)
                     .child(
                         div()
-                            .text_sm()
+                            .text_base()
                             .font_weight(FontWeight::SEMIBOLD)
                             .child(t!("Reader.settings.title").to_string()),
                     )
@@ -222,6 +225,11 @@ impl ReaderPage {
             .items_center()
             .justify_center()
             .bg(cx.theme().overlay)
+            // 遮罩挡住下面阅读器的 hitbox，滚轮 / 悬停不再落到正文上。
+            .occlude()
+            .on_scroll(|_event, _window, cx| {
+                cx.stop_propagation();
+            })
             // 只由右上角 ✕ 或 Esc 关闭：遮罩不接管点击，免得卡片里点一下就把弹窗关掉。
             .child(card)
             .into_any_element()
@@ -275,7 +283,7 @@ impl ReaderPage {
                     ),
             );
         }
-        section("Reader.typography.title", row, cx)
+        section("Reader.typography.theme_title", row, cx)
     }
 
     /// 字体：可搜索的系统字体下拉（首项「系统默认」）+ 五档字重按钮。
@@ -284,10 +292,10 @@ impl ReaderPage {
     /// 留空占位只是防布局塌一行。
     fn render_font_section(&self, reader: &ReaderConfig, cx: &Context<Self>) -> Div {
         let select = self.font_select.as_ref().map_or_else(
-            || div().flex_1().into_any_element(),
+            || div().w(px(220.0)).into_any_element(),
             |state| {
                 div()
-                    .flex_1()
+                    .w(px(220.0))
                     .min_w_0()
                     .child(Select::new(state).w_full())
                     .into_any_element()
@@ -297,21 +305,12 @@ impl ReaderPage {
             .flex()
             .flex_row()
             .items_center()
-            .gap_2()
-            .child(
-                div()
-                    .text_sm()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(t!("Reader.typography.font_family").to_string()),
-            )
+            .justify_between()
+            .gap_3()
+            .child(label_text("Reader.typography.font_family", cx))
             .child(select);
 
-        let mut weights = div().flex().flex_row().items_center().gap_2().child(
-            div()
-                .text_sm()
-                .text_color(cx.theme().muted_foreground)
-                .child(t!("Reader.typography.font_weight").to_string()),
-        );
+        let mut weight_buttons = div().flex().flex_row().items_center().gap_2();
         for (value, key) in WEIGHTS {
             let mut button = Button::new(ElementId::Name(format!("reader-weight-{value}").into()))
                 .compact()
@@ -321,19 +320,27 @@ impl ReaderPage {
             } else {
                 button.ghost()
             };
-            weights = weights.child(button.on_click(cx.listener(
+            weight_buttons = weight_buttons.child(button.on_click(cx.listener(
                 move |this, _event: &ClickEvent, _window, cx| {
                     this.update_reader_config(move |reader| reader.font_weight = value, cx);
                 },
             )));
         }
+        let weights = div()
+            .flex()
+            .flex_row()
+            .items_center()
+            .justify_between()
+            .gap_3()
+            .child(label_text("Reader.typography.font_weight", cx))
+            .child(weight_buttons);
 
         section(
             "Reader.typography.font",
             div()
                 .flex()
                 .flex_col()
-                .gap_2()
+                .gap_3()
                 .child(font_row)
                 .child(weights),
             cx,
@@ -382,6 +389,8 @@ impl ReaderPage {
             )));
         }
 
+        let effective_label =
+            effective.unwrap_or_else(|| t!("Reader.typography.encoding_auto").to_string());
         div()
             .flex()
             .flex_col()
@@ -391,27 +400,51 @@ impl ReaderPage {
                     .flex()
                     .flex_row()
                     .items_center()
+                    .justify_between()
                     .gap_2()
+                    .child(section_title("Reader.typography.encoding", cx))
                     .child(
                         div()
-                            .flex_1()
-                            .text_sm()
+                            .text_xs()
                             .text_color(cx.theme().muted_foreground)
-                            .child(t!("Reader.typography.encoding").to_string()),
-                    )
-                    .child(
-                        div()
-                            .text_sm()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(effective.unwrap_or_else(|| {
-                                t!("Reader.typography.encoding_auto").to_string()
-                            })),
+                            .child(
+                                t!(
+                                    "Reader.typography.encoding_current",
+                                    encoding = &effective_label
+                                )
+                                .to_string(),
+                            ),
                     ),
             )
             .child(buttons)
     }
 
-    fn render_field_row(field: Field, reader: &ReaderConfig, cx: &Context<Self>) -> Div {
+    /// 「排版」组：字号 / 行高 / 段距 / 页宽 / 首行缩进收进一个带分隔线的分组框。
+    fn render_layout_section(reader: &ReaderConfig, cx: &Context<Self>) -> Div {
+        let mut list = div()
+            .rounded_md()
+            .border_1()
+            .border_color(cx.theme().border)
+            .overflow_hidden();
+        let last_index = Field::ALL.len().saturating_sub(1);
+        for (index, field) in Field::ALL.into_iter().enumerate() {
+            list = list.child(Self::render_field_row(
+                field,
+                reader,
+                cx,
+                index < last_index,
+            ));
+        }
+        let list = list.child(Self::render_indent_row(reader.indent, cx, false));
+        section("Reader.typography.title", list, cx)
+    }
+
+    fn render_field_row(
+        field: Field,
+        reader: &ReaderConfig,
+        cx: &Context<Self>,
+        bordered: bool,
+    ) -> Div {
         let value = field.value(reader);
         let minus = Button::new(ElementId::Name(
             format!("reader-{}-minus", field.slug()).into(),
@@ -443,40 +476,31 @@ impl ReaderPage {
                 cx,
             );
         }));
-        div()
-            .flex()
-            .flex_row()
-            .items_center()
-            .gap_2()
+        list_row(bordered, cx)
             .child(
                 div()
                     .flex_1()
                     .text_sm()
-                    .text_color(cx.theme().muted_foreground)
                     .child(t!(field.label_key()).to_string()),
             )
             .child(minus)
             .child(
                 div()
-                    .w(px(48.0))
+                    .w(px(44.0))
                     .text_center()
                     .text_sm()
+                    .text_color(cx.theme().muted_foreground)
                     .child(field.format(value)),
             )
             .child(plus)
     }
 
-    fn render_indent_row(indent: bool, cx: &Context<Self>) -> Div {
-        div()
-            .flex()
-            .flex_row()
-            .items_center()
-            .gap_2()
+    fn render_indent_row(indent: bool, cx: &Context<Self>, bordered: bool) -> Div {
+        list_row(bordered, cx)
             .child(
                 div()
                     .flex_1()
                     .text_sm()
-                    .text_color(cx.theme().muted_foreground)
                     .child(t!("Reader.typography.indent").to_string()),
             )
             .child(
@@ -490,17 +514,50 @@ impl ReaderPage {
     }
 }
 
+/// 组标题：小号、半粗、弱化的分组名。
+fn section_title(title_key: &str, cx: &App) -> Div {
+    div()
+        .text_xs()
+        .font_weight(FontWeight::SEMIBOLD)
+        .text_color(cx.theme().muted_foreground)
+        .child(t!(title_key).to_string())
+}
+
 /// 带小标题的一组设置。
 fn section(title_key: &str, content: impl IntoElement, cx: &App) -> Div {
     div()
         .flex()
         .flex_col()
         .gap_2()
-        .child(
-            div()
-                .text_xs()
-                .text_color(cx.theme().muted_foreground)
-                .child(t!(title_key).to_string()),
-        )
+        .child(section_title(title_key, cx))
         .child(content)
+}
+
+/// 各组之间的通栏细分隔线。
+fn divider(cx: &App) -> Div {
+    div().h(px(1.0)).w_full().flex_none().bg(cx.theme().border)
+}
+
+/// 表单行左侧的固定宽度标签，保证同一组里控件起点对齐。
+fn label_text(label_key: &str, cx: &App) -> Div {
+    div()
+        .w(px(56.0))
+        .flex_none()
+        .text_sm()
+        .text_color(cx.theme().muted_foreground)
+        .child(t!(label_key).to_string())
+}
+
+/// 分组框里的一行：40 高、左右内边距、除最后一行外底部一条分隔线。
+fn list_row(bordered: bool, cx: &App) -> Div {
+    div()
+        .flex()
+        .flex_row()
+        .items_center()
+        .gap_2()
+        .px_3()
+        .h(px(40.0))
+        .when(bordered, |this| {
+            this.border_b_1().border_color(cx.theme().border)
+        })
 }

@@ -1591,6 +1591,14 @@ Reader:
       en: "The night was quiet, and the words settled slowly on the page."
       zh-CN: 夜色很静，字句在纸上慢慢铺开。
       zh-TW: 夜色很靜，字句在紙上慢慢鋪開。
+    preview_title:
+      en: "Preview"
+      zh-CN: 预览
+      zh-TW: 預覽
+    theme_title:
+      en: "Theme"
+      zh-CN: 主题
+      zh-TW: 主題
     font_size:
       en: "Font size"
       zh-CN: 字号
@@ -1619,6 +1627,11 @@ Reader:
       en: Auto
       zh-CN: 自动
       zh-TW: 自動
+    # %{encoding} 是当前实际生效的编码标签。
+    encoding_current:
+      en: "Now: %{encoding}"
+      zh-CN: "当前：%{encoding}"
+      zh-TW: "目前：%{encoding}"
     theme:
       app:
         en: "Match app"
