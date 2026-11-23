@@ -5,7 +5,7 @@
 //! `push_notification` —— 只把 [`UIEvent`] 推入 `model.pending_ui_events`, 由
 //! `desktop::RootView::render` 排空并翻译成 `Notification` 真正 push。
 //!
-//! GPUI 侧的自适应兜底 tick（有任务时 100ms，空闲最低 500ms）在
+//! GPUI 侧的自适应兜底 tick（有任务时 100ms，空闲上限 500ms）在
 //! `desktop::drain_loop::spawn_drain_loop`。
 
 use rust_i18n::t;
@@ -16,7 +16,7 @@ use super::{AppModel, UpdateOutcome};
 /// 之上, 其 channel 在该 executor 原生工作, **不**触碰 tokio runtime。
 ///
 /// `bounded(1)`: `drain` 是按需排空所有 channel 数据的, 丢一两个唤醒信号只让响应
-/// 延后到下一次兜底 tick（有任务 100ms / 空闲最低 500ms）, **不会丢数据**。
+/// 延后到下一次兜底 tick（有任务 100ms / 空闲上限 500ms）, **不会丢数据**。
 #[derive(Clone)]
 pub struct WakeupHandle {
     tx: smol::channel::Sender<()>,
