@@ -329,32 +329,36 @@ impl RootView {
                 let _ = root_for_close.update(cx, Self::flush_before_quit);
                 window.remove_window();
             })
-            .child(
-                // 必须用 `occlude()` 把按钮从祖先 drag hitbox 里「挖」出来:
-                // gpui-kit 组件库 `TitleBar` 把整条 children 行标成 `window_control_area(Drag)`,
-                // Windows 上 NCHITTEST 对按钮区返回 HTCAPTION, OS 按下即接管为拖窗,
-                // 按钮收不到 mouse_up → click 失效 (悬浮有反应但点不动)。occlude 让该点
-                // NCHITTEST 落回 HTCLIENT, 再在 mousedown 上 `stop_propagation` 免得
-                // TitleBar 自己的拖窗监听抢走手势。
-                div()
-                    .id("sidebar-toggle-hitbox")
-                    .flex()
-                    .h_full()
-                    .items_center()
-                    .occlude()
-                    .on_mouse_down(MouseButton::Left, |_ev, _window, cx| {
-                        cx.stop_propagation();
-                    })
-                    .child(
-                        SidebarToggleButton::new()
-                            .collapsed(self.sidebar_collapsed)
-                            .on_click(move |_ev, _window, app_cx| {
-                                root_entity.update(app_cx, |this, ctx| {
-                                    this.toggle_sidebar(ctx);
-                                });
-                            }),
-                    ),
-            )
+            // 阅读器分支不渲染 Sidebar，切换按钮点了也是 no-op（见 `toggle_sidebar`
+            // 的早退），直接不显示。
+            .when(self.reader.is_none(), |this| {
+                this.child(
+                    // 必须用 `occlude()` 把按钮从祖先 drag hitbox 里「挖」出来:
+                    // gpui-kit 组件库 `TitleBar` 把整条 children 行标成 `window_control_area(Drag)`,
+                    // Windows 上 NCHITTEST 对按钮区返回 HTCAPTION, OS 按下即接管为拖窗,
+                    // 按钮收不到 mouse_up → click 失效 (悬浮有反应但点不动)。occlude 让该点
+                    // NCHITTEST 落回 HTCLIENT, 再在 mousedown 上 `stop_propagation` 免得
+                    // TitleBar 自己的拖窗监听抢走手势。
+                    div()
+                        .id("sidebar-toggle-hitbox")
+                        .flex()
+                        .h_full()
+                        .items_center()
+                        .occlude()
+                        .on_mouse_down(MouseButton::Left, |_ev, _window, cx| {
+                            cx.stop_propagation();
+                        })
+                        .child(
+                            SidebarToggleButton::new()
+                                .collapsed(self.sidebar_collapsed)
+                                .on_click(move |_ev, _window, app_cx| {
+                                    root_entity.update(app_cx, |this, ctx| {
+                                        this.toggle_sidebar(ctx);
+                                    });
+                                }),
+                        ),
+                )
+            })
     }
 
     /// 按 `current_page` 渲染对应 page entity。
