@@ -197,21 +197,19 @@ impl ToolsPage {
                         .await;
                     if let Ok(encoding) = detected {
                         let name: SharedString = encoding.name().into();
-                        let Ok(applied) = this.update(async_cx, |this, cx| {
+                        let Ok(()) = this.update(async_cx, |this, cx| {
                             let form = &mut this.forms[kind.index()];
                             // 先结束对 `form.source` 的不可变借用，再写 `form.detected`。
                             let still_current =
                                 detected_matches(form.source.as_deref(), &detect_path);
                             if !still_current {
-                                return false;
+                                return;
                             }
                             form.detected = Some(name);
                             cx.notify();
-                            true
                         }) else {
                             return;
                         };
-                        let _ = applied;
                     }
                 })
                 .detach();

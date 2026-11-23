@@ -20,12 +20,31 @@ pub(super) const TOC_WIDTH: f32 = 320.0;
 /// 章节行高（px）。虚拟列表按它铺行。
 const TOC_ROW_HEIGHT: f32 = 34.0;
 
+/// 目录要展示的章节下标（相对完整标题列表）。
+///
+/// `lower` 是与标题一一对应的小写副本。它缺失或长度对不上说明过滤数据损坏 / 未就绪，
+/// 此时退化为「不过滤」并展示全部章节 —— 目录是导航入口，宁可多显示也不能假装它是空的。
+/// `needle` 在本函数内 trim + 小写。
+pub(super) fn toc_indices(len: usize, lower: Option<&[String]>, needle: &str) -> Vec<usize> {
+    let Some(lower) = lower.filter(|lower| lower.len() == len) else {
+        return (0..len).collect();
+    };
+    let needle = needle.trim().to_lowercase();
+    if needle.is_empty() {
+        return (0..len).collect();
+    }
+    (0..len)
+        .filter(|index| lower[*index].contains(&needle))
+        .collect()
+}
+
 impl ReaderPage {
     /// 目录抽屉。没有内容（加载中 / 失败）时给一句占位而不是空面板。
     pub(super) fn render_toc(&self, cx: &Context<Self>) -> AnyElement {
         // 标题与小写副本在加载时一起建好（`finish_load`）；这里不再逐帧 `to_lowercase`。
         // 过滤仍然每帧现算：几千条章节 O(n) 扫描比维护一份过滤索引简单，且只在抽屉打开时发生。
-        let Some((titles, lower)) = self.toc_titles.clone().zip(self.toc_lower.clone()) else {
+        // 小写副本缺失或长度对不上时 `toc_indices` 退化成不过滤，目录不会因此变空。
+        let Some(titles) = self.toc_titles.clone() else {
             return div()
                 .w(px(TOC_WIDTH))
                 .h_full()
@@ -39,12 +58,12 @@ impl ReaderPage {
                 .into_any_element();
         };
 
-        let needle = self.toc_filter.read(cx).value().trim().to_lowercase();
-        let indices: Rc<Vec<usize>> = Rc::new(
-            (0..titles.len())
-                .filter(|index| needle.is_empty() || lower[*index].contains(&needle))
-                .collect(),
-        );
+        let lower = self.toc_lower.as_ref().map(|lower| lower.as_slice());
+        let indices: Rc<Vec<usize>> = Rc::new(toc_indices(
+            titles.len(),
+            lower,
+            &self.toc_filter.read(cx).value(),
+        ));
         let filtered = indices.len();
         let total = titles.len();
         let current = self.chapter;
@@ -193,5 +212,37 @@ impl ReaderPage {
             )
             .child(body)
             .into_any_element()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::toc_indices;
+
+    fn lower_titles() -> Vec<String> {
+        vec!["alpha".to_string(), "beta".to_string(), "gamma".to_string()]
+    }
+
+    #[test]
+    fn toc_indices_filters_by_trimmed_lowercased_needle() {
+        let lower = lower_titles();
+        // 空 / 纯空白关键词 → 全部章节。
+        assert_eq!(toc_indices(3, Some(&lower), ""), vec![0, 1, 2]);
+        assert_eq!(toc_indices(3, Some(&lower), "   "), vec![0, 1, 2]);
+        // 大小写折叠 + trim 后只留命中的章节。
+        assert_eq!(toc_indices(3, Some(&lower), "ET"), vec![1]);
+        assert_eq!(toc_indices(3, Some(&lower), "  BETA  "), vec![1]);
+        // 三个标题都含 'a'。
+        assert_eq!(toc_indices(3, Some(&lower), "A"), vec![0, 1, 2]);
+    }
+
+    #[test]
+    fn toc_indices_degrades_to_no_filter_when_lower_is_missing_or_mismatched() {
+        // 小写副本缺失、或长度与标题对不上 → 不过滤，展示全部。
+        assert_eq!(toc_indices(3, None, "beta"), vec![0, 1, 2]);
+        let short = vec!["alpha".to_string(), "beta".to_string()];
+        assert_eq!(toc_indices(3, Some(&short), "beta"), vec![0, 1, 2]);
+        // 空目录无论 Filter 数据如何都返回空。
+        assert_eq!(toc_indices(0, None, "beta"), Vec::<usize>::new());
     }
 }

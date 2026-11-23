@@ -35,7 +35,8 @@ impl AppModel {
     /// error notification。
     ///
     /// 调用时机: 设置页的下载目录 / Cookie 输入与字号滑块由页面按 400ms 合并写
-    /// （`SettingsPage::schedule_persist`, 回车 / 松开滑块 / 退出时立即 flush）;
+    /// （`SettingsPage::schedule_persist`, 回车 / 松开滑块时立即 flush）; 退出时的最后一次
+    /// 落盘由 `RootView::flush_before_quit` 负责;
     /// 其余 setter（开关、主题选择等）低频且语义明确, 改完立即调本方法。
     pub fn persist_settings(&mut self) {
         if let Err(e) = crate::desktop::model::ops::settings::persist_settings(

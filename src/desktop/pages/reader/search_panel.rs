@@ -233,6 +233,8 @@ impl ReaderPage {
         self.search.scanning = true;
 
         let (tx, rx) = channel::unbounded::<SearchEvent>();
+        // `background_executor` 是 gpui 的后台线程池（相当于 tokio 的 `spawn_blocking`），
+        // 扫描跑在这里，UI 线程不会被整本书的逐章匹配阻塞。
         cx.background_executor()
             .spawn(async move {
                 scan_book(&book, &needle, &cancel, &tx);

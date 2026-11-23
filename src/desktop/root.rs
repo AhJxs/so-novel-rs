@@ -52,6 +52,10 @@ pub struct RootView {
 
     /// 打开的阅读器；`Some` 时覆盖主区域并隐藏侧栏。
     reader: Option<Entity<ReaderPage>>,
+
+    /// 退出落盘是否已执行过。Windows X 会先后触发 `on_window_should_close` 与
+    /// `on_app_quit`，第二次必须直接返回，别对已关闭的状态库再刷一次书架。
+    quit_flushed: bool,
 }
 
 impl RootView {
@@ -79,13 +83,14 @@ impl RootView {
         // 从 config 恢复上次折叠状态, 否则每次启动 sidebar 都会弹开。
         let sidebar_collapsed = model.read(cx).config.global.sidebar_collapsed;
 
-        // 关窗落盘有两条路由，缺一不可：
+        // 关窗落盘有三条路由，全部收敛到 `flush_before_quit`（只执行一次）：
         // - 标题栏 X / Alt+F4 是原生 `WindowControlArea`，Windows 直接发 WM_CLOSE，
         //   窗口与 `RootView` 会在 `on_app_quit` 观察者运行前销毁（弱引用升级失败），
         //   所以必须在窗口级 `on_window_should_close` 里同步落盘，返回 true 放行关闭。
         // - Cmd+Q / 菜单退出 / 应用级退出走 `on_app_quit`；此时窗口可能已不存在，
         //   只能靠它兜底（macOS 的 terminate 也会先关窗口）。
-        // `flush_before_quit` 幂等（`reader.take()` + `StateStore::close`），先后触发也安全。
+        // - Linux 自绘标题栏 X 走 `TitleBar::on_close_window`（见 `render_title_bar`）。
+        // Windows X 会先后触发前两条；`flush_before_quit` 用 `quit_flushed` 保证只跑一次。
         let weak_root = cx.entity().downgrade();
         window.on_window_should_close(cx, move |_window, cx| {
             let _ = weak_root.update(cx, Self::flush_before_quit);
@@ -109,6 +114,7 @@ impl RootView {
             tools_page,
             settings_page,
             reader: None,
+            quit_flushed: false,
         }
     }
 
@@ -170,14 +176,18 @@ impl RootView {
         window.focus(&self.focus, cx);
     }
 
-    /// 退出前的统一落盘点：`on_window_should_close`（原生关窗）与 `on_app_quit`
-    /// （Cmd+Q / 应用级退出）都会调用；两条路由先后触发也不会丢数据（`reader.take()`
-    /// 与 `StateStore::close` 幂等，重复调用最多少写一次已关闭的库）。
+    /// 退出前的统一落盘点：三条关窗路由（原生关窗 / 应用退出 / Linux 自绘标题栏关闭）
+    /// 都调用它。`quit_flushed` 保证只跑一次 —— Windows X 会先 `on_window_should_close`
+    /// 再 `on_app_quit`，第二次不能再对已关闭的状态库刷书架（那只会推出假的「保存失败」）。
     ///
     /// 有阅读器就走它自己的关闭契约（采位置、存字号、落库），没有也至少把设置与书架写一次；
     /// 任务列表最后补一次（同步提交，返回即已 fsync），随后显式关闭状态库写 WAL 收尾标记。
     /// `StateStore::close` 幂等，实体析构时 `Tree::drop` 再碰到也只会是空操作。
     fn flush_before_quit(&mut self, cx: &mut Context<Self>) {
+        if self.quit_flushed {
+            return;
+        }
+        self.quit_flushed = true;
         if let Some(reader) = self.reader.take() {
             reader.update(cx, ReaderPage::close_and_flush);
         } else {

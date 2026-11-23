@@ -265,13 +265,34 @@ mod tests {
     }
 
     #[test]
-    fn interruptible_scan_matches_plain_scan_and_honours_preset_cancel() {
+    fn interruptible_scan_returns_expected_hits_and_honours_preset_cancel() {
         let paragraphs = vec!["Hello world hello".to_string(), "无关".to_string()];
         let never = AtomicBool::new(false);
+        let group = search_chapter_interruptible(3, "章", &paragraphs, "hello", 7, &never)
+            .expect("未取消且有命中必须返回分组");
+        // 明确写死期望值（段落下标 / 字节偏移 / 片段内容），不再拿同实现互相比对。
         assert_eq!(
-            search_chapter_interruptible(3, "章", &paragraphs, "hello", 7, &never),
-            search_chapter(3, "章", &paragraphs, "hello", 7),
-            "未取消时结果必须与不可中断版本一致"
+            group,
+            SearchGroup {
+                chapter: 3,
+                title: "章".to_string(),
+                hits: vec![
+                    SearchHit {
+                        paragraph: 0,
+                        byte_offset: 0,
+                        byte_len: 5,
+                        snippet: "Hello world hello".to_string(),
+                        snippet_match: 0..5,
+                    },
+                    SearchHit {
+                        paragraph: 0,
+                        byte_offset: 12,
+                        byte_len: 5,
+                        snippet: "Hello world hello".to_string(),
+                        snippet_match: 12..17,
+                    },
+                ],
+            }
         );
 
         let cancelled = AtomicBool::new(true);
@@ -385,6 +406,36 @@ mod tests {
         assert_eq!(snippet_with_starts("", &[], 0, 0), (String::new(), 0..0));
         // 空文本走 `snippet` 也是同一条路径。
         assert_eq!(snippet("", 0, 0), (String::new(), 0..0));
+    }
+
+    #[test]
+    fn snippet_with_starts_windows_mid_paragraph_multibyte_hits() {
+        let text = format!("{}😀中{}", "甲".repeat(30), "乙".repeat(30));
+        let starts = char_starts(&text);
+        let offset = 30 * "甲".len(); // 90：命中起点在段落中间，前后都超过一个窗口半径
+        let len = "😀中".len();
+        assert_eq!(&text[offset..offset + len], "😀中");
+
+        let (snippet, range) = snippet_with_starts(&text, &starts, offset, len);
+        // 窗口规则：命中起点前后各保留 `SNIPPET_RADIUS`（24）个字符。
+        assert_eq!(
+            snippet,
+            format!("{}😀中{}", "甲".repeat(24), "乙".repeat(24))
+        );
+        assert_eq!(range, 72..79);
+        assert_eq!(&snippet[range], "😀中");
+
+        // 非 char boundary 的偏移：不得 panic，回整段文本 + 空区间。
+        assert_eq!(
+            snippet_with_starts(&text, &starts, offset + 1, len),
+            (text.clone(), 0..0)
+        );
+        // offset + len 越过文本末尾：同样回整段文本 + 空区间，不 panic。
+        let last = *starts.last().expect("char starts");
+        assert_eq!(
+            snippet_with_starts(&text, &starts, last, 10),
+            (text.clone(), 0..0)
+        );
     }
 
     #[test]

@@ -4,8 +4,10 @@
 //! hang 导致 UI 永不刷新），拿到 `&mut AppModel` 后 `drain`，有数据则 `ctx.notify()`。
 //!
 //! - 兜底间隔随空闲退避：有下载任务在跑时固定 100ms（进度条保持 100ms 节奏）；
-//!   连续空闲 5 轮后退到 500ms 上限。任一 wakeup 信号或 `drain` 有进展立刻回到
-//!   100ms —— 空闲时 timer 唤醒从 600 次/分降到约 120 次/分，任务运行时节奏不变。
+//!   连续空闲 5 轮后退到 500ms 上限。任一 wakeup 信号或 `drain` 有进展都会重置退避，
+//!   下一轮回到 100ms —— 注意 sleep 期间到达的 wakeup 要等 timer 到期才被消费，所以
+//!   唤醒最多带一个兜底间隔的延迟。空闲时 timer 唤醒从 600 次/分降到约 120 次/分，
+//!   任务运行时节奏不变。
 //! - entity 已释放（app 退出）时 `WeakEntity::upgrade` 返回 `None` 并 `break`；
 //!   必须持 `WeakEntity` 先 upgrade 再 update —— `update_entity` 对已释放 entity 直接 panic。
 //! - 判断「是否有任务在跑」同样只短暂 upgrade 读一次，读完立刻释放强引用；把
@@ -120,6 +122,14 @@ mod tests {
         for idle in [IDLE_ROUNDS_BEFORE_BACKOFF, 6, 100, u32::MAX] {
             assert_eq!(backoff_ms(idle, false), IDLE_TICK_MS, "idle={idle}");
         }
+    }
+
+    #[test]
+    fn tick_magnitudes_are_pinned() {
+        // 常量本身是行为契约：任务运行时 100ms 的进度节奏、空闲上限 500ms 都不能悄悄漂移。
+        assert_eq!(ACTIVE_TICK_MS, 100);
+        assert_eq!(IDLE_TICK_MS, 500);
+        assert_eq!(backoff_ms(5, false), 500);
     }
 
     #[test]
