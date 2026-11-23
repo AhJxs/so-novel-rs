@@ -22,8 +22,6 @@
 
 ## 📸 截图
 
-> ⚠️ 截图为旧版界面，待重新截图替换。
-
 | 搜索 | 任务 |
 |:---:|:---:|
 | ![搜索](docs/screenshots/search.png) | ![任务](docs/screenshots/task.png) |
