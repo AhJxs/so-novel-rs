@@ -49,7 +49,7 @@
 
 | 领域 | 选型 |
 |------|------|
-| 🎨 GUI | [gpui-kit 0.10](https://crates.io/crates/gpui-kit)（底层 [GPUI](https://gpui.rs) ） |
+| 🎨 GUI | [gpui-kit 0.11](https://crates.io/crates/gpui-kit)（[gpui-fast](https://crates.io/crates/gpui-fast) 后端，底层 [GPUI](https://gpui.rs)） |
 | ⚡ 异步 | [tokio 1](https://tokio.rs) (rt-multi-thread) |
 | 🌐 HTTP | [reqwest 0.13](https://docs.rs/reqwest) (rustls，无 OpenSSL) |
 | 🔍 HTML 解析 | scraper 0.27 + regex |

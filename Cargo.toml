@@ -3,7 +3,7 @@ name = "so-novel-rs"
 version = "0.7.1"
 edition = "2024"
 rust-version = "1.95"
-description = "So Novel — Rust desktop client (gpui-kit 0.10)."
+description = "So Novel — Rust desktop client (gpui-kit 0.11 + gpui-fast)."
 license = "AGPL-3.0-only"
 publish = false
 
@@ -12,12 +12,18 @@ name = "so-novel-rs"
 path = "src/main.rs"
 
 [dependencies]
-gpui-kit = "0.10.0"
+gpui-kit = { version = "0.11.0", features = ["gpui-fast"] }
 # 国际化 —— 复用 gpui-kit 组件库内部用的同一套 rust-i18n 机制。
 rust-i18n = "4.2.4"
 
 # Async runtime
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "fs"] }
+tokio = { version = "1", features = [
+    "rt-multi-thread",
+    "macros",
+    "sync",
+    "time",
+    "fs",
+] }
 
 # smol：gpui 的 `cx.spawn` 跑在 smol executor 上（不是 tokio），其 future 内部**不能**用
 # `tokio::time::sleep` / `tokio::sync::mpsc::channel`（没有 tokio reactor，会 panic），
@@ -31,7 +37,11 @@ thiserror = "2"
 tracing = "0.1"
 # `ansi` 必须开：否则 tracing-subscriber 不给字段名（`trace_id=` 等）加颜色码。
 # `json` 给容器 / 聚合栈的 `.json()` layer 用。
-tracing-subscriber = { version = "0.3", features = ["env-filter", "ansi", "json"] }
+tracing-subscriber = { version = "0.3", features = [
+    "env-filter",
+    "ansi",
+    "json",
+] }
 
 # Config / serde
 serde = { version = "1", features = ["derive"] }
@@ -96,10 +106,14 @@ zip = { version = "9", default-features = false, features = ["deflate-flate2"] }
 # 原生文件选择对话框（书源管理「添加」按钮：选 JSON 文件导入）。
 # 用 xdg-portal 而非默认 GTK3，避免引入 gtk3 系统依赖；它自带 pollster，
 # 不再需要 ashpd / tokio runtime。AsyncFileDialog 返回 impl Future，由调用方 executor 驱动。
-rfd = { version = "^0.18.0", default-features = false, features = ["xdg-portal"] }
+rfd = { version = "^0.18.0", default-features = false, features = [
+    "xdg-portal",
+] }
 
 # 读系统本地时区（UtcOffset::current_local_offset）；local-offset 在三个平台各自调 OS API。
-time = { version = "0.3", default-features = false, features = ["local-offset"] }
+time = { version = "0.3", default-features = false, features = [
+    "local-offset",
+] }
 zhconv = "0.4.1"
 # 不启用 `rendering` feature：只用 pdf_oxide::writer 直接拼文本，不走 from_html_css 渲染流水线；
 # `rendering` 会拉入整套 HTML/CSS 解析依赖，编译时间显著增加而无功能收益。
