@@ -133,6 +133,9 @@ lru = "0.19"
 tempfile = "3"
 # 构造最小 PNG 验证 cover_entry_from_bytes。
 image = "0.25"
+# GUI 组件测试：`test-support` 打开 GPUI 的无头窗口 + `#[gpui_kit::test]`。
+# 只加在 dev-dependencies —— 正常构建不带这些测试依赖（cargo 只在测试 profile 合并 feature）。
+gpui-kit = { version = "0.11.0", features = ["gpui-fast", "test-support"] }
 
 # Windows 系统代理探测：读 WinINET 注册表
 # （HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings）。

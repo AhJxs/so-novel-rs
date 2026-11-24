@@ -13,7 +13,7 @@ use encoding_rs::{Encoding, UTF_8};
 use crate::export::exporter::{
     ExportError, Exporter, RenderedChapter, strip_html_tags, unique_path,
 };
-use crate::models::Book;
+use crate::models::BookDetail;
 use crate::utils::fs;
 
 /// 流式转码写入器：将 UTF-8 `&str` 片段即时转码为目标编码写入底层 writer，
@@ -86,7 +86,7 @@ impl Exporter for TxtExporter {
 
     fn merge_with_progress(
         &self,
-        book: &Book,
+        book: &BookDetail,
         chapters: &[RenderedChapter],
         out_dir: &Path,
         _cover_bytes: Option<&[u8]>,
@@ -136,13 +136,13 @@ mod tests {
     use crate::config::ExportFormat;
     use crate::export::exporter::{RenderedChapter, write_chapter_files};
 
-    fn sample_book() -> Book {
-        Book {
+    fn sample_book() -> BookDetail {
+        BookDetail {
             url: "https://x/".into(),
             book_name: "起航".into(),
             author: "苹果".into(),
             intro: Some("<p>这是&nbsp;简介</p>".into()),
-            ..Book::default()
+            ..BookDetail::default()
         }
     }
 
@@ -163,7 +163,7 @@ mod tests {
 
     fn load_and_merge(
         exp: &dyn Exporter,
-        book: &Book,
+        book: &BookDetail,
         dir: &Path,
         out: &Path,
         format: ExportFormat,
@@ -212,12 +212,12 @@ mod tests {
         std::fs::create_dir_all(&out).unwrap();
         write_chapter_files(&chapters, &sample_chapters(), ExportFormat::Txt).unwrap();
 
-        let book = Book {
+        let book = BookDetail {
             url: "https://x/".into(),
             book_name: "无简介书".into(),
             author: "无名氏".into(),
             intro: None,
-            ..Book::default()
+            ..BookDetail::default()
         };
         let exp = TxtExporter::new("UTF-8");
         let p = load_and_merge(&exp, &book, &chapters, &out, ExportFormat::Txt);

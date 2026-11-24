@@ -22,11 +22,11 @@ pub(super) fn build(ctx: &PageContext<'_>, _cx: &App) -> SettingPage {
         .groups(vec![
             // ============ 书源 ============
             SettingGroup::new()
-                .title(t!("Settings.group.source"))
+                .title(t!("Settings.crawl.group.source"))
                 .items(vec![
                     // 搜索条数上限（Option<i32>, -1 = 不限）
                     SettingItem::new(
-                        t!("Settings.item.search_limit"),
+                        t!("Settings.crawl.item.search_limit"),
                         number_field_option_i32(
                             &m,
                             NumberFieldOptions {
@@ -38,25 +38,25 @@ pub(super) fn build(ctx: &PageContext<'_>, _cx: &App) -> SettingPage {
                             move |model, v| model.config.source.search_limit = v,
                         ),
                     )
-                    .description(t!("Settings.desc.search_limit").to_string()),
+                    .description(t!("Settings.crawl.desc.search_limit").to_string()),
                     // 过滤低相似度
                     SettingItem::new(
-                        t!("Settings.item.search_filter"),
+                        t!("Settings.crawl.item.search_filter"),
                         bool_field(
                             &m,
                             move |model| model.config.source.search_filter,
                             move |model, val| model.config.source.search_filter = val,
                         ),
                     )
-                    .description(t!("Settings.desc.search_filter").to_string()),
+                    .description(t!("Settings.crawl.desc.search_filter").to_string()),
                 ]),
             // ============ 并发与间隔 ============
             SettingGroup::new()
-                .title(t!("Settings.group.concurrency"))
+                .title(t!("Settings.crawl.group.concurrency"))
                 .items(vec![
                     // 并发上限（Option<i32>, -1 = 自动）
                     SettingItem::new(
-                        t!("Settings.item.concurrency"),
+                        t!("Settings.crawl.item.concurrency"),
                         number_field_option_i32(
                             &m,
                             NumberFieldOptions {
@@ -68,10 +68,10 @@ pub(super) fn build(ctx: &PageContext<'_>, _cx: &App) -> SettingPage {
                             move |model, v| model.config.crawl.concurrency = v,
                         ),
                     )
-                    .description(t!("Settings.desc.concurrency").to_string()),
+                    .description(t!("Settings.crawl.desc.concurrency").to_string()),
                     // 请求间隔 min
                     SettingItem::new(
-                        t!("Settings.item.min_interval"),
+                        t!("Settings.crawl.item.min_interval"),
                         number_field_u32_clamped(
                             &m,
                             NumberFieldOptions {
@@ -83,10 +83,10 @@ pub(super) fn build(ctx: &PageContext<'_>, _cx: &App) -> SettingPage {
                             move |model, v| model.config.crawl.min_interval = v,
                         ),
                     )
-                    .description(t!("Settings.desc.min_interval").to_string()),
+                    .description(t!("Settings.crawl.desc.min_interval").to_string()),
                     // 请求间隔 max
                     SettingItem::new(
-                        t!("Settings.item.max_interval"),
+                        t!("Settings.crawl.item.max_interval"),
                         number_field_u32_clamped(
                             &m,
                             NumberFieldOptions {
@@ -98,25 +98,25 @@ pub(super) fn build(ctx: &PageContext<'_>, _cx: &App) -> SettingPage {
                             move |model, v| model.config.crawl.max_interval = v,
                         ),
                     )
-                    .description(t!("Settings.desc.max_interval").to_string()),
+                    .description(t!("Settings.crawl.desc.max_interval").to_string()),
                 ]),
             // ============ 重试 ============
             SettingGroup::new()
-                .title(t!("Settings.group.retry"))
+                .title(t!("Settings.crawl.group.retry"))
                 .items(vec![
                     // 启用失败重试
                     SettingItem::new(
-                        t!("Settings.item.enable_retry"),
+                        t!("Settings.crawl.item.enable_retry"),
                         bool_field(
                             &m,
                             move |model| model.config.crawl.enable_retry,
                             move |model, val| model.config.crawl.enable_retry = val,
                         ),
                     )
-                    .description(t!("Settings.desc.enable_retry").to_string()),
+                    .description(t!("Settings.crawl.desc.enable_retry").to_string()),
                     // 最大重试次数
                     SettingItem::new(
-                        t!("Settings.item.max_retries"),
+                        t!("Settings.crawl.item.max_retries"),
                         number_field_u32_clamped(
                             &m,
                             NumberFieldOptions {
@@ -128,10 +128,10 @@ pub(super) fn build(ctx: &PageContext<'_>, _cx: &App) -> SettingPage {
                             move |model, v| model.config.crawl.max_retries = v,
                         ),
                     )
-                    .description(t!("Settings.desc.max_retries").to_string()),
+                    .description(t!("Settings.crawl.desc.max_retries").to_string()),
                     // 重试间隔 min
                     SettingItem::new(
-                        t!("Settings.item.retry_min_interval"),
+                        t!("Settings.crawl.item.retry_min_interval"),
                         number_field_u32_clamped(
                             &m,
                             NumberFieldOptions {
@@ -143,10 +143,10 @@ pub(super) fn build(ctx: &PageContext<'_>, _cx: &App) -> SettingPage {
                             move |model, v| model.config.crawl.retry_min_interval = v,
                         ),
                     )
-                    .description(t!("Settings.desc.retry_min_interval").to_string()),
+                    .description(t!("Settings.crawl.desc.retry_min_interval").to_string()),
                     // 重试间隔 max
                     SettingItem::new(
-                        t!("Settings.item.retry_max_interval"),
+                        t!("Settings.crawl.item.retry_max_interval"),
                         number_field_u32_clamped(
                             &m,
                             NumberFieldOptions {
@@ -158,7 +158,7 @@ pub(super) fn build(ctx: &PageContext<'_>, _cx: &App) -> SettingPage {
                             move |model, v| model.config.crawl.retry_max_interval = v,
                         ),
                     )
-                    .description(t!("Settings.desc.retry_max_interval").to_string()),
+                    .description(t!("Settings.crawl.desc.retry_max_interval").to_string()),
                 ]),
         ])
 }

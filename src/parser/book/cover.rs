@@ -2,7 +2,7 @@
 //! 以及 `parse_book_detail` 末尾的 3 站 `CoverUpdater` fan-out。
 
 use crate::http::absolute_url;
-use crate::models::Book;
+use crate::models::BookDetail;
 use crate::parser::dom::ContentType;
 
 /// 抽取 coverUrl 字段, 把相对路径按 `base_url` 拼成绝对。
@@ -21,7 +21,7 @@ pub(super) fn extract_cover_url(raw: String, base_url: &str) -> Option<String> {
 /// # Returns
 ///
 /// `Some(new_url)` — 拿到新封面, 应替换; `None` — 不替换 (原样保留或新值为空)
-pub(super) fn maybe_replace_cover(book: &mut Book, new_cover: String) -> bool {
+pub(super) fn maybe_replace_cover(book: &mut BookDetail, new_cover: String) -> bool {
     if !new_cover.is_empty() && book.cover_url.as_deref() != Some(new_cover.as_str()) {
         book.cover_url = Some(new_cover);
         true

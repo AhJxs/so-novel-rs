@@ -45,7 +45,7 @@ impl AppModel {
         ) {
             let msg = e.message();
             tracing::warn!("自动保存 config.toml 失败: {msg}");
-            self.push_error(msg);
+            self.push_error(rust_i18n::t!("Toasts.save_config_failed", err = &msg).to_string());
             return;
         }
         tracing::debug!("config.toml 自动保存成功");
@@ -54,9 +54,10 @@ impl AppModel {
         // **解析后的代理 URL** 比对（见 `HttpClients::rebuild_proxy`），未变即 no-op。
         // 重建失败时 config 已写盘但客户端还是旧配置, 推 error 让用户知道。
         if let Err(e) = self.http.rebuild_proxy(&self.config) {
-            let msg = format!("HTTP client 重建失败（配置已保存）: {e}");
-            tracing::warn!("{msg}");
-            self.push_error(msg);
+            tracing::warn!("HTTP client 重建失败（配置已保存）: {e}");
+            self.push_error(
+                rust_i18n::t!("Toasts.http_client_rebuild_failed", err = e.to_string()).to_string(),
+            );
         }
     }
 

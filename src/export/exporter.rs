@@ -16,7 +16,7 @@ use regex::Regex;
 use thiserror::Error;
 
 use crate::config::ExportFormat;
-use crate::models::Book;
+use crate::models::BookDetail;
 use crate::utils::fs;
 
 /// 导出阶段的统一错误。
@@ -60,7 +60,7 @@ pub trait Exporter {
     /// 章节为空或写成品失败时返回 [`ExportError`]。
     fn merge_with_progress(
         &self,
-        book: &Book,
+        book: &BookDetail,
         chapters: &[RenderedChapter],
         out_dir: &Path,
         cover_bytes: Option<&[u8]>,
@@ -74,7 +74,7 @@ pub trait Exporter {
     /// 章节为空或写成品失败时返回 [`ExportError`]。
     fn merge(
         &self,
-        book: &Book,
+        book: &BookDetail,
         chapters: &[RenderedChapter],
         out_dir: &Path,
     ) -> Result<PathBuf, ExportError> {
@@ -89,7 +89,7 @@ pub trait Exporter {
     /// 章节为空或写成品失败时返回 [`ExportError`]。
     fn merge_with_cover(
         &self,
-        book: &Book,
+        book: &BookDetail,
         chapters: &[RenderedChapter],
         out_dir: &Path,
         cover_bytes: Option<&[u8]>,
@@ -284,7 +284,7 @@ fn extract_body_title(body: &str) -> Option<String> {
 /// 工厂：用书名 + 作者构造目录名。与 Java 端
 /// `"%s (%s) %s".formatted(bookName, author, extName.toUpperCase())` 一致。
 #[must_use]
-pub fn build_book_dir_name(book: &Book, format: ExportFormat) -> String {
+pub fn build_book_dir_name(book: &BookDetail, format: ExportFormat) -> String {
     let raw = format!(
         "{} ({}) {}",
         book.book_name,
@@ -416,10 +416,10 @@ mod tests {
 
     #[test]
     fn build_book_dir_name_includes_format() {
-        let book = Book {
+        let book = BookDetail {
             book_name: "起航".into(),
             author: "苹果".into(),
-            ..Book::default()
+            ..BookDetail::default()
         };
         let s = build_book_dir_name(&book, ExportFormat::Epub);
         assert!(s.contains("起航"));
@@ -429,10 +429,10 @@ mod tests {
 
     #[test]
     fn build_book_dir_name_strips_path_separators() {
-        let book = Book {
+        let book = BookDetail {
             book_name: "a/b\\c".into(),
             author: "x".into(),
-            ..Book::default()
+            ..BookDetail::default()
         };
         let s = build_book_dir_name(&book, ExportFormat::Txt);
         assert!(!s.contains('/'));

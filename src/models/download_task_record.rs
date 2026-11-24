@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use super::{Book, SearchResult};
+use super::{BookDetail, SearchResult};
 
 /// 任务结束原因: 用 enum 而非字符串字面量做语义 tag, `is_cancelled` 等直接 match。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -51,7 +51,7 @@ pub struct DownloadTaskRecord {
     /// 任务结束 unix 时间戳（秒）。None = 还在跑。
     pub finished_at_unix: Option<i64>,
     /// 抓取到的书籍详情；未完成详情抓取时为空。
-    pub book_meta: Option<Book>,
+    pub book_meta: Option<BookDetail>,
     /// 目录解析出的章节总数。
     pub total_chapters: usize,
     /// 已成功下载的章节数。

@@ -15,7 +15,7 @@ use epub_builder::{EpubBuilder, EpubContent, EpubVersion, ReferenceType, ZipLibr
 
 use super::exporter::pad_zero;
 use crate::export::exporter::{ExportError, Exporter, RenderedChapter, unique_path};
-use crate::models::Book;
+use crate::models::BookDetail;
 use crate::utils::fs;
 
 /// 把渲染好的章节打包成 EPUB。
@@ -28,7 +28,7 @@ impl Exporter for EpubExporter {
 
     fn merge_with_progress(
         &self,
-        book: &Book,
+        book: &BookDetail,
         chapters: &[RenderedChapter],
         out_dir: &Path,
         cover_bytes: Option<&[u8]>,
@@ -47,7 +47,7 @@ impl Exporter for EpubExporter {
 ///
 /// 章节为空、epub 打包写入失败时返回 [`ExportError`]。
 pub fn merge_with_cover_bytes(
-    book: &Book,
+    book: &BookDetail,
     chapters: &[RenderedChapter],
     out_dir: &Path,
     cover_bytes: Option<&[u8]>,
@@ -58,7 +58,7 @@ pub fn merge_with_cover_bytes(
 /// 合并并逐章回调进度（epub-builder 在 `add_content` 时就把每章压进 zip 缓冲，
 /// 因此逐章回调基本等价于真实的写盘进度）。
 fn merge_epub(
-    book: &Book,
+    book: &BookDetail,
     chapters: &[RenderedChapter],
     out_dir: &Path,
     cover_bytes: Option<&[u8]>,
@@ -205,13 +205,13 @@ mod tests {
     use crate::config::ExportFormat;
     use crate::export::exporter::{RenderedChapter, write_chapter_files};
 
-    fn sample_book() -> Book {
-        Book {
+    fn sample_book() -> BookDetail {
+        BookDetail {
             url: "https://x/".into(),
             book_name: "起航".into(),
             author: "苹果".into(),
             intro: Some("简介内容".into()),
-            ..Book::default()
+            ..BookDetail::default()
         }
     }
 
@@ -238,12 +238,12 @@ mod tests {
         ]
     }
 
-    fn load_and_merge(book: &Book, dir: &Path, out: &Path) -> PathBuf {
+    fn load_and_merge(book: &BookDetail, dir: &Path, out: &Path) -> PathBuf {
         let chapters = crate::export::load_chapter_files(dir, ExportFormat::Epub).unwrap();
         EpubExporter.merge(book, &chapters, out).unwrap()
     }
 
-    fn load_and_merge_cover(book: &Book, dir: &Path, out: &Path, cover: &[u8]) -> PathBuf {
+    fn load_and_merge_cover(book: &BookDetail, dir: &Path, out: &Path, cover: &[u8]) -> PathBuf {
         let chapters = crate::export::load_chapter_files(dir, ExportFormat::Epub).unwrap();
         merge_with_cover_bytes(book, &chapters, out, Some(cover)).unwrap()
     }

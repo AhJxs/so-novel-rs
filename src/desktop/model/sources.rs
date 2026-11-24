@@ -37,13 +37,8 @@ impl AppModel {
                 self.save_sources_config();
             }
             Err(e) => {
-                let msg = e.message();
-                if msg.starts_with("文件内容为空") || msg.starts_with("文件中未找到有效")
-                {
-                    self.push_warning(msg);
-                } else {
-                    self.push_error(msg);
-                }
+                // ops 层只带技术细节，用户可见文案在这里统一兜住。
+                self.push_error(t!("Toasts.import_sources_failed", err = e.message()).to_string());
             }
         }
     }
@@ -61,7 +56,9 @@ impl AppModel {
                 self.push_success(t!("Toasts.delete_source_ok", url = source_url).to_string());
             }
             Ok(false) => self.push_warning(t!("Toasts.delete_source_missing").to_string()),
-            Err(e) => self.push_error(e.message()),
+            Err(e) => {
+                self.push_error(t!("Toasts.delete_source_failed", err = e.message()).to_string());
+            }
         }
     }
 
@@ -86,7 +83,8 @@ impl AppModel {
                 );
                 self.save_sources_config();
             }
-            Err(e) => self.push_error(e.message()),
+            Err(e) => self
+                .push_error(t!("Toasts.switch_source_file_failed", err = e.message()).to_string()),
         }
     }
 }

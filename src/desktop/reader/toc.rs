@@ -8,7 +8,7 @@ use gpui_kit::component::{ActiveTheme as _, IconName, Sizable as _};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, Context, FontWeight, InteractiveElement as _, IntoElement, ParentElement,
-    SharedString, StatefulInteractiveElement as _, Styled, div, px, uniform_list,
+    SharedString, StatefulInteractiveElement as _, Styled, div, px, rems, uniform_list,
 };
 use rust_i18n::t;
 
@@ -17,8 +17,8 @@ use super::reader_page::ReaderPage;
 /// 目录抽屉宽度（px）。正文列宽要减掉它，否则抽屉打开时分页与实际折行对不上。
 pub(super) const TOC_WIDTH: f32 = 320.0;
 
-/// 章节行高（px）。虚拟列表按它铺行。
-const TOC_ROW_HEIGHT: f32 = 34.0;
+/// 章节行高（rem；34px @ 16px 基准）。虚拟列表按它铺行，并随主题字号缩放。
+const TOC_ROW_HEIGHT: f32 = 34.0 / 16.0;
 
 /// 目录要展示的章节下标（相对完整标题列表）。
 ///
@@ -83,7 +83,7 @@ impl ReaderPage {
                     let row = div()
                         .id(("reader-toc-item", index))
                         .w_full()
-                        .h(px(TOC_ROW_HEIGHT))
+                        .h(rems(TOC_ROW_HEIGHT))
                         .flex()
                         .flex_row()
                         .items_center()
@@ -102,7 +102,7 @@ impl ReaderPage {
                         // 章号右对齐排在标题左边，目录才有「第几章」的参照。
                         .child(
                             div()
-                                .w(px(40.0))
+                                .w_10()
                                 .flex_none()
                                 .text_xs()
                                 .text_color(muted)

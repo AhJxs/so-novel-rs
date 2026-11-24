@@ -1,6 +1,6 @@
 //! 书架筛选与排序：纯函数，不持有状态。
 
-use super::book::{Book, ShelfStatus};
+use super::book::{ShelfBook, ShelfStatus};
 
 /// 书架状态筛选（与 `ShelfStatus` 区分：`All` 不是一种书籍状态）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -19,7 +19,7 @@ pub enum ShelfStatusFilter {
 impl ShelfStatusFilter {
     /// 该筛选是否接受这本书。
     #[must_use]
-    pub fn accepts(self, book: &Book) -> bool {
+    pub fn accepts(self, book: &ShelfBook) -> bool {
         match self {
             Self::All => true,
             Self::Unread => book.status() == ShelfStatus::Unread,
@@ -84,7 +84,7 @@ impl ShelfQuery {
     /// 命中书名 / 作者 / 文件名（ASCII 大小写不敏感）；收藏开关要求 `book.favorite`。
     /// 隐藏书（`hidden`）任何查询都不返回 —— 「移出书架」的扫描来源靠这条生效。
     #[must_use]
-    pub fn matches(&self, book: &Book) -> bool {
+    pub fn matches(&self, book: &ShelfBook) -> bool {
         if book.hidden {
             return false;
         }
@@ -111,8 +111,8 @@ impl ShelfQuery {
 
 /// 过滤 + 排序，返回借用而非拷贝。
 #[must_use]
-pub fn visible_books<'a>(books: &'a [Book], query: &ShelfQuery) -> Vec<&'a Book> {
-    let mut out: Vec<&Book> = books.iter().filter(|book| query.matches(book)).collect();
+pub fn visible_books<'a>(books: &'a [ShelfBook], query: &ShelfQuery) -> Vec<&'a ShelfBook> {
+    let mut out: Vec<&ShelfBook> = books.iter().filter(|book| query.matches(book)).collect();
     match query.sort {
         ShelfSort::LastOpened => out.sort_by(|a, b| {
             b.last_opened_unix
@@ -146,8 +146,8 @@ mod tests {
     use super::*;
     use crate::library::book::{BookFormat, BookOrigin, ReadingProgress};
 
-    fn book(id: &str, title: &str, author: &str, opened: Option<i64>) -> Book {
-        Book {
+    fn book(id: &str, title: &str, author: &str, opened: Option<i64>) -> ShelfBook {
+        ShelfBook {
             id: id.to_string(),
             path_key: id.to_string(),
             path: format!("C:/books/{id}.txt"),

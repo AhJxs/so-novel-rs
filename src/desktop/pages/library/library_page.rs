@@ -7,6 +7,7 @@
 //!   页面不持有根视图（避免循环强引用）；
 //! - 扫描 / 元数据提取都在后台跑，drain 循环回传后窗口自动重绘。
 
+use std::cell::Cell;
 use std::path::PathBuf;
 use std::rc::Rc;
 
@@ -17,9 +18,9 @@ use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::{ActiveTheme as _, Disableable as _, Icon, IconName, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyElement, App, AppContext as _, ClickEvent, Context, Entity, InteractiveElement as _,
-    IntoElement, ParentElement, Point, Render, ScrollHandle, StatefulInteractiveElement as _,
-    Styled, Window, div, px,
+    AnyElement, App, AppContext as _, ClickEvent, Context, Entity, FocusHandle,
+    InteractiveElement as _, IntoElement, KeyDownEvent, ParentElement, Point, Render, ScrollHandle,
+    StatefulInteractiveElement as _, Styled, Window, div, px,
 };
 use rust_i18n::t;
 
@@ -54,13 +55,28 @@ pub struct LibraryPage {
     render_cache: Option<RenderCache>,
     /// 打开阅读器的回调（`dialogs` 的「继续阅读」也要用）。
     pub(super) open_reader: Option<OpenReaderFn>,
+    /// 网格键盘导航的焦点句柄：整块网格是一个 Tab 停靠点。
+    focus: FocusHandle,
+    /// 键盘聚焦的卡片在**可见列表**中的索引；`None` 表示还没用方向键选过。
+    focused_index: Option<usize>,
+    /// 布局期实测的列数（`on_children_prepainted` 写入）：上 / 下键按列数跳。
+    grid_columns: Rc<Cell<usize>>,
 }
 
 impl LibraryPage {
     pub fn new(model: Entity<AppModel>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        // 网格整体是一个 Tab 停靠点，方向键在卡片间移动（见 `on_grid_key_down`）。
+        let focus = cx.focus_handle().tab_stop(true);
+
         // 后台扫描 / 元数据 / 阅读进度都会改 `AppModel`：观察到就重绘，
         // 不依赖 gpui 的「渲染期读过该 entity」隐式失效。
-        cx.observe(&model, |_this, _model, cx| cx.notify()).detach();
+        // 自动扫描也挂在这里：只有模型变化（下载目录设置、扫描哨兵、工具产出）时才比较，
+        // 渲染路径不再承担副作用。
+        cx.observe(&model, |this, _model, cx| {
+            this.maybe_auto_scan(cx);
+            cx.notify();
+        })
+        .detach();
 
         let search_input =
             cx.new(|cx| InputState::new(window, cx).placeholder(t!("Library.search_placeholder")));
@@ -80,14 +96,20 @@ impl LibraryPage {
         })
         .detach();
 
-        Self {
+        let this = Self {
             model,
             search_input,
             scroll: ScrollHandle::new(),
             visible_limit: BATCH,
             render_cache: None,
             open_reader: None,
-        }
+            focus,
+            focused_index: None,
+            grid_columns: Rc::new(Cell::new(1)),
+        };
+        // 构造期扫一次：之后由上面的 observe 在模型变化时比较。
+        this.maybe_auto_scan(cx);
+        this
     }
 
     /// 由 `RootView` 注入打开阅读器的回调。
@@ -107,19 +129,90 @@ impl LibraryPage {
     /// 筛选 / 排序 / 搜索变化后回到顶部并重置批次。
     fn reset_view(&mut self, cx: &mut Context<Self>) {
         self.visible_limit = BATCH;
+        // 列表顺序变了，旧的键盘索引会指向另一本书：直接清掉，下次从第一张开始。
+        self.focused_index = None;
         self.scroll.set_offset(Point::default());
         cx.notify();
     }
 
     /// 首次进入 / 下载目录变化时自动扫一次（同一目录只扫一次，靠 `scanned_dir` 去重）。
+    ///
+    /// 只在模型变化 / 构造期调用，不再是渲染期副作用；比较本身只读模型，不碰磁盘。
     fn maybe_auto_scan(&self, cx: &mut Context<Self>) {
-        let wanted = absolute_dir(std::path::Path::new(
-            &self.model.read(cx).config.download.download_path,
-        ));
-        if self.model.read(cx).library.scanned_dir.as_ref() != Some(&wanted) {
-            self.model
-                .update(cx, |model, _cx| model.refresh_library_async());
+        let (wanted, scanned, in_flight) = self.model.read_with(cx, |model, _cx| {
+            (
+                absolute_dir(std::path::Path::new(&model.config.download.download_path)),
+                model.library.scanned_dir.clone(),
+                model.library.scan_in_flight,
+            )
+        });
+        // 扫描在跑时不必再排队：完成后的模型通知会再比较一次。
+        if in_flight || scanned.as_ref() == Some(&wanted) {
+            return;
         }
+        self.model
+            .update(cx, |model, _cx| model.refresh_library_async());
+    }
+
+    /// 网格键盘导航：方向键在卡片间移动，Enter / Space 打开当前卡片。
+    ///
+    /// 列数取布局期实测值，窗口宽度或字号变化后自动更新；还没测到时按 1 列兜底。
+    /// 只处理无修饰键，避免和输入框 / 系统快捷键冲突。
+    fn on_grid_key_down(
+        &mut self,
+        event: &KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let modifiers = &event.keystroke.modifiers;
+        if modifiers.control || modifiers.alt || modifiers.platform {
+            return;
+        }
+        // 只有网格本身持有焦点时才处理：卡片内的收藏星标是独立 Button，
+        // 在它上面按 Enter / Space 只应切换收藏，不能冒泡成「打开这本书」。
+        if !self.focus.is_focused(window) {
+            return;
+        }
+
+        let total = self.model.read_with(cx, |model, _cx| {
+            visible_books(model.library.store.books(), &model.library.query).len()
+        });
+        if total == 0 {
+            return;
+        }
+
+        // 索引可能因过滤结果变短而越界，取当前位置时先夹紧。
+        let current = self.focused_index.unwrap_or(0).min(total - 1);
+        let step = self.grid_columns.get().max(1);
+        let next = match event.keystroke.key.as_str() {
+            "left" => current.saturating_sub(1),
+            "right" => (current + 1).min(total - 1),
+            "up" => current.saturating_sub(step),
+            "down" => (current + step).min(total - 1),
+            "home" => 0,
+            "end" => total - 1,
+            "enter" | "space" => {
+                // 卡片缓存与本帧列表一致；越界说明缓存还没建好，忽略这次激活。
+                let book_id = self
+                    .render_cache
+                    .as_ref()
+                    .and_then(|(_, _, _, cards, _)| cards.get(current).map(|data| data.id.clone()));
+                if let Some(book_id) = book_id {
+                    self.open_book(&book_id, window, cx);
+                }
+                cx.stop_propagation();
+                return;
+            }
+            _ => return,
+        };
+
+        self.focused_index = Some(next);
+        // 键盘移到还没渲染的批次时顺手放宽上限，用户不必再去点「加载更多」。
+        if next >= self.visible_limit {
+            self.visible_limit = ((next / BATCH) + 1) * BATCH;
+        }
+        cx.stop_propagation();
+        cx.notify();
     }
 
     /// 重新扫描下载目录。
@@ -484,10 +577,39 @@ impl LibraryPage {
     ///
     /// `cards` 是本帧要画的那一段（已按 `visible_limit` 裁剪），从缓存借用，
     /// 只有每个可见项的 `CardData` 复制一份交给 `BookCard`（元素不能借用）。
-    fn render_grid(&self, cards: &[CardData], total: usize, cx: &Context<Self>) -> AnyElement {
+    fn render_grid(
+        &self,
+        cards: &[CardData],
+        total: usize,
+        grid_focused: bool,
+        cx: &Context<Self>,
+    ) -> AnyElement {
         let more = total > cards.len();
-        let mut grid = div().flex().flex_wrap().gap_5().w_full().pb_2();
-        for data in cards {
+        // Tab 刚进入网格、还没按方向键时，把第一张当作当前项，焦点环立即可见。
+        let focused_index =
+            grid_focused.then(|| self.focused_index.unwrap_or(0).min(total.saturating_sub(1)));
+        let columns_cell = Rc::clone(&self.grid_columns);
+        let mut grid = div()
+            .flex()
+            .flex_wrap()
+            .gap_5()
+            .w_full()
+            .pb_2()
+            .track_focus(&self.focus)
+            .key_context("LibraryGrid")
+            .on_key_down(cx.listener(Self::on_grid_key_down))
+            .on_children_prepainted(move |bounds, _window, _cx| {
+                // 同一行卡片的 top 相同：数出首行数量就是当前列数。
+                // 每次布局都重测，窗口宽度 / 字号变化后方向键仍然按实际列数跳。
+                if let Some(first) = bounds.first() {
+                    let columns = bounds
+                        .iter()
+                        .filter(|bounds| bounds.origin.y == first.origin.y)
+                        .count();
+                    columns_cell.set(columns.max(1));
+                }
+            });
+        for (index, data) in cards.iter().enumerate() {
             let book_id = data.id.clone();
             let on_open: Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)> =
                 Rc::new(cx.listener(move |this, _ev: &ClickEvent, window, cx| {
@@ -504,8 +626,11 @@ impl LibraryPage {
                     cx.notify();
                 }));
             let menu = Self::book_menu(data, cx);
-            grid = grid
-                .child(BookCard::new(data.clone(), on_open, on_favorite).with_context_menu(menu));
+            grid = grid.child(
+                BookCard::new(data.clone(), on_open, on_favorite)
+                    .focused(focused_index == Some(index))
+                    .with_context_menu(menu),
+            );
         }
 
         div()
@@ -535,9 +660,8 @@ impl LibraryPage {
 }
 
 impl Render for LibraryPage {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        self.maybe_auto_scan(cx);
-
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // 自动扫描已在构造期与 `cx.observe(&model, ..)` 里触发，渲染路径保持纯声明。
         let limit = self.visible_limit;
         let (
             version,
@@ -593,7 +717,8 @@ impl Render for LibraryPage {
             Self::render_empty(has_books, cx)
         } else {
             let shown = &cards[..limit.min(cards.len())];
-            self.render_grid(shown, total, cx)
+            let grid_focused = self.focus.is_focused(window);
+            self.render_grid(shown, total, grid_focused, cx)
         };
 
         v_flex()

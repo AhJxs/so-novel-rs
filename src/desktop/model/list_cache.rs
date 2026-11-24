@@ -1,9 +1,23 @@
 //! 列表渲染缓存: 避免每帧重复 `filter + sort + slice + clone` 全表。
 //!
-//! `pages::{library,search,tasks}` 每帧都要过滤 / 排序 / 切片 / clone 整个列表, 而
-//! `drain_loop` 每 100ms 唤醒一次 —— 数据没变也按 10fps 重做。以
+//! `drain_loop` 每 100ms 唤醒一次, 数据没变时不应按 10fps 重做全表推导。以
 //! `(page_kind, data_version, filter_signature, page_index)` 为 key 缓存最终 `Vec`,
-//! 命中即复用 `Arc<Vec<…>>`; 数据/状态变化时 `clear()` 整表。
+//! 命中即复用 `Arc<Vec<…>>`。
+//!
+//! # 失效归属（唯一 owner）
+//!
+//! 每个 [`PageKind`] 只允许**一个**所有者负责失效, 避免"谁都清一点"或"没人清":
+//!
+//! - [`PageKind::Search`]: `SearchPage` 是唯一失效者。它在 model 的通知里看到
+//!   新的 `search.results_version` 后调用 [`ListCache::retain_version`] 淘汰该页
+//!   旧版本键, 并在同一处（非 render 路径）写入新快照。render 只读缓存, 未命中
+//!   就直接退回未缓存切片, 绝不在渲染期写缓存。
+//! - [`PageKind::Library`] / [`PageKind::Tasks`]: 目前未接入（Tasks 见
+//!   `tasks_page.rs` 的 TODO）。
+//! - 规则集合整体替换（切活跃书源文件 / 导入重载）是全局失效点: `AppModel` 的
+//!   sources 业务方法调 [`ListCache::clear`], 一次覆盖所有页。
+//!
+//! 新增缓存页时必须先指定它的唯一失效者; 不要用 `render` 充当失效者。
 
 use std::any::TypeId;
 use std::collections::HashMap;
@@ -22,7 +36,7 @@ pub enum PageKind {
 }
 
 /// 列表缓存 key。`elem_type` 是为了**类型擦除**: `HashMap` 只存一种 `Arc<dyn Any>`,
-/// 不同 page 的元素类型不同, 靠 `TypeId` 保证不会把书架 `Book` Vec 当成
+/// 不同 page 的元素类型不同, 靠 `TypeId` 保证不会把书架 `ShelfBook` Vec 当成
 /// `SearchResult` Vec 取出来。
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 pub struct ListCacheKey {
@@ -74,9 +88,19 @@ impl ListCache {
         arc
     }
 
-    /// 清空全部缓存。源数据大变化（如 `clear_results_and_caches`）时调。
+    /// 清空全部缓存。规则集合整体变化（切活跃书源文件 / 导入重载）时调。
     pub fn clear(&mut self) {
         self.map.clear();
+    }
+
+    /// 淘汰某页里 `data_version` 不等于当前值的键, 只保留当前版本的快照。
+    ///
+    /// 单页键数 = 过滤签名 × 页数, 通常个位数; 因此这是 O(页数) 的清理, 却能让
+    /// 流式搜索的旧版本"整表快照"立刻释放, 而不是无限堆积到下一次 `clear()`。
+    /// 调用方（唯一失效者）见模块文档。
+    pub fn retain_version(&mut self, page: PageKind, data_version: u64) {
+        self.map
+            .retain(|key, _| key.page != page || key.data_version == data_version);
     }
 
     /// 当前缓存条目数（测试用）。
@@ -160,6 +184,30 @@ mod tests {
         assert_eq!(cache.len(), 1);
         cache.clear();
         assert_eq!(cache.len(), 0);
+    }
+
+    #[test]
+    fn retain_version_drops_old_versions_for_that_page_only() {
+        let mut cache = ListCache::new();
+        let key = |page: PageKind, data_version: u64| ListCacheKey {
+            page,
+            data_version,
+            filter_sig: 0,
+            page_index: 0,
+            elem_type: TypeId::of::<u8>(),
+        };
+        cache.insert(key(PageKind::Search, 1), vec![1_u8]);
+        cache.insert(key(PageKind::Search, 2), vec![2_u8]);
+        cache.insert(key(PageKind::Library, 1), vec![3_u8]);
+
+        cache.retain_version(PageKind::Search, 2);
+
+        assert!(cache.get::<u8>(key(PageKind::Search, 1)).is_none());
+        assert!(cache.get::<u8>(key(PageKind::Search, 2)).is_some());
+        assert!(
+            cache.get::<u8>(key(PageKind::Library, 1)).is_some(),
+            "其他页不受影响"
+        );
     }
 
     #[test]

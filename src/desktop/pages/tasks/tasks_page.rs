@@ -5,7 +5,7 @@ use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::{ActiveTheme as _, IconName, WindowExt, v_flex};
 use gpui_kit::{
     App, AppContext, ClickEvent, Context, Entity, IntoElement, ParentElement, Render, Styled,
-    Window, div, px,
+    Window, div, rems,
 };
 use rust_i18n::t;
 
@@ -136,22 +136,22 @@ impl TasksPage {
             book_name
         };
 
-        window.open_dialog(cx, move |dialog: Dialog, _window, cx| {
+        window.open_dialog(cx, move |dialog: Dialog, window, cx| {
             // dialog builder 每帧重调（Fn）—— 捕获用引用 / clone，不能 FnOnce。
             let name_for_title = name.clone();
             let failures_for_list = failures.clone();
-            // 宽 640px + 不调 `.alert()`/`.confirm()`，保留默认 close_button + overlay / Esc 关闭。
+            // 宽 640px @ 16px 基准 + 不调 `.alert()`/`.confirm()`，保留默认 close_button + overlay / Esc 关闭。
             dialog
                 .title(t!(
                     "Tasks.failures_dialog.title",
                     book_name = &name_for_title
                 ))
-                .w(px(640.))
+                .w(rems(40.0).to_pixels(window.rem_size()))
                 // 失败章节可能很多 —— 限高 + 纵向滚动。`overflow_y_scrollbar` 是 terminal
                 // builder（返回 `Scrollable<Div>`），必须放链尾。
                 .child(
                     v_flex()
-                        .max_h(px(400.))
+                        .max_h(rems(25.0).to_pixels(window.rem_size()))
                         .gap_1()
                         .py_1()
                         .text_xs()
@@ -247,7 +247,7 @@ impl Render for TasksPage {
                     .border_1()
                     .border_color(cx.theme().border)
                     .rounded_md()
-                    .child(List::new(&self.list_state).p(px(12.)).size_full())
+                    .child(List::new(&self.list_state).p_3().size_full())
                     .into_any_element()
             })
             // 分页页脚（`Pagination` 自己判可见性，不足一页不渲染）。

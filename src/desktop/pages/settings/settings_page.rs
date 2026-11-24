@@ -111,7 +111,7 @@ impl SettingsPage {
         let initial_download_path = model.read(cx).config.download.download_path.clone();
         let download_path_input = cx.new(|cx| {
             InputState::new(window, cx)
-                .placeholder(t!("Settings.desc.download_path"))
+                .placeholder(t!("Settings.general.desc.download_path"))
                 .default_value(initial_download_path.clone())
         });
 
@@ -146,7 +146,7 @@ impl SettingsPage {
         let qidian_cookie_input = cx.new(|cx| {
             TextareaState::new(window, cx)
                 .rows(3)
-                .placeholder(t!("Settings.placeholder.qidian_cookie"))
+                .placeholder(t!("Settings.proxy.placeholder.qidian_cookie"))
                 .default_value(initial_qidian_cookie.clone())
         });
 

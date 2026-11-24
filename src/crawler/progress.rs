@@ -5,7 +5,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use crate::models::Book;
+use crate::models::BookDetail;
 
 /// 调度层用户可见的进度事件。
 ///
@@ -20,8 +20,8 @@ use crate::models::Book;
 pub enum Progress {
     /// 详情解析完成, 得到书籍元信息。
     BookResolved {
-        /// 已解析的 Book；与下载流程共享同一份，UI 侧不复制元信息。
-        book: Arc<Book>,
+        /// 已解析的 BookDetail；与下载流程共享同一份，UI 侧不复制元信息。
+        book: Arc<BookDetail>,
         /// 目录总章节数 (用户界面估算进度用)。
         total_chapters: usize,
     },

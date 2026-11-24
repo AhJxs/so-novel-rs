@@ -40,7 +40,7 @@ pub(super) fn build(ctx: &PageContext<'_>, cx: &App) -> SettingPage {
 
     let mut items = vec![
         SettingItem::new(
-            t!("Settings.item.proxy_mode"),
+            t!("Settings.proxy.item.proxy_mode"),
             dropdown_field(
                 mode_options,
                 &m,
@@ -49,19 +49,19 @@ pub(super) fn build(ctx: &PageContext<'_>, cx: &App) -> SettingPage {
                 Some(after_proxy_mode),
             ),
         )
-        .description(t!("Settings.desc.proxy_mode").to_string()),
+        .description(t!("Settings.proxy.desc.proxy_mode").to_string()),
         SettingItem::new(
-            t!("Settings.item.proxy_host"),
+            t!("Settings.proxy.item.proxy_host"),
             string_field(
                 &m,
                 move |model| SharedString::from(model.config.proxy.proxy_host.clone()),
                 move |model, s| model.config.proxy.proxy_host = s,
             ),
         )
-        .description(t!("Settings.desc.proxy_host").to_string())
+        .description(t!("Settings.proxy.desc.proxy_host").to_string())
         .disabled(mode != ProxyMode::Manual),
         SettingItem::new(
-            t!("Settings.item.proxy_port"),
+            t!("Settings.proxy.item.proxy_port"),
             number_field_u16(
                 &m,
                 NumberFieldOptions {
@@ -73,7 +73,7 @@ pub(super) fn build(ctx: &PageContext<'_>, cx: &App) -> SettingPage {
                 move |model, v| model.config.proxy.proxy_port = v,
             ),
         )
-        .description(t!("Settings.desc.proxy_port").to_string())
+        .description(t!("Settings.proxy.desc.proxy_port").to_string())
         .disabled(mode != ProxyMode::Manual),
     ];
 
@@ -82,7 +82,7 @@ pub(super) fn build(ctx: &PageContext<'_>, cx: &App) -> SettingPage {
     if mode == ProxyMode::System {
         items.push(
             SettingItem::new(
-                t!("Settings.item.system_proxy_status"),
+                t!("Settings.proxy.item.system_proxy_status"),
                 SettingField::render(move |_opts, _window, cx| {
                     let (text, color) = match &system_proxy {
                         SystemProxy::Found(url) => (
@@ -101,7 +101,7 @@ pub(super) fn build(ctx: &PageContext<'_>, cx: &App) -> SettingPage {
                     div().text_sm().text_color(color).child(text)
                 }),
             )
-            .description(t!("Settings.desc.system_proxy_status").to_string()),
+            .description(t!("Settings.proxy.desc.system_proxy_status").to_string()),
         );
     }
 
@@ -111,16 +111,16 @@ pub(super) fn build(ctx: &PageContext<'_>, cx: &App) -> SettingPage {
         .groups(vec![
             // ============ 代理 ============
             SettingGroup::new()
-                .title(t!("Settings.group.proxy"))
+                .title(t!("Settings.proxy.group.proxy"))
                 .items(items),
             // ============ Cookie ============
             // 起点 cookie 必须是**多行 textarea**（`Cookie:` 头是一整段多对 `k=v`），
             // 所以走 `SettingField::render` 挂 owner-cached 的 TextareaState。
             SettingGroup::new()
-                .title(t!("Settings.group.cookie"))
+                .title(t!("Settings.proxy.group.cookie"))
                 .items(vec![
                     SettingItem::new(
-                        t!("Settings.item.qidian_cookie"),
+                        t!("Settings.proxy.item.qidian_cookie"),
                         SettingField::render({
                             let qidian_cookie_input = ctx.qidian_cookie_input.clone();
                             move |options, _window, _cx| {
@@ -140,7 +140,7 @@ pub(super) fn build(ctx: &PageContext<'_>, cx: &App) -> SettingPage {
                             }
                         }),
                     )
-                    .description(t!("Settings.desc.qidian_cookie").to_string()),
+                    .description(t!("Settings.proxy.desc.qidian_cookie").to_string()),
                 ]),
         ])
 }

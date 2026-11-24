@@ -1,6 +1,6 @@
 //! 阶段二: 章节下载 + 导出
 //!
-//! 主流程: `download_book` 调 `resolve_book` 拿到 Book + 章节列表, 然后调 `download_chapters`
+//! 主流程: `download_book` 调 `resolve_book` 拿到 `BookDetail` + 章节列表, 然后调 `download_chapters`
 //! 并发抓取 + 导出。关键路径: Semaphore 限并发 / per-task write / 取消用 `tokio::select`
 //! 配合 reqwest future drop 实现零延迟中断。
 
@@ -18,7 +18,7 @@ use super::resolve::{CrawlerError, ResolvedBook, resolve_book};
 use super::retry as retry_mod;
 use crate::config::AppConfig;
 use crate::export::{self, RenderTarget};
-use crate::models::{Book, Chapter, Source};
+use crate::models::{BookDetail, Chapter, Source};
 use crate::parser::{ChapterError, TocError, parse_chapter};
 
 /// 入口: 抓一本书并导出。**全 async**: 内部直接 await 各级 parser,
@@ -35,7 +35,7 @@ use crate::parser::{ChapterError, TocError, parse_chapter};
 ///
 /// # Errors
 ///
-/// `CrawlerError::Book` / `Toc` 详情/目录解析失败; `EmptyToc` 目录返回 0 章;
+/// `CrawlerError::BookDetail` / `Toc` 详情/目录解析失败; `EmptyToc` 目录返回 0 章;
 /// `Cancelled` 用户取消; `Export` 导出失败。
 #[tracing::instrument(
     name = "download_book",
@@ -116,7 +116,7 @@ pub async fn download_chapters(
     cfg: &AppConfig,
     client: &Client,
     source: &Source,
-    book: &Book,
+    book: &BookDetail,
     chapters: Vec<Chapter>,
     opts: DownloadOptions,
 ) -> Result<PathBuf, CrawlerError> {

@@ -2,7 +2,7 @@
 //!
 //! 字段名沿用规则文件原有的驼峰命名 (`bookName` 等), 靠 `#[serde(rename_all = "camelCase")]` 与
 //! `assets/rules/*.json` 兼容。Java 端 `Rule.Book` 既当"详情规则"又当"详情数据", Rust 端拆开:
-//! `RuleBook` 仅是规则, `crate::models::book::Book` 是数据。
+//! `RuleBook` 仅是规则, `crate::models::book::BookDetail` 是数据。
 //!
 //! 所有 bool 字段统一走 `lenient_bool`: Java/hutool 容忍字符串 (`no-search.json` 里真实存在
 //! `"paragraphTagClosed": "true"`), 而 serde 严格, 不宽松会直接解析失败。

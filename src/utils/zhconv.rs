@@ -4,7 +4,7 @@
 use zhconv::{Variant, zhconv};
 
 use crate::config::LangType;
-use crate::models::Book;
+use crate::models::BookDetail;
 
 /// 把 `LangType` 映射到 `zhconv` 的目标变体：`ZhCn` → `ZhHans`、`ZhTw` → `ZhTW`
 /// （台湾繁体，含用词差异如"软体"）、`ZhHant` → ZhHant。源语言由 zhconv 自行判断。
@@ -28,7 +28,7 @@ pub fn convert_text(text: &str, target: &LangType) -> String {
 /// source 解析失败或 source == target 时不做任何改动（保守、不误转）。`book_name` /
 /// `author` 走纯文本转换，`intro` 走 `convert_html_body` 以保留 `<script>`/`<style>`；
 /// category / `cover_url` / `latest_chapter` / status 等含大量非中文，原样保留。
-pub fn convert_book_meta_in_place(book: &mut Book, source_lang_raw: &str, target: &LangType) {
+pub fn convert_book_meta_in_place(book: &mut BookDetail, source_lang_raw: &str, target: &LangType) {
     let Some(source) = LangType::parse(source_lang_raw) else {
         return;
     };
@@ -43,11 +43,15 @@ pub fn convert_book_meta_in_place(book: &mut Book, source_lang_raw: &str, target
     }
 }
 
-/// 转换书籍元信息（书名 / 作者 / 简介）到目标语言，返回新 `Book`，不修改入参。
+/// 转换书籍元信息（书名 / 作者 / 简介）到目标语言，返回新 `BookDetail`，不修改入参。
 ///
-/// [`convert_book_meta_in_place`] 的 clone 包装：需要同时保留原 `Book` 时用。
+/// [`convert_book_meta_in_place`] 的 clone 包装：需要同时保留原 `BookDetail` 时用。
 #[must_use]
-pub fn convert_book_meta(book: &Book, source_lang_raw: &str, target: &LangType) -> Book {
+pub fn convert_book_meta(
+    book: &BookDetail,
+    source_lang_raw: &str,
+    target: &LangType,
+) -> BookDetail {
     let mut out = book.clone();
     convert_book_meta_in_place(&mut out, source_lang_raw, target);
     out
@@ -160,13 +164,13 @@ mod tests {
 
     // ---------- convert_book_meta ----------
 
-    fn sample_book_cn() -> Book {
-        Book {
+    fn sample_book_cn() -> BookDetail {
+        BookDetail {
             url: "https://x".into(),
             book_name: "软件工程师的发量".into(),
             author: "苹果".into(),
             intro: Some("<p>头发的颜色是黄色</p><script>var s=\"不转\";</script>".into()),
-            ..Book::default()
+            ..BookDetail::default()
         }
     }
 
@@ -194,7 +198,7 @@ mod tests {
     /// 源 `zh_TW` + 目标 `zh_CN`：繁体转简体（含"軟體"→"软体"）。
     #[test]
     fn convert_book_meta_traditional_to_simplified() {
-        let book = Book {
+        let book = BookDetail {
             book_name: "軟體工程師".into(),
             author: "蘋果".into(),
             intro: Some("<p>頭髮的顏色</p>".into()),
@@ -229,7 +233,7 @@ mod tests {
     /// intro 为 None 时不动（不能 panic on None）。
     #[test]
     fn convert_book_meta_handles_none_intro() {
-        let book = Book {
+        let book = BookDetail {
             book_name: "软件".into(),
             author: "苹果".into(),
             intro: None,

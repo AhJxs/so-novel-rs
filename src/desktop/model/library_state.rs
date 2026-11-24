@@ -15,6 +15,7 @@ use crate::library::{AppliedMeta, LibraryStore, ScannedFile, ShelfQuery, now_uni
 /// 根随事件一起回送，而不是从 `scanned_dir` 取：`scanned_dir` 同时是「目录已扫描」哨兵，
 /// 任务结束时会被清空，拿它当根会把结果记到错误的目录下。
 #[derive(Debug)]
+#[non_exhaustive]
 pub struct Scan {
     pub root: PathBuf,
     pub files: Vec<ScannedFile>,
@@ -30,6 +31,7 @@ pub type ScanEvent = AppResult<Scan>;
 ///
 /// 与 [`ScanEvent`] 相同：一次任务只回送**一个**事件。
 #[derive(Debug)]
+#[non_exhaustive]
 pub struct MetaEvent {
     pub id: String,
     pub outcome: Result<AppliedMeta, String>,

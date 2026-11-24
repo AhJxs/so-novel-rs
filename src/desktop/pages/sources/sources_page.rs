@@ -39,6 +39,21 @@ pub struct SourcesPage {
     /// 实时 i18n sentinel：上次 render 时 `Sources.filter.placeholder` 的翻译结果。
     /// 切语言 → `t!()` 返回新值 → render 里检测到不一致 → `set_placeholder` 刷新。
     last_seen_placeholder: SharedString,
+
+    /// 上次同步给下拉框的规则文件名快照。`None` = 尚未同步。
+    ///
+    /// 不能每帧重新扫目录：`list_rule_files` 会 `read_dir` + 逐项 `is_file()`，而
+    /// `set_items` / `set_selected_index` 内部都会 `cx.notify()`，写在 render 里会形成
+    /// "通知 → 再排一帧 → 再读盘" 的自激循环，还会把下拉框每帧滚回选中项。
+    last_rule_files: Option<Vec<String>>,
+
+    /// 上次同步时的活跃规则文件名。活动文件可能已不在目录里（被删），单独比对，
+    /// 保证"切换活跃文件"即使文件列表没变也能更新选中项。
+    last_active_file: Option<String>,
+
+    /// 上次观察到健康检查是否在跑。只在 `true → false` 那次通知里刷新规则文件，
+    /// 既覆盖"检查完成后 drain"这个事件点，又不需要在 render 里读盘或轮询。
+    last_health_running: bool,
 }
 
 impl SourcesPage {
@@ -70,12 +85,14 @@ impl SourcesPage {
         cx.subscribe_in(
             &rule_file_select,
             window,
-            move |_this, _state, ev, _w, cx| {
+            move |this, _state, ev, window, cx| {
                 if let SelectEvent::Confirm(Some(value)) = ev {
                     let filename = value.clone();
                     model_for_select.update(cx, |m, _cx| {
                         m.switch_active_file(&filename);
                     });
+                    // 切换后重算选中项（文件可能已删除，`position` 返回 None 时保留旧选中）。
+                    this.sync_rule_files(window, cx);
                     cx.notify();
                 }
             },
@@ -87,21 +104,78 @@ impl SourcesPage {
         let delegate = SourcesDelegate::new(page_handle);
         let list_state = cx.new(|cx| ListState::new(delegate, window, cx));
 
-        Self {
+        // 4. 健康检查完成的唯一信号来自 model 通知：`drain` 改完 `running` 后
+        //    `ctx.notify()` 模型，这里在 `true → false` 那次重扫一次规则目录。
+        //    用 `observe_in` 而不是 render 检测，是因为它带 `&mut Window`，刷新
+        //    下拉框不必退回渲染期副作用。
+        cx.observe_in(&model, window, |this, model, window, cx| {
+            let running = model.read(cx).sources_state.running;
+            if this.last_health_running && !running {
+                this.sync_rule_files(window, cx);
+            }
+            this.last_health_running = running;
+        })
+        .detach();
+
+        let mut page = Self {
             model,
             filter_input,
             rule_file_select,
             list_state,
             current_page: 0,
             last_seen_placeholder: initial_placeholder,
+            last_rule_files: None,
+            last_active_file: None,
+            last_health_running: false,
+        };
+        // 构造期是首个"能保证用户一进页面就看到正确选项"的非渲染点。
+        page.sync_rule_files(window, cx);
+        page
+    }
+
+    /// 把 `rules_dir` 下的规则文件名同步进下拉框，快照没变就完全跳过。
+    ///
+    /// 只在真正会改变规则目录 / 活跃文件的事件点调用（构造、导入、健康检查完成、
+    /// 切换活跃文件）。`set_items` / `set_selected_index` 内都会 `cx.notify()`，
+    /// 放在 render 里会"通知 → 再排一帧 → 再读盘"自激，并把用户滚动位置拽回选中项。
+    fn sync_rule_files(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let (rules_dir, active_file) = {
+            let model = self.model.read(cx);
+            (
+                model.paths.rules_dir.clone(),
+                model.sources_config.active_file.clone(),
+            )
+        };
+        let files = list_rule_files(&rules_dir);
+        let files_changed = self.last_rule_files.as_deref() != Some(files.as_slice());
+        let active_changed = self.last_active_file.as_deref() != Some(active_file.as_str());
+        if !files_changed && !active_changed {
+            return;
         }
+        self.last_rule_files = Some(files.clone());
+        self.last_active_file = Some(active_file.clone());
+
+        let items: SearchableVec<String> = files.into();
+        let pos = <SearchableVec<String> as gpui_kit::component::select::SelectDelegate>::position(
+            &items,
+            &active_file,
+        );
+        self.rule_file_select.update(cx, |state, cx| {
+            state.set_items(items, window, cx);
+            if let Some(p) = pos {
+                state.set_selected_index(Some(p), window, cx);
+            }
+        });
     }
 
     /// 调 `rfd` 文件选择器选 JSON 文件，调 `add_sources_from_file`。
-    fn pick_and_add(&self, cx: &Context<Self>) {
-        let model = self.model.clone();
+    ///
+    /// 导入会新写入文件或重载活跃规则，因此完成后要刷新下拉框；异步回调里没有
+    /// `&mut Window`，用 `spawn_in` 拿 `AsyncWindowContext`，在 `update_in` 里
+    /// 一并完成 model 写入与下拉刷新（`update_in` 会提供 window）。
+    fn pick_and_add(window: &Window, cx: &Context<Self>) {
         let page_handle = cx.entity().downgrade();
-        cx.spawn(async move |_weak, async_cx| {
+        cx.spawn_in(window, async move |_weak, async_cx| {
             // 三个标签（对话框标题 + 两个 filter 名字）都走 `t!()` 翻译。
             // `.as_ref()` 把 `SharedString` → `&str`（rfd 的 `add_filter` / `set_title` 要 `&str`）。
             let file = rfd::AsyncFileDialog::new()
@@ -115,10 +189,11 @@ impl SourcesPage {
                 .await;
             if let Some(file) = file {
                 let path = file.path().to_path_buf();
-                let _ = page_handle.update(async_cx, |_page, cx| {
-                    model.update(cx, |m, _cx| {
+                let _ = page_handle.update_in(async_cx, |page, window, cx| {
+                    page.model.update(cx, |m, _cx| {
                         m.add_sources_from_file(&path);
                     });
+                    page.sync_rule_files(window, cx);
                     cx.notify();
                 });
             }
@@ -126,8 +201,11 @@ impl SourcesPage {
         .detach();
     }
 
-    fn run_health_check(&self, cx: &mut Context<Self>) {
+    fn run_health_check(&mut self, cx: &mut Context<Self>) {
         self.model.update(cx, |m, _cx| m.spawn_health_check());
+        // 检查可能在同一轮 drain 里全部完成（还没通知过 running=true）。先把当前
+        // 状态记进快照，observer 才能在之后那次通知里识别 true → false。
+        self.last_health_running = self.model.read(cx).sources_state.running;
         cx.notify();
     }
 
@@ -189,22 +267,7 @@ impl Render for SourcesPage {
         let health = model.sources_state.health.clone();
         let all_rules = model.rules.clone();
         let current_status = model.sources_state.filter_status;
-        let active_file = model.sources_config.active_file.clone();
-        let rules_dir = model.paths.rules_dir.clone();
         let _ = model;
-
-        let rule_files = list_rule_files(&rules_dir);
-        let items: SearchableVec<String> = rule_files.into();
-        let sel = active_file;
-        let pos = <SearchableVec<String> as gpui_kit::component::select::SelectDelegate>::position(
-            &items, &sel,
-        );
-        self.rule_file_select.update(cx, |state, cx| {
-            state.set_items(items, window, cx);
-            if let Some(p) = pos {
-                state.set_selected_index(Some(p), window, cx);
-            }
-        });
 
         let filtered = self
             .model
@@ -245,8 +308,8 @@ impl Render for SourcesPage {
                         Button::new("add-source")
                             .icon(Icon::new(IconName::Plus))
                             .label(t!("Sources.action.add"))
-                            .on_click(cx.listener(|this, _, _window, cx| {
-                                this.pick_and_add(cx);
+                            .on_click(cx.listener(|_this, _, window, cx| {
+                                Self::pick_and_add(window, cx);
                             })),
                     )
                     .action(

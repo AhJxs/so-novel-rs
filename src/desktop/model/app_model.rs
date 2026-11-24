@@ -20,41 +20,43 @@ use crate::library::LibraryStore;
 use crate::models::{DownloadTaskRecord, Rule};
 
 /// 应用整体状态。UI 中立 —— 不依赖任何 GUI 框架, 由 `desktop` 层渲染。
+///
+/// 字段都是 `pub(crate)`：它们是界面之间共享的运行时状态，不是对外承诺的 API。读写约定
+/// 是「页面只读、`ops` 层改」—— 所有会落盘或触发后台任务的改动都走
+/// [`super::ops`] 里的事务函数，不要在页面里就地赋值。
 pub struct AppModel {
     /// 配置与数据文件路径。
-    pub paths: ConfigPaths,
+    pub(crate) paths: ConfigPaths,
     /// 已加载的应用配置。
-    pub config: AppConfig,
+    pub(crate) config: AppConfig,
     /// 当前活跃的书源规则；派发的 `Source` 与本列表共享同一批 `Arc`。
-    pub rules: Vec<Arc<Rule>>,
+    pub(crate) rules: Vec<Arc<Rule>>,
     /// 书源加载失败的原因；成功时为 `None`。
-    pub rule_load_error: Option<String>,
-    /// 配置读取失败的原因；成功时为 `None`。
-    pub config_load_error: Option<String>,
+    pub(crate) rule_load_error: Option<String>,
 
     /// 书源配置：活跃文件选择 + 禁用列表。
-    pub sources_config: SourcesConfig,
+    pub(crate) sources_config: SourcesConfig,
     /// 运行数据存储（书架 / 下载任务 / 书源选择）。
-    pub state: StateStore,
+    pub(crate) state: StateStore,
     /// 后台抓取共用的 Tokio 运行时。
-    pub runtime: &'static Runtime,
+    pub(crate) runtime: &'static Runtime,
 
     /// 共享 HTTP client 集合。复用连接池 + TLS session cache; 改 proxy / `unsafe_ssl` 时
     /// `HttpClients::rebuild_proxy` 整体替换实例。后台任务在 `spawn` 前用
     /// `HttpClients::for_rule` 取出 owned `reqwest::Client`, 不持有本字段的引用。
-    pub http: HttpClients,
+    pub(crate) http: HttpClients,
 
     /// 最近一次系统代理探测结果（设置页展示用）。
     ///
     /// 启动时探一次，之后由 [`Self::refresh_system_proxy`] 在「改代理模式」和「进入设置页」
     /// 两处刷新 —— 不做后台轮询，用户在 Clash 里改完要下次触发才生效。
-    pub system_proxy: SystemProxy,
+    pub(crate) system_proxy: SystemProxy,
 
     /// 搜索页状态。
-    pub search: SearchState,
+    pub(crate) search: SearchState,
 
     /// 活动 / 已完成的下载任务。最新加在末尾。
-    pub tasks: Vec<DownloadTask>,
+    pub(crate) tasks: Vec<DownloadTask>,
     pub(super) next_task_id: u64,
     /// 加载时 `state:tasks` 解析失败（原文已备份）：本次运行不再覆盖写。
     pub(super) tasks_readonly: bool,
@@ -66,20 +68,20 @@ pub struct AppModel {
     pub(super) sources_readonly_warned: bool,
 
     /// 下载文件库页状态。
-    pub library: LibraryState,
+    pub(crate) library: LibraryState,
 
     /// 书源管理页状态（连通性检测结果）。
-    pub sources_state: SourcesState,
+    pub(crate) sources_state: SourcesState,
     /// 版本更新检查状态。
-    pub update_state: UpdateState,
+    pub(crate) update_state: UpdateState,
 
     /// 业务层 → UI 层的 [`UIEvent`] 队列, 由 `RootView::render` 排空并翻译成 notification。
     pub(crate) pending_ui_events: Vec<UIEvent>,
 
     /// 各列表的渲染缓存。
-    pub list_cache: ListCache,
+    pub(crate) list_cache: ListCache,
     /// 后台线程唤醒 UI 的句柄。
-    pub wakeup: WakeupHandle,
+    pub(crate) wakeup: WakeupHandle,
 }
 
 impl AppModel {
@@ -168,7 +170,6 @@ impl AppModel {
             config,
             rules,
             rule_load_error: None,
-            config_load_error: None,
             sources_config,
             state,
             runtime,

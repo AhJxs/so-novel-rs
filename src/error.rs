@@ -178,7 +178,7 @@ impl From<anyhow::Error> for AppError {
     }
 }
 
-// 领域错误归一 —— 让 `?` 跨域自动透传。`SearchError` 内含 Book/Toc/Chapter 子域错误，
+// 领域错误归一 —— 让 `?` 跨域自动透传。`SearchError` 内含 BookDetail/Toc/Chapter 子域错误，
 // 统一归一为 `AppError::Internal`，由边界层决定怎么渲染 (toast / log / HTTP status)。
 impl From<crate::parser::SearchError> for AppError {
     fn from(e: crate::parser::SearchError) -> Self {

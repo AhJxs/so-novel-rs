@@ -14,7 +14,7 @@ use crate::crawler::cover_updater;
 use crate::http::{
     FetchRequest, HttpMethod, absolute_url, fetch, fetch_via_cf_bypass, has_cloudflare,
 };
-use crate::models::{Book, Rule};
+use crate::models::{BookDetail, Rule};
 use crate::parser::dom::{SelectError, select_and_invoke_js};
 
 /// 详情页抓取 / 解析错误。
@@ -74,7 +74,7 @@ pub async fn parse_book_detail(
     url: &str,
     cf_bypass_base: Option<&str>,
     qidian_cookie: Option<&str>,
-) -> Result<Book, BookError> {
+) -> Result<BookDetail, BookError> {
     let started = Instant::now();
     let book_rule = rule.book.as_ref().ok_or(BookError::BookRuleMissing)?;
 
@@ -139,7 +139,7 @@ pub async fn parse_book_detail(
     Ok(book)
 }
 
-/// 仅做 HTML → Book 的解析, 不抓网络。便于离线测试。
+/// 仅做 HTML → `BookDetail` 的解析, 不抓网络。便于离线测试。
 ///
 /// # Examples
 ///
@@ -152,7 +152,7 @@ pub async fn parse_book_detail(
 /// - `BookError::BookRuleMissing` — 规则没有 `book` 段
 /// - `BookError::MissingTitleOrAuthor` — 详情页核心字段空
 /// - `BookError::Selector` — 选择器/JS 执行失败
-pub fn parse_book_html(html: &str, base_url: &str, rule: &Rule) -> Result<Book, BookError> {
+pub fn parse_book_html(html: &str, base_url: &str, rule: &Rule) -> Result<BookDetail, BookError> {
     let book_rule = rule.book.as_ref().ok_or(BookError::BookRuleMissing)?;
     let document = Html::parse_document(html);
 
@@ -200,7 +200,7 @@ pub fn parse_book_html(html: &str, base_url: &str, rule: &Rule) -> Result<Book, 
     )?;
     let cover_url = cover::extract_cover_url(raw_cover, base_url);
 
-    Ok(Book {
+    Ok(BookDetail {
         url: base_url.to_string(),
         book_name,
         author,

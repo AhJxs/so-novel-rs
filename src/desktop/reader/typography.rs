@@ -3,12 +3,11 @@
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::select::Select;
 use gpui_kit::component::switch::Switch;
-use gpui_kit::component::{ActiveTheme as _, IconName};
+use gpui_kit::component::{ActiveTheme as _, IconName, Selectable as _, WindowExt as _};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, App, ClickEvent, Context, Div, ElementId, FontWeight, InteractiveElement as _,
-    IntoElement, MouseButton, ParentElement, StatefulInteractiveElement as _, Styled, div, px,
-    relative,
+    IntoElement, ParentElement, Styled, Window, div, px, rems,
 };
 use rust_i18n::t;
 
@@ -108,8 +107,62 @@ impl Field {
 }
 
 impl ReaderPage {
-    /// 居中的「阅读设置」弹窗：每次改动即时生效，关闭时才落盘。
-    pub(super) fn render_typography(&self, cx: &Context<Self>) -> AnyElement {
+    /// 打开「阅读设置」对话框。
+    ///
+    /// 走组件库的真模态：遮罩、焦点陷阱、Esc 关闭都由 `Dialog` 负责，关闭后
+    /// 组件库还会把焦点还给「打开前聚焦的句柄」。所以这里先把焦点落到工具栏的
+    /// 设置按钮上，关闭时才会回到按钮而不是正文。
+    pub(super) fn open_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.typography_open {
+            return;
+        }
+        // 设置与其它抽屉互斥；先把目录 / 搜索 / 书签收掉（它们会各自归还焦点）。
+        self.close_drawers(window, cx);
+        self.ensure_font_select(window, cx);
+        self.typography_open = true;
+        window.focus(&self.settings_focus, cx);
+        let page = cx.entity();
+        window.open_dialog(cx, move |dialog, window, cx| {
+            // builder 每帧重跑：从实体现读状态，改一项设置立刻重画。
+            let body = page.update(cx, |this, cx| this.render_settings_body(cx));
+            let page = page.clone();
+            // `Dialog::w/.h` 只收 `Pixels`（没有 `From<Rems>`），显式按 rem 基准折算，
+            // 让弹窗跟着字号缩放（560×640 @ 16px 基准）。
+            dialog
+                .title(t!("Reader.settings.title").to_string())
+                .w(rems(35.0).to_pixels(window.rem_size()))
+                .h(rems(40.0).to_pixels(window.rem_size()))
+                // 保留原来的关闭语义：只由右上角 ✕ 或 Esc 关闭。设置是实时生效的，
+                // 误点遮罩也会直接关掉面板，这里不让遮罩接管关闭。
+                .overlay_closable(false)
+                // Esc 与右上角 ✕ 都走 Cancel 路径，最后落到 on_close：
+                // 关闭时才把设置写回 config.toml（步进过程中不刷盘）。
+                .on_close(move |_event, _window, cx| {
+                    page.update(cx, Self::settings_dialog_closed);
+                })
+                .child(body)
+        });
+        cx.notify();
+    }
+
+    /// 对话框已经自行关闭（Esc / 右上角 ✕）后的收尾。
+    ///
+    /// 必须和 `close_settings` 分开：这里不能再调 `window.close_dialog`，
+    /// 否则会把正在走的关闭流程再关一次。
+    fn settings_dialog_closed(&mut self, cx: &mut Context<Self>) {
+        if !self.typography_open {
+            return;
+        }
+        self.typography_open = false;
+        self.persist_settings(cx);
+        cx.notify();
+    }
+
+    /// 对话框主体：预览、主题、字体、排版、TXT 编码。
+    ///
+    /// 高度由 `Dialog` 的 `.h(rems(40.0))` 决定，纵向滚动由组件库的 children
+    /// 容器负责；这里保持自然高度，不能再套一层 `overflow_y_scroll`。
+    fn render_settings_body(&self, cx: &Context<Self>) -> AnyElement {
         let reader = self.reader_config(cx);
         let colors = reader_colors(reader.theme, cx);
         // 预览按「当前设置排一行字」，改字号 / 行距 / 缩进都立刻看得见。
@@ -139,11 +192,6 @@ impl ReaderPage {
 
         let mut body = div()
             .id("reader-settings-body")
-            .flex_1()
-            .min_h_0()
-            .overflow_y_scroll()
-            .px_5()
-            .py_4()
             .flex()
             .flex_col()
             .gap_4()
@@ -159,80 +207,7 @@ impl ReaderPage {
                 .child(divider(cx))
                 .child(self.render_encoding_section(cx));
         }
-
-        let card = div()
-            .id("reader-settings-card")
-            .w(px(560.0))
-            .h(px(640.0))
-            .max_h(relative(0.9))
-            .rounded_lg()
-            .border_1()
-            .border_color(cx.theme().border)
-            .bg(cx.theme().background)
-            .text_color(cx.theme().foreground)
-            .shadow_lg()
-            .overflow_hidden()
-            .flex()
-            .flex_col()
-            .occlude()
-            // 卡片内部的点击不要冒泡到遮罩层，否则改设置会顺手关掉弹窗。
-            .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
-                cx.stop_propagation();
-            })
-            .on_click(|_event: &ClickEvent, _window, cx| {
-                cx.stop_propagation();
-            })
-            // 滚轮只作用于弹窗：遮罩下的正文滚轮监听不能同时被触发。
-            .on_scroll(|_event, _window, cx| {
-                cx.stop_propagation();
-            })
-            .child(
-                div()
-                    .flex()
-                    .flex_row()
-                    .items_center()
-                    .justify_between()
-                    .gap_2()
-                    .px_5()
-                    .h(px(56.0))
-                    .flex_none()
-                    .border_b_1()
-                    .border_color(cx.theme().border)
-                    .child(
-                        div()
-                            .text_base()
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .child(t!("Reader.settings.title").to_string()),
-                    )
-                    .child(
-                        Button::new("reader-settings-close")
-                            .ghost()
-                            .compact()
-                            .icon(IconName::Close)
-                            .tooltip(t!("Reader.action.close").to_string())
-                            .on_click(cx.listener(|this, _event, _window, cx| {
-                                this.close_settings(cx);
-                            })),
-                    ),
-            )
-            .child(body);
-
-        div()
-            .id("reader-settings-backdrop")
-            .absolute()
-            .inset_0()
-            .flex()
-            .items_center()
-            .justify_center()
-            .bg(cx.theme().overlay)
-            // 遮罩挡住下面阅读器的 hitbox，滚轮 / 悬停不再落到正文上。
-            .occlude()
-            .on_scroll(|_event, _window, cx| {
-                cx.stop_propagation();
-            })
-            // 只由右上角 ✕ 或 Esc 关闭：遮罩不接管点击，免得卡片里点一下就把弹窗关掉。
-            .child(card)
-            .into_any_element()
+        body.into_any_element()
     }
 
     /// 主题色卡：每张卡直接用该主题的纸面 / 文字上色，选中的描主色边。
@@ -241,31 +216,37 @@ impl ReaderPage {
         for theme in THEMES {
             let colors = reader_colors(theme, cx);
             let selected = theme == current;
-            let swatch = div()
-                .id(ElementId::Name(
-                    format!("reader-theme-{}", theme.as_str()).into(),
-                ))
-                .h(px(44.0))
-                .w_full()
-                .rounded_md()
-                .border_2()
-                .border_color(if selected {
-                    cx.theme().primary
-                } else {
-                    cx.theme().border
-                })
-                .bg(colors.background)
-                .flex()
-                .items_center()
-                .justify_center()
-                .cursor_pointer()
-                .text_sm()
-                .font_weight(FontWeight::SEMIBOLD)
-                .text_color(colors.foreground)
-                .child("Aa")
-                .on_click(cx.listener(move |this, _event: &ClickEvent, _window, cx| {
-                    this.update_reader_config(move |reader| reader.theme = theme, cx);
-                }));
+            // 用 Button 承载色块：保留原来的纸面 / 文字绘制，同时获得焦点环、
+            // Tab 停靠、Enter / Space 激活，以及 `selected` 的可访问选中语义。
+            let swatch = Button::new(ElementId::Name(
+                format!("reader-theme-{}", theme.as_str()).into(),
+            ))
+            .ghost()
+            .selected(selected)
+            .w_full()
+            .h_11()
+            // 按钮自带的 padding / 最小宽会撑出色块，这里全部交给色块自己画。
+            .p_0()
+            .rounded_md()
+            .border_2()
+            .border_color(if selected {
+                cx.theme().primary
+            } else {
+                cx.theme().border
+            })
+            .bg(colors.background)
+            .flex()
+            .items_center()
+            .justify_center()
+            .cursor_pointer()
+            .text_sm()
+            .font_weight(FontWeight::SEMIBOLD)
+            .text_color(colors.foreground)
+            .accessibility_label(t!(theme.label_key()).to_string())
+            .child("Aa")
+            .on_click(cx.listener(move |this, _event: &ClickEvent, _window, cx| {
+                this.update_reader_config(move |reader| reader.theme = theme, cx);
+            }));
             row = row.child(
                 div()
                     .flex_1()

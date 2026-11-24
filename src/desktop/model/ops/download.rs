@@ -8,7 +8,7 @@ use tokio::sync::mpsc;
 use tracing::Instrument;
 
 use super::super::events::WakeupHandle;
-use super::super::search_state::TocEvent;
+use super::super::toc::TocEvent;
 use super::super::trace::{TraceId, sub};
 use crate::config::AppConfig;
 use crate::core::DownloadTask;
@@ -16,9 +16,9 @@ use crate::crawler::{
     CancelToken, CrawlerError, DownloadOptions, Progress, ResolvedBook, download_book,
     download_chapters, resolve_book,
 };
-use crate::desktop::model::search_state::TocState;
+use crate::desktop::model::toc::TocState;
 use crate::http::HttpClients;
-use crate::models::{Book, Chapter, Rule, SearchResult, Source};
+use crate::models::{BookDetail, Chapter, Rule, SearchResult, Source};
 use crate::utils::time::now_unix_secs;
 
 /// spawn 共享上下文: 提取 `rules` / `config` / `http` / `runtime`,
@@ -149,7 +149,7 @@ pub fn spawn_download_range(
     ctx: &OpsContext<'_>,
     next_task_id: u64,
     target: SearchResult,
-    book: Book,
+    book: BookDetail,
     chapters: Vec<Chapter>,
 ) -> (u64, DownloadTask) {
     let id = next_task_id;
@@ -167,7 +167,7 @@ pub fn spawn_download_range(
     let tx_for_task = tx.clone();
 
     let total = chapters.len();
-    // 书籍元信息在进度事件、任务字段与下载流程之间共享同一份 `Arc<Book>`。
+    // 书籍元信息在进度事件、任务字段与下载流程之间共享同一份 `Arc<BookDetail>`。
     let book = Arc::new(book);
     let book_for_meta = Arc::clone(&book);
     let _ = tx_for_task.send(Progress::BookResolved {

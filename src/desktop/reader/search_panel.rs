@@ -13,7 +13,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, App, Context, FontWeight, HighlightStyle, InteractiveElement as _, IntoElement,
     ParentElement, StatefulInteractiveElement as _, Styled, StyledText, UniformListScrollHandle,
-    div, px, uniform_list,
+    div, px, rems, uniform_list,
 };
 use rust_i18n::t;
 use smol::channel;
@@ -31,9 +31,9 @@ pub(super) const SEARCH_WIDTH: f32 = 320.0;
 /// 后台扫描每累计多少章回送一批；整批只触发一次重绘。
 const BATCH_CHAPTERS: usize = 32;
 
-/// 结果列表的固定行高（px）。`uniform_list` 要求所有行等高，所以分组标题与命中
-/// 共用这一高度：标题压成「标题 · 数量」一行，命中压成一行截断片段。
-const ROW_HEIGHT: f32 = 32.0;
+/// 结果列表的固定行高（rem；32px @ 16px 基准）。`uniform_list` 要求所有行等高，
+/// 所以分组标题与命中共用这一高度：标题压成「标题 · 数量」一行，命中压成一行截断片段。
+const ROW_HEIGHT: f32 = 32.0 / 16.0;
 
 /// 结果列表的一行：只存下标，不复制任何标题 / 片段字符串。
 #[derive(Clone, Copy)]
@@ -429,7 +429,7 @@ impl ReaderPage {
                             let group = &groups[group];
                             div()
                                 .w_full()
-                                .h(px(ROW_HEIGHT))
+                                .h(rems(ROW_HEIGHT))
                                 .flex()
                                 .items_center()
                                 .px_2()
@@ -466,7 +466,7 @@ impl ReaderPage {
                             div()
                                 .id(("reader-search-row", slot))
                                 .w_full()
-                                .h(px(ROW_HEIGHT))
+                                .h(rems(ROW_HEIGHT))
                                 .flex()
                                 .items_center()
                                 .px_2()
@@ -495,12 +495,14 @@ impl ReaderPage {
         .w_full()
         .track_scroll(&self.search.scroll);
 
+        // 滚动条必须和真正的滚动区同尺寸：`vertical_scrollbar` 的 ScrollbarLayer 按
+        // 被调用元素的盒子定位。容器不再加 padding（每行已有 `px_2` 留白），否则滚动条
+        // 会比 `uniform_list` 高出一截并向内缩。
         let results = div()
             .id("reader-search-results")
             .flex_1()
             .min_h_0()
             .relative()
-            .p_2()
             .flex()
             .flex_col()
             .child(list)

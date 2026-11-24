@@ -1,5 +1,5 @@
 //! `rust_i18n` 的 `t!` 宏是**唯一**翻译入口（`gpui_kit::component` 同款机制），调用方写字符串
-//! 字面量 key：`t!("Settings.item.theme")`。翻译表在 `locales/app.yml`（编译期嵌入，YAML
+//! 字面量 key：`t!("Settings.general.item.theme_kind")`。翻译表在 `locales/app.yml`（编译期嵌入，YAML
 //! 顶层大写），带变量用官方 args：`t!("K", name = v)`（yaml 侧写 `%{name}`）。
 //!
 //! 与组件库**共享全局 locale**：两套 i18n 实例各管各的 key 表，但 `set_locale` 写的是同一个
@@ -363,6 +363,63 @@ mod tests {
     fn reader_translated_in_all_three_locales() {
         for &key in READER_KEYS {
             for locale in ["en", "zh-CN", "zh-TW"] {
+                let v = rust_i18n::t!(key, locale = locale);
+                assert!(!v.is_empty(), "{key} 在 locale={locale} 翻译为空字符串");
+                assert_ne!(
+                    v.as_ref(),
+                    key,
+                    "{key} 在 locale={locale} 缺失（返回 key 本身）"
+                );
+            }
+        }
+    }
+
+    /// 把 `locales/app.yml` 里**每一个**叶子 key 都过一遍三语翻译。
+    ///
+    /// 上面那些 `*_KEYS` 清单管的是「代码用到 → 表里必须有」；这条管反方向「表里有 → 必须
+    /// 取得到」。重组命名空间时的漏搬、重复 key 覆盖、某个语言分支漏填，手工清单都抓不到。
+    ///
+    /// 解析故意手写：只认 `en` / `zh-CN` / `zh-TW` 三个语言标签作为叶子，其余以 `:` 结尾的行
+    /// 都算容器。不引 YAML 依赖，也不怕值里带 `: `。
+    #[test]
+    fn every_leaf_key_in_app_yml_resolves_in_all_locales() {
+        const LOCALES: [&str; 3] = ["en", "zh-CN", "zh-TW"];
+        const YAML: &str = include_str!("../locales/app.yml");
+
+        let mut stack: Vec<(usize, String)> = Vec::new();
+        let mut keys = Vec::new();
+        for line in YAML.lines() {
+            let trimmed = line.trim_end();
+            let Some((label, _)) = trimmed.trim().split_once(':') else {
+                continue;
+            };
+            let indent = trimmed.len() - trimmed.trim_start().len();
+            if LOCALES.contains(&label) {
+                keys.push(
+                    stack
+                        .iter()
+                        .map(|(_, name)| name.as_str())
+                        .collect::<Vec<_>>()
+                        .join("."),
+                );
+                continue;
+            }
+            while stack.last().is_some_and(|(depth, _)| *depth >= indent) {
+                stack.pop();
+            }
+            if trimmed.trim().ends_with(':') {
+                stack.push((indent, label.to_owned()));
+            }
+        }
+        assert!(
+            keys.len() > 500,
+            "只解析出 {} 个 key，解析器坏了",
+            keys.len()
+        );
+
+        for key in &keys {
+            let key = key.as_str();
+            for locale in LOCALES {
                 let v = rust_i18n::t!(key, locale = locale);
                 assert!(!v.is_empty(), "{key} 在 locale={locale} 翻译为空字符串");
                 assert_ne!(

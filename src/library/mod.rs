@@ -11,8 +11,8 @@ pub mod scan;
 pub mod store;
 
 pub use book::{
-    Book, BookFormat, BookOrigin, Bookmark, ReadingProgress, ShelfStatus, absolute_dir, hash64,
-    id_for_key, mtime_secs, normalize_path_key, now_unix,
+    BookFormat, BookOrigin, Bookmark, ReadingProgress, ShelfBook, ShelfStatus, absolute_dir,
+    hash64, id_for_key, mtime_secs, normalize_path_key, now_unix,
 };
 pub use cover::{
     cover_file_name, cover_palette, remove_cover_file, rename_cover_for_relink, write_cover,

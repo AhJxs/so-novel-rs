@@ -1,8 +1,8 @@
-//! 与格式无关的书稿模型：加载器产出它，转换流程再把它投影成导出层 `Book`。
+//! 与格式无关的书稿模型：加载器产出它，转换流程再把它投影成导出层 `BookDetail`。
 
 use std::path::Path;
 
-use crate::models::Book;
+use crate::models::BookDetail;
 
 /// 从本地文件加载出的书稿。
 #[derive(Debug, Clone, Default)]
@@ -27,14 +27,14 @@ pub struct SourceChapter {
 }
 
 impl SourceBook {
-    /// 投影成导出层 `Book`；`source` 只用于缺书名时回退文件名。
+    /// 投影成导出层 `BookDetail`；`source` 只用于缺书名时回退文件名。
     #[must_use]
-    pub fn to_book(&self, source: &Path) -> Book {
+    pub fn to_book(&self, source: &Path) -> BookDetail {
         let fallback = source
             .file_stem()
             .and_then(|s| s.to_str())
             .unwrap_or("未命名");
-        Book {
+        BookDetail {
             book_name: if self.title.trim().is_empty() {
                 fallback.to_string()
             } else {
@@ -51,7 +51,7 @@ impl SourceBook {
             } else {
                 self.language.clone()
             },
-            ..Book::default()
+            ..BookDetail::default()
         }
     }
 }

@@ -3,6 +3,7 @@
 //! - `RootView` 是应用内容视图（`TitleBar` + Sidebar + 内容区）; dialog / sheet /
 //!   notification 覆盖层由 `gpui_kit::open_window` 包出的 `Root` 上挂的 `RootPlugin` 渲染。
 //! - 页面在 `pages/`, 共享组件在 `components/`, 后台通道 → UI 重绘走 `drain_loop`。
+//! - 阅读器是覆盖式视图，单独放在 `reader/`，不属于 `pages/`。
 //!
 //! 本模块仅依赖 gpui-kit + 业务模块（`crate::desktop::model`）。
 
@@ -21,6 +22,7 @@ pub mod model;
 mod nav;
 mod notifications;
 mod pages;
+pub mod reader;
 mod root;
 mod run;
 pub mod themes;

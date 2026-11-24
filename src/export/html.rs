@@ -13,7 +13,7 @@ use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipWriter};
 
 use crate::export::exporter::{ExportError, Exporter, RenderedChapter, unique_path};
-use crate::models::Book;
+use crate::models::BookDetail;
 use crate::utils::fs;
 
 /// 把章节打包成单文件 HTML (zip)。
@@ -26,7 +26,7 @@ impl Exporter for HtmlExporter {
 
     fn merge_with_progress(
         &self,
-        book: &Book,
+        book: &BookDetail,
         chapters: &[RenderedChapter],
         out_dir: &Path,
         _cover_bytes: Option<&[u8]>,
@@ -90,12 +90,12 @@ mod tests {
     use crate::config::ExportFormat;
     use crate::export::exporter::{RenderedChapter, write_chapter_files};
 
-    fn sample_book() -> Book {
-        Book {
+    fn sample_book() -> BookDetail {
+        BookDetail {
             url: "https://x/".into(),
             book_name: "起航".into(),
             author: "苹果".into(),
-            ..Book::default()
+            ..BookDetail::default()
         }
     }
 
@@ -115,7 +115,7 @@ mod tests {
         ]
     }
 
-    fn load_and_merge(book: &Book, dir: &Path, out: &Path) -> PathBuf {
+    fn load_and_merge(book: &BookDetail, dir: &Path, out: &Path) -> PathBuf {
         let chapters = crate::export::load_chapter_files(dir, ExportFormat::Html).unwrap();
         HtmlExporter.merge(book, &chapters, out).unwrap()
     }

@@ -1,6 +1,6 @@
 //! 阶段一: 详情 + 目录解析
 //!
-//! 返回 `(Book, Vec<Chapter>)`, 供 UI 层展示章节列表、让用户选择范围后再调 [`super::download::download_chapters`]。
+//! 返回 `(BookDetail, Vec<Chapter>)`, 供 UI 层展示章节列表、让用户选择范围后再调 [`super::download::download_chapters`]。
 //! 详情 + 目录都包重试 (`retry_with_backoff`), 一次瞬态 HTTP 抖动不应让整本下载失败。
 
 use std::time::Duration;
@@ -11,7 +11,7 @@ use thiserror::Error;
 use super::download_options::CancelToken;
 use super::retry::retry_with_backoff;
 use crate::config::AppConfig;
-use crate::models::{Book, Chapter, Rule, Source};
+use crate::models::{BookDetail, Chapter, Rule, Source};
 use crate::parser::{BookError, SelectError, TocError, parse_book_detail, parse_toc};
 use crate::utils::zhconv::convert_book_meta_in_place;
 
@@ -35,7 +35,7 @@ use crate::utils::zhconv::convert_book_meta_in_place;
 pub enum CrawlerError {
     /// 详情页解析失败 (HTTP / CF / Parse / Selector 4 子类)。
     #[error("详情页解析失败: {0}")]
-    Book(#[from] BookError),
+    BookDetail(#[from] BookError),
     /// 目录解析失败 (HTTP / CF / Parse / Selector 4 子类)。
     #[error("目录解析失败: {0}")]
     Toc(#[from] TocError),
@@ -62,7 +62,7 @@ pub enum CrawlerError {
 /// 阶段一结果：书籍元信息 + 目录章节列表。
 pub struct ResolvedBook {
     /// 详情页解析并完成简繁转换的书籍元信息。
-    pub book: Book,
+    pub book: BookDetail,
     /// 目录解析出的章节列表。
     pub chapters: Vec<Chapter>,
 }
@@ -78,7 +78,7 @@ pub struct ResolvedBook {
 ///
 /// # Errors
 ///
-/// `CrawlerError::Book` — 详情页解析失败 (含重试后仍失败); `CrawlerError::Toc` — 目录解析失败;
+/// `CrawlerError::BookDetail` — 详情页解析失败 (含重试后仍失败); `CrawlerError::Toc` — 目录解析失败;
 /// `CrawlerError::Cancelled` — 取消令牌触发。
 #[tracing::instrument(
     name = "resolve_book",
@@ -134,7 +134,7 @@ pub async fn resolve_book(
         },
     )
     .await
-    .map_err(CrawlerError::Book)?;
+    .map_err(CrawlerError::BookDetail)?;
 
     if cancel.is_cancelled() {
         return Err(CrawlerError::Cancelled);

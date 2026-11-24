@@ -3,10 +3,12 @@
 //! 模块划分：`desktop`（GPUI 入口 + 业务 model + 渲染/主题/导航/通知）；`db` / `crawler` /
 //! `config` / `models` / `parser` / `export` / `http` / `js` / `utils` / `core` 为与
 //! GUI 解耦的业务 + 数据层。
-//! 工程规约：仓库禁止 `unsafe`（确需启用须先过 RFC）；重要 public fn 必带
-//! `#[tracing::instrument]` + `# Errors` + `# Examples`；struct/enum 顶层 doc 由模块 `//!`
-//! 承担、字段级 docs 不强制（serde-derived 字段与 JSON 一一对应，加 `///` 是噪声）；
-//! 领域错误经 `From` 归一到 `crate::error::AppError`，仅 `main.rs` 可用 `anyhow`。
+//! 工程规约：仓库禁止 `unsafe`（确需启用须先过 RFC）；**每个 `pub` 条目都要有 doc
+//! 注释**（类型本身的语义写在类型上，字段只在字段名不足以表达单位/取值/不变量时补
+//! `///`）；返回 `Result` 的公开函数写 `# Errors`（何时返回什么），不一定手写
+//! `# Examples`——只有调用方式不显然时才写；`#[tracing::instrument]` 用在会做 IO /
+//! 网络 / 长耗时的边界函数上，不是所有 public fn 的仪式；领域错误经 `From` 归一到
+//! `crate::error::AppError`，仅 `main.rs` 可用 `anyhow`。
 
 // ---------------------------------------------------------------------------
 // lint 配置（自 Cargo.toml [lints.*] 迁入，便于统一管理）

@@ -15,7 +15,7 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::{
     AnyElement, AppContext, ClickEvent, Context, Div, Entity, FocusHandle, FontWeight,
     InteractiveElement, IntoElement, MouseButton, ParentElement, Render, StyleRefinement, Styled,
-    Window, div, px,
+    Window, div, px, rems,
 };
 use rust_i18n::t;
 
@@ -23,10 +23,10 @@ use super::logo::render_logo;
 use super::nav::{KEY_CONTEXT, NavPage};
 use super::notifications::ui_event_to_notification;
 use crate::desktop::model::AppModel;
-use crate::desktop::pages::reader::{CloseReaderFn, ImmersiveFn};
 use crate::desktop::pages::{
-    LibraryPage, ReaderPage, SearchPage, SettingsPage, SourcesPage, TasksPage, ToolsPage,
+    LibraryPage, SearchPage, SettingsPage, SourcesPage, TasksPage, ToolsPage,
 };
+use crate::desktop::reader::{CloseReaderFn, ImmersiveFn, ReaderPage};
 use crate::desktop::{
     NextPage, PrevPage, ShowLibrary, ShowSearch, ShowSettings, ShowSources, ShowTasks, ShowTools,
     ToggleSidebar,
@@ -350,7 +350,7 @@ impl RootView {
             });
 
         Sidebar::new("app-sidebar")
-            .w(px(220.0))
+            .w(rems(220.0 / 16.0))
             .collapsible(true)
             .collapsed(collapsed)
             .border_color(cx.theme().border)

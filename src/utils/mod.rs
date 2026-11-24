@@ -5,7 +5,7 @@
 //! （unix 时间戳）、`zhconv`（简繁转换）。
 //!
 //! 边界：HTTP / 编码 / i18n **不**下沉到这里；唯一例外是 `zhconv::convert_book_meta`
-//! 收 `Book` 入参，但只读字段。
+//! 收 `BookDetail` 入参，但只读字段。
 
 pub mod formatting;
 pub mod fs;

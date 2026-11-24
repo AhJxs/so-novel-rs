@@ -3,7 +3,7 @@
 //! 全部 thin delegator, 实际逻辑在 `crate::desktop::model::ops::download`。
 
 use super::{AppModel, ops};
-use crate::models::{Book, Chapter, SearchResult};
+use crate::models::{BookDetail, Chapter, SearchResult};
 
 impl AppModel {
     /// 派一个新的下载任务。返回新任务 id。
@@ -28,7 +28,7 @@ impl AppModel {
     pub fn spawn_resolve_toc(&mut self, target: &SearchResult) {
         let ctx = self.ops_ctx();
         let rx = ops::spawn_resolve_toc(&ctx, target);
-        self.search.toc_rx = Some(rx);
+        self.search.toc.rx = Some(rx);
     }
 
     /// 派一个指定章节范围的下载任务, 跳过 resolve 阶段直接下载。返回新任务 id。
@@ -36,7 +36,7 @@ impl AppModel {
     pub fn spawn_download_range(
         &mut self,
         target: SearchResult,
-        book: Book,
+        book: BookDetail,
         chapters: Vec<Chapter>,
     ) -> u64 {
         let ctx = self.ops_ctx();

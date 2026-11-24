@@ -1,6 +1,6 @@
 //! 选章下载 Dialog body 渲染 + 起止输入框 clamp 工具。
 //!
-//! 反应式读 `toc_cache[(source_id, url)]`：`Pending` 显示 loading、`Loaded` 显示
+//! 反应式读 `toc.entries[(source_id, url)]`：`Pending` 显示 loading、`Loaded` 显示
 //! 「共 N 章」+ 起止 `NumberInput` + 首尾章名预览、`Failed` 显示错误占位，
 //! 都由 drain loop 每 100ms 重 render 自动推进。就绪判定在 `confirm_range_download`
 //! 那边，这里只渲染。
@@ -29,7 +29,8 @@ pub(super) fn content(
             .model
             .read(cx)
             .search
-            .toc_cache
+            .toc
+            .entries
             .get(&(t.source_id, t.url.clone()))
             .cloned()
     });
@@ -190,7 +191,7 @@ fn chapter_title_display(chapters: &[Chapter], n: usize) -> SharedString {
     }
 }
 
-/// 把输入框原始值规整到 `[1, N]`；N = 当前选章 target 在 `toc_cache` 的 Loaded 章节数，
+/// 把输入框原始值规整到 `[1, N]`；N = 当前选章 target 在 `toc.entries` 的 Loaded 章节数，
 /// 取不到按 `[1, u32::MAX]`。非数字 / 越界 → 1。
 ///
 /// **空字符串返回 0**：sentinel，Change handler 据此识别"用户正在清空输入框，不要重置"。

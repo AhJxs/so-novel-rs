@@ -6,7 +6,7 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 
 use crate::crawler::{CancelToken, Progress};
-use crate::models::{Book, DownloadTaskRecord, FailureRecord, FinishedReason, SearchResult};
+use crate::models::{BookDetail, DownloadTaskRecord, FailureRecord, FinishedReason, SearchResult};
 use crate::utils::time::now_unix_secs;
 
 // `FinishedReason` 定义在 `db::tasks`（JSON schema 跟着持久化层走），业务层直接 use。
@@ -57,7 +57,7 @@ pub struct DownloadTask {
     pub finished_at_unix: Option<i64>,
 
     /// 抓取到的书籍详情；详情页失败时为空。与进度事件共享同一份 `Arc`。
-    pub book_meta: Option<Arc<Book>>,
+    pub book_meta: Option<Arc<BookDetail>>,
     /// 目录解析出的章节总数。
     pub total_chapters: usize,
     /// 已成功下载的章节数。

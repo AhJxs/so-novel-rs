@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use crate::export::exporter::{
     ExportError, Exporter, RenderedChapter, strip_html_tags, unique_path,
 };
-use crate::models::Book;
+use crate::models::BookDetail;
 use crate::utils::fs;
 
 /// 把渲染好的章节合并成单个 Markdown 文件。
@@ -21,7 +21,7 @@ impl Exporter for MdExporter {
 
     fn merge_with_progress(
         &self,
-        book: &Book,
+        book: &BookDetail,
         chapters: &[RenderedChapter],
         out_dir: &Path,
         _cover_bytes: Option<&[u8]>,
@@ -87,15 +87,15 @@ mod tests {
     use crate::export::exporter::{
         ExportError, Exporter, RenderedChapter, exporter_for, write_chapter_files,
     };
-    use crate::models::Book;
+    use crate::models::BookDetail;
 
-    fn sample_book() -> Book {
-        Book {
+    fn sample_book() -> BookDetail {
+        BookDetail {
             url: "https://x/".into(),
             book_name: "起航".into(),
             author: "苹果".into(),
             intro: Some("<p>这是&nbsp;简介</p>".into()),
-            ..Book::default()
+            ..BookDetail::default()
         }
     }
 
@@ -114,7 +114,7 @@ mod tests {
         ]
     }
 
-    fn load_and_merge(book: &Book, dir: &Path, out: &Path) -> PathBuf {
+    fn load_and_merge(book: &BookDetail, dir: &Path, out: &Path) -> PathBuf {
         let chapters = crate::export::load_chapter_files(dir, ExportFormat::Markdown).unwrap();
         MdExporter.merge(book, &chapters, out).unwrap()
     }
@@ -165,11 +165,11 @@ mod tests {
         std::fs::create_dir_all(&chapters).unwrap();
         std::fs::create_dir_all(&out).unwrap();
         write_chapter_files(&chapters, &sample_chapters(), ExportFormat::Markdown).unwrap();
-        let book = Book {
+        let book = BookDetail {
             book_name: "无简介".into(),
             author: "无名".into(),
             intro: None,
-            ..Book::default()
+            ..BookDetail::default()
         };
         let p = load_and_merge(&book, &chapters, &out);
         let s = std::fs::read_to_string(&p).unwrap();

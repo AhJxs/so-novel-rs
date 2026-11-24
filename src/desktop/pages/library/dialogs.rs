@@ -7,7 +7,7 @@ use gpui_kit::component::button::{Button, ButtonVariant, ButtonVariants as _};
 use gpui_kit::component::dialog::AlertDialog;
 use gpui_kit::component::{ActiveTheme as _, WindowExt as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
-use gpui_kit::{App, ClickEvent, Context, Div, ParentElement, Styled, Window, div, px};
+use gpui_kit::{App, ClickEvent, Context, Div, ParentElement, Styled, Window, div, rems};
 use rust_i18n::t;
 
 use super::library_page::LibraryPage;
@@ -29,7 +29,7 @@ impl LibraryPage {
         let missing = book.missing;
         let page = cx.entity();
         let id = book_id.to_string();
-        window.open_dialog(cx, move |dialog, _window, cx| {
+        window.open_dialog(cx, move |dialog, window, cx| {
             let book = book.clone();
             let unknown = t!("Library.info.unknown").to_string();
             let chapters = book
@@ -37,7 +37,9 @@ impl LibraryPage {
                 .map_or_else(|| unknown.clone(), |count| count.to_string());
             dialog
                 .title(t!("Library.info.title").to_string())
-                .w(px(560.))
+                // `Dialog::w` 只收 `Pixels`（没有 `From<Rems>`），所以显式按 rem 基准折算，
+                // 让宽度跟字号一起缩放（= 560px @ 16px 基准）。
+                .w(rems(35.0).to_pixels(window.rem_size()))
                 .child(
                     v_flex()
                         .w_full()
@@ -209,7 +211,7 @@ fn info_row(label: String, value: String, cx: &App) -> Div {
         .gap_2()
         .child(
             div()
-                .w(px(88.))
+                .w(rems(5.5))
                 .flex_none()
                 .text_color(cx.theme().muted_foreground)
                 .child(label),

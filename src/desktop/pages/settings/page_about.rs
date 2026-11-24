@@ -28,11 +28,11 @@ pub(super) fn build(ctx: &PageContext<'_>, _cx: &App) -> SettingPage {
         .default_open(true)
         .groups(vec![
             SettingGroup::new()
-                .title(t!("Settings.group.info"))
+                .title(t!("Settings.about.group.info"))
                 .items(vec![
                     // 版本（静态文本）
                     SettingItem::new(
-                        t!("Settings.item.version"),
+                        t!("Settings.about.item.version"),
                         SettingField::render(|_opts, _window, cx| {
                             div()
                                 .text_sm()
@@ -40,20 +40,20 @@ pub(super) fn build(ctx: &PageContext<'_>, _cx: &App) -> SettingPage {
                                 .child(format!("v{}", env!("CARGO_PKG_VERSION")))
                         }),
                     )
-                    .description(t!("Settings.desc.version").to_string()),
+                    .description(t!("Settings.about.desc.version").to_string()),
                     // 检查更新 / 下载 / 安装 / 重启
                     SettingItem::new(
-                        t!("Settings.item.check_update"),
+                        t!("Settings.about.item.check_update"),
                         SettingField::render({
                             let m = m;
                             let restart = restart;
                             move |_opts, _window, cx| render_update_row(&m, restart.as_ref(), cx)
                         }),
                     )
-                    .description(t!("Settings.desc.check_update").to_string()),
+                    .description(t!("Settings.about.desc.check_update").to_string()),
                     // 项目主页
                     SettingItem::new(
-                        t!("Settings.item.open_github"),
+                        t!("Settings.about.item.open_github"),
                         SettingField::render(|_opts, _window, _cx| {
                             Button::new("open-github")
                                 .icon(Icon::new(IconName::Globe))
@@ -64,7 +64,7 @@ pub(super) fn build(ctx: &PageContext<'_>, _cx: &App) -> SettingPage {
                                 })
                         }),
                     )
-                    .description(t!("Settings.desc.open_github").to_string()),
+                    .description(t!("Settings.about.desc.open_github").to_string()),
                 ]),
         ])
 }

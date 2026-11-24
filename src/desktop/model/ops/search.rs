@@ -11,7 +11,7 @@ use super::super::trace::{TraceId, sub};
 use crate::config::AppConfig;
 use crate::core::{config_helpers, search as core_search};
 use crate::http::HttpClients;
-use crate::models::{Book, Rule};
+use crate::models::{BookDetail, Rule};
 
 /// 派聚合搜索任务。返回是否成功派发。
 pub fn spawn_search(
@@ -207,7 +207,7 @@ pub fn select_search_result(
         let url_for_event = url.clone();
         let cf = cf_bypass.clone();
         let qc = qidian_cookie.clone();
-        let result: Result<Book, String> =
+        let result: Result<BookDetail, String> =
             crate::parser::parse_book_detail(&client, &rule, &url, cf.as_deref(), qc.as_deref())
                 .await
                 .map_err(|e| format!("{e:#}"));

@@ -15,7 +15,9 @@ use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::select::{SearchableVec, SelectDelegate, SelectEvent, SelectState};
 use gpui_kit::component::spinner::Spinner;
-use gpui_kit::component::{ActiveTheme as _, Disableable as _, IconName, Selectable as _};
+use gpui_kit::component::{
+    ActiveTheme as _, Disableable as _, IconName, Selectable as _, WindowExt as _,
+};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, App, AppContext as _, Context, Div, Entity, FocusHandle, Focusable as _,
@@ -26,12 +28,16 @@ use gpui_kit::{
 };
 use rust_i18n::t;
 
+use super::actions::{
+    Dismiss, DocEnd, DocStart, KEY_CONTEXT, LineDown, LineUp, PageBack, PageForward,
+    ToggleBookmarks, ToggleImmersive, ToggleMode, ToggleSearch, ToggleToc,
+};
 use super::content_view::{self, COLUMN_PADDING};
 use super::reader_colors;
 use super::search_panel::{self, SearchPanel};
 use crate::config::{ReaderConfig, ReadingMode};
 use crate::desktop::model::AppModel;
-use crate::library::{Book, BookFormat, Bookmark, ReadingProgress};
+use crate::library::{BookFormat, Bookmark, ReadingProgress, ShelfBook};
 use crate::reader::layout::{
     block_window, page_for_ratio, page_ratio, paragraph_offsets, visible_paragraphs,
 };
@@ -133,7 +139,7 @@ pub struct ReaderPage {
     pub(super) model: Entity<AppModel>,
     pub(super) book_id: String,
     /// 打开时的书籍快照；关闭时用于落盘。
-    pub(super) book: Book,
+    pub(super) book: ShelfBook,
     pub(super) content: Option<ReaderBook>,
     /// 用户刚选、还没验证成功的编码。
     ///
@@ -199,8 +205,8 @@ pub struct ReaderPage {
     toolbar_hide_gen: u64,
     /// 「更多」抽屉。
     pub(super) more_open: bool,
-    /// 「更多」抽屉的数据快照：`(books_version, Book)`；版本没变就复用，别每帧整本 clone。
-    pub(super) more_cache: Option<(u64, Book)>,
+    /// 「更多」抽屉的数据快照：`(books_version, ShelfBook)`；版本没变就复用，别每帧整本 clone。
+    pub(super) more_cache: Option<(u64, ShelfBook)>,
     /// 书签抽屉的数据快照：`(books_version, 书签列表)`；同上。
     pub(super) bookmarks_cache: Option<(u64, Vec<Bookmark>)>,
     /// 书签列表的滚动位置。
@@ -209,6 +215,10 @@ pub struct ReaderPage {
     pub(super) search_cancel: Option<Arc<AtomicBool>>,
     pub(super) toc_open: bool,
     pub(super) typography_open: bool,
+    /// 工具栏「设置」按钮的焦点句柄。
+    ///
+    /// 打开对话框前先聚焦它，组件库关闭对话框时才能把焦点还给按钮而不是正文。
+    pub(super) settings_focus: FocusHandle,
     /// 系统字体下拉。首次打开设置面板时才枚举字体并创建（枚举几百个名字不值得每帧做）。
     pub(super) font_select: Option<Entity<SelectState<SearchableVec<SharedString>>>>,
     immersive: bool,
@@ -241,12 +251,13 @@ impl ReaderPage {
     /// 打开一本书并启动后台加载。
     pub fn new(
         model: Entity<AppModel>,
-        book: Book,
+        book: ShelfBook,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
         let focus = cx.focus_handle();
         window.focus(&focus, cx);
+        let settings_focus = cx.focus_handle();
         let toc_filter = cx.new(|cx| {
             InputState::new(window, cx).placeholder(t!("Reader.toc.filter_placeholder").to_string())
         });
@@ -302,6 +313,7 @@ impl ReaderPage {
             search_cancel: None,
             toc_open: false,
             typography_open: false,
+            settings_focus,
             font_select: None,
             immersive: false,
             generation: 1,
@@ -400,10 +412,13 @@ impl ReaderPage {
     ///
     /// 收 `window` 是因为 `close_toc` / `set_search_open` / `set_bookmarks_open`
     /// 关抽屉时要把焦点收回正文。
-    fn close_drawers(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn close_drawers(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.typography_open {
             self.typography_open = false;
             self.persist_settings(cx);
+            // 设置是组件库的真模态：只清标志位不够，还得让对话框真正卸载，
+            // 否则它会继续盖在正文上。焦点还原由组件库负责。
+            window.close_dialog(cx);
         }
         if self.toc_open {
             self.close_toc(window, cx);
@@ -418,13 +433,17 @@ impl ReaderPage {
         self.cancel_search();
     }
 
-    /// 关阅读设置弹窗：面板里的改动在关闭时才落盘。
-    pub(super) fn close_settings(&mut self, cx: &mut Context<Self>) {
+    /// 关阅读设置对话框：面板里的改动在关闭时才落盘。
+    ///
+    /// 程序化关闭不会触发 `Dialog::on_close`，所以标志位与写盘都在这里做；
+    /// 用户的 Esc / 遮罩 / ✕ 关闭走 `settings_dialog_closed`。
+    pub(super) fn close_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if !self.typography_open {
             return;
         }
         self.typography_open = false;
         self.persist_settings(cx);
+        window.close_dialog(cx);
         cx.notify();
     }
 
@@ -432,7 +451,7 @@ impl ReaderPage {
     ///
     /// 选「系统默认」存空串（`font-family = ""`）；字体名按字典序去重，
     /// 「系统默认」固定在第一项。字体列表一次枚举后缓存在页面上，改设置不重列。
-    fn ensure_font_select(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn ensure_font_select(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.font_select.is_some() {
             return;
         }
@@ -517,7 +536,7 @@ impl ReaderPage {
         cx.notify();
     }
 
-    fn persist_settings(&self, cx: &mut Context<Self>) {
+    pub(super) fn persist_settings(&self, cx: &mut Context<Self>) {
         self.model.update(cx, |model, _| model.persist_settings());
     }
 
@@ -1074,7 +1093,7 @@ impl ReaderPage {
     }
 
     fn shortcuts_blocked(&self, window: &Window, cx: &App) -> bool {
-        // 抽屉里的输入框聚焦时按键归输入框；只有 Esc 例外（在 on_key_down 里处理）。
+        // 抽屉里的输入框聚焦时按键归输入框；Esc 例外（`on_dismiss` 里单独放行）。
         self.toc_filter.read(cx).focus_handle(cx).is_focused(window)
             || self
                 .search_input
@@ -1083,103 +1102,194 @@ impl ReaderPage {
                 .is_focused(window)
     }
 
-    fn on_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
-        let key = event.keystroke.key.as_str();
-        // 字母快捷键不抢带修饰键的按键：Cmd/Ctrl+B 是侧边栏，不能让书签抽屉跟着开。
-        let plain = !(event.keystroke.modifiers.control
-            || event.keystroke.modifiers.alt
-            || event.keystroke.modifiers.platform);
-        if self.shortcuts_blocked(window, cx) {
-            if key == "escape" {
-                self.close_drawers(window, cx);
-                cx.notify();
-            }
-            return;
-        }
-        // 加载中 / 错误态只留 Esc（关抽屉 / 退沉浸 / 返回）：别滚动、切模式或开空书签。
-        if !self.is_ready() && key != "escape" {
-            return;
-        }
+    /// 除 Esc 外所有快捷键的统一门禁。
+    ///
+    /// 阅读设置现在是真模态（焦点在对话框上时按键根本不会派发到阅读页），但焦点转移失败
+    /// 的异常路径仍要兜底；抽屉输入框聚焦、书籍未加载完成时同样不响应。
+    fn shortcut_blocked(&self, window: &Window, cx: &App) -> bool {
+        (self.typography_open && self.focus.is_focused(window))
+            || self.shortcuts_blocked(window, cx)
+            || !self.is_ready()
+    }
 
+    /// 字号 `+` / `-` 仍走原始按键事件。
+    ///
+    /// 这两个键的 `key_char` 取决于键盘布局（`=` 要按 Shift 才是 `+`），`Keystroke` 表达不了
+    /// 这种关系；其余快捷键都在 `super::actions` 里绑定。
+    fn on_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        if self.shortcut_blocked(window, cx) {
+            return;
+        }
         match event.keystroke.key_char.as_deref() {
-            Some("+") => {
-                self.adjust_font_size(1.0, cx);
-                return;
-            }
-            Some("-") => {
-                self.adjust_font_size(-1.0, cx);
-                return;
-            }
+            Some("+") => self.adjust_font_size(1.0, cx),
+            Some("-") => self.adjust_font_size(-1.0, cx),
             _ => {}
         }
+    }
 
-        let paging = matches!(self.mode, ReadingMode::Page);
-        match key {
-            "left" | "pageup" | "up" if paging => self.turn_page(-1, cx),
-            "right" | "pagedown" | "space" | "down" if paging => self.turn_page(1, cx),
-            "home" if paging => self.goto_page(0, cx),
-            "end" if paging => {
-                let pages = self
-                    .page_cache
-                    .as_ref()
-                    .map_or(0, |cache| cache.offset.len());
-                self.goto_page(pages.saturating_sub(1), cx);
-            }
-            "left" | "pageup" => self.scroll_by_page(-1.0),
-            "right" | "pagedown" | "space" => self.scroll_by_page(1.0),
-            "up" => self.scroll_by_step(-1.0),
-            "down" => self.scroll_by_step(1.0),
-            "home" => self.scroll_to_ratio(0.0),
-            "end" => self.scroll_to_ratio(1.0),
-            // 不要退回 Task 18 之前的写法：关目录必须走 `toggle_toc`（它把焦点从过滤框
-            // 收回正文），Esc 关闭必须走 `window.defer`（`cx.listener` 正租着本实体）。
-            "t" if plain => self.toggle_toc(window, cx),
-            "s" if plain => {
-                self.toc_open = false;
-                self.typography_open = false;
-                let open = !self.search_open;
-                self.set_search_open(open, window, cx);
-                cx.notify();
-            }
-            "b" if plain => {
-                self.typography_open = false;
-                let open = !self.bookmarks_open;
-                self.set_bookmarks_open(open, window, cx);
-                cx.notify();
-            }
-            "m" if plain => self.toggle_mode(cx),
-            "f11" if !event.is_held => self.toggle_immersive(window, cx),
-            "escape" => {
-                if self.toc_open
-                    || self.search_open
-                    || self.bookmarks_open
-                    || self.typography_open
-                    || self.more_open
-                {
-                    self.close_drawers(window, cx);
-                    cx.notify();
-                } else if self.immersive {
-                    self.toggle_immersive(window, cx);
-                } else if let Some(handler) = self.close_handler.clone() {
-                    // `cx.listener` 在回调期间租着本实体，关闭回调要 read/update 它。
-                    window.defer(cx, move |window, cx| handler(window, cx));
-                }
-            }
-            _ => return,
+    /// 滚动模式的按键只改了滚动位置，进度要在滚动之后补记；翻页模式的
+    /// `turn_page` / `goto_page` 已经自己记过进度了。
+    fn after_scroll(&mut self, cx: &mut Context<Self>) {
+        // `set_offset` 不会自己重绘（Task 18 修的 I3），翻页模式则由 `goto_page` 的
+        // `cx.notify()` 负责，所以只在滚动模式下补这一下。
+        cx.notify();
+        self.schedule_progress_commit(cx);
+    }
+
+    fn on_page_back(&mut self, _: &PageBack, window: &mut Window, cx: &mut Context<Self>) {
+        if self.shortcut_blocked(window, cx) {
+            return;
         }
+        if matches!(self.mode, ReadingMode::Page) {
+            self.turn_page(-1, cx);
+        } else {
+            self.scroll_by_page(-1.0);
+            self.after_scroll(cx);
+        }
+    }
 
-        // 滚动模式的按键只改了滚动位置，进度要在滚动之后补记；
-        // 翻页模式的 turn_page / goto_page 已经自己记过进度了。
-        if !paging
-            && matches!(
-                key,
-                "left" | "right" | "pageup" | "pagedown" | "space" | "up" | "down" | "home" | "end"
-            )
-        {
-            // `set_offset` 不会自己重绘（Task 18 修的 I3），翻页模式则由 `goto_page` 的
-            // `cx.notify()` 负责，所以只在滚动模式下补这一下。
+    fn on_page_forward(&mut self, _: &PageForward, window: &mut Window, cx: &mut Context<Self>) {
+        if self.shortcut_blocked(window, cx) {
+            return;
+        }
+        if matches!(self.mode, ReadingMode::Page) {
+            self.turn_page(1, cx);
+        } else {
+            self.scroll_by_page(1.0);
+            self.after_scroll(cx);
+        }
+    }
+
+    fn on_line_up(&mut self, _: &LineUp, window: &mut Window, cx: &mut Context<Self>) {
+        if self.shortcut_blocked(window, cx) {
+            return;
+        }
+        if matches!(self.mode, ReadingMode::Page) {
+            self.turn_page(-1, cx);
+        } else {
+            self.scroll_by_step(-1.0);
+            self.after_scroll(cx);
+        }
+    }
+
+    fn on_line_down(&mut self, _: &LineDown, window: &mut Window, cx: &mut Context<Self>) {
+        if self.shortcut_blocked(window, cx) {
+            return;
+        }
+        if matches!(self.mode, ReadingMode::Page) {
+            self.turn_page(1, cx);
+        } else {
+            self.scroll_by_step(1.0);
+            self.after_scroll(cx);
+        }
+    }
+
+    fn on_doc_start(&mut self, _: &DocStart, window: &mut Window, cx: &mut Context<Self>) {
+        if self.shortcut_blocked(window, cx) {
+            return;
+        }
+        if matches!(self.mode, ReadingMode::Page) {
+            self.goto_page(0, cx);
+        } else {
+            self.scroll_to_ratio(0.0);
+            self.after_scroll(cx);
+        }
+    }
+
+    fn on_doc_end(&mut self, _: &DocEnd, window: &mut Window, cx: &mut Context<Self>) {
+        if self.shortcut_blocked(window, cx) {
+            return;
+        }
+        if matches!(self.mode, ReadingMode::Page) {
+            let pages = self
+                .page_cache
+                .as_ref()
+                .map_or(0, |cache| cache.offset.len());
+            self.goto_page(pages.saturating_sub(1), cx);
+        } else {
+            self.scroll_to_ratio(1.0);
+            self.after_scroll(cx);
+        }
+    }
+
+    // 不要退回 Task 18 之前的写法：关目录必须走 `toggle_toc`（它把焦点从过滤框收回正文），
+    // Esc 关闭必须走 `window.defer`（`cx.listener` 正租着本实体）。
+    fn on_toggle_toc(&mut self, _: &ToggleToc, window: &mut Window, cx: &mut Context<Self>) {
+        if self.shortcut_blocked(window, cx) {
+            return;
+        }
+        self.toggle_toc(window, cx);
+    }
+
+    fn on_toggle_search(&mut self, _: &ToggleSearch, window: &mut Window, cx: &mut Context<Self>) {
+        if self.shortcut_blocked(window, cx) {
+            return;
+        }
+        self.toc_open = false;
+        self.typography_open = false;
+        let open = !self.search_open;
+        self.set_search_open(open, window, cx);
+        cx.notify();
+    }
+
+    fn on_toggle_bookmarks(
+        &mut self,
+        _: &ToggleBookmarks,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.shortcut_blocked(window, cx) {
+            return;
+        }
+        self.typography_open = false;
+        let open = !self.bookmarks_open;
+        self.set_bookmarks_open(open, window, cx);
+        cx.notify();
+    }
+
+    fn on_toggle_mode(&mut self, _: &ToggleMode, window: &mut Window, cx: &mut Context<Self>) {
+        if self.shortcut_blocked(window, cx) {
+            return;
+        }
+        self.toggle_mode(cx);
+    }
+
+    fn on_toggle_immersive(
+        &mut self,
+        _: &ToggleImmersive,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.shortcut_blocked(window, cx) {
+            return;
+        }
+        self.toggle_immersive(window, cx);
+    }
+
+    fn on_dismiss(&mut self, _: &Dismiss, window: &mut Window, cx: &mut Context<Self>) {
+        if self.typography_open && self.focus.is_focused(window) {
+            self.close_settings(window, cx);
+            return;
+        }
+        if self.shortcuts_blocked(window, cx) {
+            self.close_drawers(window, cx);
             cx.notify();
-            self.schedule_progress_commit(cx);
+            return;
+        }
+        // 加载中 / 错误态也要能关抽屉、退沉浸、返回，所以这里不查 `is_ready`。
+        if self.toc_open
+            || self.search_open
+            || self.bookmarks_open
+            || self.typography_open
+            || self.more_open
+        {
+            self.close_drawers(window, cx);
+            cx.notify();
+        } else if self.immersive {
+            self.toggle_immersive(window, cx);
+        } else if let Some(handler) = self.close_handler.clone() {
+            // `cx.listener` 在回调期间租着本实体，关闭回调要 read/update 它。
+            window.defer(cx, move |window, cx| handler(window, cx));
         }
     }
 
@@ -1230,7 +1340,8 @@ impl ReaderPage {
             .items_center()
             .gap_1()
             .px_2()
-            .h(px(48.0))
+            // 48px 改用 rem 尺度：大字号下按钮跟着长高，不会被 48px 硬高竖向裁切。
+            .h_12()
             .border_b_1()
             .border_color(cx.theme().border)
             // 工具栏用应用主题铺底：阅读主题只负责正文纸面，否则浅色纸面上
@@ -1319,17 +1430,16 @@ impl ReaderPage {
                     IconName::Settings,
                     t!("Reader.action.settings").to_string(),
                 )
+                .track_focus(&self.settings_focus)
                 .selected(self.typography_open)
                 .on_click(cx.listener(|this, _event, window, cx| {
-                    let open = !this.typography_open;
-                    // 设置弹窗与四个抽屉不共存；关掉正在开的那个时 `close_drawers`
-                    // 已经替它 `persist_settings` 了，这里不必再写一次。
-                    this.close_drawers(window, cx);
-                    if open {
-                        this.ensure_font_select(window, cx);
+                    // 设置由组件库对话框承载：打开 / 关闭都只走这两个入口，
+                    // 标志位与对话框的挂载不会分叉。
+                    if this.typography_open {
+                        this.close_settings(window, cx);
+                    } else {
+                        this.open_settings(window, cx);
                     }
-                    this.typography_open = open;
-                    cx.notify();
                 })),
             )
             .child(
@@ -2256,11 +2366,7 @@ impl Render for ReaderPage {
         } else {
             None
         };
-        let typography = if self.typography_open {
-            Some(self.render_typography(cx))
-        } else {
-            None
-        };
+        // 阅读设置由 `open_settings` 打开的组件库对话框承载，不再画在页面树里。
         // 放到最后取：Rust 2024 下 `impl IntoElement` 会捕获 `&Context` 的生命周期，
         // 先拿 `toolbar` 再调需要 `&mut Context` 的渲染方法会撞借用冲突。
         // 沉浸模式的工具栏由悬浮层渲染，这里不要再白算一份。
@@ -2269,12 +2375,24 @@ impl Render for ReaderPage {
         div()
             .relative()
             .track_focus(&self.focus)
-            .key_context("Reader")
+            .key_context(KEY_CONTEXT)
             .size_full()
             .flex()
             .flex_col()
             .bg(colors.background)
             .text_color(colors.foreground)
+            .on_action(cx.listener(Self::on_page_back))
+            .on_action(cx.listener(Self::on_page_forward))
+            .on_action(cx.listener(Self::on_line_up))
+            .on_action(cx.listener(Self::on_line_down))
+            .on_action(cx.listener(Self::on_doc_start))
+            .on_action(cx.listener(Self::on_doc_end))
+            .on_action(cx.listener(Self::on_toggle_toc))
+            .on_action(cx.listener(Self::on_toggle_search))
+            .on_action(cx.listener(Self::on_toggle_bookmarks))
+            .on_action(cx.listener(Self::on_toggle_mode))
+            .on_action(cx.listener(Self::on_toggle_immersive))
+            .on_action(cx.listener(Self::on_dismiss))
             .on_key_down(cx.listener(Self::on_key_down))
             .when_some(toolbar, ParentElement::child)
             .child(
@@ -2289,7 +2407,6 @@ impl Render for ReaderPage {
                     .when_some(bookmarks, ParentElement::child)
                     .when_some(more, ParentElement::child),
             )
-            .when_some(typography, ParentElement::child)
             .when_some(overlay, ParentElement::child)
     }
 }

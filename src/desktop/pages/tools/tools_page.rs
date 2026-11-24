@@ -10,11 +10,11 @@ use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::component::progress::Progress;
 use gpui_kit::component::scroll::ScrollableElement as _;
-use gpui_kit::component::{ActiveTheme as _, Disableable, Icon, h_flex, v_flex};
+use gpui_kit::component::{ActiveTheme as _, Disableable, Icon, Selectable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AppContext, Context, Entity, FontWeight, InteractiveElement as _, IntoElement, ParentElement,
-    Render, SharedString, StatefulInteractiveElement as _, Styled, Window, div, px,
+    Render, SharedString, Styled, Window, div, px,
 };
 use rust_i18n::t;
 use tokio::sync::mpsc;
@@ -358,6 +358,9 @@ impl ToolsPage {
     }
 
     /// 一排工具卡片（同屏 tab）：点卡片切换下方表单，选中卡片描边 + 高亮底色 + 右侧圆点。
+    ///
+    /// 用 `Button` 承载交互（焦点环、Enter / Space 激活、选中语义），
+    /// 内容通过 `ParentElement` 放进按钮内部的 flex 容器；
     fn render_kind_cards(&self, cx: &Context<Self>) -> impl IntoElement {
         h_flex()
             .gap_3()
@@ -375,50 +378,63 @@ impl ToolsPage {
                 } else {
                     theme.muted_foreground
                 };
-                v_flex()
-                    .id(("tool-card", kind.index() as u64))
+                Button::new(("tool-card", kind.index() as u64))
+                    .ghost()
                     .flex_1()
                     .min_w_0()
-                    .gap_2()
+                    // 按钮默认有固定高度（h_8），这里改回由卡片内容撑开。
+                    .h_auto()
                     .p_3()
                     .rounded(theme.radius)
                     .border_1()
                     .border_color(border)
+                    .text_color(theme.foreground)
                     .when(selected, |card| card.bg(hover_bg))
                     .cursor_pointer()
-                    .hover(|style| style.bg(hover_bg))
+                    .accessibility_label(t!(kind.label_key()).to_string())
+                    .selected(selected)
                     .child(
-                        h_flex()
+                        v_flex()
                             .w_full()
-                            .items_center()
-                            .justify_between()
+                            .min_w_0()
                             .gap_2()
                             .child(
                                 h_flex()
-                                    .min_w_0()
+                                    .w_full()
                                     .items_center()
+                                    .justify_between()
                                     .gap_2()
-                                    .child(Icon::new(kind.icon()).text_color(icon_color))
                                     .child(
-                                        div()
+                                        h_flex()
                                             .min_w_0()
-                                            .overflow_hidden()
-                                            .whitespace_nowrap()
-                                            .text_ellipsis()
-                                            .text_sm()
-                                            .font_weight(FontWeight::SEMIBOLD)
-                                            .child(t!(kind.label_key()).to_string()),
-                                    ),
+                                            .items_center()
+                                            .gap_2()
+                                            .child(Icon::new(kind.icon()).text_color(icon_color))
+                                            .child(
+                                                div()
+                                                    .min_w_0()
+                                                    .overflow_hidden()
+                                                    .whitespace_nowrap()
+                                                    .text_ellipsis()
+                                                    .text_sm()
+                                                    .font_weight(FontWeight::SEMIBOLD)
+                                                    .child(t!(kind.label_key()).to_string()),
+                                            ),
+                                    )
+                                    .when(selected, |row| {
+                                        row.child(
+                                            div().size(px(6.0)).rounded_full().bg(highlight),
+                                        )
+                                    }),
                             )
-                            .when(selected, |row| {
-                                row.child(div().size(px(6.0)).rounded_full().bg(highlight))
-                            }),
-                    )
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(theme.muted_foreground)
-                            .child(t!(kind.description_key()).to_string()),
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(theme.muted_foreground)
+                                    // Button 的内容容器默认 nowrap；说明文字保持可换行。
+                                    .whitespace_normal()
+                                    .child(t!(kind.description_key()).to_string()),
+                            ),
                     )
                     .on_click(cx.listener(move |this, _, _window, cx| {
                         this.kind = kind;
@@ -787,7 +803,8 @@ impl Render for ToolsPage {
 }
 
 /// 一排单选胶囊按钮：点哪项就把 `String` 值交给 `on_pick`。
-/// 单选胶囊：与上方工具卡片共用一套描边语言，选中态用主题主色。
+/// 单选胶囊：用 `Button` 的选中语义，自带焦点环与 Enter / Space 激活；
+/// `ghost` + 默认尺寸保持原来胶囊的高度与描边语言。
 fn option_chip(
     id: (&'static str, u64),
     label: impl Into<SharedString>,
@@ -795,23 +812,10 @@ fn option_chip(
     on_pick: impl Fn(&mut ToolsPage) + 'static,
     cx: &Context<ToolsPage>,
 ) -> impl IntoElement {
-    let theme = cx.theme();
-    let accent = theme.primary;
-    let muted_bg = theme.muted;
-    let border = theme.border;
-    div()
-        .id(id)
-        .px_3()
-        .py_1p5()
-        .rounded(theme.radius)
-        .border_1()
-        .border_color(if selected { accent } else { border })
-        .when(selected, |chip| chip.bg(muted_bg))
-        .cursor_pointer()
-        .hover(move |style| style.bg(muted_bg))
-        .text_sm()
-        .when(selected, move |chip| chip.text_color(accent))
-        .child(label.into())
+    Button::new(id)
+        .ghost()
+        .selected(selected)
+        .label(label)
         .on_click(cx.listener(move |this, _, _window, cx| {
             on_pick(this);
             cx.notify();

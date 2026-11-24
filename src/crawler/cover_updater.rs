@@ -18,7 +18,7 @@ use tracing::warn;
 use url::Url;
 
 use crate::http::user_agent::random_user_agent;
-use crate::models::Book;
+use crate::models::BookDetail;
 
 /// 起点 CDN 的占位默认封面，规则里没给 coverUrl / `CoverUpdater` 全部失败时用。
 const DEFAULT_COVER: &str = "https://bookcover.yuewen.com/qdbimg/no-cover";
@@ -48,7 +48,7 @@ const TIMEOUT_SECS: u64 = 5;
 )]
 pub async fn fetch_cover(
     client: &Client,
-    book: &Book,
+    book: &BookDetail,
     fallback_cover_url: Option<&str>,
     qidian_cookie: &str,
 ) -> String {
@@ -142,7 +142,7 @@ fn is_valid_cover(url: &str) -> bool {
 
 /// 起点：用 cookie 拿搜索结果，从 `.res-book-item` 抽 cover URL，
 /// 去 `/150(\.webp)?` 缩略图后缀拿全分辨率。
-async fn fetch_qidian(client: &Client, book: &Book, cookie: &str) -> Option<String> {
+async fn fetch_qidian(client: &Client, book: &BookDetail, cookie: &str) -> Option<String> {
     let url = format!("https://www.qidian.com/so/{}.html", book.book_name);
     let resp = client
         .get(&url)
@@ -175,7 +175,7 @@ async fn fetch_qidian(client: &Client, book: &Book, cookie: &str) -> Option<Stri
 
 /// 纵横：GET `search.zongheng.com`，form 字段当 query string（Hutool 同款）。响应
 /// `data.datas.list[].{name, authorName, coverUrl}`，`coverUrl` 是相对路径，要拼 `https://static.zongheng.com/upload` 前缀。
-async fn fetch_zongheng(client: &Client, book: &Book) -> Option<String> {
+async fn fetch_zongheng(client: &Client, book: &BookDetail) -> Option<String> {
     let form = [
         ("keyword", book.book_name.as_str()),
         ("pageNo", "1"),
@@ -206,7 +206,7 @@ async fn fetch_zongheng(client: &Client, book: &Book) -> Option<String> {
 
 /// 七猫：GET `qimao.com/qimaoapi/api/search/result`，form 当 query。
 /// 响应 `data.search_list[].{title, author, image_link}`，`image_link` 已经是完整 URL。
-async fn fetch_qimao(client: &Client, book: &Book) -> Option<String> {
+async fn fetch_qimao(client: &Client, book: &BookDetail) -> Option<String> {
     let form = [
         ("keyword", book.book_name.as_str()),
         ("count", "0"),
@@ -264,7 +264,7 @@ fn extract_attr(el: &ElementRef, sel: &str, attr: &str) -> String {
 ///
 /// Java 端先用 `HanLP` 转简体再比；我们按 `==` 直比 —— 99% 情况源站搜索结果与详情页来源一致，
 /// 出现简繁漏匹配再扩（`util::zhconv::convert_text` 已有）。
-fn match_book(book: &Book, name: &str, author: &str) -> bool {
+fn match_book(book: &BookDetail, name: &str, author: &str) -> bool {
     let src_name = book.book_name.trim();
     let src_author = book.author.trim();
     if src_name.is_empty() || src_author.is_empty() {
@@ -316,11 +316,11 @@ mod tests {
     use crate::config::AppConfig;
     use crate::http::client::{ClientOptions, build_async_client};
 
-    fn book(name: &str, author: &str) -> Book {
-        Book {
+    fn book(name: &str, author: &str) -> BookDetail {
+        BookDetail {
             book_name: name.into(),
             author: author.into(),
-            ..Book::default()
+            ..BookDetail::default()
         }
     }
 

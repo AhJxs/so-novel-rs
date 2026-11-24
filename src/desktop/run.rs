@@ -92,10 +92,14 @@ pub fn run() -> Result<()> {
             Err(e) => {
                 tracing::error!("AppModel 初始化失败: {e:#}");
                 rfd::MessageDialog::new()
-                    .set_title("So Novel 启动失败")
-                    .set_description(format!(
-                        "初始化失败，无法启动应用：\n\n{e:#}\n\n请检查磁盘权限或重装应用。"
-                    ))
+                    .set_title(rust_i18n::t!("App.startup_failed.title").to_string())
+                    .set_description(
+                        rust_i18n::t!(
+                            "App.startup_failed.init_description",
+                            err = format!("{e:#}")
+                        )
+                        .to_string(),
+                    )
                     .set_level(rfd::MessageLevel::Error)
                     .show();
                 cx.quit();
@@ -104,6 +108,8 @@ pub fn run() -> Result<()> {
         };
 
         register_key_bindings(cx);
+        // 阅读器快捷键跟着阅读器的 key context 走，和主界面绑定分开注册。
+        crate::desktop::reader::actions::register_key_bindings(cx);
 
         drain_loop::spawn_drain_loop(&model, wakeup_rx, cx);
 
@@ -157,8 +163,14 @@ pub fn run() -> Result<()> {
         }) {
             tracing::error!("open_window 失败: {e:#}");
             rfd::MessageDialog::new()
-                .set_title("So Novel 启动失败")
-                .set_description(format!("无法打开主窗口：\n\n{e:#}"))
+                .set_title(rust_i18n::t!("App.startup_failed.title").to_string())
+                .set_description(
+                    rust_i18n::t!(
+                        "App.startup_failed.window_description",
+                        err = format!("{e:#}")
+                    )
+                    .to_string(),
+                )
                 .set_level(rfd::MessageLevel::Error)
                 .show();
             cx.quit();

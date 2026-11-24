@@ -10,7 +10,7 @@ use rust_i18n::t;
 use serde::{Deserialize, Serialize};
 
 use super::book::{
-    Book, BookFormat, BookOrigin, Bookmark, ReadingProgress, id_for_key, normalize_path_key,
+    BookFormat, BookOrigin, Bookmark, ReadingProgress, ShelfBook, id_for_key, normalize_path_key,
     now_unix,
 };
 use super::cover::remove_cover_file;
@@ -30,20 +30,20 @@ pub fn path_key_is_child_of(path_key: &str, root_key: &str) -> bool {
     Path::new(path_key).parent() == Some(Path::new(root_key))
 }
 
-/// 书架 blob 的根结构（反序列化用，拥有 `Vec<Book>`）。
+/// 书架 blob 的根结构（反序列化用，拥有 `Vec<ShelfBook>`）。
 #[derive(Debug, Deserialize)]
 struct LibraryFile {
     #[serde(default)]
     version: u32,
     #[serde(default)]
-    books: Vec<Book>,
+    books: Vec<ShelfBook>,
 }
 
 /// 序列化视图：借用书列表，避开每次落盘前整库深拷贝。
 #[derive(Serialize)]
 struct LibraryFileRef<'a> {
     version: u32,
-    books: &'a [Book],
+    books: &'a [ShelfBook],
 }
 
 /// 后台工作线程把封面写入封面缓存目录之后的结果；drain 只做内存回写，不碰磁盘。
@@ -78,14 +78,14 @@ enum MergeAction {
         size_bytes: u64,
         mtime: i64,
     },
-    /// 本次扫描新发现的书（`Box` 避免枚举被 `Book` 撑大）。
-    Fresh(Box<Book>),
+    /// 本次扫描新发现的书（`Box` 避免枚举被 `ShelfBook` 撑大）。
+    Fresh(Box<ShelfBook>),
 }
 
 /// 书架内存状态 + 脏标记。
 #[derive(Debug, Default)]
 pub struct LibraryStore {
-    books: Vec<Book>,
+    books: Vec<ShelfBook>,
     dirty: bool,
     /// 文件版本高于本程序支持的版本：只读，拒绝覆盖，避免把新版数据写回旧格式。
     future_version: bool,
@@ -179,13 +179,13 @@ impl LibraryStore {
 
     /// 全部书籍（含隐藏项，UI 自行过滤）。
     #[must_use]
-    pub fn books(&self) -> &[Book] {
+    pub fn books(&self) -> &[ShelfBook] {
         &self.books
     }
 
     /// 按 ID 取书。
     #[must_use]
-    pub fn get(&self, id: &str) -> Option<&Book> {
+    pub fn get(&self, id: &str) -> Option<&ShelfBook> {
         self.books.iter().find(|book| book.id == id)
     }
 
@@ -259,7 +259,7 @@ impl LibraryStore {
                 });
                 continue;
             }
-            match Book::from_file(&file.path, BookOrigin::Downloaded) {
+            match ShelfBook::from_file(&file.path, BookOrigin::Downloaded) {
                 // 旧实现用一次全量 `any` 兜住「与已有书重复」和「与本次新书重复」，
                 // 这里换成索引 O(1) 查询 + 本次新书集合，语义等价。
                 Ok(book)
@@ -354,7 +354,7 @@ impl LibraryStore {
                 ));
                 continue;
             }
-            let book = match Book::from_file(path, BookOrigin::Imported) {
+            let book = match ShelfBook::from_file(path, BookOrigin::Imported) {
                 Ok(book) => book,
                 Err(error) => {
                     outcome.failed.push((path.clone(), error));
@@ -484,7 +484,7 @@ impl LibraryStore {
 
     /// 彻底删除记录（删除磁盘文件后调用）。
     #[must_use]
-    pub fn remove(&mut self, id: &str) -> Option<Book> {
+    pub fn remove(&mut self, id: &str) -> Option<ShelfBook> {
         let index = self.books.iter().position(|book| book.id == id)?;
         self.dirty = true;
         Some(self.books.remove(index))
@@ -627,7 +627,7 @@ impl LibraryStore {
             ));
         }
         let fresh =
-            Book::from_file(new_path, self.books[index].origin).map_err(AppError::business)?;
+            ShelfBook::from_file(new_path, self.books[index].origin).map_err(AppError::business)?;
         if self
             .books
             .iter()
@@ -730,10 +730,10 @@ mod tests {
     use super::*;
     use crate::library::book::{BookFormat, BookOrigin};
 
-    fn sample_book(dir: &std::path::Path, name: &str) -> Book {
+    fn sample_book(dir: &std::path::Path, name: &str) -> ShelfBook {
         let path = dir.join(name);
         std::fs::write(&path, b"hello").unwrap();
-        Book::from_file(&path, BookOrigin::Downloaded).unwrap()
+        ShelfBook::from_file(&path, BookOrigin::Downloaded).unwrap()
     }
 
     #[test]

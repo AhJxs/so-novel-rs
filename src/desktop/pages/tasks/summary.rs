@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use crate::core::DownloadTask;
 use crate::desktop::model::AppModel;
-use crate::models::{Book, FinishedReason, SearchResult};
+use crate::models::{BookDetail, FinishedReason, SearchResult};
 
 /// `DownloadTask` 的轻量 Clone 视图 —— 给 List delegate 用。
 #[derive(Clone)]
@@ -19,7 +19,7 @@ pub struct TaskSummary {
     pub index: usize,
     pub origin: SearchResult,
     pub started_at_unix: i64,
-    pub book_meta: Option<Arc<Book>>,
+    pub book_meta: Option<Arc<BookDetail>>,
     pub total_chapters: usize,
     pub completed: u32,
     pub failed: u32,

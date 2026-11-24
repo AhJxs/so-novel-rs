@@ -12,7 +12,7 @@ use super::fonts::{CJK_FONT, Measurer, find_cjk_font};
 use crate::export::exporter::{
     ExportError, Exporter, RenderedChapter, strip_html_tags, unique_path,
 };
-use crate::models::Book;
+use crate::models::BookDetail;
 
 /// PDF 导出器 (实现 [`Exporter`] trait)。
 pub struct PdfExporter;
@@ -29,7 +29,7 @@ impl Exporter for PdfExporter {
     )]
     fn merge_with_progress(
         &self,
-        book: &Book,
+        book: &BookDetail,
         chapters: &[RenderedChapter],
         out_dir: &Path,
         _cover_bytes: Option<&[u8]>,
@@ -229,7 +229,7 @@ impl<'pdf> Paginator<'pdf> {
     }
 
     /// 封面页: 书名 / 作者 / 简介, 之后强制分页。
-    fn render_cover(&mut self, book: &Book) {
+    fn render_cover(&mut self, book: &BookDetail) {
         self.line_centered(&book.book_name, COVER_TITLE_SIZE, COVER_TITLE_SIZE * 1.3);
         self.space(COVER_TITLE_SIZE * 0.8);
         self.line_centered(&book.author, COVER_AUTHOR_SIZE, COVER_AUTHOR_SIZE * 1.5);
@@ -296,13 +296,13 @@ mod tests {
     use crate::config::ExportFormat;
     use crate::export::exporter::{RenderedChapter, write_chapter_files};
 
-    fn sample_book() -> Book {
-        Book {
+    fn sample_book() -> BookDetail {
+        BookDetail {
             url: "https://x/".into(),
             book_name: "起航".into(),
             author: "苹果".into(),
             intro: Some("<p>这是&nbsp;简介</p>".into()),
-            ..Book::default()
+            ..BookDetail::default()
         }
     }
 
@@ -331,7 +331,7 @@ mod tests {
         write_chapter_files(dir, &chapters, ExportFormat::Pdf).unwrap();
     }
 
-    fn load_and_merge(book: &Book, dir: &Path, out: &Path) -> PathBuf {
+    fn load_and_merge(book: &BookDetail, dir: &Path, out: &Path) -> PathBuf {
         let chapters = crate::export::load_chapter_files(dir, ExportFormat::Pdf).unwrap();
         PdfExporter.merge(book, &chapters, out).unwrap()
     }

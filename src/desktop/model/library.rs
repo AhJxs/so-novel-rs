@@ -6,7 +6,7 @@ use rust_i18n::t;
 
 use super::{AppModel, MetaEvent, Scan, ScanEvent};
 use crate::error::AppError;
-use crate::library::{AppliedMeta, Book, ReadingMode, ReadingProgress};
+use crate::library::{AppliedMeta, ReadingMode, ReadingProgress, ShelfBook};
 
 /// 删除文件；文件本就不存在视为成功（missing 书记录也要能删掉）。
 fn remove_file_if_exists(path: &Path) -> std::io::Result<()> {
@@ -31,9 +31,12 @@ impl AppModel {
         // 与书架数据里的 `path_key` 共用 `absolute_dir`，否则
         // 「相对路径 vs 绝对路径」永远对不上 → 同一目录被反复当成新目录扫描。
         let dir = crate::library::absolute_dir(Path::new(&self.config.download.download_path));
-        // 目录还不存在时不记「已扫描」：下载目录可能稍后才被创建，
-        // 记下了书架页的 `maybe_auto_scan` 就再也不会自动重扫。
+        // 目录不存在也记下「已尝试」的目录：书架页现在只在模型变化时比较哨兵，
+        // 不记录的话每次模型变化都会重复 stat 并再触发一次扫描尝试。
+        // 下载目录之后被创建 / 被设置修改时会写入新的 `download_path`，
+        // 那次模型变化仍会重新比较并扫描；此外还有「重新扫描」按钮兜底。
         if !dir.exists() {
+            self.library.scanned_dir = Some(dir);
             return;
         }
         self.library.scanned_dir = Some(dir.clone());
@@ -178,7 +181,7 @@ impl AppModel {
 
     /// 取一本书的快照；书籍已不存在时返回 `None`。
     #[must_use]
-    pub fn book_snapshot(&self, id: &str) -> Option<Book> {
+    pub fn book_snapshot(&self, id: &str) -> Option<ShelfBook> {
         self.library.store.get(id).cloned()
     }
 
@@ -318,7 +321,7 @@ impl AppModel {
     ///
     /// 按路径判定而不是 `origin`：导入书后来被挪进下载目录后，扫描同样会把它收回来，
     /// 这类书必须隐藏而不是删记录 —— 否则下次扫描又冒出来，「移出」等于没生效。
-    fn book_is_scanned(&self, book: &Book) -> bool {
+    fn book_is_scanned(&self, book: &ShelfBook) -> bool {
         let download_path = &self.config.download.download_path;
         if download_path.trim().is_empty() {
             return false;

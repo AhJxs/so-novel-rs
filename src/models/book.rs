@@ -1,14 +1,14 @@
 //! 详情页解析后的书籍数据。Java 端复用 `Rule.Book` 承载"规则 + 数据", 这里拆开: 规则 →
-//! `crate::models::rule::RuleBook`, 数据 → 本结构体 `Book`。`Book` 兼 PO (落 `download_task_record`) 与
+//! `crate::models::rule::RuleBook`, 数据 → 本结构体 `BookDetail`。`BookDetail` 兼 PO (落 `download_task_record`) 与
 //! 序列化格式 (JSON); 字段名沿用 camelCase, 与既有规则文件 / 任务记录保持一致。
 
 use serde::{Deserialize, Serialize};
 
 /// 详情页解析后的书籍数据。字段几乎全是 `Option` / 带默认值: 各书源详情页结构差异大, 没有哪个
-/// 字段是所有书源都填的; `Default` 让未完整解析的 `Book` 也能安全构造, 业务层用
+/// 字段是所有书源都填的; `Default` 让未完整解析的 `BookDetail` 也能安全构造, 业务层用
 /// `book.book_name.is_empty()` 判 "详情页失败"。
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Book {
+pub struct BookDetail {
     /// 详情页 URL (书源唯一标识, 跟 Rule.url 对齐)。
     pub url: String,
     /// 书名 (必填, 详情页核心数据)。

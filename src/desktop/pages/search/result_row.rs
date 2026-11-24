@@ -8,7 +8,7 @@ use gpui_kit::component::button::Button;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::notification::{Notification, NotificationType};
 use gpui_kit::component::{ActiveTheme as _, Icon, IconName, Sizable, WindowExt, h_flex, v_flex};
-use gpui_kit::{App, Entity, FontWeight, IntoElement, ParentElement, Styled, div, px};
+use gpui_kit::{App, Entity, FontWeight, IntoElement, ParentElement, Styled, div, rems};
 use rust_i18n::t;
 
 use super::{SearchPage, detail_dialog};
@@ -62,7 +62,7 @@ pub(super) fn render(
         // 序号列：跨分页连续（idx 是全局 0-based）。48px 装 "#100"。
         .child(
             div()
-                .w(px(48.0))
+                .w_12()
                 .text_xs()
                 .text_color(cx.theme().muted_foreground)
                 .child(format!("#{}", idx + 1)),
@@ -71,7 +71,9 @@ pub(super) fn render(
         .child(
             v_flex()
                 .flex_1()
-                .min_w(px(160.))
+                // 必须可收缩：固定列 + 尾部按钮在 900px 最小窗口下装不下，
+                // 旧的 `min_w(px(160.))` 让省略号失效并把按钮挤出可视区。
+                .min_w_0()
                 .gap_0p5()
                 .child(
                     div()
@@ -95,7 +97,7 @@ pub(super) fn render(
         // 作者列
         .child(
             div()
-                .w(px(140.0))
+                .w(rems(140.0 / 16.0))
                 .overflow_x_hidden()
                 .text_xs()
                 .text_color(cx.theme().muted_foreground)
@@ -109,7 +111,7 @@ pub(super) fn render(
         // 书源名称列
         .child(
             div()
-                .w(px(120.0))
+                .w(rems(120.0 / 16.0))
                 .overflow_x_hidden()
                 .text_xs()
                 .text_color(cx.theme().muted_foreground)
@@ -141,14 +143,16 @@ pub(super) fn render(
                     let r = result_for_detail.clone();
                     let source_id = source_id_for_detail;
                     let url = url_for_detail.clone();
-                    window.open_dialog(cx, move |dialog: Dialog, _window, cx| {
+                    window.open_dialog(cx, move |dialog: Dialog, window, cx| {
                         // 每帧重新 clone（builder 可多次调）。
                         let r = r.clone();
                         let page = page.clone();
                         let url = url.clone();
                         dialog
                             .title(t!("Search.detail.title"))
-                            .w(px(640.))
+                            // `Dialog::w` 只收 `Pixels`：用当前窗口 rem 把 40rem
+                            //（≈640px @16px）换算成像素，让对话框宽度随字号缩放。
+                            .w(rems(640.0 / 16.0).to_pixels(window.rem_size()))
                             .child(detail_dialog::content(&r, &page, source_id, &url, cx))
                     });
                 }),

@@ -130,7 +130,8 @@ pub fn drain(model: &mut AppModel) -> bool {
     //     防止长时间运行时任务表无限增长；有删除时 `need_save` 让下面的落盘一并生效。
     need_save |= crate::db::trim_completed_runtime(&mut model.tasks);
     if library_changed {
-        // 下载目录内容变了：清掉「已扫描」哨兵，书库页下次渲染自动重扫。
+        // 下载目录内容变了：清掉「已扫描」哨兵，`LibraryPage` 的 model observer 收到通知后
+        // 会重扫（render 本身不再触发扫描）。
         model.library.scanned_dir = None;
     }
     // 批量保存任务到文件 — fire-and-forget, 不阻塞 drain_loop。

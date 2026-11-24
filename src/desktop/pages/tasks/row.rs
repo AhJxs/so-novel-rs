@@ -5,7 +5,7 @@ use gpui_kit::component::progress::Progress;
 use gpui_kit::component::{ActiveTheme as _, Disableable, Icon, IconName, Sizable, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    App, Entity, FontWeight, IntoElement, ParentElement, SharedString, Styled, Window, div, px,
+    App, Entity, FontWeight, IntoElement, ParentElement, SharedString, Styled, Window, div,
 };
 use rust_i18n::t;
 
@@ -145,7 +145,7 @@ pub(super) fn render(task: &TaskSummary, page: &Entity<TasksPage>, cx: &App) -> 
         // ---- 序号列（跨分页连续：1-based，48px 装 "#100"）----
         .child(
             div()
-                .w(px(48.0))
+                .w_12()
                 .flex_shrink_0()
                 .text_xs()
                 .text_color(cx.theme().muted_foreground)
@@ -155,7 +155,7 @@ pub(super) fn render(task: &TaskSummary, page: &Entity<TasksPage>, cx: &App) -> 
         .child(
             v_flex()
                 .flex_1()
-                .min_w(px(0.))
+                .min_w_0()
                 .gap_2()
                 .child(
                     h_flex()

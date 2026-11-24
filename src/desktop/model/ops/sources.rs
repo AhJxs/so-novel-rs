@@ -40,17 +40,18 @@ pub fn add_sources_from_file(
     let filename = source_path
         .file_name()
         .and_then(|n| n.to_str())
-        .ok_or_else(|| AppError::invalid("无法获取文件名".to_string()))?
+        .ok_or_else(|| AppError::invalid(source_path.display().to_string()))?
         .to_string();
 
     // 验证文件内容有效（解析链统一在 core::sources::parse_rules_bytes）。
-    let bytes = std::fs::read(source_path).map_err(|e| AppError::io_msg(&e, "读取文件失败"))?;
+    // 错误只带技术细节：用户可见的「导入失败」文案由 UI 边界的 `t!` 拼。
+    let bytes = std::fs::read(source_path).map_err(AppError::from)?;
     let _: Vec<Rule> = core_sources::parse_rules_bytes(&bytes, source_path)
         .map_err(|e| AppError::internal(format!("{e:#}")))?;
 
     // 复制文件到 rules 目录（重名覆盖）。
     let dest = rules_dir.join(&filename);
-    std::fs::copy(source_path, &dest).map_err(|e| AppError::io_msg(&e, "复制文件失败"))?;
+    std::fs::copy(source_path, &dest).map_err(AppError::from)?;
 
     tracing::info!("已导入书源文件: {}", dest.display());
 
@@ -84,7 +85,7 @@ pub struct ImportResult {
 
 /// 删除一条书源（从当前活跃文件中移除）。
 ///
-/// 返回 (是否真删了, 错误信息 toast 文本)
+/// 返回是否真的删掉了。错误只带技术细节，toast 文案由 UI 边界拼。
 pub fn delete_source(
     rules_dir: &Path,
     sources_config: &SourcesConfig,
@@ -112,9 +113,8 @@ pub fn delete_source(
             // `serde` 未启用 `rc` feature：先解引用成 `Vec<&Rule>`，保持落盘 JSON 不变。
             let plain: Vec<&Rule> = rules.iter().map(Arc::as_ref).collect();
             let content = serde_json::to_string_pretty(&plain)
-                .map_err(|e| AppError::internal(format!("序列化失败: {e}")))?;
-            crate::db::write_atomically(&file_path, content.as_bytes())
-                .map_err(|e| AppError::internal(format!("写入文件失败: {e}")))?;
+                .map_err(|e| AppError::internal(format!("{e}")))?;
+            crate::db::write_atomically(&file_path, content.as_bytes()).map_err(AppError::from)?;
         }
 
         // 清掉这条源的健康检查结果。
@@ -136,7 +136,7 @@ pub fn switch_active_file(
 ) -> AppResult<()> {
     let file_path = rules_dir.join(filename);
     if !file_path.exists() {
-        return Err(AppError::not_found(format!("文件不存在: {filename}")));
+        return Err(AppError::not_found(filename.to_string()));
     }
 
     sources_config.active_file = filename.to_string();
@@ -149,7 +149,7 @@ pub fn switch_active_file(
         }
         Err(e) => {
             *rule_load_error = Some(format!("{e:#}"));
-            Err(AppError::internal(format!("加载规则失败: {e:#}")))
+            Err(AppError::internal(format!("{e:#}")))
         }
     }
 }

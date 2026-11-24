@@ -13,7 +13,7 @@ use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::{ActiveTheme as _, Sizable, h_flex, v_flex};
 use gpui_kit::{
     AnyElement, App, Entity, ImageSource, IntoElement, ObjectFit, ParentElement, RenderImage,
-    SharedString, Styled, StyledImage, div, img, px,
+    SharedString, Styled, StyledImage, div, img, px, rems,
 };
 use image::{Frame, ImageReader};
 use rust_i18n::t;
@@ -47,14 +47,14 @@ pub(super) fn content(
         .and_then(|s| s.book().cloned());
     let b = book.as_ref();
 
-    // source_name / word_count 只有 SearchResult 有（Book 不带），永远用 r。
+    // source_name / word_count 只有 SearchResult 有（BookDetail 不带），永远用 r。
     let source_val = if r.source_name.is_empty() {
         t!("Search.detail.unknown").to_string()
     } else {
         r.source_name.clone()
     };
 
-    // detail-only 字段优先 Book，Book 为空时回退 SearchResult。
+    // detail-only 字段优先 BookDetail，BookDetail 为空时回退 SearchResult。
     let book_name = b
         .map(|x| x.book_name.clone())
         .filter(|s| !s.trim().is_empty())
@@ -86,7 +86,7 @@ pub(super) fn content(
         .items_start()
         .child(
             div()
-                .w(px(84.0))
+                .w(rems(84.0 / 16.0))
                 .flex_shrink_0()
                 .text_xs()
                 .text_color(cx.theme().muted_foreground)
@@ -184,7 +184,7 @@ fn detail_row(
     cx: &App,
 ) -> impl IntoElement {
     let label_el = div()
-        .w(px(84.0))
+        .w(rems(84.0 / 16.0))
         .flex_shrink_0()
         .text_xs()
         .text_color(cx.theme().muted_foreground)

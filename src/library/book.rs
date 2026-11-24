@@ -11,7 +11,7 @@ use crate::config::ReadingMode;
 
 /// 库内书籍标识与元数据。字段顺序即 `library.json` 的键顺序。
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Book {
+pub struct ShelfBook {
     /// 稳定 ID：`path_key` 的 FNV-1a 64 位哈希（16 hex），用于封面文件名与 UI 键。
     #[serde(default)]
     pub id: String,
@@ -68,14 +68,14 @@ pub struct Book {
     pub bookmarks: Vec<Bookmark>,
 }
 
-impl Book {
+impl ShelfBook {
     /// 由磁盘文件构造新记录。
     ///
     /// # Errors
     ///
     /// 文件不存在 / 不是普通文件 / 后缀不支持时返回可直接进 toast 的文案：
     /// 后两种走 t! 本地化，IO 失败透传系统原始文案。
-    #[tracing::instrument(name = "library::Book::from_file", skip_all, fields(path = %path.display()))]
+    #[tracing::instrument(name = "library::ShelfBook::from_file", skip_all, fields(path = %path.display()))]
     pub fn from_file(path: &Path, origin: BookOrigin) -> Result<Self, String> {
         let metadata = std::fs::metadata(path).map_err(|error| error.to_string())?;
         if !metadata.is_file() {
@@ -470,7 +470,7 @@ mod tests {
         let path = dir.path().join("斗破苍穹.txt");
         std::fs::write(&path, "第一章\n正文").unwrap();
 
-        let book = Book::from_file(&path, BookOrigin::Imported).expect("book");
+        let book = ShelfBook::from_file(&path, BookOrigin::Imported).expect("book");
         assert_eq!(book.title, "斗破苍穹");
         assert_eq!(book.format, BookFormat::Txt);
         assert_eq!(book.origin, BookOrigin::Imported);
@@ -486,7 +486,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("notes.docx");
         std::fs::write(&path, b"x").unwrap();
-        assert!(Book::from_file(&path, BookOrigin::Downloaded).is_err());
+        assert!(ShelfBook::from_file(&path, BookOrigin::Downloaded).is_err());
     }
 
     #[test]
@@ -494,7 +494,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("a.epub");
         std::fs::write(&path, b"x").unwrap();
-        let mut book = Book::from_file(&path, BookOrigin::Downloaded).expect("book");
+        let mut book = ShelfBook::from_file(&path, BookOrigin::Downloaded).expect("book");
 
         assert_eq!(book.status(), ShelfStatus::Unread);
         book.progress.updated_unix = 10;

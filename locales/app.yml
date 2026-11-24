@@ -285,6 +285,28 @@ Toasts:
     en: "Switched to rule file: %{filename}"
     zh-CN: "已切换到书源文件: %{filename}"
     zh-TW: "已切換到書源檔案: %{filename}"
+  # 失败文案统一在这里拼（而不是在 ops 层拼中文串再原样塞进 toast），
+  # 技术细节走 `%{err}`，见 src/desktop/model/persistence.rs 与 model/sources.rs。
+  save_config_failed:
+    en: "Failed to save settings: %{err}"
+    zh-CN: "保存设置失败: %{err}"
+    zh-TW: "儲存設定失敗: %{err}"
+  http_client_rebuild_failed:
+    en: "Settings saved, but rebuilding the HTTP client failed: %{err}"
+    zh-CN: "设置已保存，但 HTTP 客户端重建失败: %{err}"
+    zh-TW: "設定已儲存，但 HTTP 用戶端重建失敗: %{err}"
+  import_sources_failed:
+    en: "Failed to import the rule file: %{err}"
+    zh-CN: "导入书源文件失败: %{err}"
+    zh-TW: "匯入書源檔案失敗: %{err}"
+  delete_source_failed:
+    en: "Failed to delete the source: %{err}"
+    zh-CN: "删除书源失败: %{err}"
+    zh-TW: "刪除書源失敗: %{err}"
+  switch_source_file_failed:
+    en: "Failed to switch the rule file: %{err}"
+    zh-CN: "切换书源文件失败: %{err}"
+    zh-TW: "切換書源檔案失敗: %{err}"
   no_sources_detected:
     en: "No sources detected"
     zh-CN: 没有可检测的书源
@@ -366,6 +388,21 @@ App:
     en: So Novel
     zh-CN: So Novel
     zh-TW: So Novel
+  # 启动阶段的致命错误用原生对话框展示（GPUI 还没起来，用不了 toast）。
+  # 第一条发生在 locale 设置之前，此时 `t!` 走 rust-i18n 默认 locale（en）。
+  startup_failed:
+    title:
+      en: "So Novel failed to start"
+      zh-CN: So Novel 启动失败
+      zh-TW: So Novel 啟動失敗
+    init_description:
+      en: "Initialization failed, the app cannot start:\n\n%{err}\n\nCheck disk permissions or reinstall the app."
+      zh-CN: "初始化失败，无法启动应用：\n\n%{err}\n\n请检查磁盘权限或重装应用。"
+      zh-TW: "初始化失敗，無法啟動應用程式：\n\n%{err}\n\n請檢查磁碟權限或重新安裝應用程式。"
+    window_description:
+      en: "Could not open the main window:\n\n%{err}"
+      zh-CN: "无法打开主窗口：\n\n%{err}"
+      zh-TW: "無法開啟主視窗：\n\n%{err}"
 
 Settings:
   page:
@@ -385,290 +422,303 @@ Settings:
       en: About
       zh-CN: 关于
       zh-TW: 關於
-  group:
-    appearance:
-      en: Appearance
-      zh-CN: 外观
-      zh-TW: 外觀
-    network:
-      en: Network
-      zh-CN: 网络
-      zh-TW: 網路
-    download:
-      en: Download
-      zh-CN: 下载
-      zh-TW: 下載
-    source:
-      en: Sources
-      zh-CN: 书源
-      zh-TW: 書源
-    concurrency:
-      en: "Concurrency & interval"
-      zh-CN: 并发与间隔
-      zh-TW: 並發與間隔
-    retry:
-      en: Retry
-      zh-CN: 重试
-      zh-TW: 重試
-    proxy:
-      en: Proxy
-      zh-CN: 代理
-      zh-TW: 代理
-    cookie:
-      en: Cookie
-      zh-CN: Cookie
-      zh-TW: Cookie
-    info:
-      en: Info
-      zh-CN: 信息
-      zh-TW: 資訊
-  item:
-    theme_kind:
-      en: "Theme mode"
-      zh-CN: 主题模式
-      zh-TW: 主題模式
-    theme_static:
-      en: Theme
-      zh-CN: 主题
-      zh-TW: 主題
-    theme_dyn_mode:
-      en: "Light / dark"
-      zh-CN: 浅色/深色
-      zh-TW: 淺色/深色
-    theme_light:
-      en: "Light theme"
-      zh-CN: 浅色主题
-      zh-TW: 淺色主題
-    theme_dark:
-      en: "Dark theme"
-      zh-CN: 深色主题
-      zh-TW: 深色主題
-    language:
-      en: "Interface language"
-      zh-CN: 界面语言
-      zh-TW: 界面語言
-    font_size:
-      en: "Font size"
-      zh-CN: 字号
-      zh-TW: 字號
-    gh_proxy:
-      en: "GitHub proxy"
-      zh-CN: "GitHub 代理"
-      zh-TW: "GitHub 代理"
-    cf_bypass:
-      en: "Cloudflare bypass URL"
-      zh-CN: "Cloudflare bypass URL"
-      zh-TW: "Cloudflare bypass URL"
-    download_path:
-      en: "Download directory"
-      zh-CN: 下载目录
-      zh-TW: 下載目錄
-    default_format:
-      en: "Default format"
-      zh-CN: 默认格式
-      zh-TW: 預設格式
-    txt_encoding:
-      en: "TXT encoding"
-      zh-CN: "TXT 编码"
-      zh-TW: "TXT 編碼"
-    preserve_chapter_cache:
-      en: "Preserve chapter cache"
-      zh-CN: 保留章节缓存目录
-      zh-TW: 保留章節快取目錄
-    search_limit:
-      en: "Search result limit"
-      zh-CN: 搜索条数上限
-      zh-TW: 搜尋條數上限
-    search_filter:
-      en: "Filter & sort by similarity"
-      zh-CN: 过滤低相似度并排序搜索结果
-      zh-TW: 過濾低相似度並排序搜尋結果
-    concurrency:
-      en: "Concurrency limit"
-      zh-CN: 并发上限
-      zh-TW: 並發上限
-    min_interval:
-      en: "Request interval min (ms)"
-      zh-CN: 请求间隔最小 (ms)
-      zh-TW: 請求間隔最小 (ms)
-    max_interval:
-      en: "Request interval max (ms)"
-      zh-CN: 请求间隔最大 (ms)
-      zh-TW: 請求間隔最大 (ms)
-    enable_retry:
-      en: "Enable retry on failure"
-      zh-CN: 启用失败重试
-      zh-TW: 啟用失敗重試
-    max_retries:
-      en: "Max retry count"
-      zh-CN: 最大重试次数
-      zh-TW: 最大重試次數
-    retry_min_interval:
-      en: "Retry interval min (ms)"
-      zh-CN: 重试间隔最小 (ms)
-      zh-TW: 重試間隔最小 (ms)
-    retry_max_interval:
-      en: "Retry interval max (ms)"
-      zh-CN: 重试间隔最大 (ms)
-      zh-TW: 重試間隔最大 (ms)
-    proxy_mode:
-      en: "Proxy mode"
-      zh-CN: 代理模式
-      zh-TW: 代理模式
-    system_proxy_status:
-      en: "System proxy"
-      zh-CN: 系统代理
-      zh-TW: 系統代理
-    proxy_host:
-      en: "Proxy host"
-      zh-CN: 代理 Host
-      zh-TW: 代理 Host
-    proxy_port:
-      en: "Proxy port"
-      zh-CN: 代理 Port
-      zh-TW: 代理 Port
-    qidian_cookie:
-      en: "Qidian cookie"
-      zh-CN: 起点 Cookie
-      zh-TW: 起點 Cookie
-    version:
-      en: Version
-      zh-CN: 版本
-      zh-TW: 版本
-    check_update:
-      en: "Check for updates"
-      zh-CN: 检查更新
-      zh-TW: 檢查更新
-    open_github:
-      en: "Project homepage"
-      zh-CN: 项目主页
-      zh-TW: 項目主頁
-  desc:
-    theme_kind:
-      en: "Dynamic: pick light & dark themes, switch by system/appearance. Static: fix one theme, ignore light/dark."
-      zh-CN: 动态：分别选浅色/深色主题，按系统或强制明暗切换；静态：固定一个主题，不随明暗变化。改动即时生效。
-      zh-TW: 動態：分別選淺色/深色主題，按系統或強制明暗切換；靜態：固定一個主題，不隨明暗變化。改動即時生效。
-    theme_static:
-      en: "The fixed theme used in static mode."
-      zh-CN: 静态模式下使用的固定主题。
-      zh-TW: 靜態模式下使用的固定主題。
-    theme_dyn_mode:
-      en: "When to switch between the light and dark theme (dynamic mode only)."
-      zh-CN: 动态模式下浅色/深色主题的切换方式。
-      zh-TW: 動態模式下淺色/深色主題的切換方式。
-    theme_light:
-      en: "Light theme used in dynamic mode."
-      zh-CN: 动态模式下的浅色主题。
-      zh-TW: 動態模式下的淺色主題。
-    theme_dark:
-      en: "Dark theme used in dynamic mode."
-      zh-CN: 动态模式下的深色主题。
-      zh-TW: 動態模式下的深色主題。
-    language:
-      en: "App UI and downloaded chapter text language. Takes effect after restart."
-      zh-CN: 应用 UI 与下载章节正文的语言。重启后生效。
-      zh-TW: 應用 UI 與下載章節正文的語言。重啟後生效。
-    font_size:
-      en: "UI font size (12–24px); the whole app scales proportionally. Changes take effect immediately."
-      zh-CN: 界面字号（12–24px），整个应用等比缩放。改动即时生效。
-      zh-TW: 界面字號（12–24px），整個應用等比縮放。改動即時生效。
-    gh_proxy:
-      en: "Used to speed up release / raw asset downloads; leave empty to use default."
-      zh-CN: 用于加速 release / raw 资源下载；留空走默认。
-      zh-TW: 用於加速 release / raw 資源下載；留空走預設。
-    cf_bypass:
-      en: "Base URL of a local or remote sarperavci/CloudflareBypass service."
-      zh-CN: 本地或远端 sarperavci/CloudflareBypass 服务的 base URL。
-      zh-TW: 本地或遠端 sarperavci/CloudflareBypass 服務的 base URL。
-    download_path:
-      en: "Directory to save downloaded book files (absolute path)."
-      zh-CN: 书籍文件保存目录（绝对路径）。
-      zh-TW: 書籍檔案儲存目錄（絕對路徑）。
-    default_format:
-      en: "Output format for downloaded files."
-      zh-CN: 下载完成的文件输出格式。
-      zh-TW: 下載完成的檔案輸出格式。
-    txt_encoding:
-      en: "Character encoding for TXT export; pick GBK for older devices."
-      zh-CN: TXT 导出的字符编码；如需兼容旧设备选 GBK。
-      zh-TW: TXT 匯出的字元編碼；如需相容舊裝置選 GBK。
-    preserve_chapter_cache:
-      en: "When disabled, re-downloading will fetch all chapters from scratch."
-      zh-CN: 关闭后下次重新下载会全章节再爬。
-      zh-TW: 關閉後下次重新下載會全章節再爬。
-    search_limit:
-      en: "Max results per source; -1 means unlimited."
-      zh-CN: 每源最多返回条数；-1 表示不限。
-      zh-TW: 每源最多返回條數；-1 表示不限。
-    search_filter:
-      en: "Filter out low-similarity results and sort by title/author similarity."
-      zh-CN: 根据标题/作者相似度过滤无效结果并按相似度排序。
-      zh-TW: 根據標題/作者相似度過濾無效結果並按相似度排序。
-    concurrency:
-      en: "-1 = auto: min(50, chapter count)."
-      zh-CN: "-1 = 自动：min(50, 章节数)。"
-      zh-TW: "-1 = 自動：min(50, 章節數)。"
-    min_interval:
-      en: "min ≤ max; wait a random ms in [min..max] before each chapter fetch."
-      zh-CN: min ≤ max；抓每章前等 [min..max] 内的随机 ms。
-      zh-TW: min ≤ max；擷取每章前等 [min..max] 內的隨機 ms。
-    max_interval:
-      en: "See the previous item."
-      zh-CN: 见上一项。
-      zh-TW: 見上一項。
-    enable_retry:
-      en: "On chapter fetch failure, retry with the intervals below; give up after max retries."
-      zh-CN: 章节下载失败时按下方间隔重试，达到上限后视为放弃。
-      zh-TW: 章節下載失敗時按下方間隔重試，達到上限後視為放棄。
-    max_retries:
-      en: "0 = no retry."
-      zh-CN: "0 = 不重试。"
-      zh-TW: "0 = 不重試。"
-    retry_min_interval:
-      en: "min ≤ max; wait a random ms in [min..max] between retries."
-      zh-CN: min ≤ max；两次重试之间等 [min..max] 内的随机 ms。
-      zh-TW: min ≤ max；兩次重試之間等 [min..max] 內的隨機 ms。
-    retry_max_interval:
-      en: "See the previous item."
-      zh-CN: 见上一项。
-      zh-TW: 見上一項。
-    proxy_mode:
-      en: "Direct, a manually configured HTTP proxy, or the OS proxy settings."
-      zh-CN: 直连、手动配置的 HTTP 代理，或读取操作系统代理设置。
-      zh-TW: 直連、手動設定的 HTTP 代理，或讀取作業系統代理設定。
-    system_proxy_status:
-      en: "Read from the Windows registry (WinINET), or from HTTPS_PROXY on other platforms."
-      zh-CN: Windows 下读注册表 WinINET；其它平台读 HTTPS_PROXY 环境变量。
-      zh-TW: Windows 下讀登錄檔 WinINET；其它平台讀 HTTPS_PROXY 環境變數。
-    proxy_host:
-      en: "Proxy server address (IP or domain). Used in Manual mode only."
-      zh-CN: 代理服务器地址（IP 或域名）。仅在「手动配置」模式下生效。
-      zh-TW: 代理伺服器地址（IP 或域名）。僅在「手動設定」模式下生效。
-    proxy_port:
-      en: "Proxy server port (1-65535). Used in Manual mode only."
-      zh-CN: 代理服务器端口（1-65535）。仅在「手动配置」模式下生效。
-      zh-TW: 代理伺服器埠（1-65535）。僅在「手動設定」模式下生效。
-    qidian_cookie:
-      en: "Required for qidian.com / qidian overseas sites; can be ignored for other sources."
-      zh-CN: 起点中文网 / 起点海外站点需要；其它书源可忽略。
-      zh-TW: 起點中文網 / 起點海外站點需要；其它書源可忽略。
-    version:
-      en: "So Novel — Rust + GPUI desktop client."
-      zh-CN: "So Novel — Rust + GPUI 桌面客户端。"
-      zh-TW: "So Novel — Rust + GPUI 桌面用戶端。"
-    check_update:
-      en: "Query GitHub releases for a newer version."
-      zh-CN: 查询 GitHub releases 是否有新版本。
-      zh-TW: 查詢 GitHub releases 是否有新版本。
-    open_github:
-      en: "Source code / issue tracker / latest release are all on GitHub."
-      zh-CN: 项目源码 / 问题反馈 / 最新版本都在 GitHub。
-      zh-TW: 項目源碼 / 問題回饋 / 最新版本都在 GitHub。
-  placeholder:
-    qidian_cookie:
-      en: "w_tsfp=..."
-      zh-CN: "w_tsfp=..."
-      zh-TW: "w_tsfp=..."
+  general:
+    group:
+      appearance:
+        en: Appearance
+        zh-CN: 外观
+        zh-TW: 外觀
+      network:
+        en: Network
+        zh-CN: 网络
+        zh-TW: 網路
+      download:
+        en: Download
+        zh-CN: 下载
+        zh-TW: 下載
+    item:
+      theme_kind:
+        en: "Theme mode"
+        zh-CN: 主题模式
+        zh-TW: 主題模式
+      theme_static:
+        en: Theme
+        zh-CN: 主题
+        zh-TW: 主題
+      theme_dyn_mode:
+        en: "Light / dark"
+        zh-CN: 浅色/深色
+        zh-TW: 淺色/深色
+      theme_light:
+        en: "Light theme"
+        zh-CN: 浅色主题
+        zh-TW: 淺色主題
+      theme_dark:
+        en: "Dark theme"
+        zh-CN: 深色主题
+        zh-TW: 深色主題
+      language:
+        en: "Interface language"
+        zh-CN: 界面语言
+        zh-TW: 界面語言
+      font_size:
+        en: "Font size"
+        zh-CN: 字号
+        zh-TW: 字號
+      gh_proxy:
+        en: "GitHub proxy"
+        zh-CN: "GitHub 代理"
+        zh-TW: "GitHub 代理"
+      cf_bypass:
+        en: "Cloudflare bypass URL"
+        zh-CN: "Cloudflare bypass URL"
+        zh-TW: "Cloudflare bypass URL"
+      download_path:
+        en: "Download directory"
+        zh-CN: 下载目录
+        zh-TW: 下載目錄
+      default_format:
+        en: "Default format"
+        zh-CN: 默认格式
+        zh-TW: 預設格式
+      txt_encoding:
+        en: "TXT encoding"
+        zh-CN: "TXT 编码"
+        zh-TW: "TXT 編碼"
+      preserve_chapter_cache:
+        en: "Preserve chapter cache"
+        zh-CN: 保留章节缓存目录
+        zh-TW: 保留章節快取目錄
+    desc:
+      theme_kind:
+        en: "Dynamic: pick light & dark themes, switch by system/appearance. Static: fix one theme, ignore light/dark."
+        zh-CN: 动态：分别选浅色/深色主题，按系统或强制明暗切换；静态：固定一个主题，不随明暗变化。改动即时生效。
+        zh-TW: 動態：分別選淺色/深色主題，按系統或強制明暗切換；靜態：固定一個主題，不隨明暗變化。改動即時生效。
+      theme_static:
+        en: "The fixed theme used in static mode."
+        zh-CN: 静态模式下使用的固定主题。
+        zh-TW: 靜態模式下使用的固定主題。
+      theme_dyn_mode:
+        en: "When to switch between the light and dark theme (dynamic mode only)."
+        zh-CN: 动态模式下浅色/深色主题的切换方式。
+        zh-TW: 動態模式下淺色/深色主題的切換方式。
+      theme_light:
+        en: "Light theme used in dynamic mode."
+        zh-CN: 动态模式下的浅色主题。
+        zh-TW: 動態模式下的淺色主題。
+      theme_dark:
+        en: "Dark theme used in dynamic mode."
+        zh-CN: 动态模式下的深色主题。
+        zh-TW: 動態模式下的深色主題。
+      language:
+        en: "App UI and downloaded chapter text language. Takes effect after restart."
+        zh-CN: 应用 UI 与下载章节正文的语言。重启后生效。
+        zh-TW: 應用 UI 與下載章節正文的語言。重啟後生效。
+      font_size:
+        en: "UI font size (12–24px); the whole app scales proportionally. Changes take effect immediately."
+        zh-CN: 界面字号（12–24px），整个应用等比缩放。改动即时生效。
+        zh-TW: 界面字號（12–24px），整個應用等比縮放。改動即時生效。
+      gh_proxy:
+        en: "Used to speed up release / raw asset downloads; leave empty to use default."
+        zh-CN: 用于加速 release / raw 资源下载；留空走默认。
+        zh-TW: 用於加速 release / raw 資源下載；留空走預設。
+      cf_bypass:
+        en: "Base URL of a local or remote sarperavci/CloudflareBypass service."
+        zh-CN: 本地或远端 sarperavci/CloudflareBypass 服务的 base URL。
+        zh-TW: 本地或遠端 sarperavci/CloudflareBypass 服務的 base URL。
+      download_path:
+        en: "Directory to save downloaded book files (absolute path)."
+        zh-CN: 书籍文件保存目录（绝对路径）。
+        zh-TW: 書籍檔案儲存目錄（絕對路徑）。
+      default_format:
+        en: "Output format for downloaded files."
+        zh-CN: 下载完成的文件输出格式。
+        zh-TW: 下載完成的檔案輸出格式。
+      txt_encoding:
+        en: "Character encoding for TXT export; pick GBK for older devices."
+        zh-CN: TXT 导出的字符编码；如需兼容旧设备选 GBK。
+        zh-TW: TXT 匯出的字元編碼；如需相容舊裝置選 GBK。
+      preserve_chapter_cache:
+        en: "When disabled, re-downloading will fetch all chapters from scratch."
+        zh-CN: 关闭后下次重新下载会全章节再爬。
+        zh-TW: 關閉後下次重新下載會全章節再爬。
+  crawl:
+    group:
+      source:
+        en: Sources
+        zh-CN: 书源
+        zh-TW: 書源
+      concurrency:
+        en: "Concurrency & interval"
+        zh-CN: 并发与间隔
+        zh-TW: 並發與間隔
+      retry:
+        en: Retry
+        zh-CN: 重试
+        zh-TW: 重試
+    item:
+      search_limit:
+        en: "Search result limit"
+        zh-CN: 搜索条数上限
+        zh-TW: 搜尋條數上限
+      search_filter:
+        en: "Filter & sort by similarity"
+        zh-CN: 过滤低相似度并排序搜索结果
+        zh-TW: 過濾低相似度並排序搜尋結果
+      concurrency:
+        en: "Concurrency limit"
+        zh-CN: 并发上限
+        zh-TW: 並發上限
+      min_interval:
+        en: "Request interval min (ms)"
+        zh-CN: 请求间隔最小 (ms)
+        zh-TW: 請求間隔最小 (ms)
+      max_interval:
+        en: "Request interval max (ms)"
+        zh-CN: 请求间隔最大 (ms)
+        zh-TW: 請求間隔最大 (ms)
+      enable_retry:
+        en: "Enable retry on failure"
+        zh-CN: 启用失败重试
+        zh-TW: 啟用失敗重試
+      max_retries:
+        en: "Max retry count"
+        zh-CN: 最大重试次数
+        zh-TW: 最大重試次數
+      retry_min_interval:
+        en: "Retry interval min (ms)"
+        zh-CN: 重试间隔最小 (ms)
+        zh-TW: 重試間隔最小 (ms)
+      retry_max_interval:
+        en: "Retry interval max (ms)"
+        zh-CN: 重试间隔最大 (ms)
+        zh-TW: 重試間隔最大 (ms)
+    desc:
+      search_limit:
+        en: "Max results per source; -1 means unlimited."
+        zh-CN: 每源最多返回条数；-1 表示不限。
+        zh-TW: 每源最多返回條數；-1 表示不限。
+      search_filter:
+        en: "Filter out low-similarity results and sort by title/author similarity."
+        zh-CN: 根据标题/作者相似度过滤无效结果并按相似度排序。
+        zh-TW: 根據標題/作者相似度過濾無效結果並按相似度排序。
+      concurrency:
+        en: "-1 = auto: min(50, chapter count)."
+        zh-CN: "-1 = 自动：min(50, 章节数)。"
+        zh-TW: "-1 = 自動：min(50, 章節數)。"
+      min_interval:
+        en: "min ≤ max; wait a random ms in [min..max] before each chapter fetch."
+        zh-CN: min ≤ max；抓每章前等 [min..max] 内的随机 ms。
+        zh-TW: min ≤ max；擷取每章前等 [min..max] 內的隨機 ms。
+      max_interval:
+        en: "Upper bound of the per-chapter wait; equal to min means a fixed delay."
+        zh-CN: 抓每章前等待的上限；与 min 相等时为固定延时。
+        zh-TW: 擷取每章前等待的上限；與 min 相等時為固定延時。
+      enable_retry:
+        en: "On chapter fetch failure, retry with the intervals below; give up after max retries."
+        zh-CN: 章节下载失败时按下方间隔重试，达到上限后视为放弃。
+        zh-TW: 章節下載失敗時按下方間隔重試，達到上限後視為放棄。
+      max_retries:
+        en: "0 = no retry."
+        zh-CN: "0 = 不重试。"
+        zh-TW: "0 = 不重試。"
+      retry_min_interval:
+        en: "min ≤ max; wait a random ms in [min..max] between retries."
+        zh-CN: min ≤ max；两次重试之间等 [min..max] 内的随机 ms。
+        zh-TW: min ≤ max；兩次重試之間等 [min..max] 內的隨機 ms。
+      retry_max_interval:
+        en: "Upper bound of the retry wait; equal to min means a fixed delay."
+        zh-CN: 两次重试之间等待的上限；与 min 相等时为固定延时。
+        zh-TW: 兩次重試之間等待的上限；與 min 相等時為固定延時。
+  proxy:
+    group:
+      proxy:
+        en: Proxy
+        zh-CN: 代理
+        zh-TW: 代理
+      cookie:
+        en: Cookie
+        zh-CN: Cookie
+        zh-TW: Cookie
+    item:
+      proxy_mode:
+        en: "Proxy mode"
+        zh-CN: 代理模式
+        zh-TW: 代理模式
+      system_proxy_status:
+        en: "System proxy"
+        zh-CN: 系统代理
+        zh-TW: 系統代理
+      proxy_host:
+        en: "Proxy host"
+        zh-CN: 代理 Host
+        zh-TW: 代理 Host
+      proxy_port:
+        en: "Proxy port"
+        zh-CN: 代理 Port
+        zh-TW: 代理 Port
+      qidian_cookie:
+        en: "Qidian cookie"
+        zh-CN: 起点 Cookie
+        zh-TW: 起點 Cookie
+    desc:
+      proxy_mode:
+        en: "Direct, a manually configured HTTP proxy, or the OS proxy settings."
+        zh-CN: 直连、手动配置的 HTTP 代理，或读取操作系统代理设置。
+        zh-TW: 直連、手動設定的 HTTP 代理，或讀取作業系統代理設定。
+      system_proxy_status:
+        en: "Read from the Windows registry (WinINET), or from HTTPS_PROXY on other platforms."
+        zh-CN: Windows 下读注册表 WinINET；其它平台读 HTTPS_PROXY 环境变量。
+        zh-TW: Windows 下讀登錄檔 WinINET；其它平台讀 HTTPS_PROXY 環境變數。
+      proxy_host:
+        en: "Proxy server address (IP or domain). Used in Manual mode only."
+        zh-CN: 代理服务器地址（IP 或域名）。仅在「手动配置」模式下生效。
+        zh-TW: 代理伺服器地址（IP 或域名）。僅在「手動設定」模式下生效。
+      proxy_port:
+        en: "Proxy server port (1-65535). Used in Manual mode only."
+        zh-CN: 代理服务器端口（1-65535）。仅在「手动配置」模式下生效。
+        zh-TW: 代理伺服器埠（1-65535）。僅在「手動設定」模式下生效。
+      qidian_cookie:
+        en: "Required for qidian.com / qidian overseas sites; can be ignored for other sources."
+        zh-CN: 起点中文网 / 起点海外站点需要；其它书源可忽略。
+        zh-TW: 起點中文網 / 起點海外站點需要；其它書源可忽略。
+    placeholder:
+      qidian_cookie:
+        en: "w_tsfp=..."
+        zh-CN: "w_tsfp=..."
+        zh-TW: "w_tsfp=..."
+  about:
+    group:
+      info:
+        en: Info
+        zh-CN: 信息
+        zh-TW: 資訊
+    item:
+      version:
+        en: Version
+        zh-CN: 版本
+        zh-TW: 版本
+      check_update:
+        en: "Check for updates"
+        zh-CN: 检查更新
+        zh-TW: 檢查更新
+      open_github:
+        en: "Project homepage"
+        zh-CN: 项目主页
+        zh-TW: 項目主頁
+    desc:
+      version:
+        en: "So Novel — Rust + GPUI desktop client."
+        zh-CN: "So Novel — Rust + GPUI 桌面客户端。"
+        zh-TW: "So Novel — Rust + GPUI 桌面用戶端。"
+      check_update:
+        en: "Query GitHub releases for a newer version."
+        zh-CN: 查询 GitHub releases 是否有新版本。
+        zh-TW: 查詢 GitHub releases 是否有新版本。
+      open_github:
+        en: "Source code / issue tracker / latest release are all on GitHub."
+        zh-CN: 项目源码 / 问题反馈 / 最新版本都在 GitHub。
+        zh-TW: 項目源碼 / 問題回饋 / 最新版本都在 GitHub。
   # 按钮 label（SettingsField::render 渲染的 button 上的 label）
   check_update_button:
     en: "Check GitHub for updates"
@@ -866,12 +916,12 @@ Tasks:
       en: Cancelled
       zh-CN: 已取消
       zh-TW: 已取消
-  # 删除单条任务的二次确认 Dialog
+  # 删除单条任务的二次确认 Dialog（标题点名对象，具体书名在 message 里）
   delete_dialog:
     title:
-      en: "Confirm delete"
-      zh-CN: 确认删除
-      zh-TW: 確認刪除
+      en: "Delete download record"
+      zh-CN: 删除下载记录
+      zh-TW: 刪除下載記錄
     # %{book_name} 占位符
     message:
       en: 'Delete the download record for "%{book_name}"? This action cannot be undone.'
@@ -1006,9 +1056,9 @@ Tasks:
         zh-CN: 取消
         zh-TW: 取消
       cancelling:
-        en: "Cancelling..."
-        zh-CN: "正在取消..."
-        zh-TW: "正在取消..."
+        en: "Cancelling…"
+        zh-CN: "正在取消…"
+        zh-TW: "正在取消…"
       retry:
         en: Retry
         zh-CN: 重试
@@ -1138,7 +1188,12 @@ Library:
       en: "This format cannot be read in the app yet"
       zh-CN: 该格式暂不支持应用内阅读
       zh-TW: 該格式暫不支援應用程式內閱讀
+  # 封面右上收藏星标的 tooltip 与无障碍名（选中态由 `selected` 语义表达，文案不分增减）。
   card:
+    favorite:
+      en: "Favorite"
+      zh-CN: 收藏
+      zh-TW: 收藏
     missing:
       en: "File missing"
       zh-CN: 文件已不存在
@@ -1299,10 +1354,11 @@ Library:
       en: "Continue reading"
       zh-CN: 继续阅读
       zh-TW: 繼續閱讀
+    # 打开对话框的入口统一以 `…` 结尾（见 design-guides 的 Button 规则）。
     info:
-      en: "Book info"
-      zh-CN: 书籍信息
-      zh-TW: 書籍資訊
+      en: "Book info…"
+      zh-CN: 书籍信息…
+      zh-TW: 書籍資訊…
     relink:
       en: "Relink file"
       zh-CN: 重新定位文件
@@ -1843,7 +1899,6 @@ Reader:
 #   但 actions 区保留「添加」「测速」两个功能按钮（library 没 actions，因为 watcher
 #   实时刷新；sources 没有 watcher，所以保留手动触发入口）。
 # - filter 命名空间跟 library 对齐：`Sources.filter.*` / `Sources.status.*`
-# - 语言 tag 用 `Sources.action.delete` 同一个 key（行内删除按钮 + dialog confirm 按钮）
 Sources:
   page_title:
     en: "Source management"
@@ -1946,10 +2001,6 @@ Sources:
       en: "Health check"
       zh-CN: 测速
       zh-TW: 測速
-    delete:
-      en: Delete
-      zh-CN: 删除
-      zh-TW: 刪除
   # 书源行内小 tag 的标签（language 已经是 rule.language 不需要翻译；
   # need_proxy 这个 tag 是 UI 提示文案要翻译）。
   tag:
@@ -1957,24 +2008,6 @@ Sources:
       en: Proxy
       zh-CN: 代理
       zh-TW: 代理
-  delete_dialog:
-    title:
-      en: "Confirm delete"
-      zh-CN: 确认删除书源
-      zh-TW: 確認刪除書源
-    # %{source_url} —— 书源的 URL（唯一标识）。
-    message:
-      en: "Are you sure you want to delete this source? This action cannot be undone."
-      zh-CN: "确定要删除此书源吗？此操作无法撤销。"
-      zh-TW: "確定要刪除此書源嗎？此操作無法撤銷。"
-    confirm:
-      en: Delete
-      zh-CN: 删除
-      zh-TW: 刪除
-    cancel:
-      en: Cancel
-      zh-CN: 取消
-      zh-TW: 取消
   # 导入 JSON 后的反馈 toast。
   # %{filename} 导入的文件名。
   import:
@@ -2040,9 +2073,9 @@ Search:
       zh-TW: 搜尋
     # 行内选章按钮 label + 不可用提示 toast 消息
     select_chapters:
-      en: "Select Chapters"
-      zh-CN: 选章
-      zh-TW: 選章
+      en: "Select Chapters…"
+      zh-CN: 选章…
+      zh-TW: 選章…
     # 行内全本按钮 label
     download_whole:
       en: "Whole Book"
@@ -2114,9 +2147,9 @@ Search:
   url_download:
     # PageHeader 按钮 label
     button:
-      en: "Download by URL"
-      zh-CN: 下载链接
-      zh-TW: 下載連結
+      en: "Download by URL…"
+      zh-CN: 下载链接…
+      zh-TW: 下載連結…
     # URL 输入 Dialog 标题
     dialog_title:
       en: "Download from URL"
@@ -2124,9 +2157,9 @@ Search:
       zh-TW: 從連結下載
     # URL 输入框 placeholder
     placeholder:
-      en: "Paste novel detail page URL (http/https)..."
-      zh-CN: 请粘贴小说详情页链接（http/https）...
-      zh-TW: 請粘貼小說詳情頁連結（http/https）...
+      en: "Paste novel detail page URL (http/https)…"
+      zh-CN: 请粘贴小说详情页链接（http/https）…
+      zh-TW: 請粘貼小說詳情頁連結（http/https）…
     # 剪贴板已自动粘贴时的提示行
     auto_pasted:
       en: "✓ Auto-pasted from clipboard"
@@ -2204,9 +2237,9 @@ Search:
   detail:
     # 行内"详情"按钮 label
     action:
-      en: Details
-      zh-CN: 详情
-      zh-TW: 詳情
+      en: "Details…"
+      zh-CN: 详情…
+      zh-TW: 詳情…
     # Dialog 标题
     title:
       en: Book Details

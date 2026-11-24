@@ -11,8 +11,9 @@ use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
 
 use super::cover::{CoverEntry, cover_entry_from_bytes};
+use super::toc::{TocCache, TocEvent, TocState};
 use crate::core::{DrainOutcome, try_drain_all};
-use crate::models::{Book, Chapter, SearchResult};
+use crate::models::{BookDetail, SearchResult};
 
 /// 封面结果缓存最大条目数。64 条 ≈ 5-10MB, 让长会话的内存有界
 /// （旧实现是无上限 `HashMap`, 会累积所有查看过的封面）。
@@ -20,28 +21,6 @@ const COVER_CACHE_CAPACITY: NonZeroUsize = match NonZeroUsize::new(64) {
     Some(n) => n,
     None => unreachable!(),
 };
-
-/// TOC 预取加载状态。
-#[derive(Debug, Clone)]
-pub enum TocState {
-    /// 预取尚未返回。
-    Pending,
-    /// 已拿到书籍详情与章节目录。
-    Loaded(Box<Book>, Vec<Chapter>),
-    /// 预取失败，附错误文本。
-    Failed(String),
-}
-
-/// TOC 预取后台 → UI 通道事件。
-#[derive(Debug)]
-pub struct TocEvent {
-    /// 完成预取的书源 ID。
-    pub source_id: i32,
-    /// 该书的详情页 URL，作为缓存 key 的另一半。
-    pub url: String,
-    /// 预取结果状态。
-    pub state: TocState,
-}
 
 /// 搜索页状态（含后台通道）。
 pub struct SearchState {
@@ -81,10 +60,8 @@ pub struct SearchState {
     /// 搜索结束后是否自动执行结果过滤。
     pub filter_after_done: bool,
 
-    /// 每个 (源 ID, 书 URL) 的目录预取状态。
-    pub toc_cache: HashMap<(i32, String), TocState>,
-    /// 目录预取的后台通道。
-    pub toc_rx: Option<mpsc::UnboundedReceiver<TocEvent>>,
+    /// 每个 (源 ID, 书 URL) 的目录预取状态 + 预取后台通道。
+    pub toc: TocCache,
     /// 下载章节范围的下界（含）。
     pub chapter_range_start: u32,
     /// 下载章节范围的上界（含）。
@@ -120,8 +97,7 @@ impl Default for SearchState {
             detail_cache: HashMap::new(),
             detail_rx: None,
             filter_after_done: false,
-            toc_cache: HashMap::new(),
-            toc_rx: None,
+            toc: TocCache::default(),
             chapter_range_start: 0,
             chapter_range_end: 0,
             cover_tx: None,
@@ -139,7 +115,7 @@ pub enum DetailState {
     /// 详情尚未返回。
     Pending,
     /// 已拿到书籍详情。
-    Loaded(Box<Book>),
+    Loaded(Box<BookDetail>),
     /// 详情抓取失败，附错误文本。
     Failed(String),
 }
@@ -147,7 +123,7 @@ pub enum DetailState {
 impl DetailState {
     /// 仅当 Loaded 状态可取书；Pending/Failed 返回 None。
     #[must_use]
-    pub fn book(&self) -> Option<&Book> {
+    pub fn book(&self) -> Option<&BookDetail> {
         match self {
             Self::Loaded(b) => Some(b),
             _ => None,
@@ -303,7 +279,7 @@ impl SearchState {
     /// 排空 TOC 预取后台通道。
     fn drain_toc(&mut self) -> bool {
         let mut any = false;
-        let _ = try_drain_all(&mut self.toc_rx, |ev: TocEvent| {
+        let _ = try_drain_all(&mut self.toc.rx, |ev: TocEvent| {
             any = true;
             // 首次加载完成时初始化章节范围。
             if let TocState::Loaded(_, chapters) = &ev.state
@@ -312,7 +288,7 @@ impl SearchState {
                 self.chapter_range_start = 1;
                 self.chapter_range_end = chapters.len() as u32;
             }
-            self.toc_cache.insert((ev.source_id, ev.url), ev.state);
+            self.toc.entries.insert((ev.source_id, ev.url), ev.state);
         });
         any
     }
@@ -506,7 +482,7 @@ mod search_state_tests {
             (3, "http://www.mcxs.la/148_148487/".to_string()),
             DetailState::Loaded(Box::default()),
         );
-        s.toc_cache.insert(
+        s.toc.entries.insert(
             (3, "http://www.mcxs.la/148_148487/".to_string()),
             TocState::Loaded(Box::default(), vec![]),
         );
@@ -523,7 +499,7 @@ mod search_state_tests {
         assert!(s.source_id.is_none(), "source_id 应重置为 None");
         assert!(s.results.is_empty(), "results 应清空");
         assert!(s.detail_cache.is_empty(), "detail_cache 应清空");
-        assert!(s.toc_cache.is_empty(), "toc_cache 应清空");
+        assert!(s.toc.entries.is_empty(), "toc 缓存应清空");
         assert!(s.cover_cache.is_empty(), "cover_cache 应清空");
     }
 }

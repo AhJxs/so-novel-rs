@@ -294,7 +294,7 @@ pub fn paragraph_at_ratio(paragraphs: &[String], ratio: f32) -> usize {
 ///
 /// 一本书的行数、页数以千计，远在 f32 的 2^24 有效位以内；集中在这一处转换，
 /// 省得每个调用点各写一个 allow。阅读器正文测量的估算分支
-/// （`desktop::pages::reader::content_view::measure_lines`）也走这里。
+/// （`desktop::reader::content_view::measure_lines`）也走这里。
 #[allow(clippy::cast_precision_loss)]
 pub(crate) const fn count_f32(count: usize) -> f32 {
     count as f32

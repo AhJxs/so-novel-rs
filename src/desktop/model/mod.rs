@@ -17,6 +17,7 @@ mod search;
 mod search_state;
 mod sources;
 mod sources_state;
+mod toc;
 pub use app_model::AppModel;
 pub use sources_state::SourcesFilterStatus;
 pub(crate) mod tasks;
@@ -32,10 +33,10 @@ pub use library_state::{LibraryState, MetaEvent, Scan, ScanEvent};
 pub use list_cache::{ListCache, ListCacheKey, PageKind, filter_signature};
 pub use runtime::build_shared_runtime;
 pub use search_state::{
-    CoverEvent, DetailEvent, DetailState, SearchState, SourceSearchEvent, SourceStatus, TocEvent,
-    TocState,
+    CoverEvent, DetailEvent, DetailState, SearchState, SourceSearchEvent, SourceStatus,
 };
 pub use sources_state::SourcesState;
+pub use toc::{TocCache, TocEvent, TocKey, TocState};
 pub use ui_event::UIEvent;
 pub use update_state::{
     DownloadOutcome, DownloadPhase, DownloadState, UpdateCheckResult, UpdateError, UpdateOutcome,

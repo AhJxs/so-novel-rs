@@ -29,7 +29,7 @@ use super::source_select::SourceSelectItem;
 use crate::desktop::components::{
     EmptyState, PageHeader, Pagination, compute_page_window, truncate,
 };
-use crate::desktop::model::{AppModel, TocState};
+use crate::desktop::model::{AppModel, ListCacheKey, PageKind, TocState, filter_signature};
 use crate::models::{SearchResult, Source};
 
 /// Search 页面 entity。
@@ -56,17 +56,19 @@ pub struct SearchPage {
     /// 由本页订阅事件 clamp 到 [1, N] 后写回。
     pub(super) range_start_input: Entity<InputState>,
     pub(super) range_end_input: Entity<InputState>,
-    /// Dialog 当前服务的搜索结果（None = 没开）；TOC 用 `(source_id, url)` 查 `toc_cache`。
+    /// Dialog 当前服务的搜索结果（None = 没开）；TOC 用 `(source_id, url)` 查 `toc.entries`。
     pub(super) range_target: Option<SearchResult>,
     /// 是否已为当前 target 初始化过输入框。防 TOC 重渲时反复 `set_value` 覆盖用户输入。
     pub(super) range_initialized: bool,
 
     /// URL 输入 Dialog（PageHeader「下载链接」）的输入框，同 `keyword` 由 owner 持有。
     url_input: Entity<InputState>,
-    /// URL 输入 Dialog 点「解析」成功后写入，由 `render()` 下一帧 drain 掉。
-    /// **不能在 `on_ok` 里直接开 range Dialog**：返回 true 后组件库会 `close_dialog`
-    /// （`active_dialogs.pop()`），刚 push 的 Dialog 会被自己弹掉。
-    pending_range_dialog: Option<SearchResult>,
+
+    /// 上一次已写入 `list_cache` 的 `search.results_version`。
+    ///
+    /// 缓存生产与失效都在 model observer（非渲染路径）里完成：版本一变就
+    /// `retain_version` 淘汰旧快照并写入当前版本。render 只读，不写 model。
+    last_results_version: Option<u64>,
 }
 
 impl SearchPage {
@@ -103,6 +105,33 @@ impl SearchPage {
         let page_handle = cx.entity();
         let delegate = SearchDelegate::new(page_handle);
         let list_state = cx.new(|cx| ListState::new(delegate, window, cx));
+
+        // list_cache 的生产与失效都放在 model 通知里（非渲染路径）：`results_version`
+        // 变化时先淘汰本页旧版本键，再写入当前版本的全表快照。这样流式搜索不会把
+        // 每批结果都留成一份"整张结果表"的拷贝，render 也不必承担写 model 的副作用。
+        cx.observe_in(&model, window, |this, model, _window, cx| {
+            let version = model.read(cx).search.results_version;
+            if this.last_results_version == Some(version) {
+                return;
+            }
+            this.last_results_version = Some(version);
+            model.update(cx, |m, _cx| {
+                m.list_cache.retain_version(PageKind::Search, version);
+                let filter_sig =
+                    filter_signature(&[m.search.last_keyword.as_deref().unwrap_or("")]);
+                let key = ListCacheKey {
+                    page: PageKind::Search,
+                    data_version: version,
+                    filter_sig,
+                    page_index: 0, // 缓存全表，分页在 render 末尾 slice
+                    elem_type: std::any::TypeId::of::<Arc<SearchResult>>(),
+                };
+                if m.list_cache.get::<Arc<SearchResult>>(key).is_none() {
+                    m.list_cache.insert(key, m.search.results.clone());
+                }
+            });
+        })
+        .detach();
 
         // 起止输入框：Change 事件 clamp 后写回，Step 事件（+/-）由自己算值 —— NumberInput
         // 的 +/- 只发事件不改值。clamp 范围 [1, N]，N 取不到时按 [1, u32::MAX]。
@@ -216,7 +245,7 @@ impl SearchPage {
             range_target: None,
             range_initialized: false,
             url_input,
-            pending_range_dialog: None,
+            last_results_version: None,
         }
     }
 
@@ -240,11 +269,11 @@ impl SearchPage {
         cx.notify();
     }
 
-    /// 当前选章 Dialog 的 target 在 `toc_cache` 里 Loaded 的章节数。未拉到 / 失败 → `None`。
+    /// 当前选章 Dialog 的 target 在 `toc.entries` 里 Loaded 的章节数。未拉到 / 失败 → `None`。
     pub(super) fn current_range_chapters_len(&self, cx: &App) -> Option<u32> {
         let t = self.range_target.as_ref()?;
         let key = (t.source_id, t.url.clone());
-        match self.model.read(cx).search.toc_cache.get(&key) {
+        match self.model.read(cx).search.toc.entries.get(&key) {
             Some(TocState::Loaded(_, chs)) => Some(chs.len() as u32),
             _ => None,
         }
@@ -362,7 +391,7 @@ impl SearchPage {
                 .ok_text(t!("Search.url_download.confirm"))
                 .cancel_text(t!("Search.url_download.cancel"))
                 .confirm()
-                .on_ok(move |_ev, _window, cx| {
+                .on_ok(move |_ev, window, cx| {
                     let url = page.read(cx).url_input.read(cx).value().to_string();
                     let url = url.trim().to_string();
                     if url.is_empty() {
@@ -414,12 +443,19 @@ impl SearchPage {
                                     .to_string(),
                             );
                         });
-                        // 不能直接开 range Dialog：on_ok 返回 true 后组件库会 pop 栈顶，
-                        // 刚 push 的 Dialog 会被弹掉。改为置 flag，render 下一帧接手。
-                        p.pending_range_dialog = Some(target);
                         cx.notify();
                     });
-                    true // 关 URL Dialog，range Dialog 在下一帧 render() 里接管
+                    // 不能直接开 range Dialog：on_ok 返回 true 后组件库会 close_dialog
+                    // pop 掉栈顶，刚 push 的 Dialog 会被自己弹掉。用 `window.defer` 排到
+                    // 当前效果周期之后（此时 URL Dialog 已出栈），并借 `&mut Window`
+                    // 完成 TOC 请求与弹窗；render 只读状态，不再 spawn 网络请求。
+                    let page_for_dialog = page.clone();
+                    window.defer(cx, move |window, cx| {
+                        page_for_dialog.update(cx, |p, cx| {
+                            p.open_range_dialog(target, window, cx);
+                        });
+                    });
+                    true // 关 URL Dialog，range Dialog 在 defer 里接管
                 })
         });
     }
@@ -434,7 +470,7 @@ impl SearchPage {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        // 拉 TOC（幂等）。TOC 回来后写 toc_cache + drain loop notify → Dialog 刷新。
+        // 拉 TOC（幂等）。TOC 回来后写 `toc.entries` + drain loop notify → Dialog 刷新。
         self.model.update(cx, |m, _cx| m.spawn_resolve_toc(&target));
         self.range_target = Some(target);
         self.range_initialized = false;
@@ -496,7 +532,7 @@ impl SearchPage {
         };
         let key = (target.source_id, target.url.clone());
         let Some(TocState::Loaded(book, chapters)) =
-            self.model.read(cx).search.toc_cache.get(&key).cloned()
+            self.model.read(cx).search.toc.entries.get(&key).cloned()
         else {
             // TOC 还没回来 —— 留着 Dialog 等 drain loop 刷新。
             return RangeOutcome::Pending;
@@ -559,42 +595,35 @@ enum RangeOutcome {
 
 impl Render for SearchPage {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        // 排空「URL Dialog 解析成功 → 弹 range Dialog」的挂起请求。必须在最前面：此时
-        // URL Dialog 已被 close_dialog pop 掉、栈空，push 的新 Dialog 才不会被覆盖。
-        if let Some(target) = self.pending_range_dialog.take() {
-            self.open_range_dialog(target, window, cx);
-        }
-
         // 差量同步书源下拉：这里要 `&mut Window`，所以先做。
         self.sync_source_items(window, cx);
 
-        // 走 list_cache：drain / filter_sort 会原地替换 search.results，靠 results_version
-        // 递增让旧 key 立即失效并重算。filter_sig 目前只有 `last_keyword`（本页无其它过滤控件）。
-        let (results, running, expected, received, source_status) =
-            self.model.update(cx, |model, _cx| {
-                let filter_sig = crate::desktop::model::filter_signature(&[model
-                    .search
-                    .last_keyword
-                    .as_deref()
-                    .unwrap_or("")]);
-                let key = crate::desktop::model::ListCacheKey {
-                    page: crate::desktop::model::PageKind::Search,
-                    data_version: model.search.results_version,
-                    filter_sig,
-                    page_index: 0, // 缓存全表 results，分页在 render 末尾 slice
-                    elem_type: std::any::TypeId::of::<Arc<SearchResult>>(),
-                };
-                let results = if let Some(arc) = model.list_cache.get::<Arc<SearchResult>>(key) {
-                    arc
-                } else {
-                    model.list_cache.insert(key, model.search.results.clone())
-                };
-                let running = model.search.running;
-                let expected = model.search.expected;
-                let received = model.search.received;
-                let source_status = model.search.source_status.clone();
-                (results, running, expected, received, source_status)
-            });
+        // render 只读：缓存的生产 / 失效在 model observer 里（见 `new`）。
+        // 未命中（首帧，或版本刚变但通知还没跑到）就直接用未缓存的结果切片，
+        // 绝不在渲染期写 `list_cache`。
+        let (results, running, expected, received, source_status) = {
+            let model = self.model.read(cx);
+            let filter_sig =
+                filter_signature(&[model.search.last_keyword.as_deref().unwrap_or("")]);
+            let key = ListCacheKey {
+                page: PageKind::Search,
+                data_version: model.search.results_version,
+                filter_sig,
+                page_index: 0, // 缓存全表 results，分页在 render 末尾 slice
+                elem_type: std::any::TypeId::of::<Arc<SearchResult>>(),
+            };
+            let results = model
+                .list_cache
+                .get::<Arc<SearchResult>>(key)
+                .unwrap_or_else(|| Arc::new(model.search.results.clone()));
+            (
+                results,
+                model.search.running,
+                model.search.expected,
+                model.search.received,
+                model.search.source_status.clone(),
+            )
+        };
 
         let total = results.len();
         let w = compute_page_window(total, &mut self.current_page);

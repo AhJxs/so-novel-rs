@@ -18,6 +18,7 @@ pub const PAGE_SIZE: usize = 30;
 /// 一次分页的切片窗口：`start..end`（end 排他）。`current_page` 已被
 /// [`compute_page_window`] 兜底回卷，永远 `start < end <= total`。
 #[derive(Debug, Clone, Copy)]
+#[non_exhaustive]
 pub struct PageSlice {
     /// 本页第一条元素的下标（含）。
     pub start: usize,
@@ -68,21 +69,23 @@ pub type PaginationOnChange = dyn Fn(&usize, &mut Window, &mut App) + 'static;
 /// 分页组件：0-based 页码 + 「不足一页隐藏」的外部契约，内部委托组件库 `Pagination`。
 pub struct Pagination {
     current: usize,
-    total: usize,
+    /// 总页数（不是条目数）。命名与 `PageSlice::page_count` 对齐，避免和 `PageSlice::total`
+    /// （条目总数）混淆。
+    page_count: usize,
     /// `Rc<dyn Fn(...)>` 让每帧重建组件库 `Pagination` 时复用同一份回调，只复制引用计数。
     on_change: Rc<PaginationOnChange>,
 }
 
 impl Pagination {
-    /// `current` 是 **0-based** 当前页；`total` 是**总页数**（`PageSlice::page_count`），
-    /// 不是条目数 —— `total <= 1`（含 `total == 0`）时整个页脚渲染成 `Empty`，不显示。
-    pub fn new<F>(current: usize, total: usize, on_change: F) -> Self
+    /// `current` 是 **0-based** 当前页；`page_count` 是**总页数**（`PageSlice::page_count`），
+    /// 不是条目数 —— `page_count <= 1`（含 `0`）时整个页脚渲染成 `Empty`，不显示。
+    pub fn new<F>(current: usize, page_count: usize, on_change: F) -> Self
     where
         F: Fn(&usize, &mut Window, &mut App) + 'static,
     {
         Self {
             current,
-            total,
+            page_count,
             // 把 `F` 擦成 `dyn Fn(...)`，调用方可以传任何形态的闭包。
             on_change: Rc::new(on_change) as Rc<PaginationOnChange>,
         }
@@ -103,15 +106,15 @@ impl RenderOnce for Pagination {
     fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
         let Self {
             current,
-            total,
+            page_count,
             on_change,
         } = self;
 
-        // 外部契约 2：**不足一页就隐藏**（`total` 是总页数）。用 `Empty` 而不是空 `div()`：
+        // 外部契约 2：**不足一页就隐藏**（`page_count` 是总页数）。用 `Empty` 而不是空 `div()`：
         // gpui 的 `Empty` 以 `display: Display::None` 请求布局，taffy 会把整棵子树从布局里
         // 摘掉，**连父容器 `gap_3()` 的间距都不留**；空 `div()` 会占一个真实 flex item，
         // 视觉上列表下方多出 12px（4 个 page 的容器都是 `v_flex().gap_3()`）。
-        let total_pages = total.max(1);
+        let total_pages = page_count.max(1);
         if total_pages <= 1 {
             return Empty.into_any_element();
         }
@@ -137,5 +140,133 @@ impl RenderOnce for Pagination {
             .w_full()
             .justify_end()
             .into_any_element()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{PAGE_SIZE, compute_page_window};
+
+    #[test]
+    fn empty_list_yields_empty_slice() {
+        let mut current = 0;
+        let slice = compute_page_window(0, &mut current);
+        assert_eq!(slice.page_count, 0);
+        assert_eq!((slice.start, slice.end), (0, 0));
+        assert!(slice.is_empty());
+        // 空列表不能把 current 改成 -1（usize 下溢）。
+        assert_eq!(current, 0);
+    }
+
+    #[test]
+    fn exact_page_boundary_has_no_trailing_empty_page() {
+        let mut current = 0;
+        let slice = compute_page_window(PAGE_SIZE, &mut current);
+        assert_eq!(slice.page_count, 1);
+        assert_eq!((slice.start, slice.end), (0, PAGE_SIZE));
+    }
+
+    #[test]
+    fn last_page_is_partial() {
+        let mut current = 2;
+        let slice = compute_page_window(2 * PAGE_SIZE + 1, &mut current);
+        assert_eq!(slice.page_count, 3);
+        assert_eq!((slice.start, slice.end), (2 * PAGE_SIZE, 2 * PAGE_SIZE + 1));
+        assert!(!slice.is_empty());
+    }
+
+    #[test]
+    fn out_of_range_current_page_wraps_to_last() {
+        // 列表被过滤变短了，调用方还停在第 5 页。
+        let mut current = 5;
+        let total = PAGE_SIZE + 15;
+        let slice = compute_page_window(total, &mut current);
+        assert_eq!(current, 1, "越界页码应回卷到最后一页");
+        assert_eq!((slice.start, slice.end), (PAGE_SIZE, total));
+    }
+}
+
+/// 无头窗口里点真按钮，验证上面两条对外契约（0-based / 不足一页隐藏）不是纸面承诺。
+///
+/// 需要 `gpui-kit` 的 `test-support` feature（`Cargo.toml` 的 `[dev-dependencies]`）。
+#[cfg(test)]
+mod gui_tests {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    use gpui_kit::test::TestWindowExt;
+    use gpui_kit::{
+        Context, IntoElement, ParentElement, Render, Styled, TestAppContext, Window, div,
+    };
+
+    use super::Pagination;
+
+    /// 极简宿主视图：每帧用固定参数重建 `Pagination`，把回调收到的页码记进 `pages`。
+    struct Harness {
+        current: usize,
+        page_count: usize,
+        pages: Rc<RefCell<Vec<usize>>>,
+    }
+
+    impl Render for Harness {
+        fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+            let pages = self.pages.clone();
+            div().size_full().child(Pagination::new(
+                self.current,
+                self.page_count,
+                move |page, _window, _cx| pages.borrow_mut().push(*page),
+            ))
+        }
+    }
+
+    /// 起一个无头窗口并渲染一帧；返回回调记录 + 窗口上下文。
+    fn open(
+        cx: &mut TestAppContext,
+        current: usize,
+        page_count: usize,
+    ) -> (Rc<RefCell<Vec<usize>>>, &mut gpui_kit::VisualTestContext) {
+        // 组件库的 Button / theme token 依赖 `Theme` 全局，测试窗口里也得先 init。
+        cx.update(gpui_kit::component::init);
+        let pages = Rc::new(RefCell::new(Vec::new()));
+        let handle = Rc::clone(&pages);
+        let (_, vcx) = cx.add_window_view(move |_window, _cx| Harness {
+            current,
+            page_count,
+            pages: handle,
+        });
+        (pages, vcx)
+    }
+
+    #[gpui_kit::test]
+    fn next_button_reports_zero_based_page(cx: &mut TestAppContext) {
+        let (pages, vcx) = open(cx, 0, 3);
+        vcx.update(|window, cx| {
+            window.render_frame(cx);
+            // 正向对照：多页时 "next" 必须查得到，否则下面「只有一页时查不到」就是空断言。
+            assert!(window.try_find("next").is_some());
+            window.click("next", cx);
+        });
+        // 组件库的「下一页」是 1-based 的 2，对外必须换算成 0-based 的 1。
+        assert_eq!(*pages.borrow(), vec![1]);
+    }
+
+    #[gpui_kit::test]
+    fn page_number_button_reports_zero_based_page(cx: &mut TestAppContext) {
+        let (pages, vcx) = open(cx, 0, 3);
+        // 页码按钮的 id 就是 1-based 的页码字面量（`Button::new(page)`）。
+        vcx.update(|window, cx| window.click(3_usize, cx));
+        assert_eq!(*pages.borrow(), vec![2]);
+    }
+
+    #[gpui_kit::test]
+    fn single_page_renders_no_footer(cx: &mut TestAppContext) {
+        let (pages, vcx) = open(cx, 0, 1);
+        vcx.update(|window, cx| {
+            window.render_frame(cx);
+            // 只有一页时页脚渲染成 `Empty`，整棵子树（含 prev/next 按钮）都不进布局。
+            assert!(window.try_find("next").is_none());
+            assert!(window.try_find("prev").is_none());
+        });
+        assert!(pages.borrow().is_empty(), "隐藏的页脚不能触发任何回调");
     }
 }
