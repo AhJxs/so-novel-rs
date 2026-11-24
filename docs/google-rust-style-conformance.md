@@ -125,13 +125,11 @@ spec §8 所列、**未修改**的框架强制项：
    均不存在），该项检查 N/A；spec 中的环境限制条目不再适用。
 5. **网络相关测试**：健康检查用 RFC 5737 保留地址、搜索聚合测试不发真实请求；真实书源
    的端到端下载未验证。
-6. **rustfmt 版本差异**：本地验证用的是本机 nightly，不是 CI 固定的
-   `nightly-2026-11-08`；若两者 rustfmt 行为不同，CI fmt 可能要求一次重排。
 
 ## 5. 最终验证命令与结果
 
 ```text
-cargo +nightly fmt --all -- --check         # 0
+cargo fmt --all -- --check                  # 0
 cargo clippy --all-targets -- -D warnings   # No issues found
 cargo test --all-targets                    # 457 passed / 4 ignored / 0 failed
 cargo test --doc                            # 3 passed / 29 ignored

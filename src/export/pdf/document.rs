@@ -147,7 +147,7 @@ struct Run {
 const PAGE_W: f32 = 595.0;
 const PAGE_H: f32 = 842.0;
 const MARGIN: f32 = 56.0; // ≈2cm
-const CONTENT_W: f32 = PAGE_W - 2.0 * MARGIN;
+const CONTENT_W: f32 = 2.0f32.mul_add(-MARGIN, PAGE_W);
 
 const BODY_SIZE: f32 = 12.0;
 const TITLE_SIZE: f32 = 20.0;

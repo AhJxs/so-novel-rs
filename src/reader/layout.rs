@@ -541,7 +541,7 @@ mod tests {
             // 跳过页前的块后，pad_top + 列内偏移必须还原成不裁剪时的位置。
             let pad_top = offsets[range.start] - start;
             let column_start = offsets[range.start];
-            for &top in &offsets[range.clone()] {
+            for &top in &offsets[range] {
                 let rendered = pad_top + (top - column_start);
                 let unculled = top - start;
                 assert!(

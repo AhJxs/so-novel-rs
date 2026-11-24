@@ -84,7 +84,7 @@ pub fn format_size(bytes: u64) -> String {
 const fn u64_to_f64(v: u64) -> f64 {
     let lo = (v as u32) as f64;
     let hi = ((v >> 32) as u32) as f64;
-    hi * 4_294_967_296.0 + lo
+    hi.mul_add(4_294_967_296.0, lo)
 }
 
 #[cfg(test)]

@@ -193,9 +193,9 @@ mod tests {
     /// 只做编译期断言: `drain` 接 `&mut AppModel`（真实运行验证留给集成测试）。
     #[test]
     fn drain_on_empty_appmodel_does_not_panic() {
-        fn _check(m: &mut AppModel) -> bool {
+        fn check(m: &mut AppModel) -> bool {
             drain(m)
         }
-        let _ = _check as fn(&mut AppModel) -> bool;
+        let _ = check as fn(&mut AppModel) -> bool;
     }
 }
