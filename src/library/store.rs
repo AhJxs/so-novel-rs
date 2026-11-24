@@ -490,6 +490,18 @@ impl LibraryStore {
         Some(self.books.remove(index))
     }
 
+    /// 把一条记录放回书架（撤销「移出书架」）；同 id 已存在时不重复插入。
+    ///
+    /// 与 `remove` 对称：`remove` 把记录交还给调用方，撤销时原样送回即可，
+    /// 书签、进度与元数据都在记录内部，不会丢。
+    pub fn restore(&mut self, book: ShelfBook) {
+        if self.books.iter().any(|b| b.id == book.id) {
+            return;
+        }
+        self.books.push(book);
+        self.dirty = true;
+    }
+
     /// 收藏 / 取消收藏。
     pub fn set_favorite(&mut self, id: &str, favorite: bool) {
         if let Some(book) = self.books.iter_mut().find(|book| book.id == id)

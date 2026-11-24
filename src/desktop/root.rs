@@ -113,6 +113,17 @@ impl RootView {
         })
         .detach();
 
+        // `events::drain` 在 `drain_loop` 里跑，拿不到 `&mut Window`，只能把通知入队到
+        // `pending_ui_events`；model 通知时在这里（非渲染路径）整批取出并 push。
+        // 用 `observe_in` 而不是 render 里排空：渲染可能一帧跑多次，副作用不该挂在那里。
+        cx.observe_in(&model, window, |_this, model, window, cx| {
+            let pending = model.update(cx, |m, _cx| std::mem::take(&mut m.pending_ui_events));
+            for ev in pending {
+                window.push_notification(ui_event_to_notification(ev), cx);
+            }
+        })
+        .detach();
+
         Self {
             model,
             current_page: NavPage::default(),
@@ -477,18 +488,8 @@ impl RootView {
 }
 
 impl Render for RootView {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        // 排空 `AppModel::pending_ui_events` (`events::drain` 没有 `&mut Window`, 只能先
-        // 入队), 翻译成 `Notification` 并 push。`mem::take` 整取而非逐个 pop, 避免遍历
-        // 中 model 被追加事件。
-        let pending = std::mem::take(
-            &mut self
-                .model
-                .update(cx, |m, _| std::mem::take(&mut m.pending_ui_events)),
-        );
-        for ev in pending {
-            window.push_notification(ui_event_to_notification(ev), cx);
-        }
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // 渲染保持纯声明：`pending_ui_events` 的排空由 `new()` 里注册的 model observer 完成。
 
         // 阅读器打开时覆盖整个主区域（Sidebar + TitleBar + 内容区），仅沉浸模式下也隐藏
         // TitleBar；关闭由 RootView 丢弃 entity 完成。退出旁路挂在这一分支：

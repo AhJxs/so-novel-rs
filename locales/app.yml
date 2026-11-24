@@ -1384,18 +1384,14 @@ Library:
       zh-CN: 从头开始
       zh-TW: 從頭開始
   hide_dialog:
-    title:
-      en: "Remove from library"
-      zh-CN: 从书架移除
-      zh-TW: 從書架移除
-    message:
-      en: 'Remove "%{title}" from the library? The file stays on disk.'
-      zh-CN: '把「%{title}」从书架移除？磁盘上的文件不会被删除。'
-      zh-TW: '把「%{title}」從書架移除？磁碟上的檔案不會被刪除。'
-    confirm_button:
-      en: Remove
-      zh-CN: 移除
-      zh-TW: 移除
+    removed:
+      en: "Removed from library"
+      zh-CN: 已移出书架
+      zh-TW: 已移出書架
+    undo:
+      en: Undo
+      zh-CN: 撤销
+      zh-TW: 復原
   delete_file_dialog:
     title:
       en: "Delete file"

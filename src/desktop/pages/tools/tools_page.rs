@@ -776,11 +776,15 @@ impl Render for ToolsPage {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         v_flex()
             .size_full()
-            .p_6()
             .gap_4()
+            // 内边距挂在滚动容器内部：滚动条按容器边缘定位，挂在外面会把滚动条挤进来。
             .child(
-                PageHeader::new(t!("Tools.page_title").into())
-                    .subtitle(t!("Tools.page_subtitle").into()),
+                div()
+                    .px_6()
+                    .pt_6()
+                    .child(PageHeader::new(t!("Tools.page_title").into()).subtitle(
+                        t!("Tools.page_subtitle").into(),
+                    )),
             )
             .child(
                 div()
@@ -795,6 +799,8 @@ impl Render for ToolsPage {
                             .w_full()
                             .min_w_0()
                             .gap_5()
+                            .px_6()
+                            .pb_6()
                             .child(self.render_kind_cards(cx))
                             .child(self.render_form(cx)),
                     ),

@@ -404,6 +404,7 @@ impl LibraryPage {
             .items_center()
             .justify_center()
             .gap_3()
+            .px_6()
             .child(empty)
             .child(if has_books {
                 h_flex()
@@ -554,7 +555,7 @@ impl LibraryPage {
                     .icon(Icon::new(IconName::Minus))
                     .on_click(move |_event, window, cx| {
                         let id = hide_id.clone();
-                        let _ = hide_page.update(cx, |page, cx| page.prompt_hide(&id, window, cx));
+                        let _ = hide_page.update(cx, |page, cx| page.hide_book(&id, window, cx));
                     }),
             );
 
@@ -594,7 +595,9 @@ impl LibraryPage {
             .flex_wrap()
             .gap_5()
             .w_full()
-            .pb_2()
+            // 内边距挂在滚动内容上，滚动条才贴窗口边缘（与页头的 `px_6` 对齐）。
+            .px_6()
+            .pb_6()
             .track_focus(&self.focus)
             .key_context("LibraryGrid")
             .on_key_down(cx.listener(Self::on_grid_key_down))
@@ -643,7 +646,7 @@ impl LibraryPage {
             .child(grid)
             .when(more, |this| {
                 this.child(
-                    div().w_full().flex().justify_center().pt_3().child(
+                    div().w_full().flex().justify_center().py_3().child(
                         Button::new("shelf-load-more")
                             .ghost()
                             .label(t!("Library.action_load_more"))
@@ -723,48 +726,57 @@ impl Render for LibraryPage {
 
         v_flex()
             .size_full()
-            .p_6()
             .gap_3()
+            // 页头留在滚动区外，内边距自己带；滚动区占满剩余宽度，
+            // 滚动条才能贴到窗口右边缘（挂在 `p_6` 里面会内缩 24px）。
             .child(
-                PageHeader::new(t!("Library.page_title").into())
-                    .subtitle(
-                        t!(
-                            "Library.subtitle",
-                            count = &total.to_string(),
-                            dir = &download_dir
+                v_flex()
+                    .px_6()
+                    .pt_6()
+                    .gap_3()
+                    .child(
+                        PageHeader::new(t!("Library.page_title").into())
+                            .subtitle(
+                                t!(
+                                    "Library.subtitle",
+                                    count = &total.to_string(),
+                                    dir = &download_dir
+                                )
+                                .into(),
+                            )
+                            .action(
+                                Button::new("shelf-import")
+                                    .primary()
+                                    .icon(Icon::new(IconName::Plus))
+                                    .label(t!("Library.action_import"))
+                                    .on_click(cx.listener(|this, _ev, _window, cx| {
+                                        this.pick_and_import(cx);
+                                    })),
+                            )
+                            .action(
+                                Button::new("shelf-rescan")
+                                    .ghost()
+                                    .icon(Icon::new(IconName::Redo))
+                                    .label(t!("Library.action_rescan"))
+                                    .loading(scan_in_flight)
+                                    .disabled(scan_in_flight)
+                                    .on_click(cx.listener(|this, _ev, _window, cx| {
+                                        this.rescan(cx);
+                                    })),
+                            ),
+                    )
+                    .child(self.render_filters(sort, status, favorite_only, cx))
+                    .when_some(scan_error, |this, error| {
+                        this.child(
+                            div()
+                                .p_3()
+                                .rounded_md()
+                                .bg(cx.theme().danger)
+                                .text_color(cx.theme().danger_foreground)
+                                .child(error),
                         )
-                        .into(),
-                    )
-                    .action(
-                        Button::new("shelf-import")
-                            .primary()
-                            .icon(Icon::new(IconName::Plus))
-                            .label(t!("Library.action_import"))
-                            .on_click(cx.listener(|this, _ev, _window, cx| {
-                                this.pick_and_import(cx);
-                            })),
-                    )
-                    .action(
-                        Button::new("shelf-rescan")
-                            .ghost()
-                            .icon(Icon::new(IconName::Redo))
-                            .label(t!("Library.action_rescan"))
-                            .loading(scan_in_flight)
-                            .disabled(scan_in_flight)
-                            .on_click(cx.listener(|this, _ev, _window, cx| this.rescan(cx))),
-                    ),
+                    }),
             )
-            .child(self.render_filters(sort, status, favorite_only, cx))
-            .when_some(scan_error, |this, error| {
-                this.child(
-                    div()
-                        .p_3()
-                        .rounded_md()
-                        .bg(cx.theme().danger)
-                        .text_color(cx.theme().danger_foreground)
-                        .child(error),
-                )
-            })
             .child(body)
     }
 }

@@ -334,6 +334,20 @@ impl AppModel {
         crate::library::path_key_is_child_of(&book.path_key, &root_key)
     }
 
+    /// 撤销「移出书架」：隐藏的书恢复可见，被删掉的记录整条放回。
+    ///
+    /// `snapshot` 是 `hide_book` 之前取的整本快照 —— 删记录的分支只有它还能把
+    /// 书签 / 进度 / 元数据还原（封面文件已被 `hide_book` 删除，撤销后按需重提取）。
+    pub fn undo_hide_book(&mut self, snapshot: ShelfBook) {
+        if self.library.store.get(&snapshot.id).is_some() {
+            self.library.store.set_hidden(&snapshot.id, false);
+        } else {
+            self.library.store.restore(snapshot);
+        }
+        self.library.bump();
+        self.persist_library();
+    }
+
     /// 移出书架：扫描范围内的书只隐藏（重扫不会再加回），范围外直接删记录。
     pub fn hide_book(&mut self, id: &str) {
         let Some(book) = self.library.store.get(id).cloned() else {

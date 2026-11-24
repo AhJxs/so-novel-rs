@@ -10,7 +10,6 @@ const COVER_IMAGES_CAPACITY: NonZeroUsize = match NonZeroUsize::new(32) {
 };
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::dialog::AlertDialog;
 use gpui_kit::component::input::{Input, InputEvent, InputState, NumberInputEvent, StepAction};
 use gpui_kit::component::list::{List, ListState};
 use gpui_kit::component::notification::{Notification, NotificationType};
@@ -19,7 +18,7 @@ use gpui_kit::component::{ActiveTheme as _, Icon, IconName, Sizable, WindowExt, 
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     App, AppContext, Context, Entity, IntoElement, ParentElement, Render, RenderImage,
-    SharedString, Styled, Window, div, px,
+    SharedString, Styled, Window, div, rems,
 };
 use rust_i18n::t;
 
@@ -27,7 +26,7 @@ use super::delegate::SearchDelegate;
 use super::range_dialog::clamp_range_value;
 use super::source_select::SourceSelectItem;
 use crate::desktop::components::{
-    EmptyState, PageHeader, Pagination, compute_page_window, truncate,
+    EmptyState, PageHeader, Pagination, compute_page_window, form_dialog_footer, truncate,
 };
 use crate::desktop::model::{AppModel, ListCacheKey, PageKind, TocState, filter_signature};
 use crate::models::{SearchResult, Source};
@@ -345,7 +344,8 @@ impl SearchPage {
         }
 
         let page = cx.entity();
-        window.open_alert_dialog(cx, move |alert: AlertDialog, _window, cx| {
+        // 表单走 `Dialog` 而不是 `AlertDialog`：后者只留给「严重后果」的确认。
+        window.open_dialog(cx, move |dialog, window, cx| {
             let page = page.clone();
             let url_input = page.read(cx).url_input.clone();
             let body = v_flex()
@@ -383,14 +383,16 @@ impl SearchPage {
                                 .child(t!("Search.url_download.auto_pasted")),
                         ),
                 );
-            // 复杂 body 走 `.child(body)`；宽用 AlertDialog 的 `.width()`。
-            alert
+            // 复杂 body 走 `.child(body)`；宽按 rem 折算，跟随全局字号缩放。
+            // 普通 `Dialog` 不会自己渲染按钮，页脚必须显式给（见 `form_dialog_footer`）。
+            dialog
                 .title(t!("Search.url_download.dialog_title"))
-                .width(px(520.))
+                .width(rems(32.5).to_pixels(window.rem_size()))
                 .child(body)
-                .ok_text(t!("Search.url_download.confirm"))
-                .cancel_text(t!("Search.url_download.cancel"))
-                .confirm()
+                .footer(form_dialog_footer(
+                    t!("Search.url_download.confirm"),
+                    t!("Search.url_download.cancel"),
+                ))
                 .on_ok(move |_ev, window, cx| {
                     let url = page.read(cx).url_input.read(cx).value().to_string();
                     let url = url.trim().to_string();
@@ -476,16 +478,20 @@ impl SearchPage {
         self.range_initialized = false;
 
         let page = cx.entity();
-        window.open_alert_dialog(cx, move |alert: AlertDialog, window, cx| {
+        // 章节范围是表单，用 `Dialog`（`AlertDialog` 只留给严重后果确认）。
+        window.open_dialog(cx, move |dialog, window, cx| {
             let page = page.clone();
+            // 宽度先算：`content` 借 `&mut Window`，之后再取 `rem_size` 会撞借用。
+            let width = rems(32.5).to_pixels(window.rem_size());
             let body = super::range_dialog::content(&page, window, cx);
-            alert
+            dialog
                 .title(t!("Search.range.title"))
-                .width(px(520.))
+                .width(width)
                 .child(body)
-                .ok_text(t!("Search.range.confirm"))
-                .cancel_text(t!("Search.range.cancel"))
-                .confirm()
+                .footer(form_dialog_footer(
+                    t!("Search.range.confirm"),
+                    t!("Search.range.cancel"),
+                ))
                 // on_ok 挂 Dialog 上（带 `&mut Window`）；page.update 内部只有 Context，
                 // 所以下载在 update 里派发、通知在这层发，结果用 RangeOutcome 传出。
                 .on_ok(move |_, window, cx| {
@@ -696,7 +702,7 @@ impl Render for SearchPage {
                     .border_1()
                     .border_color(cx.theme().border)
                     .rounded_md()
-                    .child(List::new(&self.list_state).p(px(12.)).size_full())
+                    .child(List::new(&self.list_state).p_3().size_full())
                     .into_any_element()
             })
             // 页脚可见性由 `Pagination` 自己判。

@@ -1,11 +1,12 @@
-//! 书架弹窗：书籍信息、移出 / 删除确认、重新定位。
+//! 书架弹窗：书籍信息、删除确认、重新定位。
 //!
 //! 所有弹窗都从 `LibraryPage` 的方法打开；`window.open_dialog` 的 builder 每帧重跑，
 //! 因此状态按帧从 `AppModel` 重读，不往 builder 闭包里放可变状态。
 
 use gpui_kit::component::button::{Button, ButtonVariant, ButtonVariants as _};
 use gpui_kit::component::dialog::AlertDialog;
-use gpui_kit::component::{ActiveTheme as _, WindowExt as _, h_flex, v_flex};
+use gpui_kit::component::notification::Notification;
+use gpui_kit::component::{ActiveTheme as _, Sizable as _, WindowExt as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{App, ClickEvent, Context, Div, ParentElement, Styled, Window, div, rems};
 use rust_i18n::t;
@@ -114,28 +115,39 @@ impl LibraryPage {
         });
     }
 
-    /// 移出书架（二次确认）。
-    pub(super) fn prompt_hide(&self, book_id: &str, window: &mut Window, cx: &mut Context<Self>) {
+    /// 移出书架（可直接撤销，不再二次确认）。
+    ///
+    /// 指南：可逆的低风险动作不该用确认弹窗拦住。`hide_book` 的两种结果
+    /// （置隐藏位 / 删记录）都能被 `undo_hide_book` 原样还原，所以这里直接执行，
+    /// 再用一条带「撤销」按钮的通知兜底；确认弹窗只留给真正不可逆的动作。
+    pub(super) fn hide_book(&self, book_id: &str, window: &mut Window, cx: &mut Context<Self>) {
         let Some(book) = self.model.read(cx).book_snapshot(book_id) else {
             return;
         };
+        let title = book.title.clone();
+        self.model
+            .update(cx, |model, _cx| model.hide_book(&book.id));
+        cx.notify();
+
         let model = self.model.clone();
-        let id = book.id;
-        let title = book.title;
-        window.open_alert_dialog(cx, move |alert: AlertDialog, _window, _cx| {
-            let model = model.clone();
-            let id = id.clone();
-            alert
-                .title(t!("Library.hide_dialog.title"))
-                .description(t!("Library.hide_dialog.message", title = &title))
-                .ok_text(t!("Library.hide_dialog.confirm_button"))
-                .cancel_text(t!("Library.dialog.cancel_button"))
-                .confirm()
-                .on_ok(move |_ev: &ClickEvent, _window, cx| {
-                    model.update(cx, |model, _cx| model.hide_book(&id));
-                    true
-                })
-        });
+        let snapshot = book;
+        window.push_notification(
+            Notification::new()
+                .title(t!("Library.hide_dialog.removed").to_string())
+                .message(title)
+                // 带 action 的通知不会自动消失：撤销机会必须留给用户。
+                .action(move |_notification, _window, _cx| {
+                    let model = model.clone();
+                    let snapshot = snapshot.clone();
+                    Button::new("undo-hide-book")
+                        .small()
+                        .label(t!("Library.hide_dialog.undo").to_string())
+                        .on_click(move |_ev, _window, cx| {
+                            model.update(cx, |model, _cx| model.undo_hide_book(snapshot.clone()));
+                        })
+                }),
+            cx,
+        );
     }
 
     /// 删除磁盘文件（二次确认，危险操作）。

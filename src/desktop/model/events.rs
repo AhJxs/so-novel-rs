@@ -56,6 +56,9 @@ pub fn new_wakeup() -> (WakeupHandle, WakeupReceiver) {
 /// 派发 `pending_cover_prefetch`; 把 `update_state` 结果推成 `UIEvent`。
 pub fn drain(model: &mut AppModel) -> bool {
     let mut any = false;
+    // 推了 toast 也必须让调用方 `notify`：`RootView` 的 model observer 只有收到通知才会
+    // 把 `pending_ui_events` 翻译成弹窗。只比较增量，遗留的旧事件不会让循环空转。
+    let pending_before = model.pending_ui_events.len();
 
     // 1. 搜索（单源完成 / 详情 / 封面 / TOC 全部走 search.drain）。
     any |= model.search.drain();
@@ -176,6 +179,7 @@ pub fn drain(model: &mut AppModel) -> bool {
         any = true;
     }
 
+    any |= model.pending_ui_events.len() > pending_before;
     any
 }
 
