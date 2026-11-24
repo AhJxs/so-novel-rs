@@ -57,4 +57,5 @@ pub mod models;
 pub mod parser;
 pub mod reader;
 pub mod tools;
+pub mod update;
 pub mod utils;

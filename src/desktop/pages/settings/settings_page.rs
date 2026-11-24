@@ -10,7 +10,7 @@ use gpui_kit::component::slider::{SliderEvent, SliderState, SliderValue};
 use gpui_kit::{App, AppContext, Context, Entity, IntoElement, Render, SharedString, Window};
 use rust_i18n::t;
 
-use super::ctx::{PageContext, PickFolderListener};
+use super::ctx::{PageContext, PickFolderListener, RestartHandler};
 use crate::desktop::model::AppModel;
 use crate::desktop::themes;
 
@@ -38,6 +38,10 @@ pub struct SettingsPage {
 
     /// 合并写盘代次：输入/滑块每变化一次 +1，400ms 计时器醒来只写自己那一代。
     persist_generation: u64,
+
+    /// `RootView` 注入的「重启并更新」回调。设置页拿不到根视图（避免循环持有），
+    /// 所以安装 / 重启动作必须由根视图完成。
+    restart_handler: Option<RestartHandler>,
 }
 
 /// 构造一个可搜索的主题 `SelectState`。用函数而不是闭包：闭包捕获 `window: &mut Window`
@@ -210,7 +214,13 @@ impl SettingsPage {
             font_size_state,
             qidian_cookie_input,
             persist_generation: 0,
+            restart_handler: None,
         }
+    }
+
+    /// 注入「重启并更新」回调（`RootView::new` 调用一次）。
+    pub fn set_restart_handler(&mut self, handler: RestartHandler) {
+        self.restart_handler = Some(handler);
     }
 
     /// 输入框 / 滑块变化后调：把真正写盘推迟到停止输入 400ms，期间再多变化也只写一次。
@@ -344,6 +354,7 @@ impl SettingsPage {
             download_path_input: &self.download_path_input,
             qidian_cookie_input: &self.qidian_cookie_input,
             pick_folder_listener: &self.pick_folder_listener,
+            restart_handler: self.restart_handler.as_ref(),
         };
         vec![
             super::page_general::build(&ctx, cx),

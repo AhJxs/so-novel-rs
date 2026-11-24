@@ -113,6 +113,10 @@ impl AppModel {
                 StateOpenError::Other(error) => error,
             })?;
 
+        // 拿到运行数据目录 = 本进程是唯一实例，此时才能安全清理上次自更新留下的
+        // `<exe>.old` / 暂存包（第二个实例若先清理会误删正在运行的下载）。
+        crate::update::cleanup_after_update();
+
         // 2. 书源选择要先于规则加载：规则目录按活跃书源文件解析。
         let (sources_config, sources_readonly) =
             load_sources_config(&state, snapshot.sources.as_deref());

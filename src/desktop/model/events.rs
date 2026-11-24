@@ -158,6 +158,23 @@ pub fn drain(model: &mut AppModel) -> bool {
         }
     }
 
+    // 6. 自更新下载/解包进度。Progress 只要求重绘；Ready/Cancelled/Failed 推 toast。
+    //    安装动作由 Settings 页的确认弹窗触发，不走这里。
+    if let Some(outcome) = model.update_state.drain_download() {
+        use super::update_state::DownloadOutcome::{
+            Cancelled, Failed as DownloadFailed, Progress, Ready,
+        };
+        match outcome {
+            Progress => {}
+            Ready => model.push_success(t!("Toasts.update_download_ready").to_string()),
+            Cancelled => model.push_info(t!("Toasts.update_download_cancelled").to_string()),
+            DownloadFailed(err) => {
+                model.push_error(t!("Toasts.update_download_failed", err = &err).to_string());
+            }
+        }
+        any = true;
+    }
+
     any
 }
 

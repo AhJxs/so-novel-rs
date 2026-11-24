@@ -15,6 +15,9 @@ pub struct ConfigPaths {
     /// 运行数据目录 `~/.sonovel/state/`：书架 / 下载任务 / 书源选择三份数据由
     /// [`crate::db::StateStore`] 统一存这里（SurrealKV），不再拆成独立 JSON。
     pub state_dir: PathBuf,
+    /// 自更新暂存目录 `~/.sonovel/updates/`：下载的发布包与解出的新主程序，
+    /// 安装完成（或每次启动）后清理。
+    pub updates_dir: PathBuf,
 }
 
 impl ConfigPaths {
@@ -28,6 +31,7 @@ impl ConfigPaths {
             themes_dir: base.join("themes"),
             rules_dir: base.join("rules"),
             state_dir: base.join("state"),
+            updates_dir: base.join("updates"),
         }
     }
 }

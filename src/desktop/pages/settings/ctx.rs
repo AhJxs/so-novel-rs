@@ -16,6 +16,9 @@ use crate::desktop::model::AppModel;
 /// 「下载目录」按钮 click handler 的类型别名（owner-cache 闭包用），只在本模块内用。
 pub(super) type PickFolderListener = Rc<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
 
+/// 「重启并更新」确认后的回调：由 `RootView` 在 `new()` 里注入，设置页自己够不到根视图。
+pub(super) type RestartHandler = Rc<dyn Fn(&mut Window, &mut App)>;
+
 /// 把 owner-cached entity 借给各 page 模块用。
 ///
 /// 字段全是 `&'page` 借出（`Entity::clone` 只是 refcount 增量），`'page` 跟 `SettingsPage` 同生同死。
@@ -30,4 +33,6 @@ pub(super) struct PageContext<'page> {
     /// 多行由 `TextareaState` 模式本身携带，配合 `.rows(3)` + `.h(px(80.))` 给固定高度。
     pub qidian_cookie_input: &'page Entity<TextareaState>,
     pub pick_folder_listener: &'page PickFolderListener,
+    /// `RootView` 注入的重启回调；`None` 时「重启并更新」会提示重新下载而不是静默失败。
+    pub restart_handler: Option<&'page RestartHandler>,
 }

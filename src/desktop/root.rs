@@ -72,6 +72,17 @@ impl RootView {
         let tools_page = cx.new(|cx| ToolsPage::new(model.clone(), window, cx));
         let settings_page = cx.new(|cx| SettingsPage::new(model.clone(), window, cx));
 
+        // 设置页 →「重启并更新」：页面拿不到 RootView，注入弱引用回调（同 LibraryPage 的写法）。
+        // 安装 / 关库 / 拉新进程都必须在根视图上做。
+        let restart_handle = cx.entity().downgrade();
+        settings_page.update(cx, |page, _cx| {
+            page.set_restart_handler(Rc::new(move |_window, cx| {
+                let _ = restart_handle.update(cx, |root, cx| {
+                    let _ = root.restart_to_update(cx);
+                });
+            }));
+        });
+
         // 书架卡片点击 → RootView::open_reader。用弱引用避免 RootView ↔ LibraryPage 循环持有。
         let root_handle = cx.entity().downgrade();
         library_page.update(cx, |page, _cx| {
@@ -200,6 +211,40 @@ impl RootView {
             model.persist_tasks();
             model.state.close();
         });
+    }
+
+    /// 安装已下载的新主程序并重启：替换 → 落盘关库 → 启动新进程 → 退出。
+    ///
+    /// 顺序是刻意的：先替换，失败时旧版本仍完整、状态库仍打开，可继续用；替换成功后再
+    /// [`Self::flush_before_quit`] 关库（释放 `SurrealKV` 目录锁），最后才 spawn 新实例，
+    /// 否则子进程会撞上父进程还持有的锁。
+    ///
+    /// # Errors
+    ///
+    /// 更新未就绪、替换主程序失败或新进程启动失败时返回错误（已推 notification）。
+    pub fn restart_to_update(&mut self, cx: &mut Context<Self>) -> Result<(), String> {
+        let staged = self
+            .model
+            .update(cx, |model, _| model.begin_update_install())
+            .ok_or_else(|| rust_i18n::t!("Toasts.update_not_ready").to_string())?;
+        let exe = match crate::update::install_binary(&staged) {
+            Ok(exe) => exe,
+            Err(error) => {
+                let message = error.to_string();
+                self.model
+                    .update(cx, |model, _| model.fail_update_install(&message));
+                return Err(message);
+            }
+        };
+        self.flush_before_quit(cx);
+        if let Err(error) = crate::update::spawn_restarted(&exe) {
+            let message = error.to_string();
+            self.model
+                .update(cx, |model, _| model.fail_update_install(&message));
+            return Err(message);
+        }
+        cx.quit();
+        Ok(())
     }
 
     fn navigate(&mut self, page: NavPage, cx: &mut Context<Self>) {

@@ -103,6 +103,13 @@ epub-builder = "0.8"
 # 减少 Windows MSVC 编译时对 cl.exe 的依赖。
 zip = { version = "9", default-features = false, features = ["deflate-flate2"] }
 
+# 自更新：解 Linux / macOS 的 tar.gz 发布包（Windows 的 zip 复用上面的 zip crate）。
+# flate2 走纯 Rust 后端，与 zip 的 deflate-flate2 保持同一实现，避免引入 C 依赖。
+flate2 = { version = "1", default-features = false, features = [
+    "rust_backend",
+] }
+tar = { version = "0.4", default-features = false }
+
 # 原生文件选择对话框（书源管理「添加」按钮：选 JSON 文件导入）。
 # 用 xdg-portal 而非默认 GTK3，避免引入 gtk3 系统依赖；它自带 pollster，
 # 不再需要 ashpd / tokio runtime。AsyncFileDialog 返回 impl Future，由调用方 executor 驱动。

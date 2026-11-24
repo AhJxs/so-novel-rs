@@ -1,16 +1,17 @@
 //! 版本更新检查。
 //!
 //! `check_latest_release` / `classify` / `is_new_version_available` 都是纯业务，无 GUI /
-//! HTTP 状态语义。
+//! HTTP 状态语义。自更新的下载 / 解包 / 替换在 [`crate::update`]，这里只负责查询 GitHub
+//! release 并解析出 tag + 产物清单（`ReleaseAsset`），由 `crate::update::asset` 挑当前平台。
 //!
 //! 网络层不持有共享 `HttpClients`：调用方在 `spawn` 前取出 [`GhProxy`] 与 safe
 //! `reqwest::Client` 并移入任务。
 
-use serde_json::Value;
+use serde::Deserialize;
 
 use crate::http::GhProxy;
 
-/// 更新检查失败原因。
+/// 更新检查 / 下载 / 安装失败原因。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UpdateError(pub String);
 
@@ -21,13 +22,32 @@ impl std::fmt::Display for UpdateError {
 }
 impl std::error::Error for UpdateError {}
 
-/// 后台更新检查的结果：成功时 `Ok` 携带 GitHub 上最新 release 的 tag（可能解析不到，
-/// 此时为 `Ok(None)`），失败时 `Err` 携带原因。
-pub type UpdateCheckResult = Result<Option<String>, UpdateError>;
+/// GitHub release 里的一个可下载产物。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReleaseAsset {
+    /// 产物文件名（如 `so-novel-rs-0.7.2-windows-x86_64.zip`）。
+    pub name: String,
+    /// 直链（`browser_download_url`）。
+    pub url: String,
+    /// 字节数；GitHub 未提供时为 0（下载时退化为响应头 `Content-Length`）。
+    pub size: u64,
+}
+
+/// 最新 release：tag + 产物清单。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReleaseInfo {
+    /// 原始 tag（保留 `v` 前缀，由 UI 决定是否剥）。
+    pub tag: String,
+    pub assets: Vec<ReleaseAsset>,
+}
+
+/// 后台更新检查的结果：成功时 `Ok` 携带最新 release（可能解析不到，此时为
+/// `Ok(None)`），失败时 `Err` 携带原因。
+pub type UpdateCheckResult = Result<Option<ReleaseInfo>, UpdateError>;
 
 /// `classify` / `UpdateState::drain` 报告的语义化跃迁：把"通道刚返回了一条 result"
 /// 翻译成"用户应该听到什么"，调用方拿到后只管 push notification，不再自己 `if let` 串字段。
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum UpdateOutcome {
     /// 当前版本 = GitHub 最新版本。
     UpToDate,
@@ -45,10 +65,10 @@ pub enum UpdateOutcome {
 pub fn classify(result: &UpdateCheckResult) -> UpdateOutcome {
     match result {
         Err(e) => UpdateOutcome::Failed(e.to_string()),
-        Ok(Some(latest)) if latest.trim_start_matches('v') == env!("CARGO_PKG_VERSION") => {
+        Ok(Some(info)) if info.tag.trim_start_matches('v') == env!("CARGO_PKG_VERSION") => {
             UpdateOutcome::UpToDate
         }
-        Ok(Some(latest)) => UpdateOutcome::NewVersion(latest.clone()),
+        Ok(Some(info)) => UpdateOutcome::NewVersion(info.tag.clone()),
         Ok(None) => UpdateOutcome::Failed("(empty result)".into()),
     }
 }
@@ -61,7 +81,7 @@ pub fn is_new_version_available(latest: &str) -> bool {
     latest.trim_start_matches('v') != env!("CARGO_PKG_VERSION")
 }
 
-/// 向 GitHub API 查询最新 release 版本号。
+/// 向 GitHub API 查询最新 release（tag + 产物清单）。
 ///
 /// 代理优先级：`gh_proxy.url` 非空 → 预构建的 GH 镜像前向代理 client（已含 proxy + UA），
 /// 否则用调用方传入的 `safe_client`（已含 CONNECT 代理 / TLS cache / 默认 headers）。
@@ -105,15 +125,13 @@ pub async fn check_latest_release(
             }
             match resp.text().await {
                 Ok(body) => {
-                    // GitHub 返回压缩 JSON（无换行），必须用 serde_json 取 tag_name；
+                    // GitHub 返回压缩 JSON（无换行），必须用 serde 取字段；
                     // 按行匹配 pretty-print 格式会永远找不到 → 误报 "(empty result)"。
-                    let tag = serde_json::from_str::<Value>(&body)
-                        .ok()
-                        .and_then(|v| v.get("tag_name").and_then(|t| t.as_str()).map(String::from));
-                    if tag.is_none() {
+                    let release = parse_release(&body);
+                    if release.is_none() {
                         tracing::warn!("GitHub release response 无 tag_name: {body}");
                     }
-                    Ok(tag)
+                    Ok(release)
                 }
                 Err(e) => Err(UpdateError(format!("读取响应失败: {e}"))),
             }
@@ -122,10 +140,49 @@ pub async fn check_latest_release(
     }
 }
 
+#[derive(Deserialize)]
+struct RawRelease {
+    tag_name: Option<String>,
+    #[serde(default)]
+    assets: Vec<RawAsset>,
+}
+
+#[derive(Deserialize)]
+struct RawAsset {
+    name: String,
+    browser_download_url: String,
+    #[serde(default)]
+    size: u64,
+}
+
+/// 解析 `/releases/latest` 响应体；缺 `tag_name` 或不是合法 JSON 时返回 `None`。
+fn parse_release(body: &str) -> Option<ReleaseInfo> {
+    let raw: RawRelease = serde_json::from_str(body).ok()?;
+    Some(ReleaseInfo {
+        tag: raw.tag_name?,
+        assets: raw
+            .assets
+            .into_iter()
+            .map(|a| ReleaseAsset {
+                name: a.name,
+                url: a.browser_download_url,
+                size: a.size,
+            })
+            .collect(),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
     use super::*;
+
+    fn info(tag: &str) -> ReleaseInfo {
+        ReleaseInfo {
+            tag: tag.to_string(),
+            assets: Vec::new(),
+        }
+    }
 
     #[test]
     fn classify_failure_returns_failed() {
@@ -135,20 +192,20 @@ mod tests {
 
     #[test]
     fn classify_up_to_date_strips_leading_v() {
-        let r: UpdateCheckResult = Ok(Some(format!("v{}", env!("CARGO_PKG_VERSION"))));
+        let r: UpdateCheckResult = Ok(Some(info(&format!("v{}", env!("CARGO_PKG_VERSION")))));
         assert!(matches!(classify(&r), UpdateOutcome::UpToDate));
     }
 
     #[test]
     fn classify_up_to_date_without_v_prefix() {
         // tag 可能没 v 前缀（自己 fork 时常见）
-        let r: UpdateCheckResult = Ok(Some(env!("CARGO_PKG_VERSION").to_string()));
+        let r: UpdateCheckResult = Ok(Some(info(env!("CARGO_PKG_VERSION"))));
         assert!(matches!(classify(&r), UpdateOutcome::UpToDate));
     }
 
     #[test]
     fn classify_new_version_returns_new_version() {
-        let r: UpdateCheckResult = Ok(Some("v999.0.0".into()));
+        let r: UpdateCheckResult = Ok(Some(info("v999.0.0")));
         assert!(matches!(classify(&r), UpdateOutcome::NewVersion(v) if v == "v999.0.0"));
     }
 
@@ -178,21 +235,33 @@ mod tests {
     }
 
     #[test]
-    fn parse_tag_name_from_actual_github_response() {
-        // 真实 /releases/latest 响应（压缩格式，无换行）。
-        let body = r#"{"url":"https://api.github.com/repos/AhJxs/so-novel-rs/releases/341144353","html_url":"https://github.com/AhJxs/so-novel-rs/releases/tag/v0.2.3","id":341144353,"author":{"login":"github-actions[bot]","id":41898282},"node_id":"RE_kwDOS6YKu84UVXMh","tag_name":"v0.2.3","target_commitish":"master","name":"v0.2.3","draft":false,"immutable":false,"prerelease":false,"created_at":"2026-06-18T03:12:36Z","updated_at":"2026-06-18T03:28:50Z","published_at":"2026-06-18T03:28:50Z","assets":[],"tarball_url":"x","zipball_url":"y","body":"x"}"#;
-        let tag = serde_json::from_str::<Value>(body)
-            .ok()
-            .and_then(|v| v.get("tag_name").and_then(|t| t.as_str()).map(String::from));
-        assert_eq!(tag.as_deref(), Some("v0.2.3"));
+    fn parse_release_from_actual_github_response() {
+        // 真实 /releases/latest 响应结构（压缩格式，无换行），补一个 asset。
+        let body = r#"{"url":"https://api.github.com/repos/AhJxs/so-novel-rs/releases/341144353","html_url":"https://github.com/AhJxs/so-novel-rs/releases/tag/v0.2.3","id":341144353,"author":{"login":"github-actions[bot]","id":41898282},"node_id":"RE_kwDOS6YKu84UVXMh","tag_name":"v0.2.3","target_commitish":"master","name":"v0.2.3","draft":false,"immutable":false,"prerelease":false,"created_at":"2026-06-18T03:12:36Z","updated_at":"2026-06-18T03:28:50Z","published_at":"2026-06-18T03:28:50Z","assets":[{"url":"https://api.github.com/assets/1","id":1,"name":"so-novel-rs-0.2.3-windows-x86_64.zip","size":12345,"browser_download_url":"https://github.com/AhJxs/so-novel-rs/releases/download/v0.2.3/so-novel-rs-0.2.3-windows-x86_64.zip"}],"tarball_url":"x","zipball_url":"y","body":"x"}"#;
+        let release = parse_release(body).expect("应解析出 release");
+        assert_eq!(release.tag, "v0.2.3");
+        assert_eq!(release.assets.len(), 1);
+        assert_eq!(
+            release.assets[0].name,
+            "so-novel-rs-0.2.3-windows-x86_64.zip"
+        );
+        assert_eq!(release.assets[0].size, 12345);
+        assert_eq!(
+            release.assets[0].url,
+            "https://github.com/AhJxs/so-novel-rs/releases/download/v0.2.3/so-novel-rs-0.2.3-windows-x86_64.zip"
+        );
     }
 
     #[test]
-    fn parse_tag_name_missing_yields_none() {
+    fn parse_release_missing_tag_yields_none() {
         let body = r#"{"html_url":"x","name":"v0.2.3"}"#;
-        let tag = serde_json::from_str::<Value>(body)
-            .ok()
-            .and_then(|v| v.get("tag_name").and_then(|t| t.as_str()).map(String::from));
-        assert!(tag.is_none());
+        assert!(parse_release(body).is_none());
+    }
+
+    #[test]
+    fn parse_release_without_assets_is_ok() {
+        let body = r#"{"tag_name":"v0.2.3"}"#;
+        let release = parse_release(body).expect("缺 assets 字段应默认为空");
+        assert_eq!(release.assets.len(), 0);
     }
 }

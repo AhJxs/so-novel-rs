@@ -306,6 +306,26 @@ Toasts:
     en: "Update check failed: %{err}"
     zh-CN: "检查更新失败: %{err}"
     zh-TW: "檢查更新失敗: %{err}"
+  update_download_ready:
+    en: "New version downloaded — restart to apply"
+    zh-CN: 新版本已下载，重启后生效
+    zh-TW: 新版本已下載，重啟後生效
+  update_download_cancelled:
+    en: "Update download cancelled"
+    zh-CN: 已取消下载更新
+    zh-TW: 已取消下載更新
+  update_download_failed:
+    en: "Update download failed: %{err}"
+    zh-CN: "下载更新失败: %{err}"
+    zh-TW: "下載更新失敗: %{err}"
+  update_install_failed:
+    en: "Failed to install update: %{err}"
+    zh-CN: "安装更新失败: %{err}"
+    zh-TW: "安裝更新失敗: %{err}"
+  update_not_ready:
+    en: "Update is not ready yet, please download again"
+    zh-CN: 更新尚未就绪，请重新下载
+    zh-TW: 更新尚未就緒，請重新下載
   # 本地书库扫描 / 删除错误文案（AppModel::library.last_error 值）
   library_scan_failed:
     en: "Failed to scan download directory: %{err}"
@@ -658,6 +678,48 @@ Settings:
     en: "Download v%{ver}"
     zh-CN: 下载新版 v%{ver}
     zh-TW: 下載新版 v%{ver}
+  # 自更新下载 / 安装各阶段文案（page_about 的「检查更新」行）
+  update_cancel_button:
+    en: Cancel
+    zh-CN: 取消
+    zh-TW: 取消
+  update_cancelling_button:
+    en: Cancelling…
+    zh-CN: 正在取消…
+    zh-TW: 正在取消…
+  update_installing_button:
+    en: Installing…
+    zh-CN: 正在安装…
+    zh-TW: 正在安裝…
+  update_restart_button:
+    en: Restart and update
+    zh-CN: 重启并更新
+    zh-TW: 重啟並更新
+  update_retry_button:
+    en: Retry download
+    zh-CN: 重试下载
+    zh-TW: 重試下載
+  update_failed_text:
+    en: "Update failed: %{err}"
+    zh-CN: "更新失败: %{err}"
+    zh-TW: "更新失敗: %{err}"
+  update_dialog:
+    title:
+      en: Restart to apply the update?
+      zh-CN: 重启以完成更新？
+      zh-TW: 重啟以完成更新？
+    message:
+      en: "The app will replace the current program with v%{ver}, then restart itself. Reading history and settings are kept."
+      zh-CN: "应用会把当前程序替换为 v%{ver} 后自动重启，书架与设置都会保留。"
+      zh-TW: "應用會把目前程式替換為 v%{ver} 後自動重啟，書架與設定都會保留。"
+    confirm_button:
+      en: Restart now
+      zh-CN: 立即重启
+      zh-TW: 立即重啟
+    cancel_button:
+      en: Later
+      zh-CN: 稍后
+      zh-TW: 稍後
   open_github_button:
     en: "Open GitHub"
     zh-CN: 访问 GitHub
