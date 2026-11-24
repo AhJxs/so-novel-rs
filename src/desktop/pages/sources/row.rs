@@ -44,30 +44,25 @@ pub(super) fn render(
         )
         // ---- 书名 + 语言 tag ----
         .child(
-            h_flex()
-                .flex_1()
-                .min_w_0()
-                .items_center()
-                .gap_1()
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .overflow_x_hidden()
-                        .text_sm()
-                        .text_color(cx.theme().foreground)
-                        .child(div().whitespace_nowrap().text_ellipsis().child(name))
-                        .child(
-                            div()
-                                .h_flex()
-                                .items_center()
-                                .gap_1()
-                                .child(Tag::secondary().small().child(lang_display))
-                                .when(need_proxy, |d| {
-                                    d.child(Tag::secondary().small().child(t!("Sources.tag.proxy")))
-                                }),
-                        ),
-                ),
+            h_flex().flex_1().min_w_0().items_center().gap_1().child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .overflow_x_hidden()
+                    .text_sm()
+                    .text_color(cx.theme().foreground)
+                    .child(div().whitespace_nowrap().text_ellipsis().child(name))
+                    .child(
+                        div()
+                            .h_flex()
+                            .items_center()
+                            .gap_1()
+                            .child(Tag::secondary().small().child(lang_display))
+                            .when(need_proxy, |d| {
+                                d.child(Tag::secondary().small().child(t!("Sources.tag.proxy")))
+                            }),
+                    ),
+            ),
         )
         .child(
             // URL 列：`Link` 点击由内置 on_click 走 `cx.open_url`。
@@ -85,23 +80,18 @@ pub(super) fn render(
         // ---- 健康状态 Badge ----
         // 用 `h_flex` 让 `justify_end` 生效：`div` 默认 block，Taffy 会忽略
         // block 容器上的 justify_content，Badge 实际不会右对齐。
-        .child(
-            h_flex()
-                .w(rems(150.0 / 16.0))
-                .justify_end()
-                .child({
-                    let (badge_kind, label) = health.map_or_else(
-                        || {
-                            (
-                                StatusKind::Neutral,
-                                t!("Sources.health.not_tested").to_string(),
-                            )
-                        },
-                        |h| (health_status_kind_from(h.classify()), h.label()),
-                    );
-                    StatusBadge::new(badge_kind, label.into())
-                }),
-        )
+        .child(h_flex().w(rems(150.0 / 16.0)).justify_end().child({
+            let (badge_kind, label) = health.map_or_else(
+                || {
+                    (
+                        StatusKind::Neutral,
+                        t!("Sources.health.not_tested").to_string(),
+                    )
+                },
+                |h| (health_status_kind_from(h.classify()), h.label()),
+            );
+            StatusBadge::new(badge_kind, label.into())
+        }))
         // ---- 启用开关 ----
         .child({
             let page_for_switch = page;

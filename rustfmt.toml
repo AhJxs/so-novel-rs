@@ -1,17 +1,14 @@
-# rustfmt 配置。fmt 需 nightly（imports_granularity / group_imports 等仍是 unstable），
-# 构建与测试仍用 stable。CI 的 fmt 作业使用 `cargo +nightly fmt`。
+# rustfmt 配置。**只用 stable 选项**：CI 与本地都跑 stable `cargo fmt`，
+# 不再需要 nightly toolchain。（unstable 选项会被 stable 静默忽略并刷告警，
+# 那样本地与 CI 的排版结果可能不一致，2026-11-24 曾因此让 CI fmt 作业失败。）
 edition = "2024"
 max_width = 100
 use_field_init_shorthand = true
 use_try_shorthand = true
 
 reorder_imports = true
-imports_granularity = "Module"
-group_imports = "StdExternalCrate"
 
 hex_literal_case = "Lower"
-format_macro_matchers = true
-format_code_in_doc_comments = true
 
 # 中文注释不重排：CJK 宽度与 rustfmt 的列宽计算不稳定。
 # wrap_comments = true

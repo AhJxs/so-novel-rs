@@ -8,10 +8,9 @@
 //! 按钮不直接调回调：`DialogClose` / `DialogAction` 会把点击派发成对话框作用域里的
 //! `Cancel` / `Confirm` action，从而复用 `open_dialog` 上挂的 `on_ok` / `on_cancel`。
 
-use gpui_kit::IntoElement;
-use gpui_kit::ParentElement as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::dialog::{DialogAction, DialogClose, DialogFooter};
+use gpui_kit::{IntoElement, ParentElement as _};
 
 /// 表单对话框页脚：`cancel` 在左（默认样式），`confirm` 在右（主按钮）。
 ///

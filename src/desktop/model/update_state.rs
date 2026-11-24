@@ -210,9 +210,8 @@ impl UpdateState {
 #[cfg(test)]
 mod tests {
     #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
-    use crate::core::update::ReleaseInfo;
-
     use super::*;
+    use crate::core::update::ReleaseInfo;
 
     #[test]
     fn drain_returns_none_without_rx() {

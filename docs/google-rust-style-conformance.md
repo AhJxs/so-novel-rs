@@ -142,9 +142,10 @@ cargo doc --no-deps                         # 0 warnings
 
 CI（`.github/workflows/ci.yml`）：
 
-- `fmt`：nightly-2026-11-08 + rustfmt，`cargo +nightly-2026-11-08 fmt --all -- --check`；
-- `test`：固定 clippy 1.99.0，安装 Linux gpui 依赖后跑 `cargo clippy --all-targets -- -D warnings`
-  与 `cargo test --all-targets`。
+- `fmt`：最新 stable + rustfmt，`cargo fmt --all -- --check`（`rustfmt.toml` 只用 stable 选项，
+  2026-11-24 起不再依赖 nightly toolchain）；
+- `test`：最新 stable + clippy（不钉版本），安装 Linux gpui 依赖后跑
+  `cargo clippy --all-targets -- -D warnings` 与 `cargo test --all-targets`。
 
 **首次运行结果**（`f85ea36`，run 42743463426）：`fmt` 通过；`test` 在 clippy 阶段失败——
 Rust 1.99 比本机的 1.98 多报四类 lint（`must_use_candidate`（非 Windows 分支的

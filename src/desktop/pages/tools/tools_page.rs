@@ -422,9 +422,7 @@ impl ToolsPage {
                                             ),
                                     )
                                     .when(selected, |row| {
-                                        row.child(
-                                            div().size(px(6.0)).rounded_full().bg(highlight),
-                                        )
+                                        row.child(div().size(px(6.0)).rounded_full().bg(highlight))
                                     }),
                             )
                             .child(
@@ -779,12 +777,10 @@ impl Render for ToolsPage {
             .gap_4()
             // 内边距挂在滚动容器内部：滚动条按容器边缘定位，挂在外面会把滚动条挤进来。
             .child(
-                div()
-                    .px_6()
-                    .pt_6()
-                    .child(PageHeader::new(t!("Tools.page_title").into()).subtitle(
-                        t!("Tools.page_subtitle").into(),
-                    )),
+                div().px_6().pt_6().child(
+                    PageHeader::new(t!("Tools.page_title").into())
+                        .subtitle(t!("Tools.page_subtitle").into()),
+                ),
             )
             .child(
                 div()
