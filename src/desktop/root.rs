@@ -335,27 +335,32 @@ impl RootView {
         })
         .collect();
 
-        // Header: logo + 全大写细体 app 名。折叠态保留 logo, 文字由 `when(!collapsed)`
-        // 隐藏; gpui 无 letter_spacing API, 靠大写 + 细体 + 小字营造 logo 字感。
+        // Header: logo + app 名的左对齐品牌行。产品名保留 i18n 原始大小写 —— 全大写
+        // 在设计指南里只留给很短的 eyebrow, 产品名不该被转写。折叠态保留 logo, 文字由
+        // `when(!collapsed)` 隐藏。展开态再内缩 8px, 让 20px logo 左缘与菜单 icon 左缘
+        // (header 外层 px_3 12 + 菜单项 p_2 8 = 20) 落在同一条脊线上; 折叠态 header 内容
+        // 宽 32px, 20px logo 居中即与 icon 中心 (24px) 重合, 所以不加内缩。
         // 两态内边距不同 (header pt_3/pt_2、折叠态根节点多 gap_2、内容区 p_2/px_3),
         // 由 header 自身的 pt_1 / pb_4 补齐; 标题行高钉 20px 与 logo 同高,
         // 两态 logo 与首个菜单项的 y 坐标才一致 (实测见 tasks/todo.md)。
-        let title_text = t!("App.title").to_uppercase();
+        let title_text = t!("App.title");
         let header = div()
             .w_full()
             .flex()
             .items_center()
-            .justify_center()
             .gap_2()
-            .when(collapsed, Styled::pt_1)
-            .when(!collapsed, Styled::pb_4)
+            .when(collapsed, |h| h.pt_1().justify_center())
+            .when(!collapsed, |h| h.px_2().pb_4().justify_start())
             .child(render_logo(px(20.0)))
             .when(!collapsed, |h| {
                 h.child(
                     div()
                         .text_sm()
                         .line_height(px(20.0))
-                        .font_weight(FontWeight::LIGHT)
+                        .font_weight(FontWeight::MEDIUM)
+                        .overflow_hidden()
+                        .whitespace_nowrap()
+                        .text_ellipsis()
                         .child(title_text),
                 )
             });
