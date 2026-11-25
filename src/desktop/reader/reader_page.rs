@@ -1,14 +1,19 @@
 //! 阅读器页面：加载状态机 + 滚动 / 翻页两种正文 + 目录抽屉 / 排版面板。
 //!
-//! 两种模式共用同一份位置（`chapter` + `chapter_ratio`）：滚动模式从滚动偏移采样，
-//! 翻页模式由分页表换算，切换模式时按比例恢复。
+//! 两种模式共用同一份位置（`chapter` + `chapter_ratio`）：滚动模式从全书滚动偏移
+//! 经 [`scroll_map`] 换算，翻页模式由分页表换算，切换模式时按比例恢复。
+//!
+//! 滚动模式把整本书首尾相接：内容总高 = Σ章高，右侧滚动条覆盖全书。章高由
+//! `scroll_map` 维护（进过视口的章实测、其余按字数估算），只有视口附近的 2–4 章
+//! 真正渲染——几千章的书一次性渲染要秒级（见 `tasks/todo.md` 的基准）。
 
 use std::cell::Cell;
+use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{InputEvent, InputState};
@@ -22,9 +27,8 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, App, AppContext as _, Context, Div, Entity, FocusHandle, Focusable as _,
     FontWeight, InteractiveElement as _, IntoElement, KeyDownEvent, ParentElement, Render,
-    ScrollDelta, ScrollEvent, ScrollHandle, ScrollStrategy, SharedString,
-    StatefulInteractiveElement as _, Styled, UniformListScrollHandle, Window, div, point, px,
-    relative,
+    ScrollEvent, ScrollHandle, ScrollStrategy, SharedString, StatefulInteractiveElement as _,
+    Styled, UniformListScrollHandle, Window, div, point, px, relative,
 };
 use rust_i18n::t;
 
@@ -34,6 +38,7 @@ use super::actions::{
 };
 use super::content_view::{self, COLUMN_PADDING};
 use super::reader_colors;
+use super::scroll_map::{self, ScrollMap};
 use super::search_panel::{self, SearchPanel};
 use crate::config::{ReaderConfig, ReadingMode};
 use crate::desktop::model::AppModel;
@@ -54,38 +59,52 @@ pub(super) const ENCODING_CHOICES: &[&str] =
 /// 关闭阅读器：由 `RootView` 注入（需要同时改 `RootView` 状态与全屏标记）。
 pub type CloseReaderFn = Rc<dyn Fn(&mut Window, &mut App)>;
 
+/// 滚动模式下，视口上下各多渲染几章。
+///
+/// 只为两件事：滚轮/触控板一帧可能跨过好几行，以及章高从估算换成实测时前缀和会动。
+/// 再多就是白画：一屏通常只放得下 1–2 章。
+const SCROLL_BUFFER: usize = 1;
+
+/// 平滑滚动的帧间隔：约 60 fps。
+const SMOOTH_FRAME: Duration = Duration::from_millis(16);
+
+/// 平滑滚动指数趋近的时间常数（秒）。
+///
+/// 每帧吃掉剩余位移的 `1 - exp(-dt / TAU)`：越大越"肉"，越小越跟手。
+/// 用指数趋近而不是补间，是因为滚轮随时会再叠一步——目标一改，
+/// 后面的帧自动接着补，不会有排队等待 / 过冲回弹。
+const SMOOTH_TAU: f32 = 0.06;
+
+/// 剩余位移小于这个值就收口（px），免得无限逼近。
+const SMOOTH_EPSILON: f32 = 0.5;
+
+/// 指数趋近一帧后应到的位置；`dt` 是本帧间隔（秒）。
+///
+/// 结果永远落在 `current` 与 `target` 之间（没有过冲），所以滚轮连发时是顺着新目标
+/// 接着补，而不是补间曲线撞到终点再弹回来那种"硬停"。
+fn smooth_advance(current: f32, target: f32, dt: f32) -> f32 {
+    let eased = 1.0 - (-dt / SMOOTH_TAU).exp();
+    (target - current).mul_add(eased, current)
+}
+
 /// 沉浸模式变化通知：`RootView` 用它重画自己的标题栏。
 pub type ImmersiveFn = Rc<dyn Fn(&mut App)>;
 
-/// gpui 的滚动偏移向下为负（`set_offset`：越往下滚偏移越负），而进度要的是
-/// 0..=1 的正向比例。全部换算都走这两个函数，别在调用点各写一份。
-/// 偏移 → 章内比例；内容不足一屏（滚不动）时整章已完全可见，返回 1.0。
-// `Option` 是采样接口的既有形状（「这次采样是否可信」），保留它省得调用点与测试
-// 跟着改签名；目前所有输入都能给出确定比例，故这一处不做 `unnecessary_wraps` 合并。
-#[allow(clippy::unnecessary_wraps)]
-fn scroll_ratio(offset_y: f32, max_y: f32) -> Option<f32> {
-    if max_y <= 1.0 {
-        // 内容不足一屏：整章已完全可见。
-        return Some(1.0);
-    }
-    Some((-offset_y / max_y).clamp(0.0, 1.0))
-}
-
-/// 章内比例 → 滚动偏移（负值）。
-fn ratio_offset(ratio: f32, max_y: f32) -> f32 {
-    -(max_y.max(0.0) * ratio.clamp(0.0, 1.0))
-}
-
-/// 偏移 → 恢复位置用的比例。
+/// 滚动几何的排版键：列宽、字号 / 字重 / 行高 / 段距 / 缩进 / 字体族。
 ///
-/// 与 `scroll_ratio` 的区别只在「内容不足一屏」：那种章整章可见，**进度的语义**
-/// 是 1.0（已读完，见 `scroll_ratio`），但**位置的语义**是章首 0.0 —— 抽屉开合或
-/// 窗口缩放让它变得可滚动时，按 1.0 恢复会直接落到章尾。
-fn position_ratio(offset_y: f32, max_y: f32) -> f32 {
-    if max_y <= 1.0 {
-        return 0.0;
-    }
-    (-offset_y / max_y).clamp(0.0, 1.0)
+/// 这些任一变化，每章折行数与章高都会变：估算表、实测值、窗口缓存必须整表作废。
+/// 宽度按 `to_bits()` 格式化，避免 `19.0` / `19` 这类浮点噪声。
+fn scroll_layout_key(reader: &ReaderConfig, width: f32) -> String {
+    format!(
+        "{:08x}:{}:{}:{}:{}:{}:{}",
+        width.to_bits(),
+        reader.font_size,
+        reader.font_weight,
+        reader.line_height,
+        reader.paragraph_spacing,
+        reader.indent,
+        reader.font_family
+    )
 }
 
 /// 当前章 `display_text` 的缓存键：`(章节号, 排版指纹)`。
@@ -155,14 +174,42 @@ pub struct ReaderPage {
     finished: bool,
     /// 滚动模式的滚动位置。
     pub(super) scroll: ScrollHandle,
+    /// 平滑滚动的目标位置（正向偏移 px）：滚轮与方向键只改它，动画每帧把句柄挪近。
+    scroll_target: f32,
+    /// 已经写进滚动句柄的位置（正向偏移 px）。
+    ///
+    /// 滚轮由 gpui 原生先挪一步、再交给 `on_scroll`：那一步要退回，差值只能靠它算。
+    scroll_written: f32,
+    /// 平滑滚动的帧循环是否在跑。
+    smooth_running: bool,
+    /// 上一帧的时刻：缓动按真实 dt 折算，掉帧时不会一步跳过头。
+    smooth_tick: Option<Instant>,
     /// 待恢复的位置：`max_offset` 要等布局完成，所以恢复放到下一帧。
     pub(super) restore_pending: bool,
     /// 下一帧恢复用的位置比例；None 表示沿用 `chapter_ratio`（跳章 / 切模式）。
     restore_position: Option<f32>,
     /// 每次滚动自增，只有最新一代的防抖任务会写进度。
     scroll_generation: u64,
-    /// 上一次自动续章的时间；冷却期内不再接下一章。
-    last_chapter_jump: Option<std::time::Instant>,
+    /// 滚动模式的全书几何：每章高度 + 前缀和，见 [`ScrollMap`]。
+    ///
+    /// `None` = 正文还没加载完或排版刚变；下一次渲染按 `scroll_units` 建估算表。
+    scroll_map: Option<ScrollMap>,
+    /// 全书的字符单位数（标题 + 各段），只随正文变、与排版无关。
+    ///
+    /// 排版变化时用它重估每章高度，不必回读几千章字符串。
+    scroll_units: Vec<scroll_map::ChapterUnits>,
+    /// 生成当前估算表用的排版键；与 [`scroll_layout_key`] 不一致就重估。
+    scroll_map_key: Option<String>,
+    /// 上一帧实际渲染的章区间（滚动模式下）。
+    ///
+    /// gpui 的滚动只平移已画好的内容，元素树不变；`on_scroll` 靠它判断视口是否
+    /// 已经离开这一窗内容（离开就得重绘补章，否则下面是一片空白）。
+    scroll_window: Range<usize>,
+    /// 滚动模式渲染窗口内各章的 `display_text`（键 = 章号 + 排版指纹）。
+    ///
+    /// 窗口里同时有 2–4 章，单章缓存 [`Self::display_cache`] 不够用；滚动时每帧
+    /// 整章重拼缩进前缀会持续分配。只留窗口内的章，滚出去就丢。
+    scroll_display_cache: Vec<(usize, String, Rc<Vec<String>>)>,
     /// 翻页模式：当前页号。
     page_index: usize,
     /// 翻页模式：当前章的分页缓存。
@@ -284,10 +331,18 @@ impl ReaderPage {
             load_state: LoadState::Loading,
             finished,
             scroll: ScrollHandle::new(),
+            scroll_target: 0.0,
+            scroll_written: 0.0,
+            smooth_running: false,
+            smooth_tick: None,
             restore_pending: true,
             restore_position: None,
             scroll_generation: 0,
-            last_chapter_jump: None,
+            scroll_map: None,
+            scroll_units: Vec::new(),
+            scroll_map_key: None,
+            scroll_window: 0..0,
+            scroll_display_cache: Vec::new(),
             page_index: 0,
             page_cache: None,
             display_cache: None,
@@ -521,12 +576,9 @@ impl ReaderPage {
     ) {
         // 字号一变内容高度就变，先把「读到哪」按比例记下来，下一帧再按比例恢复。
         self.capture_scroll_ratio();
-        // 位置用 `position_ratio` 而不是 `chapter_ratio`：一屏放得下的章进度是 1.0，
-        // 改小字号让它变得可滚动时会直接落到章尾。
-        self.restore_position = Some(position_ratio(
-            f32::from(self.scroll.offset().y),
-            f32::from(self.scroll.max_offset().y),
-        ));
+        // 位置用「位置语义」的比例：一步放得下的章进度是 1.0，改小字号让它变得可滚动时
+        // 按 1.0 恢复会直接落到章尾（见 `ScrollMap::position_ratio`）。
+        self.restore_position = Some(self.scroll_position_ratio());
         self.restore_pending = true;
         self.model.update(cx, |model, _cx| {
             let mut reader = model.config.reader.clamped();
@@ -602,6 +654,12 @@ impl ReaderPage {
         // 同一章号也可能换了一份正文（换编码 / 重新定位 / 重新分章），章节号单独不足以失效。
         self.display_cache = None;
         self.page_cache = None;
+        // 全书几何与窗口缓存都绑在这一份正文上：换正文必须整张丢掉。
+        self.scroll_map = None;
+        self.scroll_map_key = None;
+        self.scroll_units.clear();
+        self.scroll_display_cache.clear();
+        self.scroll_window = 0..0;
         self.toc_titles = None;
         self.toc_lower = None;
         // 位置由调用方决定，一律按 `chapter` / `chapter_ratio` 恢复。
@@ -701,18 +759,33 @@ impl ReaderPage {
                 self.chapter_ratio = self.chapter_ratio.clamp(0.0, 1.0);
                 let encoding = content.encoding.clone();
                 let forced = self.force_decode;
-                // 标题与小写副本同一次遍历建好，目录过滤不必每帧再 `to_lowercase`。
+                // 标题与小写副本同一次遍历建好，目录过滤不必每帧再 `to_lowercase`；
+                // 同时记下每章字符数，滚动几何重估时不必再回读整本正文。
                 let mut titles = Vec::with_capacity(content.chapters.len());
                 let mut lower = Vec::with_capacity(content.chapters.len());
+                let mut units = Vec::with_capacity(content.chapters.len());
                 for chapter in &content.chapters {
                     titles.push(chapter.title.clone());
                     lower.push(chapter.title.to_lowercase());
+                    units.push(scroll_map::ChapterUnits {
+                        title: scroll_map::char_units(&chapter.title),
+                        paragraphs: chapter
+                            .paragraphs
+                            .iter()
+                            .map(|paragraph| scroll_map::char_units(paragraph))
+                            .collect(),
+                    });
                 }
                 self.toc_titles = Some(Rc::new(titles));
                 self.toc_lower = Some(Rc::new(lower));
+                self.scroll_units = units;
                 self.content = Some(content);
                 // 重新加载后同章号指向新正文：旧缓存必须作废（指纹里的章节号看不出这点）。
                 self.display_cache = None;
+                self.scroll_map = None;
+                self.scroll_map_key = None;
+                self.scroll_display_cache.clear();
+                self.scroll_window = 0..0;
                 self.load_state = LoadState::Ready;
                 self.invalidate_scroll_commit();
                 // 加载完成按书架里的进度（`chapter_ratio`）恢复，不接旧的抽样值。
@@ -790,7 +863,9 @@ impl ReaderPage {
         self.model.update(cx, |model, _| model.persist_library());
     }
 
-    /// 把当前滚动位置换算成章内比例（滚不动时整章已读，记 1.0）。
+    /// 把当前滚动位置换算成（章号, 章内比例）；滚到书末时比例记 1.0。
+    ///
+    /// 滚动模式下一本书首尾相接，`chapter` 也跟着视口走：读到哪一章就是哪一章。
     pub(super) fn capture_scroll_ratio(&mut self) {
         self.invalidate_scroll_commit();
         // 跳章 / 切模式 / 改排版之后、恢复帧跑之前，滚动句柄里还是**旧**位置；
@@ -798,15 +873,160 @@ impl ReaderPage {
         if self.restore_pending {
             return;
         }
-        // 翻页模式没有滚动容器：句柄里留着切模式前那次布局的偏移与上限，
+        // 翻页模式没有滚动容器：句柄里留着切模式前那次布局的偏移，
         // 采样会把 `goto_page` 写下的页内比例改回旧位置（autosave 每 5 s 采一次）。
         if matches!(self.mode, ReadingMode::Page) {
             return;
         }
-        let max = f32::from(self.scroll.max_offset().y);
-        if let Some(ratio) = scroll_ratio(f32::from(self.scroll.offset().y), max) {
-            self.chapter_ratio = ratio;
+        let Some(map) = self.scroll_map.as_ref() else {
+            return;
+        };
+        let (chapter, ratio) = map.locate(self.scroll_top(), self.scroll_viewport());
+        self.chapter = chapter;
+        self.chapter_ratio = ratio;
+    }
+
+    /// 滚动容器当前的正向偏移（gpui 的偏移向下为负）。
+    fn scroll_top(&self) -> f32 {
+        -f32::from(self.scroll.offset().y)
+    }
+
+    /// 滚动上限（px，正向）。
+    fn scroll_max(&self) -> f32 {
+        f32::from(self.scroll.max_offset().y).max(0.0)
+    }
+
+    /// 正文视口高度：优先用探针实测值，没有就退回滚动容器的 bounds。
+    ///
+    /// 采样与恢复必须用同一个视口：`ScrollMap` 的章内比例按「章高 - 视口」归一，
+    /// 两个值不一样会让位置在恢复后缓慢漂移。
+    fn scroll_viewport(&self) -> f32 {
+        self.viewport_height
+            .unwrap_or_else(|| f32::from(self.scroll.bounds().size.height))
+            .max(1.0)
+    }
+
+    /// 当前位置的「位置语义」章内比例（见 `ScrollMap::position_ratio`），供恢复用。
+    fn scroll_position_ratio(&self) -> f32 {
+        let Some(map) = self.scroll_map.as_ref() else {
+            return self.chapter_ratio;
+        };
+        map.position_ratio(self.chapter, self.scroll_top(), self.scroll_viewport())
+    }
+
+    /// 把滚动容器瞬移到（章, 章内比例）处。
+    ///
+    /// 跳章 / 恢复这类「已经到别处了」的移动不走平滑动画：从书首到书末也补间一遍
+    /// 只会糊成一片。在跑的动画目标同时搬过去，否则它会把位置又拉回旧目标。
+    fn scroll_to(&mut self, chapter: usize, ratio: f32) {
+        let viewport = self.scroll_viewport();
+        let Some(offset) = self
+            .scroll_map
+            .as_ref()
+            .map(|map| map.offset_at(chapter, ratio, viewport))
+        else {
+            return;
+        };
+        self.scroll_target = offset;
+        self.write_scroll_top(offset);
+    }
+
+    /// 写滚动偏移，并记住写过的位置（滚轮那一步的增量靠它算）。
+    fn write_scroll_top(&mut self, top: f32) {
+        let top = top.clamp(0.0, self.scroll_max());
+        self.scroll.set_offset(point(px(0.0), px(-top)));
+        self.scroll_written = top;
+    }
+
+    /// 把 gpui 原生滚轮挪的那一步退回来，收进目标交给平滑动画补。
+    ///
+    /// 滚轮监听与 `on_scroll` 同在冒泡阶段：`on_scroll` 的监听在 `paint_mouse_listeners`
+    /// 里先注册，容器自己的滚轮监听在 `paint_scroll_listener` 里后注册，而冒泡按注册
+    /// 顺序**倒序**执行 —— 所以走到这里时句柄已经被原生挪过一步。gpui 的滚动是一步到位的，
+    /// 屏幕上就是「直接闪」；退回原位、让动画每帧补一点，才是滑动。
+    ///
+    /// 拖动滚动条不走 `on_scroll`（由 `vertical_scrollbar` 直接改句柄），不受影响。
+    fn rebase_native_scroll(&mut self, cx: &Context<Self>) {
+        // 翻页模式不渲染滚动容器：句柄里留着上次布局的偏移，别在这里动它。
+        if matches!(self.mode, ReadingMode::Page) {
+            return;
         }
+        let applied = self.scroll_top();
+        let step = applied - self.scroll_written;
+        if step.abs() < SMOOTH_EPSILON {
+            // 已在首尾（原生没挪动）或横向滚动：没有要补的位移。
+            self.scroll_written = applied;
+            return;
+        }
+        self.scroll_target = (self.scroll_target + step).clamp(0.0, self.scroll_max());
+        self.scroll
+            .set_offset(point(px(0.0), px(-self.scroll_written)));
+        self.arm_smoothing(cx);
+    }
+
+    /// 让句柄朝 `scroll_target` 平滑靠拢；已经在跑就不另起一条帧循环。
+    fn arm_smoothing(&mut self, cx: &Context<Self>) {
+        if self.smooth_running {
+            return;
+        }
+        self.smooth_running = true;
+        self.smooth_tick = None;
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor().timer(SMOOTH_FRAME).await;
+                let done = this.update(cx, |page, cx| {
+                    let done = page.smooth_scroll_step(cx);
+                    if done {
+                        page.smooth_running = false;
+                    }
+                    done
+                });
+                match done {
+                    Ok(true) | Err(_) => break,
+                    Ok(false) => {}
+                }
+            }
+        })
+        .detach();
+    }
+
+    /// 一帧平滑滚动；返回是否已经到位。
+    fn smooth_scroll_step(&mut self, cx: &mut Context<Self>) -> bool {
+        let now = Instant::now();
+        let dt = self.smooth_tick.map_or(SMOOTH_FRAME.as_secs_f32(), |last| {
+            // 上限挡住长时间挂起后醒来的巨大 dt：宁可慢一帧，也别一步冲到底。
+            (now - last).as_secs_f32().clamp(0.001, 0.05)
+        });
+        self.smooth_tick = Some(now);
+        let current = self.scroll_top();
+        // 句柄被别的路径改过（拖动滚动条直接写句柄、不走 `on_scroll`）：让位，
+        // 否则动画下一帧会把它拽回目标，用户的手感是"拖动被弹回去"。
+        // 自己写的位置永远精确等于 `scroll_written`，所以这点偏差只可能是外部写的。
+        if (current - self.scroll_written).abs() > SMOOTH_EPSILON {
+            self.scroll_written = current;
+            self.scroll_target = current;
+            self.smooth_tick = None;
+            cx.notify();
+            return true;
+        }
+        let remaining = self.scroll_target - current;
+        if remaining.abs() < SMOOTH_EPSILON {
+            self.write_scroll_top(self.scroll_target);
+            self.scroll_target = self.scroll_written;
+            self.smooth_tick = None;
+            cx.notify();
+            // 落位后再提交一次：滚动防抖是滚轮期间排的，可能已经采到动画中途的位置。
+            self.schedule_progress_commit(cx);
+            return true;
+        }
+        self.write_scroll_top(smooth_advance(current, self.scroll_target, dt));
+        cx.notify();
+        false
+    }
+
+    /// 就地停住平滑动画（目标搬到当前位置），切模式这类不连续的状态变更用。
+    const fn settle_smoothing(&mut self) {
+        self.scroll_target = self.scroll_written;
     }
 
     /// 作废在途的滚动防抖提交（位置已被别的路径改写）。
@@ -859,6 +1079,8 @@ impl ReaderPage {
             return;
         }
         self.capture_scroll_ratio();
+        // 位置已按屏幕上的那一帧记下，别让在跑的动画把它继续往下拖。
+        self.settle_smoothing();
         self.mode = match self.mode {
             ReadingMode::Scroll => ReadingMode::Page,
             ReadingMode::Page => ReadingMode::Scroll,
@@ -934,31 +1156,32 @@ impl ReaderPage {
     }
 
     /// 按屏幕高度滚动（`direction` 为 -1 / 1）。
-    pub(super) fn scroll_by_page(&self, direction: f32) {
-        let viewport = f32::from(self.scroll.bounds().size.height);
-        self.scroll_relative(direction * (viewport * 0.9).max(1.0));
+    pub(super) fn scroll_by_page(&mut self, direction: f32, cx: &Context<Self>) {
+        let viewport = self.scroll_viewport();
+        self.scroll_relative(direction * (viewport * 0.9).max(1.0), cx);
     }
 
     /// 小步滚动（方向键）。
-    fn scroll_by_step(&self, direction: f32) {
-        self.scroll_relative(direction * 40.0);
+    fn scroll_by_step(&mut self, direction: f32, cx: &Context<Self>) {
+        self.scroll_relative(direction * 40.0, cx);
     }
 
-    /// 滚动到章内某个比例处。
-    fn scroll_to_ratio(&self, ratio: f32) {
-        let max = f32::from(self.scroll.max_offset().y);
-        self.scroll
-            .set_offset(point(px(0.0), px(ratio_offset(ratio, max))));
-    }
-
-    /// 在当前位置上偏移（正数为向下）；程序化滚动不会触发 `on_scroll`，
-    /// 调用方负责补重绘与进度提交。
-    pub(super) fn scroll_relative(&self, delta: f32) {
-        let max = f32::from(self.scroll.max_offset().y).max(0.0);
-        let current = f32::from(self.scroll.offset().y);
-        // 偏移越往下越负，所以「向下 delta」= 偏移减去 delta。
-        let target = (current - delta).clamp(-max, 0.0);
-        self.scroll.set_offset(point(px(0.0), px(target)));
+    /// 在当前位置上偏移（正数为向下），交给平滑动画补完。
+    ///
+    /// 程序化滚动不触发 `on_scroll`，动画每帧自己重绘。
+    pub(super) fn scroll_relative(&mut self, delta: f32, cx: &Context<Self>) {
+        // 动画在跑时以目标为基准：连按方向键要接着累加，而不是从画面上那一点重来。
+        let base = if self.smooth_running {
+            self.scroll_target
+        } else {
+            // 静止时句柄就是真值（拖滚动条不走 `on_scroll`，只能在这里对表）。
+            let current = self.scroll_top();
+            self.scroll_target = current;
+            self.scroll_written = current;
+            current
+        };
+        self.scroll_target = (base + delta).clamp(0.0, self.scroll_max());
+        self.arm_smoothing(cx);
     }
 
     /// 滚动防抖：200 ms 内不再滚动才写进度，避免每一帧都更新 store。
@@ -986,8 +1209,14 @@ impl ReaderPage {
         if generation != self.scroll_generation {
             return;
         }
-        let max = f32::from(handle.max_offset().y);
-        if let Some(ratio) = scroll_ratio(f32::from(handle.offset().y), max) {
+        // 任务在 200 ms 后才跑，句柄里的位置可能又变了：以**当前**偏移重算，
+        // 而不是信任务创建时的那一帧。
+        let located = self
+            .scroll_map
+            .as_ref()
+            .map(|map| map.locate(-f32::from(handle.offset().y), self.scroll_viewport()));
+        if let Some((chapter, ratio)) = located {
+            self.chapter = chapter;
             self.chapter_ratio = ratio;
         }
         self.record_progress(cx);
@@ -1143,7 +1372,7 @@ impl ReaderPage {
         if matches!(self.mode, ReadingMode::Page) {
             self.turn_page(-1, cx);
         } else {
-            self.scroll_by_page(-1.0);
+            self.scroll_by_page(-1.0, cx);
             self.after_scroll(cx);
         }
     }
@@ -1155,7 +1384,7 @@ impl ReaderPage {
         if matches!(self.mode, ReadingMode::Page) {
             self.turn_page(1, cx);
         } else {
-            self.scroll_by_page(1.0);
+            self.scroll_by_page(1.0, cx);
             self.after_scroll(cx);
         }
     }
@@ -1167,7 +1396,7 @@ impl ReaderPage {
         if matches!(self.mode, ReadingMode::Page) {
             self.turn_page(-1, cx);
         } else {
-            self.scroll_by_step(-1.0);
+            self.scroll_by_step(-1.0, cx);
             self.after_scroll(cx);
         }
     }
@@ -1179,7 +1408,7 @@ impl ReaderPage {
         if matches!(self.mode, ReadingMode::Page) {
             self.turn_page(1, cx);
         } else {
-            self.scroll_by_step(1.0);
+            self.scroll_by_step(1.0, cx);
             self.after_scroll(cx);
         }
     }
@@ -1191,7 +1420,8 @@ impl ReaderPage {
         if matches!(self.mode, ReadingMode::Page) {
             self.goto_page(0, cx);
         } else {
-            self.scroll_to_ratio(0.0);
+            // 整本书是一根连续的卷轴：Home 就是卷首那一章。
+            self.scroll_to(0, 0.0);
             self.after_scroll(cx);
         }
     }
@@ -1207,7 +1437,8 @@ impl ReaderPage {
                 .map_or(0, |cache| cache.offset.len());
             self.goto_page(pages.saturating_sub(1), cx);
         } else {
-            self.scroll_to_ratio(1.0);
+            // `usize::MAX` 由 `ScrollMap::offset_at` 夹到末章章尾。
+            self.scroll_to(usize::MAX, 1.0);
             self.after_scroll(cx);
         }
     }
@@ -1770,6 +2001,32 @@ impl ReaderPage {
             .max(160.0)
     }
 
+    /// 某章各段的 `display_text`（含缩进前缀），下标与 `chapter.paragraphs` 一一对应。
+    fn display_texts(&self, chapter: usize, reader: &ReaderConfig, width: f32) -> Vec<String> {
+        // `display_text` 只看缩进；其余字段传进来只是让排版参数与两个渲染入口同源。
+        let layout = ReaderLayout::new(
+            reader.font_size,
+            reader.line_height,
+            reader.paragraph_spacing,
+            width,
+            0.0,
+            reader.indent,
+            reader.font_family.clone(),
+            reader.font_weight,
+        );
+        self.content
+            .as_ref()
+            .and_then(|content| content.chapters.get(chapter))
+            .map(|chapter| {
+                chapter
+                    .paragraphs
+                    .iter()
+                    .map(|paragraph| layout.display_text(paragraph).into_owned())
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
     /// 当前章的 `display_text` 结果；章节 / 排版 / 列宽任一变化才重建。
     ///
     /// 分页测量与两个渲染入口共用这一份 `Rc`，不再每帧整章重新拼缩进前缀、
@@ -1782,31 +2039,35 @@ impl ReaderPage {
         {
             return texts.clone();
         }
-        // `display_text` 只看缩进；其余字段传进来只是让排版参数与两个渲染入口同源。
-        let layout = ReaderLayout::new(
-            reader.font_size,
-            reader.line_height,
-            reader.paragraph_spacing,
-            width,
-            0.0,
-            reader.indent,
-            reader.font_family.clone(),
-            reader.font_weight,
-        );
-        let texts = Rc::new(
-            self.content
-                .as_ref()
-                .and_then(|content| content.chapters.get(self.chapter))
-                .map(|chapter| {
-                    chapter
-                        .paragraphs
-                        .iter()
-                        .map(|paragraph| layout.display_text(paragraph).into_owned())
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or_default(),
-        );
+        let texts = Rc::new(self.display_texts(self.chapter, reader, width));
         self.display_cache = Some((chapter, key, texts.clone()));
+        texts
+    }
+
+    /// 滚动模式渲染窗口内某章的 `display_text`；滚出窗口的章不保留。
+    ///
+    /// 与 [`Self::display_paragraphs`] 的唯一区别是键里带章号：窗口里同时有
+    /// 2–4 章，单槽缓存会在每帧互相顶掉，变成每帧整窗重拼缩进。
+    fn scroll_display_paragraphs(
+        &mut self,
+        chapter: usize,
+        reader: &ReaderConfig,
+        width: f32,
+    ) -> Rc<Vec<String>> {
+        let (_, key) = display_cache_key(chapter, reader, width);
+        if let Some((_, cached_key, texts)) = self
+            .scroll_display_cache
+            .iter()
+            .find(|(cached, _, _)| *cached == chapter)
+            && *cached_key == key
+        {
+            return texts.clone();
+        }
+        let texts = Rc::new(self.display_texts(chapter, reader, width));
+        self.scroll_display_cache
+            .retain(|(cached, _, _)| *cached != chapter);
+        self.scroll_display_cache
+            .push((chapter, key, texts.clone()));
         texts
     }
 
@@ -1919,6 +2180,122 @@ impl ReaderPage {
         }
     }
 
+    /// 滚动模式：按当前排版建 / 刷新全书高度表。
+    ///
+    /// 章数变了才整表重建；只是字号 / 列宽变了就保留章数、清掉实测值按新排版重估——
+    /// 实测值绑的是旧排版，留着会让前缀和与渲染几何互相打架。
+    fn ensure_scroll_map(&mut self, reader: &ReaderConfig, width: f32, line_height_px: f32) {
+        let count = self.scroll_units.len();
+        if count == 0 {
+            return;
+        }
+        let key = scroll_layout_key(reader, width);
+        let same_len = self
+            .scroll_map
+            .as_ref()
+            .is_some_and(|map| map.len() == count);
+        if same_len && self.scroll_map_key.as_deref() == Some(key.as_str()) {
+            return;
+        }
+        // 一行放得下几个全角字：列宽 / 字号，汉字按两个半角单位算（见 `char_units`）。
+        let chars_per_line = (width / reader.font_size.max(1.0)).max(1.0);
+        let estimates: Vec<f32> = self
+            .scroll_units
+            .iter()
+            .map(|units| {
+                scroll_map::estimate_chapter_height(
+                    units,
+                    chars_per_line,
+                    line_height_px,
+                    reader.paragraph_spacing,
+                    reader.indent,
+                )
+            })
+            .collect();
+        self.scroll_map = Some(if same_len {
+            let mut map = self.scroll_map.take().unwrap_or_default();
+            map.rescale(estimates);
+            map
+        } else {
+            ScrollMap::new(estimates)
+        });
+        self.scroll_map_key = Some(key);
+        // 缩进前缀随列宽 / 字号生成：旧缓存属于旧排版。
+        self.scroll_display_cache.clear();
+    }
+
+    /// 量出 `range` 内还没量过的章高，写回高度表。
+    ///
+    /// 只在章真正进入渲染窗口时才量：一次 shaping 的代价与章内字数成正比，而几千章的
+    /// 书一次性全量要秒级（见 `tasks/todo.md` 的基准）。没量过的章先用估算值占位。
+    fn measure_scroll_chapters(
+        &mut self,
+        window: &Window,
+        reader: &ReaderConfig,
+        width: f32,
+        line_height_px: f32,
+        range: Range<usize>,
+    ) {
+        let Some(map) = self.scroll_map.as_ref() else {
+            return;
+        };
+        let pending: Vec<usize> = range.filter(|chapter| !map.is_measured(*chapter)).collect();
+        if pending.is_empty() {
+            return;
+        }
+        let style = content_view::measure_style(window, reader);
+        let mut title_style = style.clone();
+        title_style.font_weight = FontWeight::BOLD;
+        let mut measured = Vec::with_capacity(pending.len());
+        for chapter in pending {
+            let Some(title) = self
+                .toc_titles
+                .as_ref()
+                .and_then(|titles| titles.get(chapter))
+                .cloned()
+            else {
+                continue;
+            };
+            let texts = self.display_texts(chapter, reader, width);
+            let count = texts.len() + 1;
+            let mut metrics: Vec<ParagraphMetrics> = Vec::with_capacity(count);
+            // 章标题也算一块（同字号、加粗），块后间距与 `chapter_column` 的 `pb` 一致。
+            metrics.push(ParagraphMetrics {
+                lines: content_view::measure_lines(
+                    window,
+                    &title,
+                    reader.font_size,
+                    width,
+                    &title_style,
+                ),
+                spacing_after: line_height_px * 0.75,
+            });
+            for text in &texts {
+                metrics.push(ParagraphMetrics {
+                    lines: content_view::measure_lines(
+                        window,
+                        text,
+                        reader.font_size,
+                        width,
+                        &style,
+                    ),
+                    // 每个段落都有 `pb`，末段也算：与 `chapter_column` 的渲染几何逐段一致。
+                    spacing_after: reader.paragraph_spacing,
+                });
+            }
+            measured.push((
+                chapter,
+                scroll_map::chapter_height(&metrics, line_height_px),
+            ));
+        }
+        let Some(map) = self.scroll_map.as_mut() else {
+            return;
+        };
+        for (chapter, height) in measured {
+            map.set_measured(chapter, height);
+        }
+    }
+
     fn goto_page(&mut self, page: usize, cx: &mut Context<Self>) {
         let pages = self
             .page_cache
@@ -1972,7 +2349,7 @@ impl ReaderPage {
         let width = self.content_width(f32::from(window.viewport_size().width), cx);
         match self.mode {
             ReadingMode::Page => self.render_page_body(width, cx),
-            ReadingMode::Scroll => self.render_scroll_body(width, cx),
+            ReadingMode::Scroll => self.render_scroll_body(window, width, cx),
         }
     }
 
@@ -2109,31 +2486,114 @@ impl ReaderPage {
             .into_any_element()
     }
 
-    fn render_scroll_body(&mut self, width: f32, cx: &Context<Self>) -> AnyElement {
-        let Some(content) = self.content.as_ref() else {
+    /// 滚动模式：整本书首尾相接，一个滚动容器装全书总高，只画视口内的 2–4 章。
+    ///
+    /// 布局是三层：滚动容器 → 总高固定的画布 → 绝对定位在各自前缀和上的章列。
+    /// 画布高度就是全书高度，所以右侧滚动条天然反映整本书；gpui 滚动只平移已画好的
+    /// 内容、元素树不变，同章内滚动是纯绘制，只有视口跨章时才重排窗口。
+    fn render_scroll_body(
+        &mut self,
+        window: &Window,
+        width: f32,
+        cx: &Context<Self>,
+    ) -> AnyElement {
+        let Some(count) = self
+            .content
+            .as_ref()
+            .map(|content| content.chapters.len())
+            .filter(|count| *count > 0 && *count == self.scroll_units.len())
+        else {
             return div().flex_1().into_any_element();
         };
-        let (title, count) = match content.chapters.get(self.chapter) {
-            Some(chapter) => (chapter.title.clone(), content.chapters.len()),
-            None => return div().flex_1().into_any_element(),
-        };
-        // 标题 / 章数已拷成值，`content` 的借用结束；下面取缓存要 `&mut self`。
         let reader = self.reader_config(cx);
         let colors = reader_colors(reader.theme, cx);
-        // `ReaderLayout::line_height_px()` 就是这两个字段的乘积，不必再构造一份排版。
-        let line_height = reader.font_size * reader.line_height;
-        let paragraphs = self.display_paragraphs(&reader, width);
+        // 行高取 `pixel_snap` 后的设备像素值：测量与渲染必须是同一个数，
+        // 否则章列比实测高一点点，误差会沿前缀和逐章累积成可见的错位。
+        let line_height = f32::from(window.pixel_snap(px(reader.font_size * reader.line_height)));
+        self.ensure_scroll_map(&reader, width, line_height);
+        // 静止帧里句柄就是真值：拖动滚动条直接改句柄、不走 `on_scroll`，
+        // 只有在这里对表，下一次滚轮算那一步增量时才不会把拖动的距离也算进去。
+        if !self.smooth_running {
+            let settled = self.scroll_top();
+            self.scroll_written = settled;
+            self.scroll_target = settled;
+        }
+        let top = self.scroll_top();
+        let viewport = self.scroll_viewport();
+        // 窗口按当前 offset 现算。实测会改写章高、进而改写前缀和，所以量完再算一遍区间：
+        // 两轮足够收敛（第一轮把窗口内的章换成实测值，第二轮补上因此新进窗的章）。
+        let Some(map) = self.scroll_map.as_ref() else {
+            return div().flex_1().into_any_element();
+        };
+        let mut range = map.window(top, viewport, SCROLL_BUFFER);
+        for _ in 0..2 {
+            self.measure_scroll_chapters(window, &reader, width, line_height, range.clone());
+            let Some(map) = self.scroll_map.as_ref() else {
+                return div().flex_1().into_any_element();
+            };
+            let next = map.window(top, viewport, SCROLL_BUFFER);
+            if next == range {
+                break;
+            }
+            range = next;
+        }
+        let Some(map) = self.scroll_map.as_ref() else {
+            return div().flex_1().into_any_element();
+        };
+        let offsets: Vec<f32> = range
+            .clone()
+            .map(|chapter| map.offset_of(chapter))
+            .collect();
+        // 内容不足一屏时也要占满视口，否则滚动容器会把画布顶到上方留白。
+        let total = map.total().max(viewport);
+        // 拖滚动条不走 `on_scroll`：这里顺手把「读到哪一章」对齐到视口，
+        // 高亮与页脚章号才不会停在旧章（落盘仍由防抖提交与 autosave 负责）。
+        if !self.restore_pending {
+            let (chapter, _) = map.locate(top, viewport);
+            self.chapter = chapter;
+        }
+        self.scroll_window = range.clone();
+        // `map` 的借用到此结束：下面取窗口内各章的 `display_text` 要 `&mut self`。
         let highlights = self.chapter_highlights(&reader, cx);
-        let column = content_view::chapter_column(
-            Some(&title),
-            paragraphs.as_slice(),
-            &reader,
-            width,
-            line_height,
-            highlights.as_ref(),
-            0..paragraphs.len(),
-            0.0,
-        );
+
+        let mut children = Vec::with_capacity(range.len());
+        for (offset, chapter) in offsets.into_iter().zip(range) {
+            let Some(title) = self
+                .toc_titles
+                .as_ref()
+                .and_then(|titles| titles.get(chapter))
+                .cloned()
+            else {
+                continue;
+            };
+            let paragraphs = self.scroll_display_paragraphs(chapter, &reader, width);
+            // 搜索高亮只属于当前章：别的章传 None，免得 `chapter_highlights` 的下标对不上。
+            let highlights = (chapter == self.chapter)
+                .then_some(highlights.as_ref())
+                .flatten();
+            let column = content_view::chapter_column(
+                Some(&title),
+                paragraphs.as_slice(),
+                &reader,
+                width,
+                line_height,
+                highlights,
+                0..paragraphs.len(),
+                scroll_map::CHAPTER_GAP,
+            );
+            children.push(
+                div()
+                    .absolute()
+                    .top(px(offset))
+                    // 居中靠 flex：gpui 没有 auto margin 样式。
+                    .w_full()
+                    .flex()
+                    .flex_row()
+                    .justify_center()
+                    .px(px(COLUMN_PADDING))
+                    .child(column),
+            );
+        }
 
         div()
             .flex_1()
@@ -2144,86 +2604,55 @@ impl ReaderPage {
             .bg(colors.background)
             .text_color(colors.foreground)
             .child(
+                // 外层只负责量视口高度：探针绝对铺满它，量到的是可见高度，
+                // 而不是滚动内容的总高（放到滚动容器里就会量成全书高度）。
                 div()
-                    .id("reader-scroll")
                     .relative()
                     .flex_1()
                     .min_w_0()
                     .min_h_0()
-                    .overflow_y_scroll()
-                    .track_scroll(&self.scroll)
-                    .vertical_scrollbar(&self.scroll)
-                    .on_scroll(cx.listener(|this, event: &ScrollEvent, _window, cx| {
-                        this.schedule_progress_commit(cx);
-                        this.continue_to_next_chapter(event, cx);
-                    }))
+                    // 必须是 flex 容器：滚动容器靠 `flex_1` 拿到「减掉页脚后的可见高度」。
+                    // 普通块级父容器会让它的高度退化成内容总高（= 全书高度），
+                    // 没有溢出就没有滚动空间，滚轮自然纹丝不动。
+                    .flex()
+                    .flex_col()
+                    .child(content_view::viewport_probe(
+                        cx.entity().downgrade(),
+                        self.viewport_measured.clone(),
+                    ))
                     .child(
-                        // 居中靠 flex：gpui 没有 auto margin 样式。
                         div()
-                            .w_full()
-                            .flex()
-                            .flex_row()
-                            .justify_center()
-                            .px(px(COLUMN_PADDING))
-                            .py(px(COLUMN_PADDING))
-                            .child(column),
+                            .id("reader-scroll")
+                            .relative()
+                            .flex_1()
+                            .min_w_0()
+                            .min_h_0()
+                            .overflow_y_scroll()
+                            .track_scroll(&self.scroll)
+                            .vertical_scrollbar(&self.scroll)
+                            .on_scroll(cx.listener(|this, _event: &ScrollEvent, _window, cx| {
+                                // 原生滚轮是一步到位的，先把它退回来交给平滑动画补；
+                                // 拖动滚动条不走这里，位置原样保留。
+                                this.rebase_native_scroll(cx);
+                                this.schedule_progress_commit(cx);
+                                // 视口滚出已渲染窗口就补章。滚轮本来会触发重绘，但拖动滚动条
+                                // 与程序化 `set_offset` 不一定；`covers` 为真时不通知，免得每帧重排。
+                                // 位置取退回之后的值：那才是这一帧真正会画出来的位置。
+                                if let Some(map) = this.scroll_map.as_ref()
+                                    && !map.covers(
+                                        this.scroll_window.clone(),
+                                        this.scroll_top(),
+                                        this.scroll_viewport(),
+                                    )
+                                {
+                                    cx.notify();
+                                }
+                            }))
+                            .child(div().relative().w_full().h(px(total)).children(children)),
                     ),
             )
             .child(self.render_chapter_nav(count, cx))
             .into_any_element()
-    }
-
-    const CONTINUE_COOLDOWN: std::time::Duration = std::time::Duration::from_millis(600);
-
-    /// 距上次自动续章是否已经过了冷却期。
-    fn may_continue_after(last: Option<std::time::Instant>, now: std::time::Instant) -> bool {
-        last.is_none_or(|last| now.duration_since(last) >= Self::CONTINUE_COOLDOWN)
-    }
-
-    /// 滚到章尾后继续向下滚，接上下一章（从章首开始）。
-    ///
-    /// 只认「已经贴底 + 这一下还在往下」：到章尾就立刻跳会让人看不到最后一屏。
-    /// `restore_pending` 期间不接：`goto_chapter` 已置位，滚动句柄要等下一帧才回到章首，
-    /// 此时再收到惯性滚动就会连跳两章。
-    /// 两次自动续章之间隔 `CONTINUE_COOLDOWN`：触控板惯性在一跳后还会继续送向下事件，
-    /// 短章会被一口气连跳好几章；往回滚则立刻解除冷却。
-    fn continue_to_next_chapter(&mut self, event: &ScrollEvent, cx: &mut Context<Self>) {
-        if !matches!(self.mode, ReadingMode::Scroll) || self.restore_pending {
-            return;
-        }
-        let down = match event.delta {
-            ScrollDelta::Pixels(delta) => f32::from(delta.y) < 0.0,
-            ScrollDelta::Lines(delta) => delta.y < 0.0,
-        };
-        if !down {
-            // 用户往回滚：立刻解除冷却，下一次触底可以正常续章。
-            self.last_chapter_jump = None;
-            return;
-        }
-        if !Self::may_continue_after(self.last_chapter_jump, std::time::Instant::now()) {
-            return;
-        }
-        let max = f32::from(self.scroll.max_offset().y);
-        let current = f32::from(self.scroll.offset().y);
-        if !Self::at_bottom_and_scrolling_down(down, current, max) {
-            return;
-        }
-        let Some(count) = self.content.as_ref().map(|content| content.chapters.len()) else {
-            return;
-        };
-        if self.chapter + 1 >= count {
-            return;
-        }
-        self.goto_chapter(self.chapter + 1, cx);
-        self.last_chapter_jump = Some(std::time::Instant::now());
-    }
-
-    /// 「这一下滚动是否该接下一章」：已经贴底，且这一下还在向下。
-    ///
-    /// 偏移向下为负，贴底就是 `offset == -max`；留 1px 容差吸收亚像素与末帧取整。
-    /// 整章一屏放得下（`max == 0`）也算贴底：否则短章滚不动，永远接不上下一章。
-    fn at_bottom_and_scrolling_down(down: bool, offset_y: f32, max_offset_y: f32) -> bool {
-        down && offset_y <= 1.0 - max_offset_y.max(0.0)
     }
 
     fn render_page_nav(&self, pages: usize, count: usize, cx: &Context<Self>) -> impl IntoElement {
@@ -2284,12 +2713,9 @@ impl Render for ReaderPage {
         {
             // 折行变了，绝对偏移会指向另一段文字：先记比例，下一帧按新高度恢复。
             self.capture_scroll_ratio();
-            // 位置另按 `position_ratio` 采：一屏放得下的章进度是 1.0，让它变得可滚动后
+            // 位置另按「位置语义」采：一屏放得下的章进度是 1.0，让它变得可滚动后
             // 按 1.0 恢复会落到章尾。两个读取都在旧布局上，正是用户此刻看到的位置。
-            self.restore_position = Some(position_ratio(
-                f32::from(self.scroll.offset().y),
-                f32::from(self.scroll.max_offset().y),
-            ));
+            self.restore_position = Some(self.scroll_position_ratio());
             self.restore_pending = true;
         }
         // 未命中守卫的帧也要更新，否则下一次比较仍对着旧值。
@@ -2297,16 +2723,17 @@ impl Render for ReaderPage {
 
         // 首帧布局算完才知道 max_offset，所以恢复位置一定发生在下一帧。
         if self.restore_pending && matches!(self.load_state, LoadState::Ready) {
-            let handle = self.scroll.clone();
             // 宽度 / 排版变化时用采样到的位置；跳章、切模式、加载走 `chapter_ratio`。
             let ratio = self
                 .restore_position
                 .take()
                 .unwrap_or(self.chapter_ratio)
                 .clamp(0.0, 1.0);
+            let chapter = self.chapter;
             cx.on_next_frame(window, move |page, window, cx| {
-                let max = f32::from(handle.max_offset().y);
-                handle.set_offset(point(px(0.0), px(ratio_offset(ratio, max))));
+                // 全书几何里「章 + 章内比例」是唯一的坐标：窗口缩放、抽屉开合、
+                // 字号变化之后都靠它回到同一段文字，而不是某个绝对像素。
+                page.scroll_to(chapter, ratio);
                 // 标志要留到偏移真正写进去之后再清：在 render 里清掉的话，
                 // 「render 已清、本回调未跑」这段里 autosave 仍会采到旧偏移。
                 page.restore_pending = false;
@@ -2413,7 +2840,7 @@ impl Render for ReaderPage {
 
 #[cfg(test)]
 mod tests {
-    use super::{ReaderPage, display_cache_key, position_ratio, ratio_offset, scroll_ratio};
+    use super::{SMOOTH_FRAME, display_cache_key, scroll_layout_key, smooth_advance};
 
     #[test]
     fn display_cache_key_covers_chapter_indent_width_and_typography() {
@@ -2454,81 +2881,54 @@ mod tests {
     }
 
     #[test]
-    fn position_ratio_treats_unscrollable_content_as_the_top() {
-        // 一屏放得下的章：进度是 1.0（见 `scroll_ratio`），位置却是章首。
-        assert_eq!(position_ratio(0.0, 0.0), 0.0);
-        // 同一章变宽 / 换字号后可滚动时，从章首开始，而不是落到章尾。
-        assert_eq!(position_ratio(0.0, 100.0), 0.0);
-        assert_eq!(position_ratio(-50.0, 100.0), 0.5);
-        assert_eq!(position_ratio(-200.0, 100.0), 1.0);
-    }
-
-    #[test]
-    fn scroll_ratio_maps_negative_offsets_to_forward_progress() {
-        // gpui 的偏移向下为负：0 是章首，-max 是章尾。
-        assert_eq!(scroll_ratio(0.0, 1000.0), Some(0.0));
-        assert_eq!(scroll_ratio(-500.0, 1000.0), Some(0.5));
-        assert_eq!(scroll_ratio(-1000.0, 1000.0), Some(1.0));
-        // resize / 亚像素造成的越界要夹住，不能写出负数或 NaN。
-        assert_eq!(scroll_ratio(-1200.0, 1000.0), Some(1.0));
-        assert_eq!(scroll_ratio(20.0, 1000.0), Some(0.0));
-    }
-
-    #[test]
-    fn a_chapter_that_fits_on_screen_is_fully_read() {
-        assert_eq!(super::scroll_ratio(0.0, 0.0), Some(1.0));
-        assert_eq!(super::scroll_ratio(0.0, 100.0), Some(0.0));
-    }
-
-    #[test]
-    fn scroll_ratio_treats_unscrollable_content_as_fully_read() {
-        assert_eq!(scroll_ratio(0.0, 0.0), Some(1.0));
-        assert_eq!(scroll_ratio(-0.5, 1.0), Some(1.0));
-        assert_eq!(scroll_ratio(0.0, -3.0), Some(1.0));
-    }
-
-    #[test]
-    fn ratio_offset_round_trips_and_stays_inside_content() {
-        let max = 800.0;
-        for ratio in [0.0, 0.25, 0.5, 1.0] {
-            assert_eq!(scroll_ratio(ratio_offset(ratio, max), max), Some(ratio));
+    fn smooth_advance_approaches_target_without_overshoot() {
+        let (start, target) = (0.0_f32, 120.0_f32);
+        let frame = SMOOTH_FRAME.as_secs_f32();
+        let mut position = start;
+        for _ in 0..24 {
+            let next = smooth_advance(position, target, frame);
+            // 单调前进且不越过目标：过冲会让滚轮停手后回弹一下。
+            assert!(next > position && next < target, "{next}");
+            position = next;
         }
-        assert_eq!(ratio_offset(1.5, max), -800.0);
-        assert_eq!(ratio_offset(-1.0, 0.0), 0.0);
+        // 24 帧（约 380 ms）后应吃掉九成以上，再慢就会觉得"滚不动"。
+        assert!(position > target * 0.9, "{position}");
+
+        // 已经到位就不动；反向同理。
+        assert_eq!(smooth_advance(target, target, frame), target);
+        assert!(smooth_advance(target, start, frame) < target);
+
+        // dt 再大（休眠唤醒）也只落在目标上，不会冲过头。
+        assert_eq!(smooth_advance(start, target, 10.0), target);
     }
 
     #[test]
-    fn continues_to_next_chapter_only_at_the_bottom_scrolling_down() {
-        // 贴底（offset == -max）再往下：接。
-        assert!(ReaderPage::at_bottom_and_scrolling_down(
-            true, -800.0, 800.0
-        ));
-        // 亚像素没贴严也算贴底。
-        assert!(ReaderPage::at_bottom_and_scrolling_down(
-            true, -799.5, 800.0
-        ));
-        // 还在章中间：不接，否则最后一屏看不到。
-        assert!(!ReaderPage::at_bottom_and_scrolling_down(
-            true, -700.0, 800.0
-        ));
-        // 向上滚到章首不该跳走。
-        assert!(!ReaderPage::at_bottom_and_scrolling_down(
-            false, -800.0, 800.0
-        ));
-        // 整章一屏放得下：本来就没得滚，继续向下就该接下一章。
-        assert!(ReaderPage::at_bottom_and_scrolling_down(true, 0.0, 0.0));
-    }
+    fn scroll_layout_key_covers_what_changes_wrapping() {
+        let reader = crate::config::ReaderConfig::default();
+        let base = scroll_layout_key(&reader, 720.0);
 
-    #[test]
-    fn short_chapters_need_a_pause_between_jumps() {
-        let now = std::time::Instant::now();
-        assert!(!ReaderPage::may_continue_after(Some(now), now));
-        // `Instant - Duration` 会触发 `clippy::unchecked_time_subtraction`；
-        // 这里 `now` 刚取到，减 700ms 一定成立，直接 `unwrap`。
-        let earlier = now
-            .checked_sub(std::time::Duration::from_millis(700))
-            .unwrap();
-        assert!(ReaderPage::may_continue_after(Some(earlier), now));
-        assert!(ReaderPage::may_continue_after(None, now));
+        // 同样的输入必须相等：没变就不该重估几千章。
+        assert_eq!(base, scroll_layout_key(&reader, 720.0));
+
+        // 列宽变了折行就变：估算表、实测值、窗口缓存都要整表作废。
+        assert_ne!(base, scroll_layout_key(&reader, 721.0));
+
+        let cases: [(&str, fn(&mut crate::config::ReaderConfig)); 6] = [
+            ("font_size", |r| r.font_size = 22.0),
+            ("font_weight", |r| r.font_weight = 700),
+            ("line_height", |r| r.line_height = 2.0),
+            ("paragraph_spacing", |r| r.paragraph_spacing += 2.0),
+            ("indent", |r| r.indent = false),
+            ("font_family", |r| r.font_family = "衬线".to_string()),
+        ];
+        for (name, mutate) in cases {
+            let mut changed = reader.clone();
+            mutate(&mut changed);
+            assert_ne!(
+                base,
+                scroll_layout_key(&changed, 720.0),
+                "改 {name} 后 key 必须变化"
+            );
+        }
     }
 }

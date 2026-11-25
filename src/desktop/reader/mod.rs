@@ -6,6 +6,7 @@ pub mod actions;
 mod bookmarks_panel;
 mod content_view;
 mod more_panel;
+mod scroll_map;
 mod search_panel;
 mod toc;
 mod typography;
