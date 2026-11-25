@@ -1,6 +1,6 @@
 [package]
 name = "so-novel-rs"
-version = "0.7.2"
+version = "0.7.3"
 edition = "2024"
 rust-version = "1.95"
 description = "So Novel — Rust desktop client (gpui-kit 0.11 + gpui-fast)."
