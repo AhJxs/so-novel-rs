@@ -1,4 +1,4 @@
-//! 书架卡片：封面（真实封面或生成封面）、格式徽标、收藏星标、书名 / 作者、进度条。
+//! 书架卡片：封面（真实封面或生成封面）、格式徽标、收藏星标、阅读进度角标、书名 / 作者。
 
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -9,11 +9,11 @@ use gpui_kit::component::{ActiveTheme as _, Icon, IconName, Selectable as _};
 use gpui_kit::{
     App, ClickEvent, Context, ElementId, FontWeight, Hsla, InteractiveElement as _, IntoElement,
     ObjectFit, ParentElement, RenderOnce, StatefulInteractiveElement as _, Styled,
-    StyledImage as _, Window, div, img, linear_color_stop, linear_gradient, px, relative, rems,
-    rgb,
+    StyledImage as _, Window, div, img, linear_color_stop, linear_gradient, rems, rgb,
 };
 use rust_i18n::t;
 
+use crate::desktop::motion;
 use crate::library::{ShelfBook, cover_palette};
 
 /// 封面尺寸（2:3，rem 尺度，默认字号下为 140×210）。
@@ -33,8 +33,6 @@ pub(super) struct CardData {
     pub title: String,
     pub author: String,
     pub format_label: &'static str,
-    /// `ShelfBook::status_key()` 的结果，UI 层再翻译。
-    pub status_key: &'static str,
     pub percent: f32,
     pub favorite: bool,
     pub missing: bool,
@@ -69,7 +67,6 @@ impl CardData {
             title: book.title.clone(),
             author: book.author.clone(),
             format_label: book.format.label(),
-            status_key: book.status_key(),
             percent: book.progress.percent,
             favorite: book.favorite,
             missing: book.missing,
@@ -126,7 +123,7 @@ impl BookCard {
 }
 
 impl RenderOnce for BookCard {
-    fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let Self {
             data,
             on_open,
@@ -134,6 +131,29 @@ impl RenderOnce for BookCard {
             menu,
             focused,
         } = self;
+
+        // 悬停态存 keyed state：`BookCard` 是 `RenderOnce`，没有自己的 entity 记这个
+        // bool；keyed entity 被当前 view 观察着，`cx.notify()` 会触发书架重绘。
+        let hover = window.use_keyed_state(
+            ElementId::Name(format!("book-card-hovered-{}", data.id).into()),
+            cx,
+            |_, _| false,
+        );
+        let hovered = *hover.read(cx);
+        // 背景色过渡：静止态是「同一色、透明度 0」，只在透明通道上动，
+        // 渐变到 `list_hover` 时不会先跳到别的色相。
+        let hover_bg = cx.theme().list_hover;
+        let background = gpui_kit::base::motion::transition(
+            ("book-card-bg", data.id.clone()),
+            if hovered {
+                hover_bg
+            } else {
+                Hsla { a: 0.0, ..hover_bg }
+            },
+            motion::fast(cx),
+            window,
+            cx,
+        );
 
         // ---- 1. 封面区：先铺生成封面（渐变 + 书名首字），有真实封面时再盖上去 ----
         let mut cover = div()
@@ -213,6 +233,25 @@ impl RenderOnce for BookCard {
             ),
         );
 
+        // 左下进度角标：只在真读过（四舍五入到 1% 以上）时出现 —— 未读的书整张封面
+        // 保持干净，不用「0%」占位。缺失的书不显示进度（进度对它没有意义）。
+        let percent = data.percent.clamp(0.0, 100.0);
+        if !data.missing && percent.round() >= 1.0 {
+            cover = cover.child(
+                div()
+                    .absolute()
+                    .bottom_1()
+                    .left_1()
+                    .px_1()
+                    .rounded_sm()
+                    // 与左上格式徽标同一套配对色：叠在深浅不一的封面上都读得清。
+                    .bg(cx.theme().background.opacity(0.85))
+                    .text_xs()
+                    .text_color(cx.theme().foreground)
+                    .child(format!("{percent:.0}%")),
+            );
+        }
+
         if data.missing {
             // 缺失态是错误语义而不是单纯遮罩：用 danger 配对色，文字本身也说明了原因。
             cover = cover.child(
@@ -232,63 +271,55 @@ impl RenderOnce for BookCard {
             );
         }
 
-        // ---- 2. 文本区：书名 2 行 + 作者 1 行 + 进度条 + 状态 ----
-        let mut card = div()
-            .id(ElementId::Name(format!("book-card-{}", data.id).into()))
-            .relative()
+        // ---- 2. 内容列：封面 + 书名 1 行 + 作者 1 行，宽度锁在封面宽度上 ----
+        let content = div()
             .w(rems(COVER_W_REMS))
             .flex()
             .flex_col()
             .gap_1()
-            .rounded_md()
-            .cursor_pointer()
-            .on_click(move |event, window, cx| (on_open)(event, window, cx))
             .child(cover)
             .child(
                 div()
                     .text_sm()
                     .font_weight(FontWeight::MEDIUM)
-                    .line_clamp(2)
-                    .child(data.title.clone()),
+                    .truncate()
+                    .child(data.title),
             );
 
-        if !data.author.is_empty() {
-            card = card.child(
+        let content = if data.author.is_empty() {
+            content
+        } else {
+            content.child(
                 div()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
                     .truncate()
-                    .child(data.author.clone()),
-            );
-        }
+                    .child(data.author),
+            )
+        };
 
-        let percent = data.percent.clamp(0.0, 100.0);
-        let card = card.child(
-            div()
-                .flex()
-                .flex_col()
-                .gap_1()
-                .child(
-                    div()
-                        .h(px(3.))
-                        .w_full()
-                        .rounded_full()
-                        .bg(cx.theme().muted)
-                        .child(
-                            div()
-                                .h_full()
-                                .rounded_full()
-                                .bg(cx.theme().primary)
-                                .w(relative(percent / 100.0)),
-                        ),
-                )
-                .child(
-                    div()
-                        .text_xs()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(format!("{} · {percent:.0}%", t!(data.status_key))),
-                ),
-        );
+        // ---- 3. 卡片外框：悬停遮罩画在这一层，内边距让它比内容大一圈 ----
+        //
+        // 遮罩挂在带内边距的外框、而不是内容列上：高亮浮起时四周留出呼吸感，
+        // 内容不跟着挪（宽度锁在封面宽度）。网格列数是布局后实测的，加内边距
+        // 只会让每列变宽一点，不需要同步改常量。
+        let card = div()
+            .id(ElementId::Name(format!("book-card-{}", data.id).into()))
+            .relative()
+            .rounded_md()
+            .p_1p5()
+            .bg(background)
+            .cursor_pointer()
+            .on_hover(move |is_hovered, _window, cx| {
+                hover.update(cx, |state, cx| {
+                    if *state != *is_hovered {
+                        *state = *is_hovered;
+                        cx.notify();
+                    }
+                });
+            })
+            .on_click(move |event, window, cx| (on_open)(event, window, cx))
+            .child(content);
 
         // 键盘焦点环画成覆盖层：绝对定位不参与布局，不会改变网格间距；
         // 只画描边、不填底色，也不会挡住卡片与星标的点击。
