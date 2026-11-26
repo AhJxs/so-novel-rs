@@ -616,6 +616,10 @@ impl LibraryPage {
             let book_id = data.id.clone();
             let on_open: Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)> =
                 Rc::new(cx.listener(move |this, _ev: &ClickEvent, window, cx| {
+                    // 点哪张，键盘焦点就落在哪张：网格本身是可聚焦的，鼠标点进卡片会让它
+                    // 拿到焦点，`focused_index` 还是 `None` 时焦点环会退回第一张。
+                    this.focused_index = Some(index);
+                    cx.notify();
                     this.open_book(&book_id, window, cx);
                 }));
             let favorite_id = data.id.clone();
@@ -720,7 +724,10 @@ impl Render for LibraryPage {
             Self::render_empty(has_books, cx)
         } else {
             let shown = &cards[..limit.min(cards.len())];
-            let grid_focused = self.focus.is_focused(window);
+            // 焦点环只在键盘操作时画（`:focus-visible` 语义）：鼠标点卡片虽然也会让网格
+            // 拿到焦点，但那一下不该闪一个框；用方向键 / Tab 进来时 `last_input_was_keyboard`
+            // 为真，环照常显示。
+            let grid_focused = self.focus.is_focused(window) && window.last_input_was_keyboard();
             self.render_grid(shown, total, grid_focused, cx)
         };
 
