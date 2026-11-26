@@ -20,6 +20,7 @@ use gpui_kit::{
 use rust_i18n::t;
 
 use super::logo::render_logo;
+use super::motion;
 use super::nav::{KEY_CONTEXT, NavPage};
 use super::notifications::ui_event_to_notification;
 use crate::desktop::model::AppModel;
@@ -52,6 +53,11 @@ pub struct RootView {
 
     /// 打开的阅读器；`Some` 时覆盖主区域并隐藏侧栏。
     reader: Option<Entity<ReaderPage>>,
+
+    /// 阅读器正在播出场动画：`close_and_flush` 已经跑过，entity 留到淡出结束再丢。
+    /// 这段时间它仍占着主区域（否则会先闪一下主界面），但已经按「已关闭」处理
+    /// （侧栏折叠、换书重开等入口都看 [`Self::reader_visible`]）。
+    reader_closing: bool,
 
     /// 退出落盘是否已执行过。Windows X 会先后触发 `on_window_should_close` 与
     /// `on_app_quit`，第二次必须直接返回，别对已关闭的状态库再刷一次书架。
@@ -136,6 +142,7 @@ impl RootView {
             tools_page,
             settings_page,
             reader: None,
+            reader_closing: false,
             quit_flushed: false,
         }
     }
@@ -144,8 +151,9 @@ impl RootView {
     pub fn open_reader(&mut self, book_id: &str, window: &mut Window, cx: &mut Context<Self>) {
         // 已经开着阅读器时先把旧的按关闭契约收尾，再开新的：
         // 直接覆盖 `self.reader` 会跳过 `close_and_flush`，还会把沉浸全屏留在窗口上。
+        // 换书不播出场动画：旧书立刻收尾，新书直接接管画面。
         if self.reader.is_some() {
-            self.close_reader(window, cx);
+            self.take_reader_now(window, cx);
         }
         let Some(book) = self.model.read(cx).book_snapshot(book_id) else {
             self.model.update(cx, |model, _| {
@@ -181,8 +189,14 @@ impl RootView {
     }
 
     /// 关闭阅读器：落盘进度、恢复窗口装饰，并把键盘焦点交还主窗口。
+    ///
+    /// entity 不在这里丢：本函数只把 `reader_closing` 立起来，`render` 播完 180ms
+    /// 淡出后才 take。否则阅读器消失与主界面出现会挤在同一帧，看起来就是硬切。
     pub fn close_reader(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(reader) = self.reader.take() else {
+        if self.reader_closing {
+            return;
+        }
+        let Some(reader) = self.reader.clone() else {
             return;
         };
         let immersive = reader.read(cx).is_immersive();
@@ -190,12 +204,31 @@ impl RootView {
         if immersive {
             window.toggle_fullscreen();
         }
+        self.reader_closing = true;
         cx.notify();
-        // 焦点原本在 `ReaderPage` 自己的 focus handle 上，entity 随本函数被丢掉后
-        // 键盘不再有归属。显式交还 `RootView` 的 handle —— 阅读器分支直接 track 它，
-        // 主视图分支经 `render_content` track 它，`KEY_CONTEXT` 都挂在两者的祖先根上，
-        // 所以恢复焦点即可让 Cmd+3 等无需先点窗口。
+        // 焦点原本在 `ReaderPage` 自己的 focus handle 上，淡出期间它已经不再接收
+        // 键盘；显式交还 `RootView` 的 handle。`KEY_CONTEXT` 挂在两者的祖先根上，
+        // 所以恢复焦点即可让 Cmd+Q 等无需先点窗口。
         window.focus(&self.focus, cx);
+    }
+
+    /// 阅读器是否仍占着主区域。出场动画期间为 `false` —— `close_and_flush` 已经
+    /// 跑过，屏幕上剩下的只是收尾的一帧淡出，导航 / 折叠入口按「已关闭」对待。
+    const fn reader_visible(&self) -> bool {
+        self.reader.is_some() && !self.reader_closing
+    }
+
+    /// 立刻丢弃阅读器 entity，不播动画。换书重开、退出落盘走这里。
+    fn take_reader_now(&mut self, window: &Window, cx: &mut Context<Self>) {
+        let Some(reader) = self.reader.take() else {
+            return;
+        };
+        self.reader_closing = false;
+        let immersive = reader.read(cx).is_immersive();
+        reader.update(cx, ReaderPage::close_and_flush);
+        if immersive {
+            window.toggle_fullscreen();
+        }
     }
 
     /// 退出前的统一落盘点：三条关窗路由（原生关窗 / 应用退出 / Linux 自绘标题栏关闭）
@@ -211,6 +244,7 @@ impl RootView {
         }
         self.quit_flushed = true;
         if let Some(reader) = self.reader.take() {
+            self.reader_closing = false;
             reader.update(cx, ReaderPage::close_and_flush);
         } else {
             self.model.update(cx, |model, _| {
@@ -275,7 +309,7 @@ impl RootView {
     #[tracing::instrument(name = "RootView::toggle_sidebar", skip_all)]
     fn toggle_sidebar(&mut self, cx: &mut Context<Self>) {
         // 阅读器是全屏阅读视图：侧边栏不可见，改它的折叠状态只会让用户莫名其妙。
-        if self.reader.is_some() {
+        if self.reader_visible() {
             return;
         }
         self.sidebar_collapsed = !self.sidebar_collapsed;
@@ -392,7 +426,7 @@ impl RootView {
             })
             // 阅读器分支不渲染 Sidebar，切换按钮点了也是 no-op（见 `toggle_sidebar`
             // 的早退），直接不显示。
-            .when(self.reader.is_none(), |this| {
+            .when(!self.reader_visible(), |this| {
                 this.child(
                     // 必须用 `occlude()` 把按钮从祖先 drag hitbox 里「挖」出来:
                     // gpui-kit 组件库 `TitleBar` 把整条 children 行标成 `window_control_area(Drag)`,
@@ -423,7 +457,16 @@ impl RootView {
     }
 
     /// 按 `current_page` 渲染对应 page entity。
-    fn render_content(&self, cx: &Context<Self>) -> impl IntoElement {
+    fn render_content(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // key 带上页面：切到别的页就是新的 keyed state，从 0 → 1 重新入场；
+        // 同一页的普通重绘落在 `Present`，不再请求动画帧。
+        let fade = motion::fade(
+            ("page-fade", self.current_page.label_key()),
+            true,
+            motion::enter(cx),
+            window,
+            cx,
+        );
         div()
             .track_focus(&self.focus)
             .flex_1()
@@ -431,7 +474,14 @@ impl RootView {
             .overflow_hidden()
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
-            .child(self.render_current_page())
+            .child(
+                // 只动透明度：页面内部是常驻 entity（滚动位置 / 输入框内容都在里面），
+                // 不参与入场动画，也不会因为动画改布局或虚拟列表的命中区。
+                div()
+                    .size_full()
+                    .opacity(fade.progress)
+                    .child(self.render_current_page()),
+            )
     }
 
     /// 退出落盘收敛到三条路由，最终都进 `flush_before_quit`（见 `new` / `render_title_bar`）：
@@ -493,13 +543,29 @@ impl RootView {
 }
 
 impl Render for RootView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // 渲染保持纯声明：`pending_ui_events` 的排空由 `new()` 里注册的 model observer 完成。
+
+        // 每帧都采样阅读器的出现/消失进度：出场动画结束的那一帧会返回 `Absent`，
+        // 这里据此把 entity 真正丢掉，主视图从下一帧起接管。
+        let reader_fade = motion::fade(
+            "reader",
+            self.reader_visible(),
+            motion::enter(cx),
+            window,
+            cx,
+        );
 
         // 阅读器打开时覆盖整个主区域（Sidebar + TitleBar + 内容区），仅沉浸模式下也隐藏
         // TitleBar；关闭由 RootView 丢弃 entity 完成。退出旁路挂在这一分支：
         // 两个分支互斥（早返回），每帧只有一套 listener，不会双绑定。
-        if let Some(reader) = self.reader.clone() {
+        //
+        // 出场（`reader_closing`）不走这一分支：那时要让主界面垫在下面做交叉淡出，
+        // 见函数末。打开时主界面没必要白算一遍，所以仍然是独占 + 从阅读器的底纸色淡入。
+        if reader_fade.should_render()
+            && !self.reader_closing
+            && let Some(reader) = self.reader.clone()
+        {
             let immersive = reader.read(cx).is_immersive();
             // 阅读器内只保留 Cmd+Q：导航快捷键不挂在这个分支，Cmd+1..6 / F6
             // 与 Cmd+B 落地无 listener；阅读器自己的 Esc / 方向键仍由 `ReaderPage` 处理。
@@ -509,15 +575,30 @@ impl Render for RootView {
                     .key_context(KEY_CONTEXT)
                     .flex()
                     .flex_col()
-                    .size_full(),
+                    .size_full()
+                    // 淡入期间底下垫阅读器自己的底纸色：只有正文在淡入，不会从应用主题底色
+                    // 跳到羊皮纸 / 夜读色。
+                    .bg(reader.read(cx).surface_color(cx)),
                 cx,
             )
             .when(!immersive, |this| this.child(self.render_title_bar(cx)))
-            .child(div().flex_1().min_h_0().child(reader))
+            .child(
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .opacity(reader_fade.progress)
+                    .child(reader),
+            )
             .into_any_element();
         }
+        if !reader_fade.should_render() && self.reader.is_some() {
+            // 淡出播完：`close_and_flush` 早已跑过，这一刻才丢弃 entity。
+            self.reader = None;
+            self.reader_closing = false;
+        }
 
-        Self::bind_nav_actions(div().key_context(KEY_CONTEXT), cx)
+        let main = Self::bind_nav_actions(div().key_context(KEY_CONTEXT), cx)
+            .relative()
             .size_full()
             .flex()
             .flex_row()
@@ -530,8 +611,23 @@ impl Render for RootView {
                     .flex_col()
                     .overflow_hidden()
                     .child(self.render_title_bar(cx))
-                    .child(self.render_content(cx)),
-            )
-            .into_any_element()
+                    .child(self.render_content(window, cx)),
+            );
+
+        // 出场：阅读器整层盖在主界面上淡出。主界面从第一帧就位，淡出结束不留跳变；
+        // 这一层的快捷键不挂 listener —— 主视图分支已经挂了（含 Cmd+Q），
+        // 重复挂会让同一次按键触发两遍。
+        match self.reader.clone() {
+            Some(reader) if reader_fade.should_render() => main
+                .child(
+                    div()
+                        .absolute()
+                        .inset_0()
+                        .opacity(reader_fade.progress)
+                        .child(reader),
+                )
+                .into_any_element(),
+            _ => main.into_any_element(),
+        }
     }
 }

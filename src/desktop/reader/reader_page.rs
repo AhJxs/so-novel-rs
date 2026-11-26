@@ -26,7 +26,7 @@ use gpui_kit::component::{
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, App, AppContext as _, Context, Div, Entity, FocusHandle, Focusable as _,
-    FontWeight, InteractiveElement as _, IntoElement, KeyDownEvent, ParentElement, Render,
+    FontWeight, Hsla, InteractiveElement as _, IntoElement, KeyDownEvent, ParentElement, Render,
     ScrollEvent, ScrollHandle, ScrollStrategy, SharedString, StatefulInteractiveElement as _,
     Styled, UniformListScrollHandle, Window, div, point, px, relative,
 };
@@ -42,6 +42,7 @@ use super::scroll_map::{self, ScrollMap};
 use super::search_panel::{self, SearchPanel};
 use crate::config::{ReaderConfig, ReadingMode};
 use crate::desktop::model::AppModel;
+use crate::desktop::motion;
 use crate::library::{BookFormat, Bookmark, ReadingProgress, ShelfBook};
 use crate::reader::layout::{
     block_window, page_for_ratio, page_ratio, paragraph_offsets, visible_paragraphs,
@@ -295,6 +296,27 @@ pub(super) struct PageCache {
 }
 
 impl ReaderPage {
+    /// 给抽屉包一层透明度容器。
+    ///
+    /// 抽屉根节点自带固定宽度，这层容器 `flex_none` + 自适应宽度，所以布局与不加
+    /// 容器时一致；动画只改绘制时的透明度，不参与排版。
+    fn fade_drawer(progress: f32, drawer: AnyElement) -> AnyElement {
+        div()
+            .h_full()
+            .flex_none()
+            .opacity(progress)
+            .child(drawer)
+            .into_any_element()
+    }
+
+    /// 阅读器自己的底色（随阅读主题变）。
+    ///
+    /// 父层（`RootView`）给阅读器做淡入时垫这个颜色：底纸一帧就位，只有正文在淡入，
+    /// 不会从应用主题底色跳到羊皮纸 / 夜读色。
+    pub(crate) fn surface_color(&self, cx: &App) -> Hsla {
+        reader_colors(self.reader_config(cx).theme, cx).background
+    }
+
     /// 打开一本书并启动后台加载。
     pub fn new(
         model: Entity<AppModel>,
@@ -2768,23 +2790,49 @@ impl Render for ReaderPage {
             LoadState::Error(error) => self.render_error(error, cx).into_any_element(),
             LoadState::Ready => self.render_body(window, cx),
         };
+        // 抽屉出场：每帧都采样（关着也采），让进度始终从 0 起步、退场不留残值。
+        // 抽屉宽度是即时生效的（正文靠 width_changed / restore_pending 恢复滚动位置），
+        // 所以只淡入不冻宽度：关闭时直接不渲染，不做局部出场动画。
+        let fade_toc = motion::fade("reader-toc", self.toc_open, motion::fast(cx), window, cx);
+        let fade_search = motion::fade(
+            "reader-search",
+            self.search_open,
+            motion::fast(cx),
+            window,
+            cx,
+        );
+        let fade_bookmarks = motion::fade(
+            "reader-bookmarks",
+            self.bookmarks_open,
+            motion::fast(cx),
+            window,
+            cx,
+        );
+        let fade_more = motion::fade("reader-more", self.more_open, motion::fast(cx), window, cx);
+
         let toc = if self.toc_open {
-            Some(self.render_toc(cx))
+            Some(Self::fade_drawer(fade_toc.progress, self.render_toc(cx)))
         } else {
             None
         };
         let search = if self.search_open {
-            Some(self.render_search(cx))
+            Some(Self::fade_drawer(
+                fade_search.progress,
+                self.render_search(cx),
+            ))
         } else {
             None
         };
         let bookmarks = if self.bookmarks_open {
-            Some(self.render_bookmarks(cx))
+            Some(Self::fade_drawer(
+                fade_bookmarks.progress,
+                self.render_bookmarks(cx),
+            ))
         } else {
             None
         };
         let more = if self.more_open {
-            Some(self.render_more(cx))
+            Some(Self::fade_drawer(fade_more.progress, self.render_more(cx)))
         } else {
             None
         };

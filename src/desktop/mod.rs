@@ -19,6 +19,7 @@ pub mod components;
 mod drain_loop;
 mod logo;
 pub mod model;
+mod motion;
 mod nav;
 mod notifications;
 mod pages;
