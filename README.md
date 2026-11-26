@@ -142,7 +142,7 @@ cargo run
 - `proxy-required.json` — 需要代理的书源（5 个，非大陆 IP）
 - `rate-limit.json` — 下载限流的源（4 个）
 - `no-search.json` — 不支持搜索的源（3 个）
-- `cloudflare.json` — 有 Cloudflare 保护的源（5 个）
+- `cloudflare.json` — 有 Cloudflare 保护的源（6 个）
 - `rule-template.json5` — 自定义书源模板
 
 切换书源集：在 GUI 的「书源」页右上角下拉选择活跃文件（选择结果存在

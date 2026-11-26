@@ -225,6 +225,44 @@ mod tests {
         assert!(r0.disabled, "rule should be disabled");
     }
 
+    /// 「和图书」是 2026-11-26 从上游同步进来的（上游 `bundle/rules/cloudflare.json`
+    /// 6f6d2c56 给正文补了 `filterTag`）。上游把每条 URL 用 `@js` 改写成
+    /// `http://127.0.0.1:8000/html?url=…` 的 bypass 服务地址，本项目走配置里的
+    /// cf-bypass fallback，所以规则里必须是真实域名。
+    #[test]
+    fn load_bundled_cloudflare_json_has_hetushu_rule() {
+        let rules = load_rules_from_path(&repo_rules_dir().join("cloudflare.json")).unwrap();
+        let rule = rules
+            .iter()
+            .find(|r| r.name == "和图书")
+            .expect("cloudflare.json 应包含「和图书」");
+        assert_eq!(rule.url, "https://www.hetushu.com/");
+
+        let search = rule.search.as_ref().expect("「和图书」缺 search 规则");
+        assert_eq!(search.url, "https://www.hetushu.com/search/?keyword=%s");
+        assert!(
+            !search.url.contains("127.0.0.1"),
+            "搜索 URL 不该改写成 bypass 服务地址: {}",
+            search.url
+        );
+
+        let chapter = rule.chapter.as_ref().expect("「和图书」缺 chapter 规则");
+        assert_eq!(chapter.content, "#content");
+        assert!(chapter.paragraph_tag_closed);
+        // 上游 6f6d2c56 的正文章节过滤改动
+        assert_eq!(
+            chapter.filter_tag,
+            "var, q, dfn, kbd, cite, tt, acronym, big, code, u, s, samp, bdo, strike"
+        );
+        assert_eq!(chapter.filter_txt, r"和图书|hetushu\.com|\(本章完\)");
+        // 整站 CF：bypass 慢，超时必须放宽（上游值 120s），不能被默认 15s 覆盖
+        assert_eq!(chapter.timeout, Some(120));
+
+        let toc = rule.toc.as_ref().expect("「和图书」缺 toc 规则");
+        assert_eq!(toc.item, "dl#dir > dd > a");
+        assert!(rule.crawl.is_some());
+    }
+
     #[test]
     fn load_not_found_returns_typed_error() {
         let err = load_rules_from_path(Path::new("/nonexistent/path/x.json")).unwrap_err();

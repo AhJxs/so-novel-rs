@@ -122,6 +122,47 @@
     }
   },
   {
+    "url": "https://www.hetushu.com/",
+    "name": "和图书",
+    "comment": "整站 Cloudflare 托管挑战（直连返回 403 Just a moment...），必须配 [global] cf-bypass 才能搜索/抓目录/抓正文；上游用 @js 把每条 URL 改写成 bypass 服务地址，这里写真实域名交给 fallback",
+    "search": {
+      "url": "https://www.hetushu.com/search/?keyword=%s",
+      "method": "get",
+      "timeout": 120,
+      "result": "dl#body > dd",
+      "bookName": "h4 > a",
+      "author": "h4 > span@js:r=r.replace(/[\\/\\s]/g,'')"
+    },
+    "book": {
+      "timeout": 120,
+      "bookName": ".book_info > h2",
+      "author": ".book_info > div:nth-child(3) > a",
+      "intro": ".book_info .intro",
+      "category": ".book_info > div:nth-of-type(2)@js:r=r.replace(/[^：]*：/,'')",
+      "coverUrl": ".book_info > img@src"
+    },
+    "toc": {
+      "timeout": 120,
+      "item": "dl#dir > dd > a"
+    },
+    "chapter": {
+      "timeout": 120,
+      "title": "h2.h2",
+      "content": "#content",
+      "paragraphTagClosed": true,
+      "filterTxt": "和图书|hetushu\\.com|\\(本章完\\)",
+      "filterTag": "var, q, dfn, kbd, cite, tt, acronym, big, code, u, s, samp, bdo, strike"
+    },
+    "crawl": {
+      "concurrency": 2,
+      "minInterval": 200,
+      "maxInterval": 600,
+      "maxAttempts": 3,
+      "retryMinInterval": 1500,
+      "retryMaxInterval": 3000
+    }
+  },
+  {
     "url": "https://www.linovelib.com/",
     "name": "哔哩轻小说",
     "comment": "Cloudflare 站点（403 页标题为 Attention Required! | Cloudflare，程序自带 cf-bypass 检测能命中）；搜索为 POST /S6/（searchkey），详情用 og:novel meta，目录 /novel/{id}/catalog，正文 #mlfy_main_text，章节单页",

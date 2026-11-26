@@ -9,7 +9,7 @@
 | `proxy-required.json` | 需要代理的书源（必须是非大陆 IP），需在 `config.toml` 设置 `cf-bypass` | 5 |
 | `rate-limit.json` | 下载限流的书源 | 4 |
 | `no-search.json` | 不支持搜索的书源，需要输入书籍详情页地址下载 | 3 |
-| `cloudflare.json` | 有 Cloudflare 保护的书源，需在 `config.toml` 设置 `cf-bypass` | 5 |
+| `cloudflare.json` | 有 Cloudflare 保护的书源，需在 `config.toml` 设置 `cf-bypass` | 6 |
 | `rule-template.json5` | 书源规则模板文件（自定义书源参考） | — |
 
 > **⚠️ IP 要求仅供参考，不保证完全准确**。根据需要决定是否在
@@ -89,6 +89,7 @@
 | [黄易天地](http://www.xhytd.com/) | ✅ | ✅ | 非大陆 IP 可能速度较慢 |
 | [96读书](https://www.96dushu.com/) | ✅ | ✅ | 章节 JS 加密 |
 | [东滩小说](http://www.dongtanxs.com/) | ✅ | ✅ | |
+| [和图书](https://www.hetushu.com/) | — | — | 整站 CF 托管挑战，必须配 `cf-bypass`；搜索/详情/目录/正文超时放宽到 120s；未实测 |
 | [哔哩轻小说](https://www.linovelib.com/) | ✅ | — | 搜索 POST `/S6/`、正文 `#mlfy_main_text`，章节单页 |
 
 ---
